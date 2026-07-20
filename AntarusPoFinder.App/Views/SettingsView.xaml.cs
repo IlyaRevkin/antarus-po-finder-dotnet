@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -1182,6 +1183,34 @@ public partial class SettingsView : UserControl
         _services.Db.RollbackFwVersion(v.Id!.Value);
         _host.ShowStatus($"Откатано: {v.VersionRaw}");
         LoadFirmwareTab();
+    }
+
+    /// <summary>Экспортирует стандартную таблицу нумерации (5 типов шкафов, все подтипы, все
+    /// контроллеры — см. FwVersionTableExportService) в отдельный Excel-файл, независимо от того,
+    /// что сейчас настроено в Иерархии на этой машине.</summary>
+    private void ExportVersionTable_Click(object sender, RoutedEventArgs e)
+    {
+        var initialDir = _services.Cfg.RootPath();
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Сохранить таблицу версий",
+            Filter = "Excel файлы (*.xlsx)|*.xlsx",
+            FileName = $"Antarus_версии_нумерация_{DateTime.Now:yyyyMMdd}.xlsx",
+            InitialDirectory = !string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir) ? initialDir : "",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            FwVersionTableExportService.Generate(dlg.FileName);
+            _host.ShowStatus($"Таблица версий сохранена: {Path.GetFileName(dlg.FileName)}");
+            Process.Start(new ProcessStartInfo(dlg.FileName) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось сохранить таблицу:\n{ex.Message}", "Таблица версий",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     // ── Быстрый доступ ────────────────────────────────────────────────────────

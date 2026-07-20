@@ -28,7 +28,7 @@ public class ConfigService
 
     private static readonly Dictionary<string, string> Defaults = new()
     {
-        ["root_path"] = "",
+        ["root_path"] = @"Z:\Software\Antarus Finder",
         ["second_disk_path"] = "",
         ["inspection_folder"] = "",
         ["admin_password"] = "12345",

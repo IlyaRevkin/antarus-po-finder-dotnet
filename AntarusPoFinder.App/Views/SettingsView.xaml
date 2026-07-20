@@ -247,6 +247,8 @@
                         <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
                         <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Click="RollbackFirmware_Click"
                                 ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                        <Button Content="Таблица версий (Excel)" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ExportVersionTable_Click"
+                                ToolTip="Сформировать стандартную таблицу нумерации версий (5 типов шкафов, все подтипы, все контроллеры) в отдельный Excel-файл."/>
                     </StackPanel>
                 </StackPanel>
 
