@@ -91,6 +91,7 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus("Папка осмотра сохранена", category: NotificationCategory.Sync);
     }
 
+
     private void SaveSyncInterval_Click(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(SyncIntervalInput.Text.Trim(), out var v) || v < 0)

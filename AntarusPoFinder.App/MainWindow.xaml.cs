@@ -150,6 +150,26 @@ public partial class MainWindow : Window
                 "Короткая обучалка по разделам программы. «Далее» — следующий шаг, «Пропустить всё» — закрыть сразу."),
         };
 
+        // Настройки/Сетевые диски/Тикеты/смена темы all live inside the collapsible "ДОПОЛНИТЕЛЬНО"
+        // strip now, collapsed by default (Visibility="Collapsed" — no layout position at all, so a
+        // step targeting a control inside it would have nothing valid to highlight). Force it open
+        // for the whole tour, restore whatever state it was actually in once the tour finishes.
+        //
+        // Setting MoreSectionToggle.IsChecked alone isn't enough: MoreSectionContent's Visibility is
+        // driven by a Binding to that IsChecked value, and when going false→true→(restored to
+        // false)→true again across repeated tour runs, the binding's own update sometimes lands
+        // AFTER this method's UpdateLayout() call — that race is exactly what left "Сетевые диски"
+        // highlighted as a 0-height sliver (the container existed, at its still-Collapsed layout
+        // slot). SetCurrentValue forces MoreSectionContent visible immediately without tearing out
+        // the Binding — restoring IsChecked below still works correctly afterward either way: if the
+        // section was open before, this is already the right end state; if it was closed, setting
+        // IsChecked back to false raises a real property-changed notification, and the Binding
+        // reasserts Collapsed on top of this override once that fires.
+        var wasMoreExpanded = MoreSectionToggle.IsChecked == true;
+        MoreSectionToggle.IsChecked = true;
+        MoreSectionContent.SetCurrentValue(VisibilityProperty, Visibility.Visible);
+        UpdateLayout();
+
         foreach (var navItem in _vm.NavItems.Where(n => n.IsVisible))
         {
             var pageId = navItem.PageId;
@@ -171,7 +191,18 @@ public partial class MainWindow : Window
             }
 
             if (!NavStepText.TryGetValue(pageId, out var text)) continue;
-            if (NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem) is not FrameworkElement container) continue;
+            // "Сетевые диски"/"Тикеты" (IsCompact) render in CompactNavItemsControl, everything else
+            // in NavItemsControl — but NavItems is bound (unfiltered) to BOTH controls, so a compact
+            // item still gets a real (just Visibility="Collapsed") container generated in
+            // NavItemsControl too. Checking NavItemsControl first (as this used to) found THAT
+            // collapsed container before ever reaching CompactNavItemsControl — non-null, so the
+            // "?? "fallback below never ran, and the tour highlighted a zero-size collapsed element
+            // wherever it happened to flow (right under the last visible item above it) instead of
+            // the real button. Route by IsCompact instead of chaining "??" across both.
+            var container = (navItem.IsCompact
+                ? CompactNavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem)
+                : NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem)) as FrameworkElement;
+            if (container is null) continue;
             steps.Add(new OnboardingStep(() => container, text.Title, text.Body));
 
             if (pageId == "upload")
@@ -191,6 +222,8 @@ public partial class MainWindow : Window
             }
         }
 
+        steps.Add(new OnboardingStep(() => MoreSectionToggle, "Дополнительно",
+            "Настройки, Сетевые диски, Тикеты, смена темы и обучение нужны реже, чем остальные разделы — убраны сюда и свёрнуты по умолчанию. Разворачивается кликом по этой строке."));
         steps.Add(new OnboardingStep(() => SettingsNavButton, "Настройки",
             "Иерархия шкафов, теги, резервация номеров и модерация тегов и прошивок — видно только администратору."));
         if (_vm.SettingsVisible)
@@ -202,15 +235,16 @@ public partial class MainWindow : Window
         }
         steps.Add(new OnboardingStep(() => NotificationsNavButton, "Уведомления",
             "Всё, что показывалось в статус-баре или баннером сверху, остаётся здесь — даже после того как баннер сам скрылся через несколько секунд."));
-        steps.Add(new OnboardingStep(() => RoleSwitchNavButton, "Роль",
-            "Наладчик, программист или администратор — от роли зависит, что видно в меню."));
         steps.Add(new OnboardingStep(() => ThemeToggleControl, "Тема оформления",
             "Переключение между светлой и тёмной темой."));
+        steps.Add(new OnboardingStep(() => RoleSwitchNavButton, "Роль",
+            "Наладчик, программист или администратор — от роли зависит, что видно в меню. Значок ⟳ рядом с названием роли открывает смену роли."));
 
         var overlay = new OnboardingOverlay(steps);
         overlay.Finished += (_, _) =>
         {
             OnboardingHost.Content = null;
+            MoreSectionToggle.IsChecked = wasMoreExpanded;
             if (markAsShown) _services.Cfg.SetOnboardingShown(true);
             // The tour hops between pages to show real controls — land back where the user actually
             // was, not wherever the last step happened to leave the ContentControl.

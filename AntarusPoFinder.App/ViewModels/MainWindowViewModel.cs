@@ -48,6 +48,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _fwUpdateBannerVisible;
     [ObservableProperty] private string _fwUpdateBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
+    /// <summary>Быстрый доступ display mode — see ConfigService.QuickAppsDisplayMode. Two separate
+    /// Visibility-driving flags (rather than one enum bound with a converter) because MainWindow.xaml
+    /// needs to combine this with "QuickApps.Count > 0" (an empty list never shows a bar/strip either
+    /// way, in EITHER mode) and XAML has no clean way to AND two bindings without a multi-converter.</summary>
+    [ObservableProperty] private bool _quickAppsSidebarVisible;
+    [ObservableProperty] private bool _quickAppsTopVisible;
+    /// <summary>Only meaningful while QuickAppsTopVisible is true — whether each bubble in the top
+    /// row also shows its shortcut name underneath ("top_labeled" mode) or is icon-only ("top").</summary>
+    [ObservableProperty] private bool _quickAppsTopShowLabels;
 
     public string CurrentRole { get; private set; } = "naladchik";
     public string CurrentTheme { get; private set; } = "light";
@@ -72,7 +81,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _services = services;
 
         foreach (var (pageId, label) in RolesConfig.NavItems)
-            NavItems.Add(new NavItem(pageId, label));
+            NavItems.Add(new NavItem(pageId, label, isCompact: pageId is "network" or "tickets"));
 
         CurrentRole = _services.Cfg.CurrentRole();
         CurrentTheme = _services.Cfg.Theme();
@@ -266,7 +275,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private void ShowNotificationHistory()
     {
         UnseenNotificationsCount = 0;
-        var win = new NotificationHistoryWindow(NotificationHistory) { Owner = Application.Current.MainWindow };
+        var win = new NotificationHistoryWindow(NotificationHistory, _services.Cfg) { Owner = Application.Current.MainWindow };
         win.ShowDialog();
     }
 
@@ -543,6 +552,34 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             if (expired > 0) ShowStatus($"Просрочено резервов номеров: {expired} (номера пропущены навсегда)", 8000, NotificationCategory.FirmwareAndParams);
         }
         catch { /* best effort — next tick will retry */ }
+
+        CleanupInspectionFolder();
+    }
+
+    /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupDays() from the
+    /// Осмотр folder — 0 (default) means disabled, see ConfigService for why. Piggybacks on the same
+    /// timer as the rest of RunSync (startup + every sync_interval_min) instead of a dedicated timer,
+    /// same reasoning as EnsureHierarchy/ExpireStaleReservations above: one more periodic background
+    /// check, not a whole new schedule.</summary>
+    private void CleanupInspectionFolder()
+    {
+        var days = _services.Cfg.InspectionAutoCleanupDays();
+        if (days <= 0) return;
+
+        var folder = _services.Cfg.Get("inspection_folder");
+        if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder)) return;
+
+        try
+        {
+            var result = InspectionCleanupService.Cleanup(folder, days, DateTime.Now);
+            if (result.DeletedCount == 0) return;
+
+            var preview = string.Join(", ", result.DeletedNames.Take(3));
+            var more = result.DeletedNames.Count > 3 ? $" и ещё {result.DeletedNames.Count - 3}" : "";
+            ShowStatus($"Автоочистка папки осмотра: удалено файлов старше {days} дн. — {result.DeletedCount} ({preview}{more})",
+                8000, NotificationCategory.Inspection);
+        }
+        catch { /* best effort — next tick will retry */ }
     }
 
     private void EnsureHierarchy()
@@ -561,6 +598,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         QuickApps.Clear();
         foreach (var app in _services.Cfg.QuickApps())
             QuickApps.Add(new QuickAppItem(app.Name, app.Path));
+
+        var mode = _services.Cfg.QuickAppsDisplayMode();
+        var onTop = mode is "top" or "top_labeled";
+        var hasApps = QuickApps.Count > 0;
+        QuickAppsSidebarVisible = hasApps && !onTop;
+        QuickAppsTopVisible = hasApps && onTop;
+        QuickAppsTopShowLabels = mode == "top_labeled";
     }
 
     /// <summary>0 disables periodic auto-sync — stops any running repeat timer instead of setting a

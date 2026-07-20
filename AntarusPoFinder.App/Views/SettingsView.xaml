@@ -84,10 +84,9 @@
                     <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
                     <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
 
-                    <TextBlock Text="УВЕДОМЛЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Какие категории показывать в статус-баре, баннерах и истории уведомлений. Снятая галка полностью отключает категорию на этом ПК — уведомление не появится нигде, включая историю."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                    <StackPanel x:Name="NotificationCategoriesPanel" Margin="0,0,0,16"/>
+                    <!-- Категории уведомлений переехали в окно "Уведомления" (см. NotificationHistoryWindow) —
+                         логичнее настраивать их прямо там же, где видна сама история, а не в отдельном
+                         разделе Настроек. -->
 
                     <TextBlock Text="ПРИ ЗАКРЫТИИ ОКНА (КРЕСТИК)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <RadioButton x:Name="CloseActionCloseRadio" GroupName="CloseAction" Content="Закрывать приложение" Margin="0,0,0,4" Checked="CloseAction_Changed"/>
@@ -126,10 +125,10 @@
                 <!-- ═══════════════════════════ ИЕРАРХИЯ ═══════════════════════════ -->
                 <StackPanel x:Name="HierarchyTab" Visibility="Collapsed">
                     <TextBlock Text="ТИПЫ ШКАФОВ И ПОДТИПЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Одна строка — один подтип. У типа шкафа без реального деления на подтипы одна строка с подтипом «—». Тип не может существовать без подтипа: удаление последнего подтипа удаляет и сам тип."
+                    <TextBlock Text="Одна строка — один подтип. У типа шкафа без реального деления на подтипы одна строка с подтипом «—». Тип не может существовать без подтипа: удаление последнего подтипа удаляет и сам тип. Двойной клик по ячейке «Тип шкафа»/«Подтип» — переименовать, по «Префикс типа»/«Префикс подтипа» — изменить префикс."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                     <DataGrid x:Name="HierarchyGrid" Height="260" AutoGenerateColumns="False" Margin="0,0,0,4"
-                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel" MouseDoubleClick="HierarchyGrid_MouseDoubleClick">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Тип шкафа" Binding="{Binding GroupName}" Width="130"/>
                             <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="100"/>
@@ -141,10 +140,6 @@
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                         <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"/>
                         <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"/>
-                        <Button Content="Переименовать тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RenameGroup_Click"/>
-                        <Button Content="Переименовать подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RenameSubtype_Click"/>
-                        <Button Content="Изменить префикс типа" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="EditGroupPrefix_Click"/>
-                        <Button Content="Изменить префикс подтипа" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="EditSubtypePrefix_Click"/>
                         <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"/>
                     </StackPanel>
 
@@ -166,7 +161,7 @@
                         <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteControllerRow_Click"/>
                     </StackPanel>
 
-                    <TextBlock Text="ПРОИЗВОДИТЕЛИ ПАРАМЕТРОВ (ПЧ / УПП)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="ПРОИЗВОДИТЕЛИ ПЧ/УПП" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <ListBox x:Name="ManufList" Height="130" Margin="0,0,0,4" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                         <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddManufacturer_Click"/>
@@ -342,11 +337,21 @@
                             <DataGridTextColumn Header="Путь" Binding="{Binding Path, Mode=TwoWay}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
                         <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddApp_Click"/>
                         <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DeleteApp_Click"/>
                         <Button Content="Сохранить" Click="SaveApps_Click"/>
                     </StackPanel>
+
+                    <TextBlock Text="ГДЕ ПОКАЗЫВАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Личная настройка этого компьютера — не синхронизируется с другими машинами."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <RadioButton x:Name="QuickAppsModeSidebarRadio" GroupName="QuickAppsMode" Content="В боковом меню (список, как сейчас)"
+                                 Margin="0,0,0,4" Checked="QuickAppsMode_Changed"/>
+                    <RadioButton x:Name="QuickAppsModeTopRadio" GroupName="QuickAppsMode" Content="Сверху над страницей — только иконки"
+                                 Margin="0,0,0,4" Checked="QuickAppsMode_Changed"/>
+                    <RadioButton x:Name="QuickAppsModeTopLabeledRadio" GroupName="QuickAppsMode" Content="Сверху над страницей — иконки с подписями"
+                                 Margin="0,0,0,4" Checked="QuickAppsMode_Changed"/>
                 </StackPanel>
 
             </Grid>

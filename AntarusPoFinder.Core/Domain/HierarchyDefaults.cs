@@ -87,16 +87,28 @@ public static class HierarchyDefaultsData
 public static class FirmwareNaming
 {
     /// <summary>
-    /// Normal:        НГР-КПЧ_SMH5_2.1.042.001.20260422_1348.psl
-    /// ОПЦ заявка:    ПЖ_SMH4_1.1.036.001_(01312)_20260422_1455.psl
-    /// ОПЦ SN:        ПЖ_SMH4_1.1.036.001_SN00042_20260422_1455.psl
+    /// Normal:        2.1.042.001.20260422_1348.psl
+    /// ОПЦ заявка:    1.1.036.001_(01312)_20260422_1455.psl
+    /// ОПЦ SN:        1.1.036.001_SN00042_20260422_1455.psl
     /// Оба независимы — шкаф может иметь и заявку, и SN одновременно.
+    ///
+    /// Round with the "убрать группу/подтип/контроллер из имени файла" request: the filename used to
+    /// be prefixed with the group/subtype folder name and controller name (e.g.
+    /// "НГР-КПЧ_SMH5_2.1.042...") and — for a lone .psl upload specifically — always carried a
+    /// trailing "_0" regardless of the real sw_version (a Segnetics-toolchain-compatibility quirk
+    /// per earlier round notes). Per the operator's explicit call: the folder path already encodes
+    /// group/subtype/controller (nothing is lost — see HierarchyService.FwPath), and the numeric
+    /// version string alone (`FwVersionNumber.Parse`) is enough for the app to re-derive them for
+    /// search/display, so keeping them in the filename too was redundant and made names unwieldy.
+    /// Group/subtype/controller now get added as ordinary Tags instead (see UploadView.Upload_Click)
+    /// so tag-based search keeps finding the file by the same words. The "_0" suffix is dropped
+    /// entirely (no replacement) — flagged in the release notes as worth re-confirming against the
+    /// Segnetics toolchain in practice, since that's the one part of this specific rename that isn't
+    /// purely cosmetic.
     /// </summary>
-    public static string BuildFirmwareFilename(string folderName, string controller, FwVersionNumber version,
-        string ext, string requestNum = "", string cabinetSn = "")
+    public static string BuildFirmwareFilename(FwVersionNumber version, string ext, string requestNum = "", string cabinetSn = "")
     {
-        var parts = new[] { folderName, controller, version.NumberPart };
-        var name = string.Join("_", System.Linq.Enumerable.Where(parts, p => !string.IsNullOrEmpty(p)));
+        var name = version.NumberPart;
         if (!string.IsNullOrEmpty(requestNum))
             name += $"_({requestNum})";
         if (!string.IsNullOrEmpty(cabinetSn))

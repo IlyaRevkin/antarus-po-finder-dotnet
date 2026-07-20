@@ -52,6 +52,8 @@ public class ConfigService
         ["onboarding_shown"] = "false",
         ["notification_categories_disabled"] = "[]",
         ["close_action"] = "close",
+        ["inspection_auto_cleanup_days"] = "0",
+        ["quick_apps_display_mode"] = "sidebar",
     };
 
     private readonly Database _db;
@@ -212,4 +214,24 @@ public class ConfigService
     /// трей вместо закрытия. Per-machine — трей на одном ПК не должен навязываться другому.</summary>
     public string CloseAction() => Get("close_action");
     public void SetCloseAction(string action) => Set("close_action", action);
+
+    /// <summary>0 (default for new installs — never surprise anyone with unexpected deletion) means
+    /// auto-cleanup of the Осмотр folder is off. Any other N means files older than N days get
+    /// deleted from it periodically — see InspectionCleanupService.Cleanup, called from
+    /// MainWindowViewModel.RunSync alongside the app's other periodic background checks. Per-machine
+    /// (not synced — see ConfigSyncService.SkipSettingsKeys), same reasoning as inspection_folder
+    /// itself: what one operator wants cleaned has nothing to do with another machine's folder.</summary>
+    public int InspectionAutoCleanupDays() => int.TryParse(Get("inspection_auto_cleanup_days"), out var v) && v >= 0 ? v : 0;
+    public void SetInspectionAutoCleanupDays(int days) => Set("inspection_auto_cleanup_days", Math.Max(0, days).ToString());
+
+    /// <summary>"sidebar" (default — unchanged from how it always worked) = Быстрый доступ is a
+    /// vertical list of labeled buttons at the bottom of the left sidebar's scrollable area; "top" =
+    /// a horizontal row of round icon-only "dock" bubbles above the page content; "top_labeled" =
+    /// same horizontal row, each bubble with its shortcut name captioned underneath. Purely a
+    /// personal display preference for THIS machine (not synced — see ConfigSyncService.
+    /// SkipSettingsKeys, same reasoning as close_action/theme), the underlying shortcut list itself
+    /// (QuickApps()) is unaffected either way.</summary>
+    public string QuickAppsDisplayMode() => Get("quick_apps_display_mode");
+    public void SetQuickAppsDisplayMode(string mode) =>
+        Set("quick_apps_display_mode", mode is "top" or "top_labeled" ? mode : "sidebar");
 }

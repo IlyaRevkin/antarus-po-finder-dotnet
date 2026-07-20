@@ -28,16 +28,35 @@
                               VerticalScrollBarVisibility="Auto"
                               ToolTip="Опишите проблему или предложение — что произошло/что хотелось бы, по возможности как воспроизвести."/>
                 </Grid>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Прикрепить файлы…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AttachFiles_Click"/>
+                    <Button Grid.Column="1" x:Name="ClearAttachmentsBtn" Content="Очистить вложения" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0" Visibility="Collapsed" Click="ClearAttachments_Click"/>
+                    <TextBlock Grid.Column="2" x:Name="AttachmentsSummaryText" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                </Grid>
                 <Button Content="Создать тикет" HorizontalAlignment="Left" Click="CreateTicket_Click"/>
             </StackPanel>
         </Border>
 
-        <!-- List -->
+        <!-- List — "Текст" is trimmed to one line here (a several-thousand-character ticket would
+             otherwise dominate the whole grid); double-click a row (or select + "Подробнее") for the
+             full text and any attachments, see TicketDetailDialog. -->
         <DataGrid Grid.Row="3" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
-                  IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged">
+                  IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Тип" Binding="{Binding TypeLabel}" Width="90"/>
-                <DataGridTextColumn Header="Текст" Binding="{Binding Text}" Width="*"/>
+                <DataGridTextColumn Header="Текст" Binding="{Binding Text}" Width="*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
                 <DataGridTextColumn Header="Автор" Binding="{Binding CreatedBy}" Width="120"/>
                 <DataGridTextColumn Header="Роль" Binding="{Binding CreatedByRoleLabel}" Width="110"/>
@@ -46,6 +65,7 @@
         </DataGrid>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal">
+            <Button Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"/>
             <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"/>
             <Button x:Name="TakeInProgressBtn" Content="Взять в работу" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                     Click="SetStatus_Click" Tag="in_progress" Visibility="Collapsed"/>

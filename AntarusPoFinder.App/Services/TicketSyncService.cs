@@ -30,6 +30,16 @@ public static class TicketSyncService
 {
     public static string TicketsDir(string root) => Path.Combine(root, "Конфиг", "tickets");
 
+    /// <summary>Where a ticket's attached files live — plain files on the same shared drive the
+    /// ticket events themselves sync through, not a DB blob (per the operator's explicit call: don't
+    /// bloat SQLite or complicate the event-log sync with binary payloads). Deliberately NOT tracked
+    /// in the event log or the Ticket record at all — the directory listing on whichever machine is
+    /// looking IS the list of attachments, same as how every other shared-file feature in this app
+    /// (firmware/params/schematics) already treats the network drive as the source of truth instead
+    /// of mirroring a file list into SQLite. The only cost: attachments are invisible on a machine
+    /// where the shared drive isn't currently reachable, same as any other disk-backed feature here.</summary>
+    public static string AttachmentsDir(string root, string ticketId) => Path.Combine(TicketsDir(root), "attachments", ticketId);
+
     public static (string Filename, string Payload) BuildCreateEvent(Ticket t)
     {
         var ev = new TicketEvent(Guid.NewGuid().ToString(), t.Id, "create", t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt);

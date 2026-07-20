@@ -129,6 +129,34 @@ public class TicketTests
     }
 
     [Fact]
+    public void InsertTicketIfMissing_TwoDistinctTickets_BothReturnedByGetTickets()
+    {
+        // Regression test: two DIFFERENT tickets (different ids, different authors) must never
+        // collapse into one when read back — reported live as "2 tickets exist, only 1 shown".
+        // Root cause investigation (live re-test + a synthetic two-different-machine sync repro)
+        // found GetTickets()/InsertTicketIfMissing itself always returns/stores both correctly; the
+        // reproducible part of the report was actually the DataGrid display (an extremely long
+        // ticket text visually dominating the row — see TicketsGrid's ElementStyle/TicketDetailDialog
+        // fix), not a data-layer collapse. This test locks in the data-layer half regardless.
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var t1 = new Ticket { Id = "t1", Type = TicketType.Bug, Text = "мсмчсмчс", Status = TicketStatus.Closed, CreatedBy = "Ilia", CreatedByRole = "administrator", CreatedAt = "2026-07-20T19:44:35.547", UpdatedAt = "2026-07-20T19:44:43.563" };
+            var t2 = new Ticket { Id = "t2", Type = TicketType.Bug, Text = new string('А', 2000), Status = TicketStatus.Open, CreatedBy = "Ilia", CreatedByRole = "administrator", CreatedAt = "2026-07-20T19:46:03.849", UpdatedAt = "2026-07-20T19:46:03.849" };
+            db.InsertTicketIfMissing(t1);
+            db.InsertTicketIfMissing(t2);
+            db.InsertTicketIfMissing(t1); // re-applying the same "create" event must stay idempotent, not duplicate
+
+            var all = db.GetTickets();
+            Assert.Equal(2, all.Count); // both distinct tickets present — never collapses to 1
+            Assert.Contains(all, t => t.Id == "t1" && t.Status == TicketStatus.Closed);
+            Assert.Contains(all, t => t.Id == "t2" && t.Text.Length == 2000);
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
     public void GetTickets_OrdersNewestFirst()
     {
         var path = NewTempDb();

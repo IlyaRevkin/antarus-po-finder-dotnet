@@ -293,9 +293,7 @@ public partial class UploadView : UserControl
 
         string reqNum = OpcReqNumCheck.IsChecked == true ? Format5Digits(ReqNumInput.Text) : "";
         string cabinetSn = OpcSnCheck.IsChecked == true ? Format5Digits(CabinetSnInput.Text) : "";
-        string filename = string.Equals(ext, ".psl", StringComparison.OrdinalIgnoreCase)
-            ? FirmwareNaming.BuildFirmwareFilename(subOption.Subtype.FolderName, mod.ControllerName, fwv, "", reqNum, cabinetSn) + "_0.PSL"
-            : FirmwareNaming.BuildFirmwareFilename(subOption.Subtype.FolderName, mod.ControllerName, fwv, ext, reqNum, cabinetSn);
+        string filename = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
 
         PreviewLabel.Text = $"{pathStr}\n{filename}";
     }
@@ -538,9 +536,7 @@ public partial class UploadView : UserControl
             else
             {
                 var ext = Path.GetExtension(_srcPath);
-                dstName = string.Equals(ext, ".psl", StringComparison.OrdinalIgnoreCase)
-                    ? FirmwareNaming.BuildFirmwareFilename(subOption.Subtype.FolderName, mod.ControllerName, fwv, "", reqNum, cabinetSn) + "_0.PSL"
-                    : FirmwareNaming.BuildFirmwareFilename(subOption.Subtype.FolderName, mod.ControllerName, fwv, ext, reqNum, cabinetSn);
+                dstName = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
                 File.Copy(_srcPath, Path.Combine(dstFolder, dstName), overwrite: true);
             }
         }
@@ -569,7 +565,14 @@ public partial class UploadView : UserControl
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
 
-        var tags = TagsEditor.Tags;
+        // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
+        // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
+        // "SMH5" still finds the file by the same words it used to carry in its name. "—" is the
+        // "no real subtype" placeholder (see HierarchyDefaults), not a real word to tag with.
+        var tags = TagsEditor.Tags.ToList();
+        foreach (var autoTag in new[] { group.Name, subOption.Subtype.Name == "—" ? null : subOption.Subtype.Name, mod.ControllerName })
+            if (!string.IsNullOrWhiteSpace(autoTag) && !tags.Contains(autoTag, StringComparer.OrdinalIgnoreCase))
+                tags.Add(autoTag);
         foreach (var tag in tags) _services.Db.AddTag(tag);
 
         var newFwId = _services.Db.AddFwVersion(new FwVersionRecord

@@ -45,6 +45,9 @@
                 <Button Grid.Column="2" Content="Сохранить" Click="SaveInspectionFolder_Click"/>
             </Grid>
 
+            <!-- Автоочистка папки осмотра переехала в саму вкладку "Осмотр" (InspectionView) — логичнее
+                 настраивать её там же, где видна сама папка, а не в Сетевых дисках. -->
+
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,20">
                 <StackPanel>
                     <TextBlock Text="ПОЛУЧЕНИЕ ОБНОВЛЕНИЙ КОНФИГА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>

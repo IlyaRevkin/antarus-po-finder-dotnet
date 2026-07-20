@@ -58,38 +58,159 @@
                 <ColumnDefinition Width="215"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
-            <!-- Sidebar -->
-            <Border x:Name="SidebarBorder" Grid.Column="0" Background="{DynamicResource BgSidebarBrush}">
-                <DockPanel Margin="0,16,0,12" LastChildFill="True">
+            <!-- Header band: logo/role (sidebar side) and the Быстрый доступ top bar (content side,
+                 "top"/"top_labeled" mode only) share this ONE Grid row instead of each living inside
+                 its own independently-sized container — their bottom borders previously landed at
+                 different heights (the sidebar's logo+role block and the content column's quick-apps
+                 bar were sized independently) and never lined up. A shared row's height is the max of
+                 whichever cell is tallest, so both bottom edges always land on the exact same row
+                 boundary, however tall either side's content is (e.g. "иконки с подписями" is taller
+                 than plain icons, or the bar is hidden entirely in "sidebar" quick-apps mode). -->
+            <Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource BgSidebarBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="12,16,12,12">
+                <StackPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+                        <Ellipse Width="28" Height="28" Fill="{DynamicResource AccentBrush}" Margin="0,0,8,0"/>
+                        <TextBlock Text="Antarus ПО Finder" FontWeight="SemiBold" FontSize="14"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding RoleLabel}" VerticalAlignment="Center" Style="{StaticResource MutedText}"/>
+                        <Button x:Name="RoleSwitchNavButton" Style="{StaticResource IconButton}" Width="18" Height="18" Padding="0"
+                                Margin="4,0,0,0" ToolTip="Сменить роль" Click="RoleSwitchButton_Click">
+                            <TextBlock Text="&#8635;" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"/>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource BgSidebarBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1"
+                    Visibility="{Binding QuickAppsTopVisible, Converter={StaticResource BoolToVis}}">
+                <ItemsControl ItemsSource="{Binding QuickApps}" Margin="16,10" VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Vertical" Margin="0,0,16,0" Width="56">
+                                <Button Style="{StaticResource QuickAppBubbleButton}" HorizontalAlignment="Center"
+                                        Command="{Binding LaunchCommand}" ToolTip="{Binding Name}">
+                                    <Image Source="{Binding IconSource}" Width="22" Height="22"
+                                           Visibility="{Binding IconSource, Converter={StaticResource NullToVis}}"/>
+                                </Button>
+                                <TextBlock Text="{Binding Name}" Style="{StaticResource MutedText}" FontSize="10"
+                                           HorizontalAlignment="Center" TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                           Margin="0,4,0,0" MaxWidth="56"
+                                           Visibility="{Binding DataContext.QuickAppsTopShowLabels, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+
+            <!-- Sidebar (below the shared header band) -->
+            <Border x:Name="SidebarBorder" Grid.Row="1" Grid.Column="0" Background="{DynamicResource BgSidebarBrush}">
+                <DockPanel Margin="0,12,0,12" LastChildFill="True">
 
                     <!-- LastChildFill applies to whichever child is LAST in this collection, regardless
                          of its own Dock value — so bottom-docked buttons must come first (each takes
                          its natural height off the bottom, in declaration order from bottom to top)
                          and the scrollable content last (fills the rest). -->
-                    <Grid DockPanel.Dock="Bottom" Margin="12,12,12,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="{Binding ThemeLabel}" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextBrush}"/>
-                        <ToggleButton x:Name="ThemeToggleControl" Grid.Column="1" Style="{StaticResource ThemeToggleSwitch}"
-                                      IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"/>
-                    </Grid>
 
-                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Center" Margin="12,6,12,0">
-                        <TextBlock>
-                            <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
-                        </TextBlock>
-                        <TextBlock Text=" · " Foreground="{DynamicResource TextBrush}"/>
-                        <TextBlock>
-                            <Hyperlink Click="ShowOnboarding_Click">Обучение</Hyperlink>
-                        </TextBlock>
+                    <!-- Secondary/rare-use strip: Настройки, Сетевые диски, Тикеты, Смена роли, Обучение,
+                         GitHub and the theme switch — all "check/use once in a while, not every visit"
+                         (per the operator: these were crowding the sidebar at the same visual weight as
+                         Поиск/Осмотр/Модерация тегов/Загрузка ПО/Параметры ПЧ/УПП, which ARE used
+                         constantly). Purely a placement change — every item here has exactly the same
+                         role access/visibility as before (RolesConfig.RoleAccess for the page items,
+                         SettingsVisible for Настройки), nothing here changes WHO can use it, only where
+                         its button lives. "Уведомления" deliberately stays OUTSIDE this block, full-size —
+                         it carries an unread-count badge and wasn't named as something to compact.
+
+                         Collapsed by default (MoreSectionToggle.IsChecked starts unset/false) — the whole
+                         point was to stop this from being permanently visible clutter; clicking the
+                         "› ДОПОЛНИТЕЛЬНО" header expands it downward, in place, standard accordion/
+                         disclosure pattern. Not persisted across restarts — always starts collapsed. -->
+                    <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,0">
+                        <Separator/>
+                        <ToggleButton x:Name="MoreSectionToggle" Style="{StaticResource SidebarExpanderHeader}"/>
+                        <StackPanel x:Name="MoreSectionContent"
+                                    Visibility="{Binding IsChecked, ElementName=MoreSectionToggle, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
+
+                            <TextBlock Text="РАБОЧИЕ" Style="{StaticResource MutedText}" Margin="0,0,0,2" FontSize="9"/>
+                            <Button x:Name="SettingsNavButton" Style="{StaticResource CompactNavButton}"
+                                    Margin="0,0,0,2" HorizontalAlignment="Stretch"
+                                    Visibility="{Binding SettingsVisible, Converter={StaticResource BoolToVis}}"
+                                    Tag="{Binding IsSettingsActive, Converter={StaticResource ActiveTagConverter}}"
+                                    Command="{Binding NavigateCommand}" CommandParameter="settings">
+                                <!-- Same fix as the main nav list below: an explicit per-instance Style,
+                                     not just the Button's own Foreground, since a plain TextBlock always
+                                     wins over inheritance via the app-wide implicit TextBlock style. -->
+                                <TextBlock Text="Настройки">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSettingsActive}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <ItemsControl x:Name="CompactNavItemsControl" ItemsSource="{Binding NavItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource CompactNavButton}"
+                                                Margin="0,0,0,2" HorizontalAlignment="Stretch"
+                                                Visibility="{Binding ShowInCompactList, Converter={StaticResource BoolToVis}}"
+                                                Tag="{Binding IsActive, Converter={StaticResource ActiveTagConverter}}"
+                                                Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding PageId}">
+                                            <TextBlock Text="{Binding Label}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
+                            <Grid Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding ThemeLabel}" VerticalAlignment="Center"
+                                           Style="{StaticResource MutedText}"/>
+                                <ToggleButton x:Name="ThemeToggleControl" Grid.Column="1" Style="{StaticResource ThemeToggleSwitch}"
+                                              IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"/>
+                            </Grid>
+
+                            <TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
+                            <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
+                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"/>
+                            <TextBlock HorizontalAlignment="Center" Margin="0,4,0,2">
+                                <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
+                            </TextBlock>
+                        </StackPanel>
                     </StackPanel>
-
-                    <Button x:Name="RoleSwitchNavButton" DockPanel.Dock="Bottom" Content="Сменить роль" Style="{StaticResource SecondaryButton}"
-                            Margin="12,4,12,0" Click="RoleSwitchButton_Click"/>
 
                     <Button x:Name="NotificationsNavButton" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryButton}"
                             Margin="12,4,12,0" Command="{Binding ShowNotificationHistoryCommand}">
@@ -105,39 +226,40 @@
                         </StackPanel>
                     </Button>
 
-                    <Button x:Name="SettingsNavButton" DockPanel.Dock="Bottom" Content="Настройки" Style="{StaticResource NavButton}"
-                            Margin="12,4,12,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                            Visibility="{Binding SettingsVisible, Converter={StaticResource BoolToVis}}"
-                            Tag="{Binding IsSettingsActive, Converter={StaticResource ActiveTagConverter}}"
-                            Command="{Binding NavigateCommand}" CommandParameter="settings"/>
-
                     <Separator DockPanel.Dock="Bottom" Margin="0,8,0,0"/>
 
                     <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
-                                <Ellipse Width="28" Height="28" Fill="{DynamicResource AccentBrush}" Margin="0,0,8,0"/>
-                                <TextBlock Text="Antarus ПО Finder" FontWeight="SemiBold" FontSize="14"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
-                            </StackPanel>
-
-                            <TextBlock Text="{Binding RoleLabel}" HorizontalAlignment="Center" Margin="0,4,0,8"
-                                       Style="{StaticResource MutedText}"/>
-
-                            <Separator Margin="0,0,0,8"/>
-
+                        <StackPanel Margin="0,4,0,0">
                             <ItemsControl x:Name="NavItemsControl" ItemsSource="{Binding NavItems}" Margin="8,0">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Button Style="{StaticResource NavButton}"
                                                 Margin="0,0,0,2" HorizontalAlignment="Stretch"
-                                                Visibility="{Binding IsVisible, Converter={StaticResource BoolToVis}}"
+                                                Visibility="{Binding ShowInMainList, Converter={StaticResource BoolToVis}}"
                                                 Tag="{Binding IsActive, Converter={StaticResource ActiveTagConverter}}"
                                                 Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 CommandParameter="{Binding PageId}">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Label}"/>
+                                                <!-- Explicit per-instance Style+DataTrigger, not just the Button's own
+                                                     Foreground (set by NavButton's Tag="Active" trigger) — a plain
+                                                     TextBlock always picks up the app-wide implicit TextBlock style
+                                                     (Foreground=TextBrush), which has higher precedence than an
+                                                     inherited Foreground value, so it silently overrode the Button's
+                                                     active-state Foreground. In light theme that left dark text sitting
+                                                     directly on the blue AccentBrush background — same fix as the
+                                                     badge just below, which already did this correctly. -->
+                                                <TextBlock Text="{Binding Label}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                                 <!-- Badge deliberately swaps to the opposite brush pair when the nav item
                                                      is active: the button's own Tag="Active" trigger (NavButton style)
                                                      paints its background with AccentBrush, which is also this badge's
@@ -175,7 +297,10 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
 
-                            <StackPanel Visibility="{Binding QuickApps.Count, Converter={StaticResource CountToVis}}">
+                            <!-- "sidebar" display mode (default) — see Настройки → Быстрый доступ for
+                                 the "top" alternative (horizontal bubble dock above the page content,
+                                 ContentColumn below) and ConfigService.QuickAppsDisplayMode. -->
+                            <StackPanel Visibility="{Binding QuickAppsSidebarVisible, Converter={StaticResource BoolToVis}}">
                                 <Separator Margin="0,8,0,8"/>
                                 <TextBlock Text="БЫСТРЫЙ ДОСТУП" Style="{StaticResource MutedText}" Margin="12,0,0,4" FontSize="10"/>
                                 <ItemsControl ItemsSource="{Binding QuickApps}" Margin="8,0">
@@ -199,8 +324,8 @@
                 </DockPanel>
             </Border>
 
-            <!-- Content -->
-            <Border Grid.Column="1" Background="{DynamicResource BgBrush}">
+            <!-- Content (below the shared header band — see QuickAppsTopVisible bar above) -->
+            <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BgBrush}">
                 <ContentControl Content="{Binding CurrentPageContent}"/>
             </Border>
         </Grid>

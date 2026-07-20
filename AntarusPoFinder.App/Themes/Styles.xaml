@@ -18,6 +18,18 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
     </Style>
 
+    <!-- Separator never had an app style, so every one of them rendered with the OS's default Aero
+         bevel chrome (a light-on-top/dark-on-bottom 3D groove) — designed for a light theme, so
+         against this app's dark sidebar/cards it read as an odd bright sliver instead of a plain
+         divider line, most noticeable right under the role label at the top of the sidebar. A flat
+         1px line in the theme's own border color reads consistently everywhere a Separator is used. -->
+    <Style TargetType="Separator">
+        <Setter Property="Background" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="0,4,0,4"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
     <Style x:Key="TitleText" TargetType="TextBlock">
         <Setter Property="FontSize" Value="20"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
@@ -134,6 +146,70 @@
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Padding" Value="0"/>
+    </Style>
+
+    <!-- Smaller variant of NavButton for the sidebar's secondary "ДОПОЛНИТЕЛЬНО" strip (Тикеты/
+         Сетевые диски/Обучение) — same look/active-state behavior, just more compact since these
+         are used far less often than the main page list above it. -->
+    <Style x:Key="CompactNavButton" TargetType="Button" BasedOn="{StaticResource NavButton}">
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <!-- Clickable "› ДОПОЛНИТЕЛЬНО" / "⌄ ДОПОЛНИТЕЛЬНО" disclosure header for the sidebar's
+         secondary strip (MainWindow.xaml MoreSectionToggle) — collapsed by default (chevron points
+         right), content expands downward in place when clicked (chevron points down). Plain
+         ToggleButton retemplate rather than a WPF Expander — Expander's default chrome has the same
+         "unstyled OS control against a dark theme" mismatch as Separator did (see that style above),
+         and this is simple enough not to need retemplating a heavier control. -->
+    <Style x:Key="SidebarExpanderHeader" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="0,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="Chevron" Text="&#8250;" FontSize="12" Width="14"
+                                       VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
+                            <TextBlock Text="ДОПОЛНИТЕЛЬНО" Style="{StaticResource MutedText}" FontSize="10" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chevron" Property="Text" Value="&#8964;"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chevron" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Round "dock" icon button for the Быстрый доступ strip above the page content (see
+         MainWindow.xaml) — a plain circle with the shortcut's own icon centered in it. -->
+    <Style x:Key="QuickAppBubbleButton" TargetType="Button">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="40"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Ellipse x:Name="Bg" Fill="{DynamicResource BgInputBrush}" Stroke="{DynamicResource BorderBrush2}" StrokeThickness="1"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="StrokeThickness" Value="2"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="TextBox">
@@ -529,20 +605,39 @@
          flips to the on-accent color once the thumb sits underneath it. -->
     <Style x:Key="SearchModeSegment" TargetType="RadioButton">
         <Setter Property="Cursor" Value="Hand"/>
+        <!-- Content ("Прошивки" etc.) is a plain string, so WPF wraps it in an ordinary TextBlock —
+             which, like every other TextBlock in the app, picks up the app-wide implicit TextBlock
+             style (Foreground=TextBrush) with HIGHER precedence than an inherited/attached
+             TextElement.Foreground value set on an ancestor (ContentPresenter, here). Setting
+             TextElement.Foreground in the ControlTemplate trigger below therefore never actually
+             reached the text in light theme — dark TextBrush text sat directly on the blue thumb.
+             Same fix as the sidebar nav list/Настройки button: an explicit per-instance Style on the
+             actual TextBlock, with its own trigger, which DOES take precedence. -->
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=RadioButton}, Path=IsChecked}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Border Background="Transparent">
-                        <ContentPresenter x:Name="Content" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.Foreground="{DynamicResource TextMutedBrush}"
-                                          TextElement.FontWeight="Normal"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Content" Property="TextElement.Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
-                            <Setter TargetName="Content" Property="TextElement.FontWeight" Value="SemiBold"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

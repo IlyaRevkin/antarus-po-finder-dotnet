@@ -28,10 +28,12 @@ public partial class InspectionView : UserControl
     private FileSystemWatcher? _watcher;
     private Microsoft.Web.WebView2.Wpf.WebView2? _pdfView;
 
-    // ── Image preview editing state (rotate + save) ──────────────────────────
+    // ── Image preview state (rotate, view-only — and zoom) ───────────────────
+    private static readonly double[] ZoomSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
     private BitmapSource? _previewOriginalImage;
-    private string? _previewImagePath;
     private int _previewRotationDeg;
+    private bool _zoomFit = true;
+    private double _zoomScale = 1.0;
 
     private class FileRow
     {
@@ -58,8 +60,22 @@ public partial class InspectionView : UserControl
     {
         UpdateProtoLabel();
         LoadScanResolution();
+        InspectionCleanupDaysInput.Text = _services.Cfg.InspectionAutoCleanupDays().ToString();
         StartPhotoServer();
         RefreshFileList();
+    }
+
+    /// <summary>Moved here from Настройки → Сетевые диски — logically belongs right next to the
+    /// folder it actually cleans, same reasoning as scan resolution living here instead of there.</summary>
+    private void SaveInspectionCleanupDays_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(InspectionCleanupDaysInput.Text.Trim(), out var v) || v < 0)
+        {
+            AppMessageBox.Show("Введите целое число дней (0 — отключить автоочистку).", "Автоочистка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _services.Cfg.SetInspectionAutoCleanupDays(v);
+        _host.ShowStatus(v == 0 ? "Автоочистка папки осмотра отключена" : $"Автоочистка папки осмотра: файлы старше {v} дн.", category: NotificationCategory.Inspection);
     }
 
     /// <summary>Качество сканирования используется только здесь (WiaScanner.TryScan ниже) — раньше
@@ -277,8 +293,9 @@ public partial class InspectionView : UserControl
         PreviewImage.Source = null;
         PreviewPlaceholder.Text = "Выберите файл в списке слева";
         _previewOriginalImage = null;
-        _previewImagePath = null;
         _previewRotationDeg = 0;
+        _zoomFit = true;
+        _zoomScale = 1.0;
         ImageEditToolbar.Visibility = Visibility.Collapsed;
 
         if (FilesList.SelectedItem is not FileRow row || !File.Exists(row.FullPath))
@@ -303,16 +320,18 @@ public partial class InspectionView : UserControl
                 bmp.StreamSource = stream;
                 bmp.EndInit();
                 bmp.Freeze();
-                // Viewbox (see XAML) auto-scales this to fit the preview pane, both down for a
-                // full-size photo and up for a small scan thumbnail — the Image control itself
-                // previously sat inside a ScrollViewer, which hands its child effectively unlimited
-                // space, so Stretch="Uniform" never had anything to actually fit against and every
-                // image just rendered at its native pixel size regardless of the pane's size.
+                // Starts at "fit to pane" (like a PDF viewer's default open) — the Image control
+                // used to sit directly inside a ScrollViewer with Stretch="Uniform", which hands its
+                // child effectively unlimited space, so Stretch never had anything to actually fit
+                // against and every image rendered at native pixel size regardless of pane size.
+                // Now an explicit ScaleTransform drives the size (see UpdateZoomDisplayAndScale), so
+                // the user can zoom in/out from that starting point instead of only ever seeing fit.
                 _previewOriginalImage = bmp;
-                _previewImagePath = row.FullPath;
+                _zoomFit = true;
                 PreviewImage.Source = bmp;
                 PreviewImageScroll.Visibility = Visibility.Visible;
                 ImageEditToolbar.Visibility = Visibility.Visible;
+                UpdateZoomDisplayAndScale();
             }
             catch
             {
@@ -332,7 +351,8 @@ public partial class InspectionView : UserControl
         }
     }
 
-    // ── Image preview editing: rotate + save (minimal — no crop, see round notes) ────────────
+    // ── Image preview: rotate + zoom (view-only — no crop, no save; see round notes:
+    //    Осмотр is a working folder, this preview is deliberately read-only) ──────────────────
 
     private void RotateLeft_Click(object sender, RoutedEventArgs e) => Rotate(-90);
     private void RotateRight_Click(object sender, RoutedEventArgs e) => Rotate(90);
@@ -342,11 +362,15 @@ public partial class InspectionView : UserControl
         if (_previewOriginalImage is null) return;
         _previewRotationDeg = ((_previewRotationDeg + deltaDeg) % 360 + 360) % 360;
         ApplyPreviewRotation();
+        // A 90°/270° rotation swaps width/height, which changes what "fit" means — recompute it
+        // immediately instead of waiting for the next resize event.
+        UpdateZoomDisplayAndScale();
     }
 
     /// <summary>Re-derives the displayed bitmap from the untouched original every time (never
     /// rotates the already-rotated preview) — rotating 90°/90°/90° stays lossless and always ends up
-    /// pixel-identical to a single 270° rotation, instead of accumulating repeated re-render error.</summary>
+    /// pixel-identical to a single 270° rotation, instead of accumulating repeated re-render error.
+    /// View-only: this never touches the file on disk, only what's shown here.</summary>
     private void ApplyPreviewRotation()
     {
         if (_previewOriginalImage is null) return;
@@ -360,126 +384,57 @@ public partial class InspectionView : UserControl
         PreviewImage.Source = rotated;
     }
 
-    private void SaveRotationOverwrite_Click(object sender, RoutedEventArgs e)
+    // ── Zoom (PDF-viewer style: opens at "fit to pane", then +/- step through fixed levels,
+    //    "По размеру окна" jumps back to auto-fit) ────────────────────────────────────────────
+
+    private void ZoomIn_Click(object sender, RoutedEventArgs e) => StepZoom(+1);
+    private void ZoomOut_Click(object sender, RoutedEventArgs e) => StepZoom(-1);
+
+    private void ZoomFit_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureRotationToSave(out var name)) return;
-
-        var reply = AppMessageBox.Show(
-            $"Перезаписать файл «{name}» повёрнутым изображением?\n\nИсходный файл будет заменён — отменить нельзя.",
-            "Сохранить поворот", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (reply != MessageBoxResult.Yes) return;
-
-        if (!TrySaveRotatedImage(_previewImagePath!, out var error))
-        {
-            AppMessageBox.Show($"Не удалось сохранить: {error}", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        _previewRotationDeg = 0;
-        _host.ShowStatus($"Файл перезаписан: {name}", category: NotificationCategory.Inspection);
-        RefreshFileList();
-        ReloadPreviewFromDisk();
+        _zoomFit = true;
+        UpdateZoomDisplayAndScale();
     }
 
-    private void SaveRotationAsCopy_Click(object sender, RoutedEventArgs e)
+    /// <summary>Moves to the next fixed zoom level strictly above/below whatever is currently
+    /// effective — including out of "fit" mode, starting from whatever percentage fit currently
+    /// happens to equal, so the first click after opening an image steps from a sensible point
+    /// instead of jumping to an arbitrary fixed level.</summary>
+    private void StepZoom(int direction)
     {
-        if (!EnsureRotationToSave(out _)) return;
-
-        var proto = _services.Cfg.Get("inspection_folder");
-        var ext = Path.GetExtension(_previewImagePath!);
-        var suggested = Path.Combine(proto, $"{Path.GetFileNameWithoutExtension(_previewImagePath!)}_повёрнуто{ext}");
-
-        var dlg = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "Сохранить копию с поворотом",
-            InitialDirectory = proto,
-            FileName = Path.GetFileName(suggested),
-            Filter = $"Изображение (*{ext})|*{ext}",
-        };
-        if (dlg.ShowDialog() != true) return;
-
-        if (!TrySaveRotatedImage(dlg.FileName, out var error))
-        {
-            AppMessageBox.Show($"Не удалось сохранить: {error}", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        _host.ShowStatus($"Копия сохранена: {Path.GetFileName(dlg.FileName)}", category: NotificationCategory.Inspection);
-        RefreshFileList();
+        if (_previewOriginalImage is null) return;
+        var current = _zoomFit ? ComputeFitScale() : _zoomScale;
+        _zoomScale = direction > 0
+            ? ZoomSteps.FirstOrDefault(s => s > current + 0.001, ZoomSteps[^1])
+            : ZoomSteps.LastOrDefault(s => s < current - 0.001, ZoomSteps[0]);
+        _zoomFit = false;
+        UpdateZoomDisplayAndScale();
     }
 
-    private bool EnsureRotationToSave(out string name)
+    private double ComputeFitScale()
     {
-        name = _previewImagePath is not null ? Path.GetFileName(_previewImagePath) : "";
-        if (_previewImagePath is null || _previewOriginalImage is null) return false;
-        if (_previewRotationDeg == 0)
-        {
-            AppMessageBox.Show("Сначала поверните изображение — сохранять нечего.", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Information);
-            return false;
-        }
-        return true;
+        var current = PreviewImage.Source as BitmapSource;
+        if (current is null || PreviewImageScroll.ActualWidth <= 0 || PreviewImageScroll.ActualHeight <= 0)
+            return 1.0;
+        var availW = Math.Max(PreviewImageScroll.ActualWidth - 4, 10);
+        var availH = Math.Max(PreviewImageScroll.ActualHeight - 4, 10);
+        return Math.Max(Math.Min(availW / current.PixelWidth, availH / current.PixelHeight), 0.02);
     }
 
-    /// <summary>Encodes the currently-rotated bitmap and writes it to <paramref name="destPath"/>,
-    /// picking the encoder from its extension (falls back to PNG for anything not recognized —
-    /// lossless, never a wrong-format guess). Writes to a sibling temp file first and only replaces
-    /// the destination once the encode fully succeeded, so a mid-write failure never leaves a
-    /// half-written/corrupt file in the (working, not archival) inspection folder.</summary>
-    private bool TrySaveRotatedImage(string destPath, out string error)
+    private void UpdateZoomDisplayAndScale()
     {
-        error = "";
-        try
-        {
-            var rotated = _previewRotationDeg == 0
-                ? _previewOriginalImage!
-                : new TransformedBitmap(_previewOriginalImage!, new System.Windows.Media.RotateTransform(_previewRotationDeg));
-
-            var encoder = CreateEncoderForExtension(Path.GetExtension(destPath));
-            encoder.Frames.Add(BitmapFrame.Create(rotated));
-
-            var tmp = destPath + ".tmp";
-            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
-                encoder.Save(fs);
-
-            if (File.Exists(destPath)) File.Delete(destPath);
-            File.Move(tmp, destPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
+        if (_previewOriginalImage is null) return;
+        var scale = _zoomFit ? ComputeFitScale() : _zoomScale;
+        PreviewImageScale.ScaleX = scale;
+        PreviewImageScale.ScaleY = scale;
+        ZoomLevelText.Text = _zoomFit ? "По размеру окна" : $"{Math.Round(scale * 100)}%";
     }
 
-    private static BitmapEncoder CreateEncoderForExtension(string ext) => ext.ToLowerInvariant() switch
+    /// <summary>Recomputes "fit" on resize (window resize, sidebar collapse, etc.) — only while
+    /// actually in fit mode, an explicit zoom level the user picked must stay put across a resize.</summary>
+    private void PreviewImageScroll_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        ".jpg" or ".jpeg" => new JpegBitmapEncoder { QualityLevel = 92 },
-        ".bmp" => new BmpBitmapEncoder(),
-        ".gif" => new GifBitmapEncoder(),
-        ".tif" or ".tiff" => new TiffBitmapEncoder(),
-        _ => new PngBitmapEncoder(),
-    };
-
-    /// <summary>Re-reads the just-saved file from disk (instead of just resetting the in-memory
-    /// bitmap) so the preview reflects exactly what's now on disk, including whatever the encoder
-    /// actually produced (e.g. JPEG recompression), not the pre-save in-memory version.</summary>
-    private void ReloadPreviewFromDisk()
-    {
-        if (_previewImagePath is null || !File.Exists(_previewImagePath)) return;
-        try
-        {
-            var bmp = new BitmapImage();
-            using var stream = new FileStream(_previewImagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.StreamSource = stream;
-            bmp.EndInit();
-            bmp.Freeze();
-            _previewOriginalImage = bmp;
-            PreviewImage.Source = bmp;
-        }
-        catch { /* best effort — file list/thumbnail still updated, just the live preview stays stale */ }
+        if (_zoomFit) UpdateZoomDisplayAndScale();
     }
 
     private void PhoneInstructions_Click(object sender, RoutedEventArgs e)

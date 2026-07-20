@@ -332,7 +332,6 @@ public partial class SettingsView : UserControl
 
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
-        LoadNotificationCategories();
         var tray = _services.Cfg.CloseAction() == "tray";
         CloseActionCloseRadio.IsChecked = !tray;
         CloseActionTrayRadio.IsChecked = tray;
@@ -340,35 +339,6 @@ public partial class SettingsView : UserControl
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
-    }
-
-    /// <summary>Built in code, not XAML-bound, to match this view's convention (code-behind on
-    /// x:Name, not a per-view MVVM ViewModel) — one CheckBox per NotificationCategoryInfo.All entry,
-    /// pre-checked from ConfigService.IsNotificationCategoryEnabled. Deliberately silent on toggle
-    /// (see NotificationCategoryCheck_Changed): the point of muting a category is that it stops
-    /// making noise, so the mute action itself shouldn't pop a status message.</summary>
-    private void LoadNotificationCategories()
-    {
-        NotificationCategoriesPanel.Children.Clear();
-        foreach (var (category, label) in NotificationCategoryInfo.All)
-        {
-            var cb = new CheckBox
-            {
-                Content = label,
-                Tag = category,
-                IsChecked = _services.Cfg.IsNotificationCategoryEnabled(category),
-                Margin = new Thickness(0, 0, 0, 6),
-            };
-            cb.Checked += NotificationCategoryCheck_Changed;
-            cb.Unchecked += NotificationCategoryCheck_Changed;
-            NotificationCategoriesPanel.Children.Add(cb);
-        }
-    }
-
-    private void NotificationCategoryCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        if (sender is not CheckBox { Tag: NotificationCategory category } cb) return;
-        _services.Cfg.SetNotificationCategoryEnabled(category, cb.IsChecked == true);
     }
 
     /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the
@@ -618,6 +588,35 @@ public partial class SettingsView : UserControl
         LoadHierarchy();
         AutoRebuild();
         _host.ShowStatus($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})", category: NotificationCategory.Hierarchy);
+    }
+
+    /// <summary>"Переименовать тип/подтип"/"Изменить префикс типа/подтипа" used to be four separate
+    /// buttons — they no longer fit the toolbar next to Добавить/Удалить, so double-clicking the
+    /// relevant cell now does the same thing instead (Explorer/spreadsheet-style "double-click to
+    /// edit this field"), routed by which column was actually clicked. Double-clicking any other
+    /// column (Папка) falls back to renaming the subtype, the single most common edit.</summary>
+    private void HierarchyGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!DataGridClickGuard.IsOverDataRow(e)) return;
+        var cell = FindAncestor<DataGridCell>(e.OriginalSource as DependencyObject);
+        switch (cell?.Column?.Header as string)
+        {
+            case "Тип шкафа": RenameGroup_Click(sender, e); break;
+            case "Префикс типа": EditGroupPrefix_Click(sender, e); break;
+            case "Подтип": RenameSubtype_Click(sender, e); break;
+            case "Префикс подтипа": EditSubtypePrefix_Click(sender, e); break;
+            default: RenameSubtype_Click(sender, e); break;
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match) return match;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
     }
 
     private void EditGroupPrefix_Click(object sender, RoutedEventArgs e)
@@ -1239,7 +1238,31 @@ public partial class SettingsView : UserControl
             FileName = $"Antarus_версии_нумерация_{DateTime.Now:yyyyMMdd}.xlsx",
             InitialDirectory = !string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir) ? initialDir : "",
         };
-        if (dlg.ShowDialog() != true) return;
+
+        bool? shown;
+        try
+        {
+            shown = dlg.ShowDialog();
+        }
+        catch (ArgumentException)
+        {
+            // Reproduced live: the native Save dialog's Shell API (IFileDialog) can throw
+            // "Value does not fall within the expected range" resolving InitialDirectory into a
+            // shell item, even when Directory.Exists() on that exact path returns true — observed
+            // with a Cyrillic root_path folder (D:\...\Новая папка\тест). Without this, the button
+            // silently did nothing (the exception went uncaught past this handler, past this method
+            // entirely). Retry once with no InitialDirectory instead of leaving the operator with a
+            // button that appears to do nothing.
+            dlg.InitialDirectory = "";
+            try { shown = dlg.ShowDialog(); }
+            catch (Exception ex2)
+            {
+                AppMessageBox.Show($"Не удалось открыть диалог сохранения:\n{ex2.Message}", "Таблица версий",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+        if (shown != true) return;
 
         try
         {
@@ -1260,6 +1283,25 @@ public partial class SettingsView : UserControl
     {
         var apps = _services.Cfg.QuickApps();
         AppsGrid.ItemsSource = new ObservableCollection<AppRow>(apps.Select(a => new AppRow { Name = a.Name, Path = a.Path }));
+
+        QuickAppsModeSidebarRadio.Checked -= QuickAppsMode_Changed;
+        QuickAppsModeTopRadio.Checked -= QuickAppsMode_Changed;
+        QuickAppsModeTopLabeledRadio.Checked -= QuickAppsMode_Changed;
+        var mode = _services.Cfg.QuickAppsDisplayMode();
+        QuickAppsModeTopRadio.IsChecked = mode == "top";
+        QuickAppsModeTopLabeledRadio.IsChecked = mode == "top_labeled";
+        QuickAppsModeSidebarRadio.IsChecked = mode is not ("top" or "top_labeled");
+        QuickAppsModeSidebarRadio.Checked += QuickAppsMode_Changed;
+        QuickAppsModeTopRadio.Checked += QuickAppsMode_Changed;
+        QuickAppsModeTopLabeledRadio.Checked += QuickAppsMode_Changed;
+    }
+
+    private void QuickAppsMode_Changed(object sender, RoutedEventArgs e)
+    {
+        var mode = QuickAppsModeTopLabeledRadio.IsChecked == true ? "top_labeled"
+            : QuickAppsModeTopRadio.IsChecked == true ? "top" : "sidebar";
+        _services.Cfg.SetQuickAppsDisplayMode(mode);
+        _host.ReloadSidebarApps();
     }
 
     private void AddApp_Click(object sender, RoutedEventArgs e)

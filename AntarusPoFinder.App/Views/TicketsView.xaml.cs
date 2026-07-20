@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,6 +29,7 @@ public partial class TicketsView : UserControl
 
     private readonly AppServices _services;
     private readonly IAppHost _host;
+    private readonly List<string> _pendingAttachmentPaths = new();
 
     public TicketsView(AppServices services, IAppHost host)
     {
@@ -119,9 +121,85 @@ public partial class TicketsView : UserControl
         _services.Db.EnqueueTicketOutbox(filename, payload);
         TryFlush();
 
+        CopyPendingAttachments(ticket.Id);
+
         TicketTextInput.Clear();
         _host.ShowStatus("Тикет создан", category: NotificationCategory.General);
         ReloadGrid();
+    }
+
+    // ── Attachments (staged before creation, then copied straight onto the shared drive —
+    //    see TicketSyncService.AttachmentsDir for why these aren't tracked in the DB/event log) ──
+
+    private void AttachFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "Прикрепить файлы к тикету", Multiselect = true };
+        if (dlg.ShowDialog() != true) return;
+        _pendingAttachmentPaths.AddRange(dlg.FileNames);
+        UpdateAttachmentsSummary();
+    }
+
+    private void ClearAttachments_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingAttachmentPaths.Clear();
+        UpdateAttachmentsSummary();
+    }
+
+    private void UpdateAttachmentsSummary()
+    {
+        if (_pendingAttachmentPaths.Count == 0)
+        {
+            AttachmentsSummaryText.Text = "";
+            ClearAttachmentsBtn.Visibility = Visibility.Collapsed;
+            return;
+        }
+        AttachmentsSummaryText.Text = "Прикреплено: " + string.Join(", ", _pendingAttachmentPaths.Select(Path.GetFileName));
+        ClearAttachmentsBtn.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Copies whatever was staged via "Прикрепить файлы…" onto the shared drive under this
+    /// new ticket's id, right after the ticket itself is created. If the share isn't reachable right
+    /// now, the ticket is still created (attachments just don't block it) — the operator is told so
+    /// explicitly rather than the files silently vanishing.</summary>
+    private void CopyPendingAttachments(string ticketId)
+    {
+        if (_pendingAttachmentPaths.Count == 0) return;
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show(
+                "Тикет создан, но вложения не сохранены — сетевой диск недоступен. Прикрепите их позже, пересоздав тикет, когда диск будет доступен.",
+                "Вложения", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _pendingAttachmentPaths.Clear();
+            UpdateAttachmentsSummary();
+            return;
+        }
+
+        var dir = TicketSyncService.AttachmentsDir(root, ticketId);
+        Directory.CreateDirectory(dir);
+        var failed = new List<string>();
+        foreach (var src in _pendingAttachmentPaths)
+        {
+            try { File.Copy(src, Path.Combine(dir, Path.GetFileName(src)), overwrite: true); }
+            catch (Exception ex) { failed.Add($"{Path.GetFileName(src)}: {ex.Message}"); }
+        }
+        if (failed.Count > 0)
+            AppMessageBox.Show($"Не удалось приложить:\n{string.Join("\n", failed)}", "Вложения", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+        _pendingAttachmentPaths.Clear();
+        UpdateAttachmentsSummary();
+    }
+
+    // ── Detail view (full text + attachments) ────────────────────────────────
+
+    private void ShowDetail_Click(object sender, RoutedEventArgs e) => OpenDetailForSelected();
+    private void TicketsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenDetailForSelected();
+
+    private void OpenDetailForSelected()
+    {
+        if (TicketsGrid.SelectedItem is not TicketRow row) return;
+        new TicketDetailDialog(row.Ticket, _services.Cfg.RootPath()) { Owner = Window.GetWindow(this) }.ShowDialog();
     }
 
     private void SetStatus_Click(object sender, RoutedEventArgs e)

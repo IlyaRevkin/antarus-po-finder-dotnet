@@ -12,31 +12,44 @@
 
         <!-- Protocol folder toolbar -->
         <Grid Grid.Row="1" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Папка осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBlock Grid.Column="1" x:Name="ProtoPathLabel" Text="не задана" Style="{StaticResource MutedText}"
-                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-            <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"/>
-            <Button Grid.Column="3" Content="Очистить папку осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ClearProtocolFolder_Click"/>
-            <TextBlock Grid.Column="4" Text="Качество сканирования:" VerticalAlignment="Center" Margin="16,0,8,0"/>
-            <ComboBox Grid.Column="5" x:Name="ScanResolutionCombo" Width="90" VerticalAlignment="Center"
-                      ToolTip="DPI скана — выше значение, чётче скан, но больше размер файла"
-                      SelectionChanged="ScanResolutionCombo_SelectionChanged">
-                <ComboBoxItem Content="100"/>
-                <ComboBoxItem Content="150"/>
-                <ComboBoxItem Content="200"/>
-                <ComboBoxItem Content="300"/>
-                <ComboBoxItem Content="600"/>
-            </ComboBox>
-            <Button Grid.Column="6" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid Grid.Row="0" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Папка осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" x:Name="ProtoPathLabel" Text="не задана" Style="{StaticResource MutedText}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"/>
+                <Button Grid.Column="3" Content="Очистить папку осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ClearProtocolFolder_Click"/>
+                <TextBlock Grid.Column="4" Text="Качество сканирования:" VerticalAlignment="Center" Margin="16,0,8,0"/>
+                <ComboBox Grid.Column="5" x:Name="ScanResolutionCombo" Width="90" VerticalAlignment="Center"
+                          ToolTip="DPI скана — выше значение, чётче скан, но больше размер файла"
+                          SelectionChanged="ScanResolutionCombo_SelectionChanged">
+                    <ComboBoxItem Content="100"/>
+                    <ComboBoxItem Content="150"/>
+                    <ComboBoxItem Content="200"/>
+                    <ComboBoxItem Content="300"/>
+                    <ComboBoxItem Content="600"/>
+                </ComboBox>
+                <Button Grid.Column="6" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
+            </Grid>
+            <StackPanel Grid.Row="1" Orientation="Horizontal">
+                <TextBlock Text="Автоочистка папки осмотра, дней:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="InspectionCleanupDaysInput" Width="56" Height="30" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveInspectionCleanupDays_Click"/>
+                <TextBlock Text="0 — отключено. Иначе файлы старше указанного числа дней периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
+                           Style="{StaticResource MutedText}" FontStyle="Italic" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="480"/>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="2">
@@ -113,21 +126,36 @@
                     <Button Grid.Column="1" Content="Удалить файл" Style="{StaticResource DangerButton}" Click="DeleteFile_Click"/>
                 </Grid>
 
-                <!-- Image edit toolbar: only shown while an image is selected (see FilesList_SelectionChanged) -->
+                <!-- Image toolbar: only shown while an image is selected (see FilesList_SelectionChanged).
+                     Compact icon buttons — rotate carries less weight than the preview itself, so it
+                     shouldn't crowd the toolbar; view-only (no save/overwrite — Осмотр is a working
+                     folder, this pane never mutates the file on disk). Small enough now that it fits in
+                     one row even at the window's MinWidth, unlike the earlier text-button version. -->
                 <StackPanel Grid.Row="1" x:Name="ImageEditToolbar" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
-                    <Button Content="⟲ Повернуть влево" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RotateLeft_Click"/>
-                    <Button Content="⟳ Повернуть вправо" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RotateRight_Click"/>
-                    <Button Content="Перезаписать файл" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveRotationOverwrite_Click"/>
-                    <Button Content="Сохранить как копию" Style="{StaticResource SecondaryButton}" Click="SaveRotationAsCopy_Click"/>
+                    <Button Content="⟲" Style="{StaticResource IconButton}" Margin="0,0,4,0" ToolTip="Повернуть влево" Click="RotateLeft_Click"/>
+                    <Button Content="⟳" Style="{StaticResource IconButton}" Margin="0,0,16,0" ToolTip="Повернуть вправо" Click="RotateRight_Click"/>
+                    <Button Content="−" Style="{StaticResource IconButton}" Margin="0,0,4,0" ToolTip="Уменьшить" Click="ZoomOut_Click"/>
+                    <TextBlock x:Name="ZoomLevelText" Text="По размеру окна" VerticalAlignment="Center"
+                               Width="100" TextAlignment="Center" Style="{StaticResource MutedText}"/>
+                    <Button Content="+" Style="{StaticResource IconButton}" Margin="4,0,4,0" ToolTip="Увеличить" Click="ZoomIn_Click"/>
+                    <Button Content="⤢" Style="{StaticResource IconButton}" ToolTip="По размеру окна" Click="ZoomFit_Click"/>
                 </StackPanel>
 
                 <Border Grid.Row="2" Style="{StaticResource CardBorder}">
                     <Grid x:Name="PreviewHost">
                         <TextBlock x:Name="PreviewPlaceholder" Text="Выберите файл в списке слева"
                                    Style="{StaticResource MutedText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <Viewbox x:Name="PreviewImageScroll" Visibility="Collapsed" Stretch="Uniform" StretchDirection="Both">
-                            <Image x:Name="PreviewImage"/>
-                        </Viewbox>
+                        <ScrollViewer x:Name="PreviewImageScroll" Visibility="Collapsed"
+                                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                      SizeChanged="PreviewImageScroll_SizeChanged">
+                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Image x:Name="PreviewImage" RenderOptions.BitmapScalingMode="HighQuality">
+                                    <Image.LayoutTransform>
+                                        <ScaleTransform x:Name="PreviewImageScale" ScaleX="1" ScaleY="1"/>
+                                    </Image.LayoutTransform>
+                                </Image>
+                            </Grid>
+                        </ScrollViewer>
                     </Grid>
                 </Border>
             </Grid>
