@@ -15,27 +15,42 @@ public record DefaultSubType(string GroupName, string Name, int Prefix, string F
 public record DefaultController(string Name, int SortOrder);
 public record DefaultModification(string ControllerName, string DisplayName, int HwVersion, int SortOrder, string Description);
 
-/// <summary>Seed data mirrored 1:1 from the Python app's hierarchy.py — same prefixes/hw values,
-/// so an existing po_finder.db keeps working without a data migration.</summary>
+/// <summary>Seed data for a brand-new po_finder.db — full 5-group catalogue (ПЖ/НГР/ТГР/ВЗУ/ШУЗ),
+/// mirroring the reference numbering table (see FwVersionTableExportService, which now builds that
+/// table straight off the live DB rows these seed) — prefixes ПЖ=1, НГР=2, ТГР=3, ВЗУ=4, ШУЗ=5,
+/// confirmed with colleagues. Existing installs are never rewritten wholesale from this array — see
+/// Database.EnsureDefaultEquipmentGroups/EnsureDefaultEquipmentSubtypes, which only add a group/
+/// subtype here if no row with that name exists yet, never touching/renaming/re-prefixing what's
+/// already there (e.g. an install's existing НГР-ВЗУ subtype stays exactly as-is even though ВЗУ
+/// is also its own top-level group below).</summary>
 public static class HierarchyDefaultsData
 {
     public static readonly DefaultEquipmentGroup[] EquipmentGroups =
     [
-        new("НГР", 1, 1),
-        new("ПЖ", 2, 2),
+        new("ПЖ", 1, 1),
+        new("НГР", 2, 2),
         new("ТГР", 3, 3),
+        new("ВЗУ", 4, 4),
+        new("ШУЗ", 5, 5),
     ];
 
     public static readonly DefaultSubType[] SubTypes =
     [
-        new("НГР", "КПЧ", 1, "НГР-КПЧ", 1),
-        new("НГР", "ВЗУ", 2, "НГР-ВЗУ", 2),
-        new("НГР", "КНС", 3, "НГР-КНС", 3),
-        new("НГР", "ПП", 4, "НГР-ПП", 4),
-        new("ПЖ", "КПЧ", 1, "ПЖ-КПЧ", 1),
-        new("ПЖ", "ХП", 2, "ПЖ-ХП", 2),
-        new("ПЖ", "FD", 3, "ПЖ-FD", 3),
+        new("ПЖ", "2.0", 0, "ПЖ-2.0", 1),
+        new("ПЖ", "FD", 1, "ПЖ-FD", 2),
+        new("ПЖ", "КПЧ", 2, "ПЖ-КПЧ", 3),
+        new("ПЖ", "ХП", 3, "ПЖ-ХП", 4),
+        new("ПЖ", "ПИ", 4, "ПЖ-ПИ", 5),
+        new("ПЖ", "ПКР", 5, "ПЖ-ПКР", 6),
+        new("ПЖ", "ПКР ПИ", 6, "ПЖ-ПКР ПИ", 7),
+        new("НГР", "2.0", 0, "НГР-2.0", 1),
+        new("НГР", "КНС", 1, "НГР-КНС", 2),
+        new("НГР", "УПД", 2, "НГР-УПД", 3),
+        new("НГР", "КР", 3, "НГР-КР", 4),
         new("ТГР", "—", 0, "ТГР", 1),
+        new("ВЗУ", "—", 0, "ВЗУ", 1),
+        new("ВЗУ", "ПИ", 1, "ВЗУ-ПИ", 2),
+        new("ШУЗ", "—", 0, "ШУЗ", 1),
     ];
 
     public static readonly DefaultController[] Controllers =

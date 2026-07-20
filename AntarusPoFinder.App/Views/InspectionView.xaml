@@ -69,15 +69,15 @@
                     <TextBlock Grid.Column="0" x:Name="FileCountText" Text="Файлы" Style="{StaticResource SubtitleText}" VerticalAlignment="Center"/>
                     <Button Grid.Column="1" Content="Обновить" Style="{StaticResource SecondaryButton}" Click="Refresh_Click"/>
                 </Grid>
-                <ListBox Grid.Row="1" x:Name="FilesList" MouseDoubleClick="FilesList_MouseDoubleClick"
+                <ListBox Grid.Row="1" x:Name="FilesList" SelectionMode="Extended" MouseDoubleClick="FilesList_MouseDoubleClick"
                          SelectionChanged="FilesList_SelectionChanged"
                          PreviewMouseRightButtonDown="FilesList_PreviewMouseRightButtonDown">
                     <ListBox.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem Header="Открыть файл" Click="OpenFile_Click"/>
-                            <MenuItem Header="Открыть папку" Click="OpenContainingFolder_Click"/>
+                        <ContextMenu Opened="FilesContextMenu_Opened">
+                            <MenuItem x:Name="OpenFileMenuItem" Header="Открыть файл" Click="OpenFile_Click"/>
+                            <MenuItem x:Name="OpenFolderMenuItem" Header="Открыть папку" Click="OpenContainingFolder_Click"/>
                             <Separator/>
-                            <MenuItem Header="Удалить файл" Click="DeleteFile_Click"/>
+                            <MenuItem x:Name="DeleteMenuItem" Header="Удалить файл" Click="DeleteFile_Click"/>
                         </ContextMenu>
                     </ListBox.ContextMenu>
                     <ListBox.ItemTemplate>

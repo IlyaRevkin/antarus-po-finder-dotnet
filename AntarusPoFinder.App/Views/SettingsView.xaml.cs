@@ -186,7 +186,7 @@ public partial class SettingsView : UserControl
             return;
         }
         _services.Cfg.SetReservationTtlHours(hours);
-        _host.ShowStatus(hours == 0 ? "Резервация номеров больше не истекает по умолчанию" : $"Срок резерва по умолчанию: {hours} ч");
+        _host.ShowStatus(hours == 0 ? "Резервация номеров больше не истекает по умолчанию" : $"Срок резерва по умолчанию: {hours} ч", category: NotificationCategory.FirmwareAndParams);
     }
 
     private void CancelReservation_Click(object sender, RoutedEventArgs e)
@@ -202,7 +202,7 @@ public partial class SettingsView : UserControl
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.CancelReservation(row.Record.Id!.Value);
-        _host.ShowStatus($"Резерв отменён: {row.Record.VersionRaw}");
+        _host.ShowStatus($"Резерв отменён: {row.Record.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadReservationsTab();
     }
 
@@ -279,7 +279,7 @@ public partial class SettingsView : UserControl
         if (newText.Length == 0 || newText.Equals(oldTag, StringComparison.OrdinalIgnoreCase)) { RenderTagsTab(); return; }
         _services.Db.RenameTag(oldTag, newText);
         LoadTagsTab();
-        _host.ShowStatus($"Тег переименован: «{oldTag}» → «{newText}»");
+        _host.ShowStatus($"Тег переименован: «{oldTag}» → «{newText}»", category: NotificationCategory.FirmwareAndParams);
     }
 
     private Border MakeTagAddButtonBubble()
@@ -332,10 +332,51 @@ public partial class SettingsView : UserControl
 
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
+        LoadNotificationCategories();
+        var tray = _services.Cfg.CloseAction() == "tray";
+        CloseActionCloseRadio.IsChecked = !tray;
+        CloseActionTrayRadio.IsChecked = tray;
+
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
     }
+
+    /// <summary>Built in code, not XAML-bound, to match this view's convention (code-behind on
+    /// x:Name, not a per-view MVVM ViewModel) — one CheckBox per NotificationCategoryInfo.All entry,
+    /// pre-checked from ConfigService.IsNotificationCategoryEnabled. Deliberately silent on toggle
+    /// (see NotificationCategoryCheck_Changed): the point of muting a category is that it stops
+    /// making noise, so the mute action itself shouldn't pop a status message.</summary>
+    private void LoadNotificationCategories()
+    {
+        NotificationCategoriesPanel.Children.Clear();
+        foreach (var (category, label) in NotificationCategoryInfo.All)
+        {
+            var cb = new CheckBox
+            {
+                Content = label,
+                Tag = category,
+                IsChecked = _services.Cfg.IsNotificationCategoryEnabled(category),
+                Margin = new Thickness(0, 0, 0, 6),
+            };
+            cb.Checked += NotificationCategoryCheck_Changed;
+            cb.Unchecked += NotificationCategoryCheck_Changed;
+            NotificationCategoriesPanel.Children.Add(cb);
+        }
+    }
+
+    private void NotificationCategoryCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { Tag: NotificationCategory category } cb) return;
+        _services.Cfg.SetNotificationCategoryEnabled(category, cb.IsChecked == true);
+    }
+
+    /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the
+    /// event — LoadGeneral sets both in sequence when populating the tab, so only the one flipped
+    /// to true actually fires Checked (WPF radio-group auto-uncheck doesn't raise Checked on the
+    /// other), and by the time it does both controls already reflect the final desired state.</summary>
+    private void CloseAction_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetCloseAction(CloseActionTrayRadio.IsChecked == true ? "tray" : "close");
 
     private void BrowseAppUpdatePath_Click(object sender, RoutedEventArgs e)
     {
@@ -347,7 +388,7 @@ public partial class SettingsView : UserControl
     {
         _services.Cfg.SetAppUpdatePath(AppUpdatePathInput.Text.Trim());
         _services.Cfg.SetAppAutoUpdate(AppAutoUpdateCheck.IsChecked == true);
-        _host.ShowStatus("Настройки обновлений сохранены");
+        _host.ShowStatus("Настройки обновлений сохранены", category: NotificationCategory.AppUpdates);
     }
 
     private async void CheckAppUpdates_Click(object sender, RoutedEventArgs e)
@@ -576,7 +617,7 @@ public partial class SettingsView : UserControl
 
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})");
+        _host.ShowStatus($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})", category: NotificationCategory.Hierarchy);
     }
 
     private void EditGroupPrefix_Click(object sender, RoutedEventArgs e)
@@ -602,7 +643,7 @@ public partial class SettingsView : UserControl
         }
         _services.Db.UpsertEquipmentGroup(new EquipmentGroup { Name = group.Name, Prefix = prefix, SortOrder = group.SortOrder });
         LoadHierarchy();
-        _host.ShowStatus($"Префикс типа «{group.Name}» изменён на {prefix}");
+        _host.ShowStatus($"Префикс типа «{group.Name}» изменён на {prefix}", category: NotificationCategory.Hierarchy);
     }
 
     /// <summary>Unlike the prefix (a DB-only value), the group's Name is also its on-disk folder
@@ -643,7 +684,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.RenameEquipmentGroup(group.Id!.Value, trimmed);
         LoadHierarchy();
-        _host.ShowStatus($"Тип шкафа переименован: «{group.Name}» → «{trimmed}»");
+        _host.ShowStatus($"Тип шкафа переименован: «{group.Name}» → «{trimmed}»", category: NotificationCategory.Hierarchy);
     }
 
     private void AddSubtype_Click(object sender, RoutedEventArgs e)
@@ -685,7 +726,7 @@ public partial class SettingsView : UserControl
         });
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Подтип добавлен: {folderName}");
+        _host.ShowStatus($"Подтип добавлен: {folderName}", category: NotificationCategory.Hierarchy);
     }
 
     private void EditSubtypePrefix_Click(object sender, RoutedEventArgs e)
@@ -717,7 +758,7 @@ public partial class SettingsView : UserControl
             SortOrder = row.Subtype.SortOrder,
         });
         LoadHierarchy();
-        _host.ShowStatus($"Префикс подтипа «{row.FolderName}» изменён на {prefix}");
+        _host.ShowStatus($"Префикс подтипа «{row.FolderName}» изменён на {prefix}", category: NotificationCategory.Hierarchy);
     }
 
     /// <summary>Same disk-folder-move reasoning as RenameGroup_Click. Not offered for the "—"
@@ -763,7 +804,7 @@ public partial class SettingsView : UserControl
         var newFolderName = $"{row.GroupName}-{trimmed}";
         _services.Db.RenameEquipmentSubtype(row.Subtype.Id!.Value, trimmed, newFolderName);
         LoadHierarchy();
-        _host.ShowStatus($"Подтип переименован: «{row.Subtype.Name}» → «{trimmed}»");
+        _host.ShowStatus($"Подтип переименован: «{row.Subtype.Name}» → «{trimmed}»", category: NotificationCategory.Hierarchy);
     }
 
     /// <summary>Deletes the subtype in the selected row. A group can't be left without any subtype
@@ -808,7 +849,7 @@ public partial class SettingsView : UserControl
         _services.Db.UpsertControllerModel(new ControllerModel { Name = upper, SortOrder = ControllersGrid.Items.Count + 1 });
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Контроллер добавлен: {upper}");
+        _host.ShowStatus($"Контроллер добавлен: {upper}", category: NotificationCategory.Hierarchy);
     }
 
     private void AddModification_Click(object sender, RoutedEventArgs e)
@@ -823,7 +864,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.AddControllerModification(row.ControllerId, dlg.ModName, dlg.HwVersion, dlg.Description);
         LoadHierarchy();
-        _host.ShowStatus($"Модификация добавлена: {dlg.ModName} (hw{dlg.HwVersion})");
+        _host.ShowStatus($"Модификация добавлена: {dlg.ModName} (hw{dlg.HwVersion})", category: NotificationCategory.Hierarchy);
     }
 
     private void DeleteControllerRow_Click(object sender, RoutedEventArgs e)
@@ -886,7 +927,7 @@ public partial class SettingsView : UserControl
         _services.Db.AddAllowedExtension(ext);
         ExtInput.Text = "";
         LoadHierarchy();
-        _host.ShowStatus($"Расширение добавлено: .{ext.ToLowerInvariant().TrimStart('.')}");
+        _host.ShowStatus($"Расширение добавлено: .{ext.ToLowerInvariant().TrimStart('.')}", category: NotificationCategory.Hierarchy);
     }
 
     private void DeleteExtension_Click(object sender, RoutedEventArgs e)
@@ -917,7 +958,7 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show(string.Join("\n", result.Errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
         else
             AppMessageBox.Show($"Создано папок: {result.CreatedCount}", "Структура диска", MessageBoxButton.OK, MessageBoxImage.Information);
-        _host.ShowStatus($"Структура обновлена: {result.CreatedCount} папок");
+        _host.ShowStatus($"Структура обновлена: {result.CreatedCount} папок", category: NotificationCategory.Sync);
     }
 
     private void SyncFwFromDisk_Click(object sender, RoutedEventArgs e)
@@ -944,7 +985,7 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show(summary + details, "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         LoadFirmwareTab();
-        _host.ShowStatus($"Синхронизация завершена: +{result.Added} версий" + (result.AddedItems.Count > 0 ? " (" + string.Join(", ", result.AddedItems.Take(3)) + (result.AddedItems.Count > 3 ? "…" : "") + ")" : ""));
+        _host.ShowStatus($"Синхронизация завершена: +{result.Added} версий" + (result.AddedItems.Count > 0 ? " (" + string.Join(", ", result.AddedItems.Take(3)) + (result.AddedItems.Count > 3 ? "…" : "") + ")" : ""), category: NotificationCategory.Sync);
     }
 
     private void ScanUnknown_Click(object sender, RoutedEventArgs e)
@@ -963,7 +1004,7 @@ public partial class SettingsView : UserControl
         }
         var dlg = new UnknownFilesDialog(root, unknown) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
-        _host.ShowStatus($"Перенесено: {dlg.Moved}, удалено: {dlg.Deleted}");
+        _host.ShowStatus($"Перенесено: {dlg.Moved}, удалено: {dlg.Deleted}", category: NotificationCategory.Sync);
     }
 
     private void MoveDeletedFolder(string folderName)
@@ -971,17 +1012,17 @@ public partial class SettingsView : UserControl
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
         {
-            _host.ShowStatus("Папка не перенесена — нажмите «Пересоздать структуру диска» позже");
+            _host.ShowStatus("Папка не перенесена — нажмите «Пересоздать структуру диска» позже", category: NotificationCategory.Sync);
             return;
         }
         _services.Hierarchy.EnsureStructure(root);
         var result = _services.Hierarchy.MoveNamedFolders(root, folderName);
         if (result.Moved > 0)
-            _host.ShowStatus($"Папки «{folderName}» перенесены в Неизвестное ({result.Moved} шт.)");
+            _host.ShowStatus($"Папки «{folderName}» перенесены в Неизвестное ({result.Moved} шт.)", category: NotificationCategory.Sync);
         else if (result.Errors.Count > 0)
-            _host.ShowStatus(result.Errors[0]);
+            _host.ShowStatus(result.Errors[0], category: NotificationCategory.Sync);
         else
-            _host.ShowStatus($"Папка «{folderName}» не найдена на диске или уже удалена");
+            _host.ShowStatus($"Папка «{folderName}» не найдена на диске или уже удалена", category: NotificationCategory.Sync);
     }
 
     private void AutoRebuild()
@@ -990,7 +1031,7 @@ public partial class SettingsView : UserControl
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
         var result = _services.Hierarchy.EnsureStructure(root);
         if (result.CreatedCount > 0)
-            _host.ShowStatus($"Папки на диске обновлены: +{result.CreatedCount}");
+            _host.ShowStatus($"Папки на диске обновлены: +{result.CreatedCount}", category: NotificationCategory.Sync);
     }
 
     // ── Прошивки ──────────────────────────────────────────────────────────────
@@ -1071,7 +1112,7 @@ public partial class SettingsView : UserControl
             "Модерация", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
         if (release) _services.Db.MarkFwVersionReleased(v.Id!.Value);
 
-        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}");
+        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadModerationTab();
     }
 
@@ -1144,7 +1185,7 @@ public partial class SettingsView : UserControl
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
         _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
             : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
-            : $"Без изменений: {v.VersionRaw}");
+            : $"Без изменений: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
@@ -1160,7 +1201,7 @@ public partial class SettingsView : UserControl
         var newId = _services.Db.DuplicateFwVersion(v.Id!.Value);
         if (newId > 0)
         {
-            _host.ShowStatus($"Дублировано: {v.VersionRaw}");
+            _host.ShowStatus($"Дублировано: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
             LoadFirmwareTab();
         }
     }
@@ -1181,13 +1222,13 @@ public partial class SettingsView : UserControl
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.RollbackFwVersion(v.Id!.Value);
-        _host.ShowStatus($"Откатано: {v.VersionRaw}");
+        _host.ShowStatus($"Откатано: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
-    /// <summary>Экспортирует стандартную таблицу нумерации (5 типов шкафов, все подтипы, все
-    /// контроллеры — см. FwVersionTableExportService) в отдельный Excel-файл, независимо от того,
-    /// что сейчас настроено в Иерархии на этой машине.</summary>
+    /// <summary>Экспортирует таблицу нумерации версий (типы шкафов, подтипы, контроллеры) в
+    /// отдельный Excel-файл, формируя её из текущих данных БД (см. FwVersionTableExportService) —
+    /// то есть ровно то, что сейчас настроено в Иерархии на этой машине.</summary>
     private void ExportVersionTable_Click(object sender, RoutedEventArgs e)
     {
         var initialDir = _services.Cfg.RootPath();
@@ -1202,8 +1243,8 @@ public partial class SettingsView : UserControl
 
         try
         {
-            FwVersionTableExportService.Generate(dlg.FileName);
-            _host.ShowStatus($"Таблица версий сохранена: {Path.GetFileName(dlg.FileName)}");
+            FwVersionTableExportService.Generate(dlg.FileName, _services.Db);
+            _host.ShowStatus($"Таблица версий сохранена: {Path.GetFileName(dlg.FileName)}", category: NotificationCategory.Hierarchy);
             Process.Start(new ProcessStartInfo(dlg.FileName) { UseShellExecute = true });
         }
         catch (Exception ex)

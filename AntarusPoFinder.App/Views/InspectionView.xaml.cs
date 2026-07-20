@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -6,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using AntarusPoFinder.App.Services;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using QRCoder;
 
@@ -143,7 +145,7 @@ public partial class InspectionView : UserControl
             }
             catch { /* best effort per entry, matches Python's swallowed per-file errors */ }
         }
-        _host.ShowStatus("Папка осмотра очищена");
+        _host.ShowStatus("Папка осмотра очищена", category: NotificationCategory.Inspection);
         RefreshFileList();
     }
 
@@ -168,7 +170,7 @@ public partial class InspectionView : UserControl
         // Deliberately doesn't auto-open the result anymore — the operator scans several pages in
         // a row, and a viewer window popping up (and grabbing focus) after each one just got in
         // the way. It's right there in the list below, one click away.
-        _host.ShowStatus($"Скан сохранён: {destName}");
+        _host.ShowStatus($"Скан сохранён: {destName}", category: NotificationCategory.Inspection);
         RefreshFileList();
     }
 
@@ -190,7 +192,7 @@ public partial class InspectionView : UserControl
             _server = new PhotoUploadServer(proto, _services.Cfg.ImageServerPort());
             _server.FilesUploaded += count => Dispatcher.Invoke(() =>
             {
-                _host.ShowStatus($"Загружено фото: {count}");
+                _host.ShowStatus($"Загружено фото: {count}", category: NotificationCategory.Inspection);
                 RefreshFileList();
             });
 
@@ -345,11 +347,25 @@ public partial class InspectionView : UserControl
     // ── Context menu: open / preview / open folder / delete ─────────────────
 
     /// <summary>Right-click doesn't select the item under the cursor by itself — without this the
-    /// context menu commands would act on whatever was selected before, not what was clicked.</summary>
+    /// context menu commands would act on whatever was selected before, not what was clicked.
+    /// Exception: if the clicked item is already part of a multi-selection, keep the whole
+    /// selection (Explorer-style right-click on a multi-selected block), instead of collapsing it
+    /// down to just the one item under the cursor.</summary>
     private void FilesList_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (ItemsControl.ContainerFromElement(FilesList, e.OriginalSource as DependencyObject) is ListBoxItem item)
+        if (ItemsControl.ContainerFromElement(FilesList, e.OriginalSource as DependencyObject) is ListBoxItem item
+            && !item.IsSelected)
             item.IsSelected = true;
+    }
+
+    /// <summary>"Открыть файл"/"Открыть папку" only make sense for a single file — disabled when
+    /// several are selected instead of silently acting on just the first one.</summary>
+    private void FilesContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var count = FilesList.SelectedItems.Count;
+        OpenFileMenuItem.IsEnabled = count == 1;
+        OpenFolderMenuItem.IsEnabled = count == 1;
+        DeleteMenuItem.Header = count > 1 ? $"Удалить выбранные ({count})" : "Удалить файл";
     }
 
     private void OpenFile_Click(object sender, RoutedEventArgs e)
@@ -364,28 +380,44 @@ public partial class InspectionView : UserControl
         Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{row.FullPath}\"") { UseShellExecute = true });
     }
 
+    /// <summary>Handles both the single-selection preview-pane button and the (possibly
+    /// multi-selection) context-menu item with one confirmation dialog — deleting N selected files
+    /// no longer pops up N separate "are you sure" boxes.</summary>
     private void DeleteFile_Click(object sender, RoutedEventArgs e)
     {
-        if (FilesList.SelectedItem is not FileRow row || !File.Exists(row.FullPath))
+        var rows = FilesList.SelectedItems.Cast<FileRow>().Where(r => File.Exists(r.FullPath)).ToList();
+        if (rows.Count == 0)
         {
             AppMessageBox.Show("Выберите файл в списке.", "Удаление файла", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var reply = AppMessageBox.Show($"Удалить файл:\n{row.Name}?\n\nОтменить нельзя.", "Удаление файла",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        string message;
+        if (rows.Count == 1)
+        {
+            message = $"Удалить файл:\n{rows[0].Name}?\n\nОтменить нельзя.";
+        }
+        else
+        {
+            var preview = string.Join("\n", rows.Take(5).Select(r => $"• {r.Name}"));
+            var more = rows.Count > 5 ? $"\n… и ещё {rows.Count - 5}" : "";
+            message = $"Удалить выбранные файлы ({rows.Count}):\n{preview}{more}\n\nОтменить нельзя.";
+        }
+
+        var reply = AppMessageBox.Show(message, "Удаление файла", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
 
-        try
+        var failed = new List<string>();
+        var deletedNames = new List<string>();
+        foreach (var row in rows)
         {
-            File.Delete(row.FullPath);
-            _host.ShowStatus($"Файл удалён: {row.Name}");
-            RefreshFileList();
+            try { File.Delete(row.FullPath); deletedNames.Add(row.Name); }
+            catch (Exception ex) { failed.Add($"{row.Name}: {ex.Message}"); }
         }
-        catch (Exception ex)
-        {
-            AppMessageBox.Show($"Не удалось удалить файл:\n{ex.Message}", "Удаление файла",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+
+        _host.ShowStatus(deletedNames.Count == 1 ? $"Файл удалён: {deletedNames[0]}" : $"Удалено файлов: {deletedNames.Count}", category: NotificationCategory.Inspection);
+        if (failed.Count > 0)
+            AppMessageBox.Show($"Не удалось удалить:\n{string.Join("\n", failed)}", "Удаление файла", MessageBoxButton.OK, MessageBoxImage.Warning);
+        RefreshFileList();
     }
 }

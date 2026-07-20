@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -49,6 +50,8 @@ public class ConfigService
         ["config_push_interval_min"] = "30",
         ["reservation_ttl_hours"] = "72",
         ["onboarding_shown"] = "false",
+        ["notification_categories_disabled"] = "[]",
+        ["close_action"] = "close",
     };
 
     private readonly Database _db;
@@ -176,4 +179,37 @@ public class ConfigService
         if (enabled) set.Add(localDir); else set.Remove(localDir);
         Set("fw_auto_update_dirs", JsonSerializer.Serialize(set.ToList()));
     }
+
+    /// <summary>Per-machine (not synced — see ConfigSyncService.SkipSettingsKeys), like scan_resolution_dpi/
+    /// onboarding_shown: what one operator wants muted on their PC has nothing to do with another
+    /// machine's preferences. All categories are enabled by default (empty disabled-set) so adding
+    /// this feature doesn't silently mute anything for existing installs.</summary>
+    public HashSet<NotificationCategory> DisabledNotificationCategories()
+    {
+        try
+        {
+            var names = JsonSerializer.Deserialize<List<string>>(Get("notification_categories_disabled")) ?? new();
+            return new HashSet<NotificationCategory>(names
+                .Select(n => Enum.TryParse<NotificationCategory>(n, out var c) ? (NotificationCategory?)c : null)
+                .Where(c => c.HasValue)
+                .Select(c => c!.Value));
+        }
+        catch { return new HashSet<NotificationCategory>(); }
+    }
+
+    public bool IsNotificationCategoryEnabled(NotificationCategory category) =>
+        !DisabledNotificationCategories().Contains(category);
+
+    public void SetNotificationCategoryEnabled(NotificationCategory category, bool enabled)
+    {
+        var set = DisabledNotificationCategories();
+        if (enabled) set.Remove(category); else set.Add(category);
+        Set("notification_categories_disabled", JsonSerializer.Serialize(set.Select(c => c.ToString()).ToList()));
+    }
+
+    /// <summary>"close" = закрытие окна завершает процесс как раньше (default — не менять поведение
+    /// для существующих установок без явного выбора пользователя); "tray" = сворачивать в системный
+    /// трей вместо закрытия. Per-machine — трей на одном ПК не должен навязываться другому.</summary>
+    public string CloseAction() => Get("close_action");
+    public void SetCloseAction(string action) => Set("close_action", action);
 }

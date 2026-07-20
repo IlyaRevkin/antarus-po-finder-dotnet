@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.Views;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using AntarusPoFinder.App;
 
@@ -23,6 +24,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private DispatcherTimer? _hierarchy2sTimer;
     private DispatcherTimer? _statusClearTimer;
     private DispatcherTimer? _updateCheckTimer;
+    private DispatcherTimer? _periodicUpdateCheckTimer;
     private DispatcherTimer? _fwUpdateCheckTimer;
     private DispatcherTimer? _configCheckTimer;
     private DispatcherTimer? _configPullRepeatTimer;
@@ -57,6 +59,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     private const int NotificationHistoryLimit = 100;
     private const int BannerAutoHideMs = 10000;
+
+    /// <summary>How often the app re-checks for a new self-update after the one-time startup check —
+    /// see StartTimers/_periodicUpdateCheckTimer. Deliberately not a user-facing setting (unlike
+    /// sync_interval_min) — 30 minutes is frequent enough to notice a fresh release same-day without
+    /// hammering GitHub/the update folder. Exposed as internal so a live UI test can temporarily swap
+    /// in a shorter interval without touching the timer wiring itself.</summary>
+    internal static TimeSpan PeriodicUpdateCheckInterval { get; set; } = TimeSpan.FromMinutes(30);
 
     public MainWindowViewModel(AppServices services)
     {
@@ -97,6 +106,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             inspectionView.RefreshIfActive();
         if (pageId == "network" && _pageCache[pageId] is NetworkSyncView networkView)
             networkView.RefreshIfActive();
+        if (pageId == "tickets" && _pageCache[pageId] is TicketsView ticketsView)
+            ticketsView.RefreshIfActive();
 
         foreach (var item in NavItems)
             item.IsActive = item.PageId == pageId;
@@ -119,7 +130,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             item.BadgeCount = count;
 
             if (CurrentRole == "administrator" && _lastModerationCount.HasValue && count > _lastModerationCount.Value)
-                ShowStatus($"Новая прошивка ожидает модерации (всего в очереди: {count})", 8000);
+                ShowStatus($"Новая прошивка ожидает модерации (всего в очереди: {count})", 8000, NotificationCategory.FirmwareAndParams);
             _lastModerationCount = count;
         }
         catch { /* best effort — badge just won't update this time */ }
@@ -136,6 +147,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "params" => new ParamsView(_services, this),
             "settings" => new SettingsView(_services, this),
             "network" => new NetworkSyncView(_services, this),
+            "tickets" => new TicketsView(_services, this),
             _ => null,
         };
         if (page is null) return false;
@@ -194,10 +206,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     // ── Status bar ────────────────────────────────────────────────────────────
 
-    public void ShowStatus(string message, int ms = 4000)
+    /// <summary>If the category is disabled in Настройки → Уведомления, the message is fully
+    /// suppressed — no status-bar flash, no history entry — per the user's explicit request that a
+    /// muted category shouldn't show up anywhere, not just skip the history.</summary>
+    public void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General)
     {
+        if (!_services.Cfg.IsNotificationCategoryEnabled(category)) return;
+
         StatusMessage = message;
-        if (!string.IsNullOrEmpty(message)) AddNotification(message);
+        if (!string.IsNullOrEmpty(message)) AddNotification(message, category);
         _statusClearTimer?.Stop();
         _statusClearTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
         _statusClearTimer.Tick += (_, _) =>
@@ -213,8 +230,21 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     // flashed for 4-8 seconds, or a banner that auto-hides after BannerAutoHideMs, is still visible
     // afterwards via the "Уведомления" sidebar button, not gone the moment nobody was looking.
 
-    private void AddNotification(string text, Action? reopen = null)
+    /// <summary>Callers that raise a banner directly (app/firmware update) rather than going through
+    /// ShowStatus must check IsNotificationCategoryEnabled themselves before calling this AND before
+    /// setting their *BannerVisible flag — this only guards the history entry, not the banner.</summary>
+    private void AddNotification(string text, NotificationCategory category, Action? reopen = null)
     {
+        // Same text as the entry already on top (e.g. the operator clicking "Сохранить папку
+        // осмотра" several times in a row) — refresh its timestamp instead of piling up identical
+        // rows. Doesn't bump UnseenNotificationsCount either, since it's not actually new information.
+        if (NotificationHistory.Count > 0 && NotificationHistory[0].Text == text)
+        {
+            var existing = NotificationHistory[0];
+            NotificationHistory[0] = existing with { When = DateTime.Now, Reopen = reopen ?? existing.Reopen };
+            return;
+        }
+
         NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, reopen));
         while (NotificationHistory.Count > NotificationHistoryLimit)
             NotificationHistory.RemoveAt(NotificationHistory.Count - 1);
@@ -270,11 +300,18 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _hierarchy2sTimer.Start();
 
         // 2500ms once: check for app updates (folder if configured, else GitHub — see AppUpdateService).
+        // Then, while the app stays open, re-check every PeriodicUpdateCheckInterval — a release that
+        // ships after the app was already running used to only surface the next time someone
+        // restarted it. One timer, reused for every tick (not a new thread/timer per check).
         _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
         _updateCheckTimer.Tick += async (_, _) =>
         {
             _updateCheckTimer!.Stop();
             await CheckForAppUpdatesAsync();
+
+            _periodicUpdateCheckTimer = new DispatcherTimer { Interval = PeriodicUpdateCheckInterval };
+            _periodicUpdateCheckTimer.Tick += async (_, _) => await CheckForAppUpdatesAsync();
+            _periodicUpdateCheckTimer.Start();
         };
         _updateCheckTimer.Start();
 
@@ -325,17 +362,21 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (latest.Version <= AppUpdateService.CurrentVersion) return;
 
         _pendingUpdate = latest;
+        var notifyEnabled = _services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.AppUpdates);
         if (_services.Cfg.AppAutoUpdate())
         {
-            UpdateBannerText = $"Устанавливается версия {latest.Version} (источник: {result.SourceLabel})…";
-            UpdateBannerVisible = true;
+            if (notifyEnabled)
+            {
+                UpdateBannerText = $"Устанавливается версия {latest.Version} (источник: {result.SourceLabel})…";
+                UpdateBannerVisible = true;
+            }
             await InstallUpdate();
         }
-        else
+        else if (notifyEnabled)
         {
             UpdateBannerText = $"Доступна новая версия {latest.Version} (текущая {AppUpdateService.CurrentVersion}). Источник: {result.SourceLabel}.";
             UpdateBannerVisible = true;
-            AddNotification(UpdateBannerText, reopen: () => UpdateBannerVisible = true);
+            AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
             ScheduleBannerAutoHide(() => UpdateBannerVisible = false);
         }
     }
@@ -391,14 +432,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             catch { /* best effort — still surface the rest via the manual banner below */ }
         }
         if (autoUpdated > 0)
-            ShowStatus($"Автоматически обновлено прошивок: {autoUpdated}", 6000);
+            ShowStatus($"Автоматически обновлено прошивок: {autoUpdated}", 6000, NotificationCategory.FirmwareAndParams);
 
         _pendingFwUpdates = manualOnes;
         if (manualOnes.Count == 0) return;
+        if (!_services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.FirmwareAndParams)) return;
 
         FwUpdateBannerText = $"Доступно обновление прошивок: {manualOnes.Count}";
         FwUpdateBannerVisible = true;
-        AddNotification(FwUpdateBannerText, reopen: () => FwUpdateBannerVisible = true);
+        AddNotification(FwUpdateBannerText, NotificationCategory.FirmwareAndParams, reopen: () => FwUpdateBannerVisible = true);
         ScheduleBannerAutoHide(() => FwUpdateBannerVisible = false);
     }
 
@@ -417,7 +459,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         _pendingFwUpdates.Clear();
         FwUpdateBannerVisible = false;
-        ShowStatus($"Обновлено прошивок: {count}", 6000);
+        ShowStatus($"Обновлено прошивок: {count}", 6000, NotificationCategory.FirmwareAndParams);
         RefreshSearchIfActive();
     }
 
@@ -470,7 +512,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // Root reachable but reading/parsing the shared config itself failed — worth telling
             // the user, unlike an unreachable share (already covered by DiskStatusText) or "no
             // update yet", which stay silent. The app keeps running on the local copy regardless.
-            ShowStatus($"Не удалось проверить обновление конфига: {error}", 8000);
+            ShowStatus($"Не удалось проверить обновление конфига: {error}", 8000, NotificationCategory.Sync);
             return;
         }
         if (info is null) return;
@@ -498,7 +540,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         try
         {
             var expired = _services.Db.ExpireStaleReservations();
-            if (expired > 0) ShowStatus($"Просрочено резервов номеров: {expired} (номера пропущены навсегда)", 8000);
+            if (expired > 0) ShowStatus($"Просрочено резервов номеров: {expired} (номера пропущены навсегда)", 8000, NotificationCategory.FirmwareAndParams);
         }
         catch { /* best effort — next tick will retry */ }
     }
@@ -509,7 +551,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (string.IsNullOrEmpty(root)) return;
         var result = _services.Hierarchy.EnsureStructure(root);
         if (result.CreatedCount > 0)
-            ShowStatus($"Структура диска создана: {result.CreatedCount} папок", 6000);
+            ShowStatus($"Структура диска создана: {result.CreatedCount} папок", 6000, NotificationCategory.Sync);
     }
 
     // ── IAppHost ──────────────────────────────────────────────────────────────

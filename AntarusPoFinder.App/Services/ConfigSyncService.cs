@@ -42,6 +42,7 @@ public static class ConfigSyncService
         "ad_group_administrator", "ad_group_programmer", "sync_interval_min", "quick_apps",
         "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at",
         "scan_resolution_dpi", "config_auto_push", "config_push_interval_min", "onboarding_shown",
+        "notification_categories_disabled", "close_action",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");

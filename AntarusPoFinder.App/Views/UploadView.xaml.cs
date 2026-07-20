@@ -201,7 +201,7 @@ public partial class UploadView : UserControl
         dlg.ShowDialog();
 
         RefreshReservationPicker();
-        _host.ShowStatus($"Зарезервирован номер: {fwv.Raw}");
+        _host.ShowStatus($"Зарезервирован номер: {fwv.Raw}", category: NotificationCategory.FirmwareAndParams);
     }
 
     /// <summary>Заявка и SN независимы — наладчик/программист включает и заполняет только то, что
@@ -383,7 +383,7 @@ public partial class UploadView : UserControl
         var match = FindModificationByPslKey(info.Plc.Model, info.Plc.Modification);
         if (match is null)
         {
-            _host.ShowStatus($"Обнаружен контроллер «{deviceKey}» — такой модификации нет в справочнике. Выберите вручную или добавьте её в Настройки → Иерархия.");
+            _host.ShowStatus($"Обнаружен контроллер «{deviceKey}» — такой модификации нет в справочнике. Выберите вручную или добавьте её в Настройки → Иерархия.", category: NotificationCategory.Hierarchy);
             return;
         }
 
@@ -600,7 +600,7 @@ public partial class UploadView : UserControl
         if (reservation is not null && newFwId > 0)
             _services.Db.FulfillReservation(reservation.Id!.Value, newFwId);
 
-        _host.ShowStatus($"Загружено: {fwv.Raw}");
+        _host.ShowStatus($"Загружено: {fwv.Raw}", category: NotificationCategory.FirmwareAndParams);
 
         var msg = $"Прошивка загружена:\n{dstFolder}";
         if (warnings.Count > 0)
@@ -687,6 +687,6 @@ public partial class UploadView : UserControl
 
         _services.Db.RollbackFwVersion(last.Id!.Value);
         UpdatePreview();
-        _host.ShowStatus($"Откатано: {last.VersionRaw}");
+        _host.ShowStatus($"Откатано: {last.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
     }
 }

@@ -213,6 +213,10 @@ public static class AppUpdateService
             WindowStyle = ProcessWindowStyle.Hidden,
         });
 
+        // Bypass MainWindow's "закрытие сворачивает в трей" setting — this Shutdown() must actually
+        // exit (the launched script waits for THIS process to die before moving the staged exe into
+        // place), not get cancelled by the window hiding itself instead. See MainWindow.ForceRealExit.
+        MainWindow.ForceRealExit = true;
         Application.Current.Shutdown();
     }
 

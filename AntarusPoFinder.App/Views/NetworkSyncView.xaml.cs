@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
+using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -63,7 +64,7 @@ public partial class NetworkSyncView : UserControl
     private void SaveRoot_Click(object sender, RoutedEventArgs e)
     {
         _services.Cfg.SetRootPath(RootPathInput.Text.Trim());
-        _host.ShowStatus("Путь сохранён");
+        _host.ShowStatus("Путь сохранён", category: NotificationCategory.Sync);
     }
 
     private void BrowseSecondDisk_Click(object sender, RoutedEventArgs e)
@@ -75,7 +76,7 @@ public partial class NetworkSyncView : UserControl
     private void SaveSecondDisk_Click(object sender, RoutedEventArgs e)
     {
         _services.Cfg.SetSecondDiskPath(SecondDiskInput.Text.Trim());
-        _host.ShowStatus("Путь второго диска сохранён");
+        _host.ShowStatus("Путь второго диска сохранён", category: NotificationCategory.Sync);
     }
 
     private void BrowseInspectionFolder_Click(object sender, RoutedEventArgs e)
@@ -87,7 +88,7 @@ public partial class NetworkSyncView : UserControl
     private void SaveInspectionFolder_Click(object sender, RoutedEventArgs e)
     {
         _services.Cfg.SetInspectionFolder(InspectionFolderInput.Text.Trim());
-        _host.ShowStatus("Папка осмотра сохранена");
+        _host.ShowStatus("Папка осмотра сохранена", category: NotificationCategory.Sync);
     }
 
     private void SaveSyncInterval_Click(object sender, RoutedEventArgs e)
@@ -99,7 +100,7 @@ public partial class NetworkSyncView : UserControl
         }
         _services.Cfg.SetSyncIntervalMin(v);
         _host.SetSyncIntervalMinutes(v);
-        _host.ShowStatus(v == 0 ? "Автосинхронизация с диском отключена" : $"Интервал синхронизации: {v} мин");
+        _host.ShowStatus(v == 0 ? "Автосинхронизация с диском отключена" : $"Интервал синхронизации: {v} мин", category: NotificationCategory.Sync);
     }
 
     private void SyncNow_Click(object sender, RoutedEventArgs e)
@@ -120,7 +121,7 @@ public partial class NetworkSyncView : UserControl
         if (info is null)
         {
             LastSyncText.Text = $"Изменений нет. Последняя синхронизация: {_services.Cfg.ConfigLastSyncedAt()}";
-            _host.ShowStatus("Изменений на диске нет — конфиг уже актуален");
+            _host.ShowStatus("Изменений на диске нет — конфиг уже актуален", category: NotificationCategory.Sync);
             return;
         }
 
@@ -132,7 +133,7 @@ public partial class NetworkSyncView : UserControl
             $"Настроек применено: {result.SettingsApplied}\n" +
             $"Изменений в справочнике: {result.Counts.TotalChanges}",
             "Синхронизация завершена", MessageBoxButton.OK, MessageBoxImage.Information);
-        _host.ShowStatus($"Конфиг обновлён: настроек {result.SettingsApplied}, изменений {result.Counts.TotalChanges}");
+        _host.ShowStatus($"Конфиг обновлён: настроек {result.SettingsApplied}, изменений {result.Counts.TotalChanges}", category: NotificationCategory.Sync);
     }
 
     private void AutoPushCheck_Changed(object sender, RoutedEventArgs e)
@@ -150,7 +151,7 @@ public partial class NetworkSyncView : UserControl
         }
         _services.Cfg.SetConfigPushIntervalMin(v);
         _host.RefreshConfigSync();
-        _host.ShowStatus(v == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {v} мин");
+        _host.ShowStatus(v == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {v} мин", category: NotificationCategory.Sync);
     }
 
     private void PushNow_Click(object sender, RoutedEventArgs e)
@@ -172,7 +173,7 @@ public partial class NetworkSyncView : UserControl
                 $"Групп: {result.Hierarchy.EquipmentGroups.Count}, Модификаций: {result.Hierarchy.ControllerModifications.Count}\n" +
                 $"Тегов: {result.Hierarchy.Tags?.Count ?? 0}, Резервов номеров: {result.Hierarchy.Reservations.Count}",
                 "Конфиг отправлен на диск", MessageBoxButton.OK, MessageBoxImage.Information);
-            _host.ShowStatus("Конфиг отправлен на диск");
+            _host.ShowStatus("Конфиг отправлен на диск", category: NotificationCategory.Sync);
         }
         catch (Exception ex)
         {

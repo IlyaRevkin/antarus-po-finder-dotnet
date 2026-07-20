@@ -84,6 +84,15 @@
                     <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
                     <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
 
+                    <TextBlock Text="УВЕДОМЛЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Какие категории показывать в статус-баре, баннерах и истории уведомлений. Снятая галка полностью отключает категорию на этом ПК — уведомление не появится нигде, включая историю."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <StackPanel x:Name="NotificationCategoriesPanel" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="ПРИ ЗАКРЫТИИ ОКНА (КРЕСТИК)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <RadioButton x:Name="CloseActionCloseRadio" GroupName="CloseAction" Content="Закрывать приложение" Margin="0,0,0,4" Checked="CloseAction_Changed"/>
+                    <RadioButton x:Name="CloseActionTrayRadio" GroupName="CloseAction" Content="Сворачивать в системный трей" Margin="0,0,0,16" Checked="CloseAction_Changed"/>
+
                     <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" Margin="0,0,0,6"/>
                     <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
@@ -182,7 +191,9 @@
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Пересоздать структуру диска" Margin="0,0,8,0" Click="RebuildHierarchy_Click"/>
                         <Button Content="Синхронизировать прошивки с диска" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SyncFwFromDisk_Click"/>
-                        <Button Content="Сканировать неизвестные файлы" Style="{StaticResource SecondaryButton}" Click="ScanUnknown_Click"/>
+                        <Button Content="Сканировать неизвестные файлы" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ScanUnknown_Click"/>
+                        <Button Content="Таблица версий (Excel)" Style="{StaticResource SecondaryButton}" Click="ExportVersionTable_Click"
+                                ToolTip="Сформировать таблицу нумерации версий (типы шкафов, подтипы, контроллеры — из текущих данных Иерархии) в отдельный Excel-файл."/>
                     </StackPanel>
                 </StackPanel>
 
@@ -247,8 +258,6 @@
                         <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
                         <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Click="RollbackFirmware_Click"
                                 ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
-                        <Button Content="Таблица версий (Excel)" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ExportVersionTable_Click"
-                                ToolTip="Сформировать стандартную таблицу нумерации версий (5 типов шкафов, все подтипы, все контроллеры) в отдельный Excel-файл."/>
                     </StackPanel>
                 </StackPanel>
 

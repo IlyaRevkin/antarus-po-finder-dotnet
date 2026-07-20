@@ -72,7 +72,7 @@ public class DatabaseSmokeTests
         {
             using var db = new Database(tmpDb);
             var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КПЧ");
+            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
             var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
 
             int before = db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
@@ -123,7 +123,7 @@ public class DatabaseSmokeTests
         {
             using var db = new Database(tmpDb);
             var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КПЧ");
+            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
             var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
 
             var reservation = db.ReserveNextVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
@@ -191,7 +191,7 @@ public class DatabaseSmokeTests
         {
             using var db = new Database(tmpDb);
             var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КПЧ");
+            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
             var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
 
             var reservation = db.ReserveNextVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
@@ -357,10 +357,10 @@ public class ServiceSmokeTests
             var svc = new AntarusPoFinder.Core.Services.HierarchyService(db);
 
             var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КПЧ");
+            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
             var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
 
-            var oldDiskPath = System.IO.Path.Combine(tmpRoot, "ПО", "НГР", "КПЧ", "SMH4", "2.1.001.0001");
+            var oldDiskPath = System.IO.Path.Combine(tmpRoot, "ПО", "НГР", "КНС", "SMH4", "2.1.001.0001");
             System.IO.Directory.CreateDirectory(oldDiskPath);
             System.IO.File.WriteAllText(System.IO.Path.Combine(oldDiskPath, "fw.psl"), "test");
 
@@ -384,7 +384,7 @@ public class ServiceSmokeTests
             Assert.True(result.Ok, result.Error);
             Assert.Equal(1, result.RemappedRows);
 
-            var newDiskPath = System.IO.Path.Combine(tmpRoot, "ПО", "НГР2", "КПЧ", "SMH4", "2.1.001.0001");
+            var newDiskPath = System.IO.Path.Combine(tmpRoot, "ПО", "НГР2", "КНС", "SMH4", "2.1.001.0001");
             Assert.False(System.IO.Directory.Exists(System.IO.Path.Combine(tmpRoot, "ПО", "НГР")));
             Assert.True(System.IO.Directory.Exists(newDiskPath));
             Assert.True(System.IO.File.Exists(System.IO.Path.Combine(newDiskPath, "fw.psl")));

@@ -149,6 +149,26 @@ public partial class Database : IDisposable
                  fulfilled_fw_version_id INTEGER REFERENCES fw_versions(id),
                  expires_at              TEXT    NOT NULL DEFAULT ''
              );
+
+             CREATE TABLE IF NOT EXISTS tickets (
+                 id               TEXT    PRIMARY KEY,
+                 ticket_type      TEXT    NOT NULL DEFAULT 'other',
+                 text             TEXT    NOT NULL DEFAULT '',
+                 status           TEXT    NOT NULL DEFAULT 'open',
+                 created_by       TEXT    NOT NULL DEFAULT '',
+                 created_by_role  TEXT    NOT NULL DEFAULT '',
+                 created_at       TEXT    NOT NULL DEFAULT '',
+                 updated_at       TEXT    NOT NULL DEFAULT ''
+             );
+
+             CREATE TABLE IF NOT EXISTS ticket_sync_applied (
+                 filename TEXT PRIMARY KEY
+             );
+
+             CREATE TABLE IF NOT EXISTS ticket_outbox (
+                 filename TEXT PRIMARY KEY,
+                 payload  TEXT NOT NULL
+             );
              """);
 
         EnsureColumnsExist();
@@ -156,6 +176,8 @@ public partial class Database : IDisposable
         SeedAllowedExtensionsDefaults();
         SeedTagsFromExistingFwVersions();
         RunDataMigrations();
+        EnsureDefaultEquipmentGroups();
+        EnsureDefaultEquipmentSubtypes();
         EnsureEveryGroupHasSubtype();
         EnsureDefaultControllers();
         EnsureDefaultModifications();

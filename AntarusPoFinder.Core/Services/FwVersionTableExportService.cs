@@ -1,59 +1,43 @@
-using System;
 using System.Collections.Generic;
+using System.Linq;
+using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
 using ClosedXML.Excel;
 
 namespace AntarusPoFinder.Core.Services;
 
-/// <summary>Generates the standard firmware-version numbering reference spreadsheet (5 equipment
-/// types, their subtypes, and controller hw codes) — layout copied cell-for-cell from the
-/// "Antarus_версии_нумерация.xlsx" reference kept on the admin's desktop. This is a fixed catalogue,
-/// independent of whatever equipment_groups/subtypes/controllers rows currently exist in the live
-/// DB (those can drift via the Иерархия admin UI) — the button always exports the standard.</summary>
+/// <summary>Generates the firmware-version numbering reference spreadsheet (equipment types, their
+/// subtypes, and controller hw codes) straight off the live database — whatever equipment_groups/
+/// equipment_subtypes/controller_models/controller_modifications rows exist in the DB at the moment
+/// the button is clicked (see SettingsView.ExportVersionTable_Click), including anything an admin
+/// added/renamed/removed via Настройки → Иерархия. Layout (two sheets, merged header cells) is
+/// unchanged from the original hand-authored "Antarus_версии_нумерация.xlsx" reference — only the
+/// data source changed, from a hardcoded catalogue to live DB reads.</summary>
 public static class FwVersionTableExportService
 {
-    public sealed record StandardSubtype(int Prefix, string Code);
-    public sealed record StandardGroup(int Prefix, string Name, StandardSubtype[] Subtypes);
-    public sealed record StandardController(string Model, string Modification, int Hw, string Description);
-
-    public static readonly StandardGroup[] Groups =
-    [
-        new(1, "ПЖ", [new(0, "2.0"), new(1, "FD"), new(2, "КПЧ"), new(3, "ХП"), new(4, "ПИ"), new(5, "ПКР"), new(6, "ПКР ПИ")]),
-        new(2, "НГР", [new(0, "2.0"), new(1, "КНС"), new(2, "УПД"), new(3, "КР")]),
-        new(3, "ТГР", [new(0, "-")]),
-        new(4, "ВЗУ", [new(0, "-"), new(1, "ПИ")]),
-        new(5, "ШУЗ", [new(0, "-")]),
-    ];
-
-    public static readonly StandardController[] Controllers =
-    [
-        new("SMH4", "SMH4", 4, "HMI 4.3\", 5DI / 3DO / 2AI / 2AO, RS-485, Ethernet"),
-        new("SMH5", "SMH5", 5, "HMI 5\", 8DI / 8DO / 4AI / 2AO, RS-485, Ethernet"),
-        new("KINCO", "KINCO", 20, "ПЛК KINCO K-серия, модульный, высокоскоростной I/O"),
-        new("PIXEL2", "PIXEL2", 40, "универсальный"),
-        new("PIXEL2", "PIXEL2-1020", 41, "8DI / 6DO / 8AI / 2AO"),
-        new("PIXEL2", "PIXEL2-1021", 42, "8DI / 5DO / 8AI / 4AO"),
-        new("PIXEL2", "PIXEL2-1320", 43, "8DI / 6DO / 6AI / 2AO"),
-        new("PIXEL2", "PIXEL2-1321", 44, "8DI / 5DO / 6AI / 4AO"),
-        new("PIXEL2", "PIXEL2-3022", 45, "16DI / 12DO"),
-        new("PIXEL2", "PIXEL2-3322", 46, "16DI / 8DO / 4AI"),
-        new("PIXEL2", "PIXEL2-3422", 47, "16DI / 8DO / 4AO"),
-        new("PIXEL", "PIXEL-2511", 48, "первое поколение Pixel, требует уточнения характеристик"),
-        new("PIXEL", "PIXEL-2512", 49, "первое поколение Pixel, требует уточнения характеристик"),
-        new("PIXEL", "PIXEL-2514", 50, "первое поколение Pixel, требует уточнения характеристик"),
-        new("PIXEL", "PIXEL-2515", 51, "первое поколение Pixel, требует уточнения характеристик"),
-    ];
+    private sealed record TableGroup(EquipmentGroup Group, List<EquipmentSubType> Subtypes);
+    private sealed record TableRow(ControllerModel Controller, ControllerModification Mod);
 
     private static string Hw(int hw) => hw.ToString("D3");
 
-    public static void Generate(string filePath)
+    public static void Generate(string filePath, Database db)
     {
+        var groups = db.GetAllEquipmentGroups()
+            .Select(g => new TableGroup(g, db.GetSubtypesForGroup(g.Id!.Value)))
+            .Where(tg => tg.Subtypes.Count > 0)
+            .ToList();
+
+        var rows = db.GetAllControllerModels()
+            .SelectMany(c => db.GetModificationsForController(c.Id!.Value).Select(m => new TableRow(c, m)))
+            .ToList();
+
         using var wb = new XLWorkbook();
-        BuildOverviewSheet(wb.Worksheets.Add("Обзор"));
-        BuildTableSheet(wb.Worksheets.Add("Таблица"));
+        BuildOverviewSheet(wb.Worksheets.Add("Обзор"), groups, rows);
+        BuildTableSheet(wb.Worksheets.Add("Таблица"), groups, rows);
         wb.SaveAs(filePath);
     }
 
-    private static void BuildOverviewSheet(IXLWorksheet ws)
+    private static void BuildOverviewSheet(IXLWorksheet ws, List<TableGroup> groups, List<TableRow> rows)
     {
         ws.Cell(1, 1).Value = "Схема нумерации версий прошивок — Antarus ПО Finder";
         ws.Cell(1, 1).Style.Font.Bold = true;
@@ -75,10 +59,10 @@ public static class FwVersionTableExportService
         ws.Cell(row, 2).Value = "Цифра 1 (prefix)";
         ws.Range(row, 1, row, 2).Style.Font.Bold = true;
         row++;
-        foreach (var g in Groups)
+        foreach (var g in groups)
         {
-            ws.Cell(row, 1).Value = g.Name;
-            ws.Cell(row, 2).Value = g.Prefix;
+            ws.Cell(row, 1).Value = g.Group.Name;
+            ws.Cell(row, 2).Value = g.Group.Prefix;
             row++;
         }
 
@@ -92,19 +76,19 @@ public static class FwVersionTableExportService
         ws.Cell(row, 4).Value = "Описание";
         ws.Range(row, 1, row, 4).Style.Font.Bold = true;
         row++;
-        foreach (var c in Controllers)
+        foreach (var r in rows)
         {
-            ws.Cell(row, 1).Value = c.Model;
-            ws.Cell(row, 2).Value = c.Modification;
-            ws.Cell(row, 3).Value = Hw(c.Hw);
-            ws.Cell(row, 4).Value = c.Description;
+            ws.Cell(row, 1).Value = r.Controller.Name;
+            ws.Cell(row, 2).Value = r.Mod.DisplayName;
+            ws.Cell(row, 3).Value = Hw(r.Mod.HwVersion);
+            ws.Cell(row, 4).Value = r.Mod.Description;
             row++;
         }
 
         ws.Columns(1, 4).AdjustToContents();
     }
 
-    private static void BuildTableSheet(IXLWorksheet ws)
+    private static void BuildTableSheet(IXLWorksheet ws, List<TableGroup> groups, List<TableRow> rows)
     {
         const int typeRow = 1;
         const int prefixRow = 2;
@@ -120,22 +104,22 @@ public static class FwVersionTableExportService
         ws.Cell(subtypeRow, hwCol).Value = "2. Подтип шкафа →";
         ws.Cell(indexRow, hwCol).Value = "3. Контроллеры↓";
 
-        var subtypeColumns = new List<(StandardGroup Group, StandardSubtype Subtype, int Col)>();
+        var subtypeColumns = new List<(EquipmentGroup Group, EquipmentSubType Subtype, int Col)>();
         int col = firstDataCol;
-        foreach (var g in Groups)
+        foreach (var g in groups)
         {
             int groupFirstCol = col;
             foreach (var s in g.Subtypes)
             {
-                ws.Cell(subtypeRow, col).Value = s.Code;
+                ws.Cell(subtypeRow, col).Value = s.Name;
                 ws.Cell(indexRow, col).Value = s.Prefix;
-                subtypeColumns.Add((g, s, col));
+                subtypeColumns.Add((g.Group, s, col));
                 col++;
             }
             int groupLastCol = col - 1;
 
-            ws.Cell(typeRow, groupFirstCol).Value = g.Name;
-            ws.Cell(prefixRow, groupFirstCol).Value = g.Prefix;
+            ws.Cell(typeRow, groupFirstCol).Value = g.Group.Name;
+            ws.Cell(prefixRow, groupFirstCol).Value = g.Group.Prefix;
             if (groupLastCol > groupFirstCol)
             {
                 ws.Range(typeRow, groupFirstCol, typeRow, groupLastCol).Merge();
@@ -144,12 +128,12 @@ public static class FwVersionTableExportService
         }
 
         int row = firstDataRow;
-        foreach (var c in Controllers)
+        foreach (var r in rows)
         {
-            ws.Cell(row, modelCol).Value = c.Modification;
-            ws.Cell(row, hwCol).Value = Hw(c.Hw);
+            ws.Cell(row, modelCol).Value = r.Mod.DisplayName;
+            ws.Cell(row, hwCol).Value = Hw(r.Mod.HwVersion);
             foreach (var (g, s, dataCol) in subtypeColumns)
-                ws.Cell(row, dataCol).Value = $"{g.Prefix}.{s.Prefix}.{Hw(c.Hw)}";
+                ws.Cell(row, dataCol).Value = $"{g.Prefix}.{s.Prefix}.{Hw(r.Mod.HwVersion)}";
             row++;
         }
 

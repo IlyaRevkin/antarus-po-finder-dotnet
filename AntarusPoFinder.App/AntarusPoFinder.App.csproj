@@ -22,9 +22,27 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- NotifyIcon (system tray icon — see MainWindow "Системный трей") is WinForms-only; WPF and
+         WinForms coexist fine in the same net8.0-windows project. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
-    <Version>1.12.3</Version>
+    <Version>1.13.0</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWindowsForms=true (above) auto-adds implicit "global using"s for System.Windows.Forms AND
+         System.Drawing alongside WPF's own implicit "global using System.Windows;" (ImplicitUsings=
+         enable) — a lot of WinForms/GDI+ type names collide with WPF ones (Application, Button,
+         TextBox, CheckBox, UserControl, KeyEventArgs, DragEventArgs, Brush(es), Point...), which
+         broke compilation in every WPF view file with CS0104 ambiguous-reference errors, even ones
+         that never mention WinForms/GDI+. Only MainWindow.xaml.cs actually needs System.Windows.Forms
+         (for the NotifyIcon tray icon), and it already fully-qualifies every type it uses from there
+         — so neither global using is needed anywhere and both are removed here. Existing
+         System.Drawing.* usages elsewhere (WiaScanner etc.) already have their own explicit
+         "using System.Drawing;" in-file, unaffected by removing the *global* one. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
 </Project>

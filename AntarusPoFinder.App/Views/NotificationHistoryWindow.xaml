@@ -9,11 +9,19 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
-            <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
-                       Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+                <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
+                           Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Button Grid.Column="1" Content="Очистить уведомления" Style="{StaticResource SecondaryButton}"
+                    VerticalAlignment="Top" Click="ClearAll_Click"/>
+        </Grid>
 
         <ListBox Grid.Row="1" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent">
             <ListBox.ItemTemplate>

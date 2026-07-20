@@ -160,7 +160,7 @@ public partial class ParamsView : UserControl
             UploadDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
         });
 
-        _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}");
+        _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}", category: NotificationCategory.FirmwareAndParams);
 
         DescInput.Text = "";
         _srcPath = null;
@@ -231,7 +231,7 @@ public partial class ParamsView : UserControl
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateParamFileTags(row.Id, dlg.ResultTags);
-        _host.ShowStatus($"Теги обновлены: {row.Filename}");
+        _host.ShowStatus($"Теги обновлены: {row.Filename}", category: NotificationCategory.FirmwareAndParams);
         ReloadTable();
     }
 

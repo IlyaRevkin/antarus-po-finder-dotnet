@@ -289,7 +289,7 @@ public partial class SearchView : UserControl
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateParamFileTags(file.Id!.Value, dlg.ResultTags);
-        _host.ShowStatus($"Теги обновлены: {file.Filename}");
+        _host.ShowStatus($"Теги обновлены: {file.Filename}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }
 
@@ -319,7 +319,7 @@ public partial class SearchView : UserControl
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
-        _host.ShowStatus($"Теги обновлены: {result.VersionRaw}");
+        _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }
 

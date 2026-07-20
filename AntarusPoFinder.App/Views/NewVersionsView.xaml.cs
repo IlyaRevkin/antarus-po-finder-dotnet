@@ -71,7 +71,7 @@ public partial class NewVersionsView : UserControl
             "Модерация тегов", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
         if (release) _services.Db.MarkFwVersionReleased(v.Id!.Value);
 
-        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}");
+        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadData();
     }
 }

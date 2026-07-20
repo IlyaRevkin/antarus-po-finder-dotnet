@@ -12,6 +12,16 @@ public partial class MainWindow : Window
 {
     private readonly AppServices _services;
     private readonly MainWindowViewModel _vm;
+    private System.Windows.Forms.NotifyIcon? _trayIcon;
+
+    /// <summary>Escape hatch for code that must guarantee the process actually exits — the self-update
+    /// restart flow (AppUpdateService.InstallAndRestartAsync) calls Application.Current.Shutdown()
+    /// and then waits for THIS process to die before moving the staged exe into place; if the
+    /// "закрытие сворачивает в трей" setting is on, Window_Closing would otherwise cancel that
+    /// shutdown (WPF aborts Application.Shutdown() entirely when any window cancels its Closing) and
+    /// the update would hang forever waiting for a process that never exits. Set right before calling
+    /// Shutdown(), never reset — the process is going down either way once that happens.</summary>
+    public static bool ForceRealExit { get; set; }
 
     private static readonly Dictionary<string, (string Title, string Body)> NavStepText = new()
     {
@@ -30,6 +40,83 @@ public partial class MainWindow : Window
         DataContext = _vm;
 
         ContentRendered += MainWindow_ContentRendered;
+        InitTrayIcon();
+        Closing += MainWindow_Closing;
+        StateChanged += MainWindow_StateChanged;
+    }
+
+    // ── Системный трей ───────────────────────────────────────────────────────
+    // See ConfigService.CloseAction: "close" (default) leaves the X button/taskbar-minimize behaving
+    // exactly as before this feature existed; "tray" hides the window instead of exiting/minimizing
+    // to the taskbar. The NotifyIcon itself is created once up front but stays invisible until the
+    // window is actually hidden to it — nothing to click on otherwise.
+
+    private void InitTrayIcon()
+    {
+        try
+        {
+            var exePath = System.Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+            var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+
+            var menu = new System.Windows.Forms.ContextMenuStrip();
+            menu.Items.Add("Открыть", null, (_, _) => RestoreFromTray());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+            menu.Items.Add("Выход", null, (_, _) =>
+            {
+                ForceRealExit = true;
+                Close();
+            });
+
+            _trayIcon = new System.Windows.Forms.NotifyIcon
+            {
+                Icon = icon,
+                Text = "Antarus ПО Finder",
+                ContextMenuStrip = menu,
+                Visible = false,
+            };
+            _trayIcon.MouseClick += (_, e) =>
+            {
+                // Click (left) and DoubleClick both restore — matches Проводник-style tray icons
+                // where either a single or double click is enough, no need to hit it twice.
+                if (e.Button == System.Windows.Forms.MouseButtons.Left) RestoreFromTray();
+            };
+        }
+        catch { /* best effort — if the exe's icon can't be extracted, tray support silently degrades to "always close" */ }
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (!ForceRealExit && _trayIcon is not null && _services.Cfg.CloseAction() == "tray")
+        {
+            e.Cancel = true;
+            Hide();
+            _trayIcon.Visible = true;
+            return;
+        }
+
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+    }
+
+    /// <summary>Optional but natural extension of "сворачивать в трей": the taskbar's own minimize
+    /// button behaves the same way once that setting is on, not just the X button.</summary>
+    private void MainWindow_StateChanged(object? sender, System.EventArgs e)
+    {
+        if (WindowState != WindowState.Minimized || _trayIcon is null) return;
+        if (_services.Cfg.CloseAction() != "tray") return;
+        Hide();
+        _trayIcon.Visible = true;
     }
 
     private void MainWindow_ContentRendered(object? sender, System.EventArgs e)

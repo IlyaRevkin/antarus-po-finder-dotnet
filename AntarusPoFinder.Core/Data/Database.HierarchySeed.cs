@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using AntarusPoFinder.Core.Domain;
 
@@ -76,6 +77,99 @@ public partial class Database
             var e = ext;
             ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions(ext) VALUES(@e)",
                 cmd => cmd.Parameters.AddWithValue("@e", e));
+        }
+    }
+
+    /// <summary>Idempotent: add any DefaultEquipmentGroup missing (by name) from equipment_groups.
+    /// Runs on every startup (unlike SeedHierarchyDefaults, which only seeds a fresh/empty DB) so a
+    /// group added to the reference catalogue later (e.g. ШУЗ) reaches already-existing installs
+    /// too — additive only: never overwrites the prefix/sort_order of a group that already exists
+    /// under that name (an admin may have retargeted it via Настройки → Иерархия since).</summary>
+    private void EnsureDefaultEquipmentGroups()
+    {
+        var existingNames = new HashSet<string>();
+        var existingPrefixes = new HashSet<int>();
+        using (var reader = ExecuteReader("SELECT name, prefix FROM equipment_groups"))
+        {
+            while (reader.Read())
+            {
+                existingNames.Add(reader.GetString(0));
+                existingPrefixes.Add(reader.GetInt32(1));
+            }
+        }
+
+        foreach (var g in HierarchyDefaultsData.EquipmentGroups)
+        {
+            if (existingNames.Contains(g.Name)) continue;
+
+            // The default prefix may already be in use by an unrelated group an admin created
+            // manually — prefixes feed directly into the version number (eq_prefix) and must stay
+            // unique, so fall back to the first free one above the existing set instead of colliding.
+            var prefix = g.Prefix;
+            while (existingPrefixes.Contains(prefix)) prefix++;
+
+            ExecuteNonQuery("INSERT INTO equipment_groups(name,prefix,sort_order,sync_id) VALUES(@n,@p,@s,@sy)", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@n", g.Name);
+                cmd.Parameters.AddWithValue("@p", prefix);
+                cmd.Parameters.AddWithValue("@s", g.SortOrder);
+                cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+            });
+            existingNames.Add(g.Name);
+            existingPrefixes.Add(prefix);
+        }
+    }
+
+    /// <summary>Idempotent: add any DefaultSubType missing (by group name + subtype name) from
+    /// equipment_subtypes — same additive-only reasoning as EnsureDefaultEquipmentGroups (e.g. adds
+    /// ПЖ-ПКР/ПЖ-ПКР ПИ to an install that predates them, without touching the subtypes it already
+    /// has). Only applies to groups that exist by the time this runs — including ones this same
+    /// startup's EnsureDefaultEquipmentGroups call just added, since it always runs first.</summary>
+    private void EnsureDefaultEquipmentSubtypes()
+    {
+        var groupIdsByName = new Dictionary<string, int>();
+        using (var reader = ExecuteReader("SELECT id, name FROM equipment_groups"))
+        {
+            while (reader.Read())
+                groupIdsByName[reader.GetString(1)] = reader.GetInt32(0);
+        }
+
+        var existingByGroup = new Dictionary<int, (HashSet<string> Names, HashSet<int> Prefixes)>();
+        using (var reader = ExecuteReader("SELECT group_id, name, prefix FROM equipment_subtypes"))
+        {
+            while (reader.Read())
+            {
+                var gid = reader.GetInt32(0);
+                if (!existingByGroup.TryGetValue(gid, out var sets))
+                    existingByGroup[gid] = sets = (new HashSet<string>(), new HashSet<int>());
+                sets.Names.Add(reader.GetString(1));
+                sets.Prefixes.Add(reader.GetInt32(2));
+            }
+        }
+
+        foreach (var s in HierarchyDefaultsData.SubTypes)
+        {
+            if (!groupIdsByName.TryGetValue(s.GroupName, out var gid)) continue;
+            if (!existingByGroup.TryGetValue(gid, out var sets))
+                existingByGroup[gid] = sets = (new HashSet<string>(), new HashSet<int>());
+            if (sets.Names.Contains(s.Name)) continue;
+
+            var prefix = s.Prefix;
+            while (sets.Prefixes.Contains(prefix)) prefix++;
+
+            ExecuteNonQuery(
+                "INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id) VALUES(@g,@n,@p,@f,@s,@sy)",
+                cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@g", gid);
+                    cmd.Parameters.AddWithValue("@n", s.Name);
+                    cmd.Parameters.AddWithValue("@p", prefix);
+                    cmd.Parameters.AddWithValue("@f", s.FolderName);
+                    cmd.Parameters.AddWithValue("@s", s.SortOrder);
+                    cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+                });
+            sets.Names.Add(s.Name);
+            sets.Prefixes.Add(prefix);
         }
     }
 

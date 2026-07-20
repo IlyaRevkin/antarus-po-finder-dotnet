@@ -156,7 +156,7 @@ public class ConfigSyncTests
             // extensions are the two categories safe to fully mirror, see Database.ConfigExchange).
             dbB.AddTag("only_on_b");
             var group = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = dbB.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КПЧ");
+            var subtype = dbB.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
             var mod = dbB.GetAllModifications().First(m => m.ControllerName == "SMH4");
             var fwId = dbB.AddFwVersion(new FwVersionRecord
             {
