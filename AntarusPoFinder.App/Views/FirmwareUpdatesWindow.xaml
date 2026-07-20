@@ -1,0 +1,27 @@
+<Window x:Class="AntarusPoFinder.App.Views.FirmwareUpdatesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Обновления прошивок" Width="680" Height="560" MinWidth="520" MinHeight="360"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button x:Name="UpdateAllButton" Content="Обновить все" Margin="0,0,8,0" Click="UpdateAll_Click"/>
+            <Button x:Name="UpdateSelectedButton" Content="Обновить выделенные" Style="{StaticResource SecondaryButton}" Click="UpdateSelected_Click"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="ItemsPanel"/>
+        </ScrollViewer>
+
+        <Button Grid.Row="2" Content="Закрыть" IsCancel="True" Style="{StaticResource SecondaryButton}"
+                HorizontalAlignment="Right" Width="100" Margin="0,12,0,0" Click="Close_Click"/>
+    </Grid>
+</Window>

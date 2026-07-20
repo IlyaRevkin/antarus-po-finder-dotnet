@@ -1,0 +1,7 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.TagBubbleEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <WrapPanel x:Name="BubblesPanel"/>
+    </StackPanel>
+</UserControl>

@@ -1,0 +1,180 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.UploadView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Загрузка прошивки" Style="{StaticResource TitleText}" Margin="0,0,0,16"/>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="340"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left column: drop zone + preview -->
+            <StackPanel Grid.Column="0">
+                <StackPanel x:Name="ReservationPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                    <TextBlock Text="ИСПОЛЬЗОВАТЬ ЗАРЕЗЕРВИРОВАННЫЙ НОМЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <ComboBox x:Name="ReservationCombo" Height="36" DisplayMemberPath="Label" SelectionChanged="ReservationCombo_SelectionChanged"
+                              ToolTip="Если для этого шкафа/подтипа/контроллера есть открытый резерв номера — выберите его, чтобы загрузка использовала ровно тот номер, который уже вписан в прошивку."/>
+                </StackPanel>
+
+                <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="180" Cursor="Hand"
+                        AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
+                    <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл или папку сюда&#x0a;&#x0a;или нажмите для выбора"
+                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="BrowseFile_Click"/>
+                    <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
+                </Grid>
+
+                <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,16,0,6"/>
+                <Border Style="{StaticResource CardBorder}">
+                    <TextBlock x:Name="PreviewLabel" Text="—" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                </Border>
+
+                <Button x:Name="ReserveVersionBtn" Content="Зарезервировать номер версии" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0"
+                        Click="ReserveVersion_Click"
+                        ToolTip="Зафиксировать следующий номер версии заранее — чтобы вписать его в прошивку до сборки и не рисковать, что номер уйдёт вперёд, пока идёт разработка."/>
+
+                <Button Content="Очистить данные" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0"
+                        Click="ClearData_Click" ToolTip="Сбросить выбранный файл и все поля формы (если загружен не тот файл)"/>
+            </StackPanel>
+
+            <!-- Right column: metadata form -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="МЕТАДАННЫЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,8,8"
+                                   ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
+                        <ComboBox x:Name="GroupCombo" Grid.Row="0" Grid.Column="1" Height="36" Margin="0,0,0,8"
+                                  DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <ComboBox x:Name="SubCombo" Grid.Row="1" Grid.Column="1" Height="36" Margin="0,0,0,8"
+                                  DisplayMemberPath="Label" SelectionChanged="SubCombo_SelectionChanged"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,8,0"
+                                   ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
+                        <ComboBox x:Name="CtrlCombo" Grid.Row="2" Grid.Column="1" Height="36" Margin="0,0,0,0"
+                                  DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
+                                   FontSize="11" Margin="0,2,0,8" TextWrapping="Wrap"/>
+
+                        <CheckBox Grid.Row="4" Grid.Column="1" x:Name="IncludeDateCheck" Content="Добавлять дату/время в номер версии" IsChecked="True" Margin="0,0,0,8"
+                                  Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
+                                  ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
+
+                        <StackPanel x:Name="OpcPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                            <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,0"
+                                      Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
+                                      ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
+                            <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN"
+                                      Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
+                                      ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,8" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReqNumInput" Height="36" Margin="0,0,0,8"
+                                 Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,8" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" x:Name="CabinetSnInput" Height="36" Margin="0,0,0,8"
+                                 Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
+
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Тип пуска *:" Margin="0,0,8,0"/>
+                        <StackPanel Grid.Row="8" Grid.Column="1" x:Name="LaunchTypesPanel" Orientation="Horizontal"/>
+                    </Grid>
+
+                    <TextBlock Text="Изменения в этой версии *:" Margin="0,12,0,4"/>
+                    <TextBox x:Name="DescInput" Height="72" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+
+                    <TextBlock Text="Теги:" Margin="0,12,0,4"/>
+                    <views:TagBubbleEditor x:Name="TagsEditor"/>
+
+                    <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,18,0,10"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Карта ВВ:" VerticalAlignment="Center"
+                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;"/>
+                        <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
+                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
+                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Инструкция:" VerticalAlignment="Center"
+                                   ToolTip="Копируется в папку контроллера &quot;Инструкция&quot;"/>
+                        <TextBox Grid.Column="1" x:Name="InstructionsInput" Height="34" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFile_Click" ToolTip="Выбрать файл">
+                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFolder_Click" ToolTip="Выбрать папку">
+                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsClear_Click" ToolTip="Очистить">
+                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                    </Grid>
+
+                    <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,10,0,10" TextWrapping="Wrap"/>
+
+                    <Button x:Name="UploadBtn" Content="Загрузить прошивку" Height="40" Click="Upload_Click"/>
+                    <Button x:Name="RollbackBtn" Content="Откатить последнюю версию" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Click="Rollback_Click"
+                            ToolTip="Пометить последнюю активную прошивку для выбранного шкафа/подтипа/контроллера как откатанную. Следующая загрузка получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

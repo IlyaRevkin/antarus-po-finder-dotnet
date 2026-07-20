@@ -1,0 +1,56 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.NewVersionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Модерация тегов" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="1" Text="Модерация тегов по загруженным версиям прошивок — версии здесь ожидают, чтобы им проставили теги/описание и подтвердили релиз. Двойной клик по строке или кнопка «Добавить тег»."
+                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+        <DataGrid Grid.Row="2" x:Name="RecentGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                  MouseDoubleClick="RecentGrid_MouseDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
+                <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="100"/>
+                <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="120"/>
+                <DataGridTemplateColumn Header="Версия" Width="160">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <views:CopyableVersionText Text="{Binding VersionRaw}" Margin="6,0"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
+                <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
+                <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="140"/>
+                <DataGridTemplateColumn Header="" Width="130">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="Добавить тег" Style="{StaticResource SecondaryButton}" Padding="10,3"
+                                    Click="EditTagsButton_Click"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsSuperseded}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+        </DataGrid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,100 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.NetworkSyncView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" MaxWidth="760" HorizontalAlignment="Left">
+            <TextBlock Text="Сетевые диски и синхронизация" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+            <TextBlock Text="Эти настройки — про то, где лежат файлы и как часто общий конфиг (справочник оборудования, теги, резервы номеров) обновляется на этом компьютере. Доступны всем ролям, так как каждый настраивает свой компьютер сам."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,20"/>
+
+            <TextBlock Text="ПУТЬ К ДИСКУ (WEBDAV / СЕТЕВАЯ ПАПКА)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" x:Name="RootPathInput" Height="34" Margin="0,0,8,0"/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseRoot_Click"/>
+                <Button Grid.Column="2" Content="Сохранить" Click="SaveRoot_Click"/>
+            </Grid>
+
+            <TextBlock Text="ВТОРОЙ ДИСК (ШКАФЫ И ЭЛЕКТРОСХЕМЫ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" x:Name="SecondDiskInput" Height="34" Margin="0,0,8,0" ToolTip="Путь к папке с кабинетами (шкафами)"/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseSecondDisk_Click"/>
+                <Button Grid.Column="2" Content="Сохранить" Click="SaveSecondDisk_Click"/>
+            </Grid>
+
+            <TextBlock Text="ПАПКА ОСМОТРА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock Text="Сюда сохраняются сканы, фото по QR и файлы, накопленные во время осмотра оборудования."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" x:Name="InspectionFolderInput" Height="34" Margin="0,0,8,0"/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseInspectionFolder_Click"/>
+                <Button Grid.Column="2" Content="Сохранить" Click="SaveInspectionFolder_Click"/>
+            </Grid>
+
+            <TextBlock Text="РАЗРЕШЕНИЕ СКАНИРОВАНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                <ComboBox x:Name="ScanResolutionCombo" Width="100" Margin="0,0,8,0">
+                    <ComboBoxItem Content="100"/>
+                    <ComboBoxItem Content="150"/>
+                    <ComboBoxItem Content="200"/>
+                    <ComboBoxItem Content="300"/>
+                    <ComboBoxItem Content="600"/>
+                </ComboBox>
+                <TextBlock Text="DPI" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Button Content="Сохранить" Click="SaveScanResolution_Click"/>
+            </StackPanel>
+
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="ПОЛУЧЕНИЕ ОБНОВЛЕНИЙ КОНФИГА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Справочник оборудования, теги и резервы номеров, изменённые кем-то другим на общем диске, подтягиваются на этот компьютер автоматически с указанным интервалом — подтверждать вручную не нужно."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="SyncIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
+                        <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                        <Button Content="Сохранить" Click="SaveSyncInterval_Click"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Синхронизировать сейчас" Click="SyncNow_Click" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="LastSyncText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Only administrator sees this — everyone else only pulls, see RefreshIfActive() -->
+            <Border x:Name="PushSection" Style="{StaticResource CardBorder}" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="ОТПРАВКА ИЗМЕНЕНИЙ НА ДИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Изменения, сделанные на этом компьютере (иерархия, теги, резервы), отправляются на общий диск, откуда их подтянут остальные компьютеры."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <CheckBox x:Name="AutoPushCheck" Content="Отправлять автоматически" Margin="0,0,0,10" Checked="AutoPushCheck_Changed" Unchecked="AutoPushCheck_Changed"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
+                        <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                        <Button Content="Сохранить" Click="SavePushInterval_Click"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Отправить сейчас" Style="{StaticResource SecondaryButton}" Click="PushNow_Click" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="LastPushText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

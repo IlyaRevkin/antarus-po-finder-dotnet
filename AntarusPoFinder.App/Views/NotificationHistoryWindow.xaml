@@ -1,0 +1,40 @@
+<Window x:Class="AntarusPoFinder.App.Views.NotificationHistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Уведомления" Width="480" Height="560"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource BgBrush}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+            <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <ListBox Grid.Row="1" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="0,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{Binding WhenLabel}" Style="{StaticResource MutedText}"
+                                       Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextBrush}"/>
+                            <Button Grid.Column="2" Content="Показать" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"
+                                    Visibility="{Binding CanReopen, Converter={StaticResource BoolToVis}}" Click="Reopen_Click"/>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+</Window>

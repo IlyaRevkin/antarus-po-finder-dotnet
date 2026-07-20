@@ -1,0 +1,344 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Настройки" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+
+        <StackPanel x:Name="TabBar" Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
+            <Button x:Name="TabBtnGeneral" Content="Общие" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnHierarchy" Content="Иерархия" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnFirmware" Content="Прошивки" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnModeration" Content="Модерация" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnReservations" Content="Резервы номеров" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnTags" Content="Теги" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnQuickApps" Content="Быстрый доступ" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="2" x:Name="MainScrollViewer" VerticalScrollBarVisibility="Auto">
+            <Grid>
+
+                <!-- ═══════════════════════════ ОБЩИЕ ═══════════════════════════ -->
+                <!-- Пути к дискам, разрешение сканирования и интервал синхронизации переехали на
+                     страницу "Сетевые диски", доступную всем ролям (см. NetworkSyncView) — здесь
+                     остаётся только то, что реально требует прав администратора. -->
+                <StackPanel x:Name="GeneralTab">
+                    <TextBlock Text="СМЕНИТЬ РОЛЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0" x:Name="RoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
+                        <PasswordBox Grid.Column="1" x:Name="RolePasswordInput" Height="34" Margin="0,0,8,0"/>
+                        <Button Grid.Column="2" Content="Сменить" Click="SwitchRole_Click"/>
+                    </Grid>
+
+                    <TextBlock Text="ПАРОЛИ ДОСТУПА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"/>
+                    </Grid>
+                    <Button Content="Сохранить пароли" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SavePasswords_Click"/>
+
+                    <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = вход по AD для этой роли отключён."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="напр. AntarusAdmins"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"/>
+                    </Grid>
+                    <Button Content="Сохранить группы" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
+
+                    <TextBlock Text="ПРОЧЕЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
+                    <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
+
+                    <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" Margin="0,0,0,6"/>
+                    <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="AppUpdatePathInput" Height="34" Margin="0,0,8,0" ToolTip="Сетевая папка с файлами AntarusPoFinder-{версия}.exe. Если пусто — используется GitHub."/>
+                        <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseAppUpdatePath_Click"/>
+                        <Button Grid.Column="2" Content="Сохранить" Click="SaveAppUpdatePath_Click"/>
+                    </Grid>
+                    <CheckBox x:Name="AppAutoUpdateCheck" Content="Устанавливать найденные обновления автоматически при запуске" Margin="0,0,0,8"/>
+                    <TextBlock x:Name="AppUpdateStatusText" Text="" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"/>
+                        <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Click="InstallLatestUpdate_Click"/>
+                    </StackPanel>
+                    <TextBlock Text="Откат на другую версию:" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0" x:Name="AppVersionsCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
+                        <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ИЕРАРХИЯ ═══════════════════════════ -->
+                <StackPanel x:Name="HierarchyTab" Visibility="Collapsed">
+                    <TextBlock Text="ТИПЫ ШКАФОВ И ПОДТИПЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Одна строка — один подтип. У типа шкафа без реального деления на подтипы одна строка с подтипом «—». Тип не может существовать без подтипа: удаление последнего подтипа удаляет и сам тип."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <DataGrid x:Name="HierarchyGrid" Height="260" AutoGenerateColumns="False" Margin="0,0,0,4"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Тип шкафа" Binding="{Binding GroupName}" Width="130"/>
+                            <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="100"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="110"/>
+                            <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="120"/>
+                            <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"/>
+                        <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"/>
+                        <Button Content="Переименовать тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RenameGroup_Click"/>
+                        <Button Content="Переименовать подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RenameSubtype_Click"/>
+                        <Button Content="Изменить префикс типа" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="EditGroupPrefix_Click"/>
+                        <Button Content="Изменить префикс подтипа" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="EditSubtypePrefix_Click"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"/>
+                    </StackPanel>
+
+                    <TextBlock Text="КОНТРОЛЛЕРЫ И МОДИФИКАЦИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Одна строка — одна модификация контроллера. hw_version формирует 3-ю цифру в номере версии."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <DataGrid x:Name="ControllersGrid" Height="220" AutoGenerateColumns="False" Margin="0,0,0,4"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Тип" Binding="{Binding ControllerName}" Width="90"/>
+                            <DataGridTextColumn Header="Модификация" Binding="{Binding DisplayName}" Width="*"/>
+                            <DataGridTextColumn Header="hw_version" Binding="{Binding HwVersionText}" Width="90"/>
+                            <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="200"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Добавить контроллер" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddController_Click"/>
+                        <Button Content="Добавить модификацию" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddModification_Click"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteControllerRow_Click"/>
+                    </StackPanel>
+
+                    <TextBlock Text="ПРОИЗВОДИТЕЛИ ПАРАМЕТРОВ (ПЧ / УПП)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <ListBox x:Name="ManufList" Height="130" Margin="0,0,0,4" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddManufacturer_Click"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteManufacturer_Click"/>
+                    </StackPanel>
+
+                    <TextBlock Text="РАЗРЕШЁННЫЕ РАСШИРЕНИЯ ДЛЯ ЗАГРУЗКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Если загружаемый файл не входит в этот список, программа предупредит и попросит подтвердить загрузку."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <ListBox x:Name="ExtList" Height="100" Margin="0,0,0,6" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="ExtInput" Height="34" Margin="0,0,8,0" ToolTip="напр. psl"/>
+                        <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddExtension_Click"/>
+                        <Button Grid.Column="2" Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteExtension_Click"/>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Пересоздать структуру диска" Margin="0,0,8,0" Click="RebuildHierarchy_Click"/>
+                        <Button Content="Синхронизировать прошивки с диска" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SyncFwFromDisk_Click"/>
+                        <Button Content="Сканировать неизвестные файлы" Style="{StaticResource SecondaryButton}" Click="ScanUnknown_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ПРОШИВКИ ═══════════════════════════ -->
+                <StackPanel x:Name="FirmwareTab" Visibility="Collapsed">
+                    <TextBlock Text="Все загруженные прошивки — редактируйте теги, описание и тип пуска"
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="FwFilterInput" Height="36" Margin="0,0,8,0"
+                                 ToolTip="Фильтр по группе / контроллеру / версии / тегу…" TextChanged="FwFilter_Changed"/>
+                        <Button Grid.Column="1" Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshFirmware_Click"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0" x:Name="FwGroupFilterCombo" Height="34" Margin="0,0,6,0" SelectionChanged="FwFilterCombo_Changed"/>
+                        <ComboBox Grid.Column="1" x:Name="FwSubtypeFilterCombo" Height="34" Margin="0,0,6,0" SelectionChanged="FwFilterCombo_Changed"/>
+                        <ComboBox Grid.Column="2" x:Name="FwControllerFilterCombo" Height="34" Margin="0,0,6,0" SelectionChanged="FwFilterCombo_Changed"/>
+                        <ComboBox Grid.Column="3" x:Name="FwStatusFilterCombo" Height="34" Margin="0,0,6,0" SelectionChanged="FwFilterCombo_Changed"/>
+                        <ComboBox Grid.Column="4" x:Name="FwTagFilterCombo" Height="34" SelectionChanged="FwFilterCombo_Changed"/>
+                    </Grid>
+                    <CheckBox x:Name="FwNeedsModerationCheck" Content="Только требующие модерации" Margin="0,0,0,10"
+                              Checked="FwModerationFilter_Changed" Unchecked="FwModerationFilter_Changed"/>
+                    <DataGrid x:Name="FwGrid" Height="360" AutoGenerateColumns="False" Margin="0,0,0,10"
+                              MouseDoubleClick="FwGrid_MouseDoubleClick" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
+                            <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                            <DataGridTemplateColumn Header="Версия" Width="160">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <views:CopyableVersionText Text="{Binding VersionRaw}" Margin="6,0"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
+                            <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
+                            <DataGridTextColumn Header="Теги" Binding="{Binding Tags}" Width="*"/>
+                        </DataGrid.Columns>
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Редактировать" Margin="0,0,8,0" Click="EditFirmware_Click"/>
+                        <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
+                        <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Click="RollbackFirmware_Click"
+                                ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ МОДЕРАЦИЯ ═══════════════════════════ -->
+                <StackPanel x:Name="ModerationTab" Visibility="Collapsed">
+                    <TextBlock Text="Модерация тегов по загруженным версиям прошивок, ожидающим тегов/описания и подтверждения релиза (см. также «Модерация тегов» в боковом меню)."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="ModerationCountText" Text="Версии без тегов"
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <DataGrid x:Name="ModGrid" Height="360" AutoGenerateColumns="False" Margin="0,0,0,10"
+                              MouseDoubleClick="ModGrid_MouseDoubleClick" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
+                            <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                            <DataGridTemplateColumn Header="Версия" Width="160">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <views:CopyableVersionText Text="{Binding VersionRaw}" Margin="6,0"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Описание" Binding="{Binding Record.Description}" Width="*"/>
+                            <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Добавить теги" Margin="0,0,8,0" Click="ModerateFirmware_Click"/>
+                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshModeration_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ РЕЗЕРВЫ НОМЕРОВ ═══════════════════════════ -->
+                <StackPanel x:Name="ReservationsTab" Visibility="Collapsed">
+                    <TextBlock Text="Открытые резервы номеров версий — номер зафиксирован для вписывания в прошивку до сборки, но ещё не загружен. Отмена (в том числе автоматическая по истечении срока) не освобождает номер для повторного использования."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Срок резерва по умолчанию:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="ReservationTtlInput" Width="64" Height="34" Margin="0,0,8,0"/>
+                        <TextBlock Text="ч (0 — без ограничения)" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Click="SaveReservationTtl_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="ReservationsGrid" Height="360" AutoGenerateColumns="False" Margin="0,0,0,10"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
+                            <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                            <DataGridTemplateColumn Header="Номер" Width="160">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <views:CopyableVersionText Text="{Binding Record.VersionRaw}" Margin="6,0"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Кем зарезервирован" Binding="{Binding Record.ReservedBy}" Width="140"/>
+                            <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="120"/>
+                            <DataGridTextColumn Header="Истекает" Binding="{Binding ExpiresLabel}" Width="140"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Отменить резерв" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CancelReservation_Click"/>
+                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshReservations_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ТЕГИ ═══════════════════════════ -->
+                <StackPanel x:Name="TagsTab" Visibility="Collapsed">
+                    <TextBlock Text="Общий список тегов — доступен при загрузке прошивок и редактировании тегов в Поиске/Модерации/Прошивках. Двойной клик по тегу — переименовать, «×» — удалить (снимется со всех прошивок), «+» в конце — добавить."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <WrapPanel x:Name="TagsBubblesPanel"/>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ БЫСТРЫЙ ДОСТУП ═══════════════════════════ -->
+                <StackPanel x:Name="QuickAppsTab" Visibility="Collapsed">
+                    <TextBlock Text="Ярлыки для быстрого запуска (доступны наладчику в поиске)"
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <DataGrid x:Name="AppsGrid" Height="300" AutoGenerateColumns="False" IsReadOnly="False" Margin="0,0,0,10"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Название" Binding="{Binding Name, Mode=TwoWay}" Width="200"/>
+                            <DataGridTextColumn Header="Путь" Binding="{Binding Path, Mode=TwoWay}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddApp_Click"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DeleteApp_Click"/>
+                        <Button Content="Сохранить" Click="SaveApps_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

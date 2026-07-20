@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- Per-user install into %LocalAppData% — the app's own self-update (AppUpdateService.
+       InstallAndRestart) overwrites its exe in place, which needs write access without admin
+       elevation every time, so this can never install into Program Files. -->
+  <Package Name="Antarus ПО Finder"
+           Manufacturer="Antarus"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="6e74f83e-15ca-46d2-bf18-e927ba2635ad"
+           Scope="perUser"
+           Language="1049">
+
+    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия Antarus ПО Finder. Удалите её перед установкой этой версии." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="Programs">
+        <Directory Id="APPDIR" Name="AntarusPoFinder" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuFolder" Name="Antarus ПО Finder" />
+    </StandardDirectory>
+
+    <!-- Formatted property resolving to the app's data folder (settings DB, local firmware cache —
+         see ConfigService.AppData) so the uninstaller can offer to wipe it too. Sequence="both" so
+         it's set during both install and uninstall (RemoveFolderEx below only fires on uninstall). -->
+    <SetProperty Id="APPDATADIRPROP" Value="[LocalAppDataFolder]AntarusPOFinder" After="CostFinalize" Sequence="both" />
+
+    <Component Id="MainExecutable" Directory="APPDIR" Guid="4f0a2e3e-0e77-4c1a-9c5b-8b1f6b6f3a01">
+      <File Id="AppExe" Source="publish\AntarusPoFinder.App.exe" KeyPath="yes" />
+    </Component>
+
+    <Component Id="CleanupAppData" Directory="APPDIR" Guid="9b6e2a7c-1f4d-4e8a-9b2a-2f6c7a8e5d02">
+      <RegistryValue Root="HKCU" Key="Software\Antarus\AntarusPoFinder" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+      <util:RemoveFolderEx On="uninstall" Property="APPDATADIRPROP" />
+    </Component>
+
+    <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="1c3d5e7f-2a4b-4c6d-8e0f-1a2b3c4d5e03">
+      <Shortcut Id="DesktopShortcut" Name="Antarus ПО Finder" Description="Поиск и загрузка прошивок/параметров"
+                Target="[APPDIR]AntarusPoFinder.App.exe" WorkingDirectory="APPDIR" />
+      <RegistryValue Root="HKCU" Key="Software\Antarus\AntarusPoFinder" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartMenuShortcutComponent" Directory="AppProgramMenuFolder" Guid="2d4e6f80-3b5c-4d7e-9f10-2b3c4d5e6f04">
+      <Shortcut Id="StartMenuShortcut" Name="Antarus ПО Finder" Description="Поиск и загрузка прошивок/параметров"
+                Target="[APPDIR]AntarusPoFinder.App.exe" WorkingDirectory="APPDIR" />
+      <RemoveFolder Id="RemoveAppProgramMenuFolder" Directory="AppProgramMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Antarus\AntarusPoFinder" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="MainApplication" Title="Antarus ПО Finder" Level="1" AllowAbsent="no" AllowAdvertise="no">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="CleanupAppData" />
+      <Feature Id="DesktopShortcutFeature" Title="Ярлык на рабочем столе" Level="1" AllowAdvertise="no">
+        <ComponentRef Id="DesktopShortcutComponent" />
+      </Feature>
+      <Feature Id="StartMenuShortcutFeature" Title="Ярлык в меню Пуск" Level="1" AllowAdvertise="no">
+        <ComponentRef Id="StartMenuShortcutComponent" />
+      </Feature>
+    </Feature>
+
+    <ui:WixUI Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+  </Package>
+</Wix>

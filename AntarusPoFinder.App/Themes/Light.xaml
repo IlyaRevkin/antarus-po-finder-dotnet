@@ -1,0 +1,39 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Catppuccin Latte-based light palette — the standard light counterpart to the dark
+         Mocha palette, same semantic keys so swapping this dictionary in retheming the whole app. -->
+
+    <Color x:Key="BgColor">#EFF1F5</Color>
+    <Color x:Key="BgSidebarColor">#E6E9EF</Color>
+    <Color x:Key="BgCardColor">#FFFFFF</Color>
+    <Color x:Key="BgInputColor">#FFFFFF</Color>
+    <Color x:Key="BorderColor">#BCC0CC</Color>
+    <Color x:Key="AccentColor">#1E66F5</Color>
+    <Color x:Key="AccentHoverColor">#3B7CF7</Color>
+    <Color x:Key="TextColor">#4C4F69</Color>
+    <Color x:Key="TextMutedColor">#6C6F85</Color>
+    <Color x:Key="TextOnAccentColor">#FFFFFF</Color>
+    <Color x:Key="SuccessColor">#40A02B</Color>
+    <Color x:Key="WarningColor">#FE640B</Color>
+    <Color x:Key="ErrorColor">#D20F39</Color>
+    <Color x:Key="TagBgColor">#CCD0DA</Color>
+    <Color x:Key="RolledBackColor">#B85C00</Color>
+
+    <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
+    <SolidColorBrush x:Key="BgSidebarBrush" Color="{StaticResource BgSidebarColor}"/>
+    <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCardColor}"/>
+    <SolidColorBrush x:Key="BgInputBrush" Color="{StaticResource BgInputColor}"/>
+    <SolidColorBrush x:Key="BorderBrush2" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
+    <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="{StaticResource TextOnAccentColor}"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+    <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
+    <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
+    <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
+
+</ResourceDictionary>

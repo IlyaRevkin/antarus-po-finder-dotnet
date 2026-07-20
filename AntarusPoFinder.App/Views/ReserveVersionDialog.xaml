@@ -1,0 +1,25 @@
+<Window x:Class="AntarusPoFinder.App.Views.ReserveVersionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Резерв номера версии" Width="480" SizeToContent="Height"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <TextBlock Text="Номер версии зарезервирован" Style="{StaticResource SubtitleText}" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+        <TextBlock Text="МЕТКА ДЛЯ ПРОШИВКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <Border Style="{StaticResource CardBorder}" Margin="0,0,0,8">
+            <TextBlock x:Name="LabelText" Text="" TextWrapping="Wrap" FontFamily="Consolas"/>
+        </Border>
+        <Button x:Name="CopyBtn" Content="Копировать" Style="{StaticResource SecondaryButton}"
+                HorizontalAlignment="Left" Click="Copy_Click" Margin="0,0,0,16"/>
+
+        <TextBlock Text="Впишите эту метку (или как минимум номер версии) внутрь прошивки перед сборкой. Затем сохраните и загрузите прошивку через Загрузку как обычно — резерв будет предложен автоматически для того же шкафа/подтипа/контроллера, и итоговый файл получит ровно этот номер."
+                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Закрыть" IsCancel="True" Click="Close_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

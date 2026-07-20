@@ -1,0 +1,69 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.SearchView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Поиск" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+
+        <!-- Search bar -->
+        <Grid Grid.Row="1" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0" x:Name="SearchInput" Height="38" Margin="0,0,8,0"
+                     VerticalContentAlignment="Center"
+                     ToolTip="Введите название шкафа — напр. «НГР КПЧ SMH5» или «ПЖ KINCO»"
+                     KeyDown="SearchInput_KeyDown"/>
+            <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"/>
+            <Button Grid.Column="2" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
+        </Grid>
+
+        <!-- Search mode: firmware vs. parameter files vs. cabinet schematics (second disk) — one
+             three-way sliding toggle (ModeThumb glides under the checked segment) instead of three
+             separately-styled pill buttons. -->
+        <StackPanel x:Name="ModeSelectorPanel" Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <Border CornerRadius="15" Padding="3" Margin="0,0,16,0"
+                    Background="{DynamicResource BgInputBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+                <Grid>
+                    <Border x:Name="ModeThumb" Width="150" Height="26" CornerRadius="13"
+                            Background="{DynamicResource AccentBrush}" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <Border.RenderTransform>
+                            <TranslateTransform x:Name="ModeThumbTransform" X="0"/>
+                        </Border.RenderTransform>
+                    </Border>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="FwModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
+                                     Content="Прошивки" Width="150" Height="26" IsChecked="True" Checked="SearchMode_Changed"/>
+                        <RadioButton x:Name="ParamsModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
+                                     Content="Параметры ПЧ/УПП" Width="150" Height="26" Checked="SearchMode_Changed"/>
+                        <RadioButton x:Name="SchemasModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
+                                     Content="Схемы" Width="150" Height="26" Checked="SearchMode_Changed"
+                                     ToolTip="Поиск электросхем шкафов на втором диске — по всем папкам, частичное совпадение по названию"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <CheckBox x:Name="ExactWordCheck" Content="Точное совпадение слова" VerticalAlignment="Center"
+                      ToolTip="Например, чтобы «ПЧ» не находило «КПЧ» — совпадение только по целому слову"
+                      Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>
+
+        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <TextBlock x:Name="EmptyLabel" Text="Введите запрос и нажмите «Найти»" Style="{StaticResource MutedText}"
+                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0"/>
+                <StackPanel x:Name="ResultsPanel"/>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

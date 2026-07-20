@@ -1,0 +1,29 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.FirmwareCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
+    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
+        <StackPanel>
+            <StackPanel Orientation="Horizontal" Cursor="Hand" MouseLeftButtonUp="Header_Click"
+                        ToolTip="Нажмите, чтобы скопировать имя и версию">
+                <TextBlock x:Name="NameLabel" FontWeight="Bold" FontSize="14"/>
+                <TextBlock Text="   "/>
+                <TextBlock x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0"/>
+            <TextBlock x:Name="DescLabel" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            <views:TagBubbleEditor x:Name="TagsView" Margin="0,4,0,0"/>
+
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" x:Name="SoftwareNameLabel" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" x:Name="CopyButton" Content="Копировать" Style="{StaticResource SecondaryButton}" Click="Copy_Click"/>
+            </Grid>
+
+            <WrapPanel x:Name="ActionsPanel" Margin="0,8,0,0"/>
+        </StackPanel>
+    </Border>
+</UserControl>

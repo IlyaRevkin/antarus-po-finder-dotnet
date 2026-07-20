@@ -1,0 +1,29 @@
+## .NET
+bin/
+obj/
+publish/
+*.user
+*.pdb
+
+## Installer build output (built from installer/Package.wxs — never the source)
+installer/*.msi
+installer/*.wixpdb
+installer/*.log
+.wix/
+
+## Local runtime data (never ship a real firmware database)
+*.db
+*.db-shm
+*.db-wal
+
+## Test/automation scratch (screenshots, throwaway scripts — never app code)
+AntarusPoFinder.Tests/scratch/
+
+## IDE
+.vs/
+.vscode/
+*.suo
+
+## OS
+Thumbs.db
+.DS_Store

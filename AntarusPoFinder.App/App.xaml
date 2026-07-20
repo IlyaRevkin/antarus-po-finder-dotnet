@@ -1,0 +1,19 @@
+﻿<Application x:Class="AntarusPoFinder.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:AntarusPoFinder.App"
+             xmlns:conv="clr-namespace:AntarusPoFinder.App.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary x:Name="ThemeDictionary" Source="Themes/Light.xaml"/>
+                <ResourceDictionary Source="Themes/Icons.xaml"/>
+                <ResourceDictionary Source="Themes/Styles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+            <conv:ActiveTagConverter x:Key="ActiveTagConverter"/>
+            <conv:CountToVisibilityConverter x:Key="CountToVis"/>
+            <conv:NullToVisibilityConverter x:Key="NullToVis"/>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,392 @@
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using AntarusPoFinder.Core.Domain;
+
+namespace AntarusPoFinder.Core.Data;
+
+public partial class Database
+{
+    public int AddFwVersion(FwVersionRecord v)
+    {
+        ExecuteNonQuery("""
+            INSERT INTO fw_versions
+               (subtype_id,controller_id,eq_prefix,sub_prefix,hw_version,sw_version,
+                dt_str,version_raw,filename,disk_path,local_path,description,changelog,
+                launch_types,io_map_path,instructions_path,is_opc,request_num,cabinet_sn,archived,
+                upload_date,tags,author_id,status)
+            VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
+                @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
+                @launch_types,@io_map_path,@instructions_path,@is_opc,@request_num,@cabinet_sn,0,
+                @upload_date,@tags,@author_id,@status)
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@subtype_id", v.SubtypeId);
+            cmd.Parameters.AddWithValue("@controller_id", v.ControllerId);
+            cmd.Parameters.AddWithValue("@eq_prefix", v.EqPrefix);
+            cmd.Parameters.AddWithValue("@sub_prefix", v.SubPrefix);
+            cmd.Parameters.AddWithValue("@hw_version", v.HwVersion);
+            cmd.Parameters.AddWithValue("@sw_version", v.SwVersion);
+            cmd.Parameters.AddWithValue("@dt_str", v.DtStr);
+            cmd.Parameters.AddWithValue("@version_raw", v.VersionRaw);
+            cmd.Parameters.AddWithValue("@filename", v.Filename);
+            cmd.Parameters.AddWithValue("@disk_path", v.DiskPath);
+            cmd.Parameters.AddWithValue("@local_path", v.LocalPath);
+            cmd.Parameters.AddWithValue("@description", v.Description);
+            cmd.Parameters.AddWithValue("@changelog", v.Changelog);
+            cmd.Parameters.AddWithValue("@launch_types", JsonSerializer.Serialize(v.LaunchTypes));
+            cmd.Parameters.AddWithValue("@io_map_path", v.IoMapPath);
+            cmd.Parameters.AddWithValue("@instructions_path", v.InstructionsPath);
+            cmd.Parameters.AddWithValue("@is_opc", v.IsOpc ? 1 : 0);
+            cmd.Parameters.AddWithValue("@request_num", v.RequestNum);
+            cmd.Parameters.AddWithValue("@cabinet_sn", v.CabinetSn);
+            cmd.Parameters.AddWithValue("@upload_date", NowIso());
+            cmd.Parameters.AddWithValue("@tags", v.Tags);
+            cmd.Parameters.AddWithValue("@author_id", (object?)v.AuthorId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@status", v.Status);
+        });
+        var id = ExecuteScalar("SELECT last_insert_rowid()");
+        return id is long l ? (int)l : -1;
+    }
+
+    /// <summary>Update editable fields (description, tags, launch_types) of a fw_version.</summary>
+    public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null)
+    {
+        var sets = new List<string>();
+        var values = new List<(string, object)>();
+        if (description is not null) { sets.Add("description=@description"); values.Add(("@description", description)); }
+        if (tags is not null) { sets.Add("tags=@tags"); values.Add(("@tags", tags)); }
+        if (launchTypes is not null) { sets.Add("launch_types=@launch_types"); values.Add(("@launch_types", JsonSerializer.Serialize(launchTypes))); }
+        if (sets.Count == 0) return;
+
+        ExecuteNonQuery($"UPDATE fw_versions SET {string.Join(", ", sets)} WHERE id=@id", cmd =>
+        {
+            foreach (var (name, value) in values)
+                cmd.Parameters.AddWithValue(name, value);
+            cmd.Parameters.AddWithValue("@id", versionId);
+        });
+    }
+
+    public int DuplicateFwVersion(int versionId)
+    {
+        var row = GetFwVersionById(versionId);
+        if (row is null) return -1;
+
+        ExecuteNonQuery("""
+            INSERT INTO fw_versions
+               (subtype_id,controller_id,eq_prefix,sub_prefix,hw_version,sw_version,
+                dt_str,version_raw,filename,disk_path,local_path,description,changelog,
+                launch_types,io_map_path,instructions_path,is_opc,request_num,cabinet_sn,archived,
+                upload_date,tags)
+            VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
+                @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
+                @launch_types,@io_map_path,@instructions_path,@is_opc,@request_num,@cabinet_sn,0,
+                @upload_date,@tags)
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@subtype_id", row.SubtypeId);
+            cmd.Parameters.AddWithValue("@controller_id", row.ControllerId);
+            cmd.Parameters.AddWithValue("@eq_prefix", row.EqPrefix);
+            cmd.Parameters.AddWithValue("@sub_prefix", row.SubPrefix);
+            cmd.Parameters.AddWithValue("@hw_version", row.HwVersion);
+            cmd.Parameters.AddWithValue("@sw_version", row.SwVersion);
+            cmd.Parameters.AddWithValue("@dt_str", row.DtStr);
+            cmd.Parameters.AddWithValue("@version_raw", row.VersionRaw);
+            cmd.Parameters.AddWithValue("@filename", row.Filename);
+            cmd.Parameters.AddWithValue("@disk_path", row.DiskPath);
+            cmd.Parameters.AddWithValue("@local_path", row.LocalPath);
+            cmd.Parameters.AddWithValue("@description", row.Description);
+            cmd.Parameters.AddWithValue("@changelog", row.Changelog);
+            cmd.Parameters.AddWithValue("@launch_types", JsonSerializer.Serialize(row.LaunchTypes));
+            cmd.Parameters.AddWithValue("@io_map_path", row.IoMapPath);
+            cmd.Parameters.AddWithValue("@instructions_path", row.InstructionsPath);
+            cmd.Parameters.AddWithValue("@is_opc", row.IsOpc ? 1 : 0);
+            cmd.Parameters.AddWithValue("@request_num", row.RequestNum);
+            cmd.Parameters.AddWithValue("@cabinet_sn", row.CabinetSn);
+            cmd.Parameters.AddWithValue("@upload_date", NowIso());
+            cmd.Parameters.AddWithValue("@tags", row.Tags);
+        });
+        var id = ExecuteScalar("SELECT last_insert_rowid()");
+        return id is long l ? (int)l : -1;
+    }
+
+    public FwVersionRecord? GetFwVersionById(int id)
+    {
+        using var reader = ExecuteReader("SELECT * FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+        return reader.Read() ? ReadFwVersion(reader) : null;
+    }
+
+    public List<FwVersionRecord> GetAllFwVersionsWithNames(bool includeArchived = false)
+    {
+        var sql = """
+            SELECT fv.*, eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            """;
+        if (!includeArchived) sql += " WHERE fv.archived = 0";
+        sql += " ORDER BY eg.name, es.name, cm.name, fv.hw_version DESC, fv.sw_version DESC, fv.dt_str DESC";
+
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader(sql);
+        while (reader.Read())
+        {
+            var rec = ReadFwVersion(reader);
+            rec.GroupName = GetString(reader, "group_name");
+            rec.SubtypeName = GetString(reader, "subtype_name");
+            rec.CtrlName = GetString(reader, "ctrl_name");
+            result.Add(rec);
+        }
+        return result;
+    }
+
+    /// <summary>Non-archived, non-rolled-back versions still awaiting moderation (released = 0) —
+    /// feeds both the Settings→Прошивки→Модерация tab and the sidebar "Модерация тегов" page.
+    /// A version leaves this list only when a user explicitly confirms "release from moderation"
+    /// (see MarkFwVersionReleased) — adding tags alone no longer moves it out on its own.</summary>
+    public List<FwVersionRecord> GetUnreleasedFwVersionsWithNames()
+    {
+        const string sql = """
+            SELECT fv.*, eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
+            ORDER BY fv.upload_date DESC
+            """;
+
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader(sql);
+        while (reader.Read())
+        {
+            var rec = ReadFwVersion(reader);
+            rec.GroupName = GetString(reader, "group_name");
+            rec.SubtypeName = GetString(reader, "subtype_name");
+            rec.CtrlName = GetString(reader, "ctrl_name");
+            result.Add(rec);
+        }
+        return result;
+    }
+
+    public int GetUnreleasedFwVersionsCount()
+    {
+        var result = ExecuteScalar("""
+            SELECT COUNT(*) FROM fw_versions
+            WHERE archived = 0 AND (status IS NULL OR status = 'active') AND released = 0
+            """);
+        return result is long l ? (int)l : 0;
+    }
+
+    /// <summary>Marks a version as released from moderation — set only after the user explicitly
+    /// confirms the "вывести из модерации и сделать релизной?" prompt.</summary>
+    public void MarkFwVersionReleased(int versionId) =>
+        ExecuteNonQuery("UPDATE fw_versions SET released = 1 WHERE id = @id", cmd => cmd.Parameters.AddWithValue("@id", versionId));
+
+    public List<FwVersionRecord> GetFwVersions(int? subtypeId = null, int? controllerId = null,
+        bool includeArchived = false, bool includeRolledBack = false)
+    {
+        var sql = "SELECT * FROM fw_versions WHERE 1=1";
+        var binds = new List<(string, object)>();
+        if (subtypeId is not null) { sql += " AND subtype_id=@s"; binds.Add(("@s", subtypeId.Value)); }
+        if (controllerId is not null) { sql += " AND controller_id=@c"; binds.Add(("@c", controllerId.Value)); }
+        if (!includeArchived) sql += " AND archived=0";
+        if (!includeRolledBack) sql += " AND (status IS NULL OR status='active')";
+        // dt_str is empty when a version was created with "Добавлять дату/время" unchecked — id DESC
+        // as the final tiebreak keeps recency ordering correct even when dt_str ties (e.g. all empty).
+        sql += " ORDER BY dt_str DESC, hw_version DESC, sw_version DESC, id DESC";
+
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader(sql, cmd =>
+        {
+            foreach (var (name, value) in binds)
+                cmd.Parameters.AddWithValue(name, value);
+        });
+        while (reader.Read())
+            result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
+    /// currently-open reservations (see Database.FwVersionReservations.cs) for this exact
+    /// (subtype, controller, hw_version) combo. Including reservations here is what makes the live
+    /// preview (before any reservation exists) never suggest a number someone else already locked in.</summary>
+    public int GetNextSwVersion(int subtypeId, int controllerId, int hwVersion)
+    {
+        var result = ExecuteScalar("""
+            SELECT MAX(sw_version) FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+            AND (status IS NULL OR status='active')
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+            cmd.Parameters.AddWithValue("@h", hwVersion);
+        });
+        int activeMax = result is long l ? (int)l : 0;
+        int reservedMax = GetReservedMaxSwVersion(subtypeId, controllerId, hwVersion);
+        return System.Math.Max(activeMax, reservedMax) + 1;
+    }
+
+    public User GetOrCreateUser(string windowsLogin, string name)
+    {
+        using (var reader = ExecuteReader("SELECT * FROM users WHERE windows_login=@w",
+                   cmd => cmd.Parameters.AddWithValue("@w", windowsLogin)))
+        {
+            if (reader.Read())
+            {
+                return new User
+                {
+                    Id = GetInt(reader, "id"),
+                    Name = GetString(reader, "name"),
+                    WindowsLogin = GetString(reader, "windows_login"),
+                    CreatedAt = GetString(reader, "created_at"),
+                };
+            }
+        }
+
+        ExecuteNonQuery("INSERT INTO users (name, windows_login, created_at) VALUES (@n,@w,@c)", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@n", name);
+            cmd.Parameters.AddWithValue("@w", windowsLogin);
+            cmd.Parameters.AddWithValue("@c", NowIso());
+        });
+        var id = ExecuteScalar("SELECT last_insert_rowid()");
+        return new User { Id = id is long l2 ? (int)l2 : -1, Name = name, WindowsLogin = windowsLogin };
+    }
+
+    public bool RollbackFwVersion(int fwVersionId)
+    {
+        var exists = ExecuteScalar("SELECT status FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        if (exists is null) return false;
+        ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back' WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        return true;
+    }
+
+    public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion)
+    {
+        using var reader = ExecuteReader("""
+            SELECT * FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+            AND (status IS NULL OR status='active') AND archived=0
+            ORDER BY sw_version DESC, dt_str DESC LIMIT 1
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+            cmd.Parameters.AddWithValue("@h", hwVersion);
+        });
+        return reader.Read() ? ReadFwVersion(reader) : null;
+    }
+
+    public List<FwVersionRecord> GetFwVersionsHistory(int subtypeId, int controllerId, bool includeArchived = false)
+    {
+        var sql = """
+            SELECT fv.*, cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN controller_models cm ON fv.controller_id = cm.id
+            WHERE fv.subtype_id=@s AND fv.controller_id=@c
+            """;
+        if (!includeArchived) sql += " AND fv.archived=0";
+        sql += " ORDER BY fv.dt_str DESC, fv.hw_version DESC, fv.sw_version DESC, fv.id DESC";
+
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader(sql, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+        });
+        while (reader.Read())
+        {
+            var rec = ReadFwVersion(reader);
+            rec.CtrlName = GetString(reader, "ctrl_name");
+            result.Add(rec);
+        }
+        return result;
+    }
+
+    /// <summary>The newest active fw_version per (subtype_id, controller_id) — one row per firmware,
+    /// same grouping key as SearchFwVersionsByTokens but without the token/score filter. Feeds the
+    /// background firmware-update scan, which needs "what's the latest on the server" for every
+    /// firmware the naladchik has ever downloaded, not just ones matching a search query.</summary>
+    public List<FwVersionRecord> GetLatestActiveFwVersions()
+    {
+        var rows = new List<FwVersionRecord>();
+        using (var reader = ExecuteReader("""
+            SELECT fv.*,
+                   eg.name AS group_name,
+                   es.name AS subtype_name,
+                   es.folder_name AS subtype_folder,
+                   cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id  = es.id
+            JOIN equipment_groups   eg ON es.group_id    = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active')
+            ORDER BY fv.id DESC
+            """))
+        {
+            while (reader.Read())
+            {
+                var rec = ReadFwVersion(reader);
+                rec.GroupName = GetString(reader, "group_name");
+                rec.SubtypeName = GetString(reader, "subtype_name");
+                rec.SubtypeFolder = GetString(reader, "subtype_folder");
+                rec.CtrlName = GetString(reader, "ctrl_name");
+                rows.Add(rec);
+            }
+        }
+
+        var seen = new HashSet<(int, int)>();
+        var result = new List<FwVersionRecord>();
+        foreach (var row in rows)
+        {
+            if (seen.Add((row.SubtypeId, row.ControllerId)))
+                result.Add(row);
+        }
+        return result;
+    }
+
+    public void ArchiveFwVersion(int versionId) =>
+        ExecuteNonQuery("UPDATE fw_versions SET archived=1 WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", versionId));
+
+    private static FwVersionRecord ReadFwVersion(SqliteDataReader r)
+    {
+        var launchTypesJson = GetString(r, "launch_types", "[]");
+        List<string> launchTypes;
+        try { launchTypes = JsonSerializer.Deserialize<List<string>>(launchTypesJson) ?? new(); }
+        catch { launchTypes = new(); }
+
+        return new FwVersionRecord
+        {
+            Id = GetInt(r, "id"),
+            SubtypeId = GetInt(r, "subtype_id"),
+            ControllerId = GetInt(r, "controller_id"),
+            EqPrefix = GetInt(r, "eq_prefix"),
+            SubPrefix = GetInt(r, "sub_prefix"),
+            HwVersion = GetInt(r, "hw_version"),
+            SwVersion = GetInt(r, "sw_version"),
+            DtStr = GetString(r, "dt_str"),
+            VersionRaw = GetString(r, "version_raw"),
+            Filename = GetString(r, "filename"),
+            DiskPath = GetString(r, "disk_path"),
+            LocalPath = GetString(r, "local_path"),
+            Description = GetString(r, "description"),
+            Changelog = GetString(r, "changelog"),
+            LaunchTypes = launchTypes,
+            IoMapPath = GetString(r, "io_map_path"),
+            InstructionsPath = GetString(r, "instructions_path"),
+            IsOpc = GetBool(r, "is_opc"),
+            RequestNum = GetString(r, "request_num"),
+            CabinetSn = GetString(r, "cabinet_sn"),
+            Archived = GetBool(r, "archived"),
+            UploadDate = GetString(r, "upload_date"),
+            Tags = GetString(r, "tags"),
+            AuthorId = GetIntOrNull(r, "author_id"),
+            Status = GetString(r, "status", "active"),
+            Released = GetBool(r, "released"),
+        };
+    }
+}

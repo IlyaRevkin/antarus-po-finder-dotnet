@@ -1,0 +1,1218 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using AntarusPoFinder.App.ViewModels;
+using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
+
+using AntarusPoFinder.App;
+
+namespace AntarusPoFinder.App.Views;
+
+public partial class SettingsView : UserControl
+{
+    private readonly AppServices _services;
+    private readonly IAppHost _host;
+    private List<FwVersionRecord> _fwVersionsData = new();
+
+    /// <summary>One row per subtype — the unified ТИПЫ/ПОДТИПЫ table. A group always has at least
+    /// one subtype row (see Database.EnsureEveryGroupHasSubtype), so this is also the complete list
+    /// of groups; there's no separate group-only grid to keep in sync with it.</summary>
+    private class HierarchyRow
+    {
+        public EquipmentGroup Group { get; init; } = null!;
+        public EquipmentSubType Subtype { get; init; } = null!;
+        public string GroupName => Group.Name;
+        public int GroupPrefix => Group.Prefix;
+        public string SubtypeName => Subtype.Name;
+        public int SubtypePrefix => Subtype.Prefix;
+        public string FolderName => Subtype.FolderName;
+    }
+
+    /// <summary>Flattens controller types + their modifications into one grid: one row per modification,
+    /// or a single placeholder row (ModificationId null) for a type that has none yet.</summary>
+    private class ControllerModRow
+    {
+        public int ControllerId { get; init; }
+        public string ControllerName { get; init; } = "";
+        public int SortOrder { get; init; }
+        public int? ModificationId { get; init; }
+        public string DisplayName { get; init; } = "";
+        public int HwVersion { get; init; }
+        public string Description { get; init; } = "";
+        public string HwVersionText => ModificationId.HasValue ? HwVersion.ToString() : "—";
+    }
+
+    private class FwRow
+    {
+        public FwVersionRecord Record { get; init; } = null!;
+        public string GroupName => Record.GroupName;
+        public string SubtypeName => Record.SubtypeName;
+        public string CtrlName => Record.CtrlName;
+        public string VersionRaw => Record.VersionRaw;
+        public string Tags => Record.Tags;
+        public string DateOnly => Record.UploadDate.Length >= 10 ? Record.UploadDate[..10] : Record.UploadDate;
+        public bool IsRolledBack => Record.Status == "rolled_back";
+        public string StatusLabel => IsRolledBack ? "Откатана" : "Активна";
+    }
+
+    private class ReservationRow
+    {
+        public FwVersionReservation Record { get; init; } = null!;
+        public string GroupName => Record.GroupName;
+        public string SubtypeName => Record.SubtypeName;
+        public string CtrlName => Record.CtrlName;
+        public string DateOnly => Record.ReservedAt.Length >= 10 ? Record.ReservedAt[..10] : Record.ReservedAt;
+        public string ExpiresLabel => string.IsNullOrEmpty(Record.ExpiresAt) ? "не истекает" : Record.ExpiresAt;
+    }
+
+    private class AppRow
+    {
+        public string Name { get; set; } = "";
+        public string Path { get; set; } = "";
+    }
+
+    private class AppVersionOption
+    {
+        public UpdateRelease Release { get; init; } = null!;
+        public string Label => Release.Version == AppUpdateService.CurrentVersion
+            ? $"{Release.Version} (текущая)"
+            : Release.Version.ToString();
+    }
+
+    private UpdateRelease? _latestAppRelease;
+
+    /// <summary>See SearchView.OnboardingTarget for why this exists — same reasoning.</summary>
+    public FrameworkElement? OnboardingTarget(string key) => key switch
+    {
+        "tabbar" => TabBar,
+        _ => null,
+    };
+
+    public SettingsView(AppServices services, IAppHost host)
+    {
+        InitializeComponent();
+        _services = services;
+        _host = host;
+        Loaded += (_, _) =>
+        {
+            LoadGeneral();
+            LoadHierarchy();
+            LoadFirmwareTab();
+            LoadQuickApps();
+        };
+    }
+
+    // ── Tab switching ─────────────────────────────────────────────────────────
+
+    private void Tab_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var btn in new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps })
+            btn.Tag = null;
+        ((Button)sender).Tag = "Active";
+
+        GeneralTab.Visibility = Visibility.Collapsed;
+        HierarchyTab.Visibility = Visibility.Collapsed;
+        FirmwareTab.Visibility = Visibility.Collapsed;
+        ModerationTab.Visibility = Visibility.Collapsed;
+        ReservationsTab.Visibility = Visibility.Collapsed;
+        TagsTab.Visibility = Visibility.Collapsed;
+        QuickAppsTab.Visibility = Visibility.Collapsed;
+
+        if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
+        else if (sender == TabBtnHierarchy) HierarchyTab.Visibility = Visibility.Visible;
+        else if (sender == TabBtnFirmware) FirmwareTab.Visibility = Visibility.Visible;
+        else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
+        else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
+        else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
+        else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
+    }
+
+    // ── Nested-scroll bubbling ───────────────────────────────────────────────
+    // Every tab's grids/lists sit inside one long MainScrollViewer. Each grid/list has its own
+    // internal ScrollViewer, and WPF's default behavior marks a mouse-wheel event as handled the
+    // moment the inner ScrollViewer touches it — even once it's already at the top/bottom — so the
+    // wheel never reaches MainScrollViewer and scrolling the page while hovering a table gets stuck.
+    // This forwards the wheel to MainScrollViewer once the inner one has nowhere left to scroll.
+
+    private void ScrollableChild_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not DependencyObject d) return;
+        var inner = FindVisualChild<ScrollViewer>(d);
+        bool atLimit = inner is null || inner.ScrollableHeight <= 0
+            || (e.Delta > 0 && inner.VerticalOffset <= 0)
+            || (e.Delta < 0 && inner.VerticalOffset >= inner.ScrollableHeight);
+        if (!atLimit) return;
+
+        e.Handled = true;
+        MainScrollViewer.ScrollToVerticalOffset(MainScrollViewer.VerticalOffset - e.Delta);
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null) return descendant;
+        }
+        return null;
+    }
+
+    // ── Резервы номеров ───────────────────────────────────────────────────────
+
+    private void LoadReservationsTab()
+    {
+        ReservationsGrid.ItemsSource = _services.Db.GetAllOpenReservations().Select(r => new ReservationRow { Record = r }).ToList();
+        ReservationTtlInput.Text = _services.Cfg.ReservationTtlHours().ToString();
+    }
+
+    private void RefreshReservations_Click(object sender, RoutedEventArgs e) => LoadReservationsTab();
+
+    private void SaveReservationTtl_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(ReservationTtlInput.Text.Trim(), out var hours) || hours < 0)
+        {
+            AppMessageBox.Show("Введите целое число часов (0 — без ограничения).", "Резервы номеров", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _services.Cfg.SetReservationTtlHours(hours);
+        _host.ShowStatus(hours == 0 ? "Резервы номеров больше не истекают по умолчанию" : $"Срок резерва по умолчанию: {hours} ч");
+    }
+
+    private void CancelReservation_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReservationsGrid.SelectedItem is not ReservationRow row)
+        {
+            AppMessageBox.Show("Выберите резерв в таблице.", "Резервы номеров", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var reply = AppMessageBox.Show(
+            $"Отменить резерв номера {row.Record.VersionRaw}?\n\nНомер не будет использован повторно — следующая загрузка получит следующий свободный номер.",
+            "Отменить резерв", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.CancelReservation(row.Record.Id!.Value);
+        _host.ShowStatus($"Резерв отменён: {row.Record.VersionRaw}");
+        LoadReservationsTab();
+    }
+
+    // ── Теги ──────────────────────────────────────────────────────────────────
+    // Баблы вместо таблицы (как TagBubbleEditor, но с другой семантикой: тут это глобальный
+    // список тегов — двойной клик переименовывает тег ВЕЗДЕ, "×" удаляет его из системы совсем,
+    // а не просто отвязывает от одной записи, как в TagBubbleEditor).
+
+    private string? _renamingTag;
+    private bool _addingTag;
+
+    private void LoadTagsTab()
+    {
+        _renamingTag = null;
+        _addingTag = false;
+        RenderTagsTab();
+    }
+
+    private void RenderTagsTab()
+    {
+        TagsBubblesPanel.Children.Clear();
+        foreach (var tag in _services.Db.GetAllTags())
+            TagsBubblesPanel.Children.Add(tag == _renamingTag ? MakeTagRenameBubble(tag) : MakeTagBubble(tag));
+        TagsBubblesPanel.Children.Add(_addingTag ? MakeTagAddInputBubble() : MakeTagAddButtonBubble());
+    }
+
+    private Border MakeTagBubble(string tag)
+    {
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        var text = new TextBlock { Text = tag, VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand };
+        text.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ClickCount != 2) return;
+            _renamingTag = tag;
+            RenderTagsTab();
+        };
+        panel.Children.Add(text);
+
+        var removeBtn = new Button { Content = "×", Style = (Style)FindResource("TagRemoveButton"), Margin = new Thickness(6, 0, 0, 0) };
+        removeBtn.Click += (_, _) =>
+        {
+            var reply = AppMessageBox.Show($"Удалить тег «{tag}»? Он будет снят со всех прошивок.", "Удалить тег",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (reply != MessageBoxResult.Yes) return;
+            _services.Db.DeleteTag(tag);
+            LoadTagsTab();
+        };
+        panel.Children.Add(removeBtn);
+
+        return new Border { Style = (Style)FindResource("TagBubbleBorder"), Child = panel, Margin = new Thickness(0, 0, 6, 6) };
+    }
+
+    private Border MakeTagRenameBubble(string tag)
+    {
+        var input = new TextBox
+        {
+            Text = tag, Width = 100, Height = 24, VerticalContentAlignment = VerticalAlignment.Center,
+            BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0),
+        };
+        input.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { CommitTagRename(tag, input.Text); e.Handled = true; }
+            else if (e.Key == Key.Escape) { _renamingTag = null; RenderTagsTab(); e.Handled = true; }
+        };
+        input.LostFocus += (_, _) => CommitTagRename(tag, input.Text);
+        input.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
+        return new Border { Style = (Style)FindResource("TagBubbleBorder"), Child = input, Margin = new Thickness(0, 0, 6, 6) };
+    }
+
+    private void CommitTagRename(string oldTag, string newTextRaw)
+    {
+        _renamingTag = null;
+        var newText = newTextRaw.Trim();
+        if (newText.Length == 0 || newText.Equals(oldTag, StringComparison.OrdinalIgnoreCase)) { RenderTagsTab(); return; }
+        _services.Db.RenameTag(oldTag, newText);
+        LoadTagsTab();
+        _host.ShowStatus($"Тег переименован: «{oldTag}» → «{newText}»");
+    }
+
+    private Border MakeTagAddButtonBubble()
+    {
+        var btn = new Button { Content = "+ тег", Style = (Style)FindResource("TagAddButton") };
+        btn.Click += (_, _) => { _addingTag = true; RenderTagsTab(); };
+        return new Border { Child = btn, Margin = new Thickness(0, 0, 6, 6) };
+    }
+
+    private Border MakeTagAddInputBubble()
+    {
+        var input = new TextBox
+        {
+            Width = 100, Height = 24, VerticalContentAlignment = VerticalAlignment.Center,
+            BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0),
+        };
+        input.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { CommitTagAdd(input.Text); e.Handled = true; }
+            else if (e.Key == Key.Escape) { _addingTag = false; RenderTagsTab(); e.Handled = true; }
+        };
+        input.LostFocus += (_, _) => CommitTagAdd(input.Text);
+        input.Loaded += (_, _) => input.Focus();
+        return new Border { Style = (Style)FindResource("TagBubbleBorder"), Child = input, Margin = new Thickness(0, 0, 6, 6) };
+    }
+
+    private void CommitTagAdd(string rawText)
+    {
+        _addingTag = false;
+        var name = rawText.Trim();
+        if (name.Length == 0) { RenderTagsTab(); return; }
+        _services.Db.AddTag(name);
+        LoadTagsTab();
+    }
+
+    // ── Общие ─────────────────────────────────────────────────────────────────
+
+    private void LoadGeneral()
+    {
+        RoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
+        RoleCombo.SelectedValuePath = "RoleId";
+        RoleCombo.SelectedValue = _services.Cfg.CurrentRole();
+
+        AdminPwdInput.Password = _services.Cfg.AdminPassword();
+        ProgPwdInput.Password = _services.Cfg.ProgrammerPassword();
+
+        AdDomainInput.Text = _services.Cfg.Get("ad_domain");
+        AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
+        AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
+
+        KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
+
+        AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
+        AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
+        AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
+    }
+
+    private void BrowseAppUpdatePath_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка обновлений" };
+        if (dlg.ShowDialog() == true) AppUpdatePathInput.Text = dlg.FolderName;
+    }
+
+    private void SaveAppUpdatePath_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetAppUpdatePath(AppUpdatePathInput.Text.Trim());
+        _services.Cfg.SetAppAutoUpdate(AppAutoUpdateCheck.IsChecked == true);
+        _host.ShowStatus("Настройки обновлений сохранены");
+    }
+
+    private async void CheckAppUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        AppUpdateStatusText.Text = "Проверка обновлений…";
+        InstallLatestBtn.IsEnabled = false;
+
+        UpdateCheckResult result;
+        try
+        {
+            result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.AppUpdatePath());
+        }
+        catch (Exception ex)
+        {
+            AppUpdateStatusText.Text = $"Не удалось проверить обновления: {AppUpdateService.DescribeError(ex)}";
+            _latestAppRelease = null;
+            AppVersionsCombo.ItemsSource = null;
+            return;
+        }
+
+        AppVersionsCombo.ItemsSource = result.Releases.Select(r => new AppVersionOption { Release = r }).ToList();
+        if (result.Releases.Count > 0) AppVersionsCombo.SelectedIndex = 0;
+
+        if (result.Releases.Count == 0)
+        {
+            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Релизов не найдено.";
+            _latestAppRelease = null;
+            return;
+        }
+
+        _latestAppRelease = result.Releases[0];
+        var current = AppUpdateService.CurrentVersion;
+        if (_latestAppRelease.Version > current)
+        {
+            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Доступна новая версия: {_latestAppRelease.Version} (текущая {current}).";
+            InstallLatestBtn.IsEnabled = true;
+        }
+        else
+        {
+            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Установлена актуальная версия ({current}). Найдено версий: {result.Releases.Count}.";
+        }
+    }
+
+    private void InstallLatestUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_latestAppRelease == null) return;
+        InstallAppVersion(_latestAppRelease);
+    }
+
+    private void InstallSelectedVersion_Click(object sender, RoutedEventArgs e)
+    {
+        if (AppVersionsCombo.SelectedItem is not AppVersionOption option)
+        {
+            AppMessageBox.Show("Сначала нажмите «Проверить обновления» и выберите версию.", "Установка версии",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        InstallAppVersion(option.Release);
+    }
+
+    private async void InstallAppVersion(UpdateRelease release)
+    {
+        var current = AppUpdateService.CurrentVersion;
+        var direction = release.Version > current ? "Обновить" : release.Version < current ? "Откатить" : "Переустановить";
+        var reply = AppMessageBox.Show(
+            $"{direction} приложение до версии {release.Version}?\n\nПриложение закроется и перезапустится автоматически.",
+            "Установка версии", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (reply != MessageBoxResult.Yes) return;
+
+        try
+        {
+            await AppUpdateService.InstallAndRestartAsync(release);
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось установить версию:\n{AppUpdateService.DescribeError(ex)}", "Установка версии",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void SwitchRole_Click(object sender, RoutedEventArgs e)
+    {
+        if (RoleCombo.SelectedItem is not RoleOption selected) return;
+        var password = RolePasswordInput.Password;
+
+        string? error = selected.RoleId switch
+        {
+            "administrator" when password != _services.Cfg.AdminPassword() => "Неверный пароль администратора.",
+            "programmer" when !string.IsNullOrEmpty(_services.Cfg.ProgrammerPassword()) && password != _services.Cfg.ProgrammerPassword()
+                => "Неверный пароль программиста.",
+            _ => null,
+        };
+
+        if (error is not null)
+        {
+            AppMessageBox.Show(error, "Доступ", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _host.SwitchRole(selected.RoleId);
+        RolePasswordInput.Password = "";
+        _host.ShowStatus($"Роль изменена: {selected.Label}");
+        UpdateRollbackAccess();
+    }
+
+    /// <summary>Откат — программист/администраторское действие (как в Upload); прячем кнопку
+    /// в Прошивках от всех кроме administrator (единственная роль с доступом и к Настройкам,
+    /// и к Загрузке).</summary>
+    private void UpdateRollbackAccess() =>
+        RollbackFirmwareBtn.Visibility = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
+
+    private void SavePasswords_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.Set("admin_password", AdminPwdInput.Password);
+        _services.Cfg.Set("programmer_password", ProgPwdInput.Password);
+        _host.ShowStatus("Пароли сохранены");
+    }
+
+    private void SaveAdGroups_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.Set("ad_domain", AdDomainInput.Text.Trim());
+        _services.Cfg.Set("ad_group_administrator", AdGroupAdminInput.Text.Trim());
+        _services.Cfg.Set("ad_group_programmer", AdGroupProgInput.Text.Trim());
+        _host.ShowStatus("Группы для входа через Windows сохранены");
+    }
+
+    private void SaveMisc_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.Set("keep_archives", KeepArchivesCheck.IsChecked == true ? "true" : "false");
+        _host.ShowStatus("Настройки сохранены");
+    }
+
+    // ── Иерархия ──────────────────────────────────────────────────────────────
+
+    private void LoadHierarchy()
+    {
+        var groups = _services.Db.GetAllEquipmentGroups();
+        var hierarchyRows = new List<HierarchyRow>();
+        foreach (var g in groups)
+            hierarchyRows.AddRange(_services.Db.GetSubtypesForGroup(g.Id!.Value).Select(s => new HierarchyRow { Group = g, Subtype = s }));
+        HierarchyGrid.ItemsSource = hierarchyRows;
+
+        var prevSelection = ControllersGrid.SelectedItem is ControllerModRow prevRow
+            ? (prevRow.ControllerId, prevRow.ModificationId)
+            : ((int, int?)?)null;
+
+        var controllers = _services.Db.GetAllControllerModels();
+        var ctrlRows = new List<ControllerModRow>();
+        foreach (var c in controllers)
+        {
+            var mods = _services.Db.GetModificationsForController(c.Id!.Value);
+            if (mods.Count == 0)
+            {
+                ctrlRows.Add(new ControllerModRow
+                {
+                    ControllerId = c.Id!.Value, ControllerName = c.Name, SortOrder = c.SortOrder,
+                    DisplayName = "(нет модификаций)",
+                });
+            }
+            else
+            {
+                foreach (var m in mods)
+                {
+                    ctrlRows.Add(new ControllerModRow
+                    {
+                        ControllerId = c.Id!.Value, ControllerName = c.Name, SortOrder = c.SortOrder,
+                        ModificationId = m.Id, DisplayName = m.DisplayName, HwVersion = m.HwVersion, Description = m.Description,
+                    });
+                }
+            }
+        }
+        ControllersGrid.ItemsSource = ctrlRows;
+        if (prevSelection is not null)
+        {
+            var idx = ctrlRows.FindIndex(r => r.ControllerId == prevSelection.Value.Item1 && r.ModificationId == prevSelection.Value.Item2);
+            if (idx >= 0) ControllersGrid.SelectedIndex = idx;
+        }
+
+        ManufList.ItemsSource = _services.Db.GetParamManufacturers();
+
+        ExtList.Items.Clear();
+        foreach (var ext in _services.Db.GetAllowedExtensions())
+            ExtList.Items.Add(new ListBoxItem { Content = $".{ext}", Tag = ext });
+    }
+
+    /// <summary>A cabinet type can never exist without a subtype (see Database.EnsureEveryGroupHasSubtype),
+    /// so creating a type always creates its first subtype in the same flow — there's no way to end
+    /// up with an orphaned type via the UI. Use subtype name «—» for a type with no real subtype
+    /// division.</summary>
+    private void AddGroup_Click(object sender, RoutedEventArgs e)
+    {
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить тип шкафа", "Название типа шкафа:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var trimmedGroupName = name.Trim();
+        if (_services.Db.GetAllEquipmentGroups().Any(g => string.Equals(g.Name, trimmedGroupName, StringComparison.OrdinalIgnoreCase)))
+        {
+            AppMessageBox.Show($"Тип шкафа «{trimmedGroupName}» уже существует.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var groupPrefixStr = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить тип шкафа", "Префикс типа (число):");
+        if (!int.TryParse(groupPrefixStr, out var groupPrefix))
+        {
+            AppMessageBox.Show("Префикс должен быть числом.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (_services.Db.GroupPrefixTaken(groupPrefix))
+        {
+            AppMessageBox.Show($"Префикс {groupPrefix} уже используется другим типом шкафа.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var subName = TextPromptDialog.Prompt(Window.GetWindow(this), "Первый подтип", "Название подтипа (напр. КПЧ, или — если подтипов нет):", "—");
+        if (string.IsNullOrWhiteSpace(subName)) return;
+        var subPrefixStr = TextPromptDialog.Prompt(Window.GetWindow(this), "Первый подтип", "Префикс подтипа (0 — если подтипов нет):", "0");
+        if (!int.TryParse(subPrefixStr, out var subPrefix))
+        {
+            AppMessageBox.Show("Префикс должен быть числом.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var groupId = _services.Db.UpsertEquipmentGroup(new EquipmentGroup { Name = trimmedGroupName, Prefix = groupPrefix, SortOrder = _services.Db.GetAllEquipmentGroups().Count + 1 });
+        var trimmedSubName = subName.Trim();
+        var folderName = trimmedSubName == "—" ? trimmedGroupName : $"{trimmedGroupName}-{trimmedSubName}";
+        _services.Db.UpsertEquipmentSubtype(new EquipmentSubType { GroupId = groupId, Name = trimmedSubName, Prefix = subPrefix, FolderName = folderName, SortOrder = 1 });
+
+        LoadHierarchy();
+        AutoRebuild();
+        _host.ShowStatus($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})");
+    }
+
+    private void EditGroupPrefix_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        {
+            AppMessageBox.Show("Выберите строку с типом шкафа.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var group = row.Group;
+        var prefixStr = TextPromptDialog.Prompt(Window.GetWindow(this), "Изменить префикс типа",
+            $"Префикс типа «{group.Name}» (число):", group.Prefix.ToString());
+        if (prefixStr is null) return;
+        if (!int.TryParse(prefixStr, out var prefix))
+        {
+            AppMessageBox.Show("Префикс должен быть числом.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (prefix != group.Prefix && _services.Db.GroupPrefixTaken(prefix, group.Id))
+        {
+            AppMessageBox.Show($"Префикс {prefix} уже используется другим типом шкафа.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _services.Db.UpsertEquipmentGroup(new EquipmentGroup { Name = group.Name, Prefix = prefix, SortOrder = group.SortOrder });
+        LoadHierarchy();
+        _host.ShowStatus($"Префикс типа «{group.Name}» изменён на {prefix}");
+    }
+
+    /// <summary>Unlike the prefix (a DB-only value), the group's Name is also its on-disk folder
+    /// name — read live by HierarchyService every time it builds a path — so this moves the real
+    /// folder (both ПО and Параметры trees) and remaps every already-uploaded firmware/param file's
+    /// stored path before touching the DB row, and refuses the rename entirely if either move fails.</summary>
+    private void RenameGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        {
+            AppMessageBox.Show("Выберите строку с типом шкафа.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var group = row.Group;
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать тип шкафа",
+            $"Новое название для «{group.Name}»:", group.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var trimmed = name.Trim();
+        if (trimmed == group.Name) return;
+
+        if (_services.Db.GroupNameTaken(trimmed, group.Id))
+        {
+            AppMessageBox.Show($"Тип шкафа «{trimmed}» уже существует.", "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+        {
+            var result = _services.Hierarchy.RenameGroupFolder(root, group.Name, trimmed);
+            if (!result.Ok)
+            {
+                AppMessageBox.Show($"Не удалось переименовать папку на диске:\n{result.Error}\n\nПереименование отменено.",
+                    "Тип шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        _services.Db.RenameEquipmentGroup(group.Id!.Value, trimmed);
+        LoadHierarchy();
+        _host.ShowStatus($"Тип шкафа переименован: «{group.Name}» → «{trimmed}»");
+    }
+
+    private void AddSubtype_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow selected)
+        {
+            AppMessageBox.Show("Сначала выберите строку с типом шкафа, к которому нужно добавить подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var group = selected.Group;
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить подтип", $"Название подтипа для «{group.Name}» (напр. КПЧ):");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var trimmedName = name.Trim();
+        if (_services.Db.GetSubtypesForGroup(group.Id!.Value).Any(s => string.Equals(s.Name, trimmedName, StringComparison.OrdinalIgnoreCase)))
+        {
+            AppMessageBox.Show($"Подтип «{trimmedName}» уже есть у типа «{group.Name}».", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var prefixStr = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить подтип", "Префикс подтипа (число):");
+        if (!int.TryParse(prefixStr, out var prefix))
+        {
+            AppMessageBox.Show("Префикс должен быть числом.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (_services.Db.SubtypePrefixTakenInGroup(group.Id!.Value, prefix))
+        {
+            AppMessageBox.Show($"Префикс {prefix} уже используется другим подтипом типа «{group.Name}».", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var folderName = trimmedName == "—" ? group.Name : $"{group.Name}-{trimmedName}";
+        _services.Db.UpsertEquipmentSubtype(new EquipmentSubType
+        {
+            GroupId = group.Id!.Value,
+            Name = trimmedName,
+            Prefix = prefix,
+            FolderName = folderName,
+            SortOrder = _services.Db.GetSubtypesForGroup(group.Id!.Value).Count + 1,
+        });
+        LoadHierarchy();
+        AutoRebuild();
+        _host.ShowStatus($"Подтип добавлен: {folderName}");
+    }
+
+    private void EditSubtypePrefix_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        {
+            AppMessageBox.Show("Выберите подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var prefixStr = TextPromptDialog.Prompt(Window.GetWindow(this), "Изменить префикс подтипа",
+            $"Префикс для «{row.FolderName}» (0 — если подтипов нет):", row.Subtype.Prefix.ToString());
+        if (prefixStr is null) return;
+        if (!int.TryParse(prefixStr, out var prefix))
+        {
+            AppMessageBox.Show("Префикс должен быть числом.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (prefix != row.Subtype.Prefix && _services.Db.SubtypePrefixTakenInGroup(row.Subtype.GroupId, prefix, row.Subtype.Id))
+        {
+            AppMessageBox.Show($"Префикс {prefix} уже используется другим подтипом типа «{row.GroupName}».", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _services.Db.UpsertEquipmentSubtype(new EquipmentSubType
+        {
+            GroupId = row.Subtype.GroupId,
+            Name = row.Subtype.Name,
+            Prefix = prefix,
+            FolderName = row.Subtype.FolderName,
+            SortOrder = row.Subtype.SortOrder,
+        });
+        LoadHierarchy();
+        _host.ShowStatus($"Префикс подтипа «{row.FolderName}» изменён на {prefix}");
+    }
+
+    /// <summary>Same disk-folder-move reasoning as RenameGroup_Click. Not offered for the "—"
+    /// placeholder subtype (Database.EnsureEveryGroupHasSubtype) — it has no folder segment of its
+    /// own, so there's nothing meaningful to rename.</summary>
+    private void RenameSubtype_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        {
+            AppMessageBox.Show("Выберите подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (row.Subtype.Name == "—")
+        {
+            AppMessageBox.Show("У этого типа шкафа нет подтипов — переименовывать нечего.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать подтип",
+            $"Новое название подтипа для «{row.GroupName}»:", row.Subtype.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var trimmed = name.Trim();
+        if (trimmed == row.Subtype.Name) return;
+
+        if (_services.Db.SubtypeNameTakenInGroup(row.Subtype.GroupId, trimmed, row.Subtype.Id))
+        {
+            AppMessageBox.Show($"Подтип «{trimmed}» уже есть у типа «{row.GroupName}».", "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+        {
+            var result = _services.Hierarchy.RenameSubtypeFolder(root, row.GroupName, row.Subtype.Name, trimmed);
+            if (!result.Ok)
+            {
+                AppMessageBox.Show($"Не удалось переименовать папку на диске:\n{result.Error}\n\nПереименование отменено.",
+                    "Подтип", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        var newFolderName = $"{row.GroupName}-{trimmed}";
+        _services.Db.RenameEquipmentSubtype(row.Subtype.Id!.Value, trimmed, newFolderName);
+        LoadHierarchy();
+        _host.ShowStatus($"Подтип переименован: «{row.Subtype.Name}» → «{trimmed}»");
+    }
+
+    /// <summary>Deletes the subtype in the selected row. A group can't be left without any subtype
+    /// (see Database.EnsureEveryGroupHasSubtype), so deleting the last remaining subtype of a group
+    /// asks to delete the whole type instead of silently leaving/recreating an orphaned one.</summary>
+    private void DeleteSubtype_Click(object sender, RoutedEventArgs e)
+    {
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        {
+            AppMessageBox.Show("Выберите строку для удаления.", "Удаление", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var isLastSubtype = _services.Db.CountSubtypesForGroup(row.Subtype.GroupId) <= 1;
+        if (isLastSubtype)
+        {
+            var reply = AppMessageBox.Show(
+                $"«{row.SubtypeName}» — последний подтип типа «{row.GroupName}». Тип шкафа не может остаться без подтипа.\n\nУдалить весь тип «{row.GroupName}» вместе с ним?",
+                "Удалить тип шкафа", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (reply != MessageBoxResult.Yes) return;
+
+            _services.Db.DeleteEquipmentGroup(row.Subtype.GroupId);
+            LoadHierarchy();
+            MoveDeletedFolder(row.GroupName);
+            return;
+        }
+
+        var replySub = AppMessageBox.Show($"Удалить подтип «{row.FolderName}»?", "Удалить подтип",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (replySub != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteEquipmentSubtype(row.Subtype.Id!.Value);
+        LoadHierarchy();
+        MoveDeletedFolder(row.FolderName);
+    }
+
+    private void AddController_Click(object sender, RoutedEventArgs e)
+    {
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить контроллер", "Название (напр. SMH6):");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var upper = name.Trim().ToUpperInvariant();
+        _services.Db.UpsertControllerModel(new ControllerModel { Name = upper, SortOrder = ControllersGrid.Items.Count + 1 });
+        LoadHierarchy();
+        AutoRebuild();
+        _host.ShowStatus($"Контроллер добавлен: {upper}");
+    }
+
+    private void AddModification_Click(object sender, RoutedEventArgs e)
+    {
+        if (ControllersGrid.SelectedItem is not ControllerModRow row)
+        {
+            AppMessageBox.Show("Выберите контроллер в таблице выше.", "Модификация", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var dlg = new AddModificationDialog(row.ControllerName) { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        _services.Db.AddControllerModification(row.ControllerId, dlg.ModName, dlg.HwVersion, dlg.Description);
+        LoadHierarchy();
+        _host.ShowStatus($"Модификация добавлена: {dlg.ModName} (hw{dlg.HwVersion})");
+    }
+
+    private void DeleteControllerRow_Click(object sender, RoutedEventArgs e)
+    {
+        if (ControllersGrid.SelectedItem is not ControllerModRow row)
+        {
+            AppMessageBox.Show("Выберите строку в таблице.", "Удаление", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (row.ModificationId is int modId)
+        {
+            var reply = AppMessageBox.Show($"Удалить модификацию «{row.DisplayName}» (hw{row.HwVersion})?", "Удалить модификацию",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (reply != MessageBoxResult.Yes) return;
+
+            _services.Db.DeleteControllerModification(modId);
+            LoadHierarchy();
+            return;
+        }
+
+        var replyCtrl = AppMessageBox.Show($"Удалить тип контроллера «{row.ControllerName}»?", "Удалить контроллер",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (replyCtrl != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteControllerModel(row.ControllerId);
+        LoadHierarchy();
+        MoveDeletedFolder(row.ControllerName);
+    }
+
+    private void AddManufacturer_Click(object sender, RoutedEventArgs e)
+    {
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить производителя", "Название:");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        _services.Db.AddParamManufacturer(name.Trim());
+        LoadHierarchy();
+        AutoRebuild();
+    }
+
+    private void DeleteManufacturer_Click(object sender, RoutedEventArgs e)
+    {
+        if (ManufList.SelectedItem is not string name)
+        {
+            AppMessageBox.Show("Выберите производителя.", "Производитель", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var reply = AppMessageBox.Show($"Удалить производителя «{name}»?", "Удалить производителя",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteParamManufacturer(name);
+        LoadHierarchy();
+        MoveDeletedFolder(name);
+    }
+
+    private void AddExtension_Click(object sender, RoutedEventArgs e)
+    {
+        var ext = ExtInput.Text.Trim();
+        if (string.IsNullOrEmpty(ext)) return;
+        _services.Db.AddAllowedExtension(ext);
+        ExtInput.Text = "";
+        LoadHierarchy();
+        _host.ShowStatus($"Расширение добавлено: .{ext.ToLowerInvariant().TrimStart('.')}");
+    }
+
+    private void DeleteExtension_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExtList.SelectedItem is not ListBoxItem item || item.Tag is not string ext)
+        {
+            AppMessageBox.Show("Выберите расширение.", "Расширение", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var reply = AppMessageBox.Show($"Удалить расширение «.{ext}» из списка?", "Удалить расширение",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.RemoveAllowedExtension(ext);
+        LoadHierarchy();
+    }
+
+    private void RebuildHierarchy_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск недоступен.", "Иерархия", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var result = _services.Hierarchy.EnsureStructure(root);
+        if (result.Errors.Count > 0)
+            AppMessageBox.Show(string.Join("\n", result.Errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
+        else
+            AppMessageBox.Show($"Создано папок: {result.CreatedCount}", "Структура диска", MessageBoxButton.OK, MessageBoxImage.Information);
+        _host.ShowStatus($"Структура обновлена: {result.CreatedCount} папок");
+    }
+
+    private void SyncFwFromDisk_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск недоступен.", "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var result = _services.Hierarchy.SyncFwFromDisk(root);
+        if (!result.Ok)
+        {
+            var msg = result.Errors.Count > 0 ? string.Join("\n", result.Errors.Take(5)) : "Неизвестная ошибка";
+            AppMessageBox.Show(msg, "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else
+        {
+            var summary = $"Добавлено версий: {result.Added}\nПропущено (уже есть): {result.Skipped}";
+            var details = result.AddedItems.Count == 0
+                ? ""
+                : "\n\nЧто добавлено:\n" + string.Join("\n", result.AddedItems.Take(50))
+                  + (result.AddedItems.Count > 50 ? $"\n… и ещё {result.AddedItems.Count - 50}" : "");
+            AppMessageBox.Show(summary + details, "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        LoadFirmwareTab();
+        _host.ShowStatus($"Синхронизация завершена: +{result.Added} версий" + (result.AddedItems.Count > 0 ? " (" + string.Join(", ", result.AddedItems.Take(3)) + (result.AddedItems.Count > 3 ? "…" : "") + ")" : ""));
+    }
+
+    private void ScanUnknown_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск недоступен.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var unknown = _services.Hierarchy.ScanUnknownFiles(root);
+        if (unknown.Count == 0)
+        {
+            AppMessageBox.Show("Неизвестных файлов/папок не найдено.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var dlg = new UnknownFilesDialog(root, unknown) { Owner = Window.GetWindow(this) };
+        dlg.ShowDialog();
+        _host.ShowStatus($"Перенесено: {dlg.Moved}, удалено: {dlg.Deleted}");
+    }
+
+    private void MoveDeletedFolder(string folderName)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            _host.ShowStatus("Папка не перенесена — нажмите «Пересоздать структуру диска» позже");
+            return;
+        }
+        _services.Hierarchy.EnsureStructure(root);
+        var result = _services.Hierarchy.MoveNamedFolders(root, folderName);
+        if (result.Moved > 0)
+            _host.ShowStatus($"Папки «{folderName}» перенесены в Неизвестное ({result.Moved} шт.)");
+        else if (result.Errors.Count > 0)
+            _host.ShowStatus(result.Errors[0]);
+        else
+            _host.ShowStatus($"Папка «{folderName}» не найдена на диске или уже удалена");
+    }
+
+    private void AutoRebuild()
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
+        var result = _services.Hierarchy.EnsureStructure(root);
+        if (result.CreatedCount > 0)
+            _host.ShowStatus($"Папки на диске обновлены: +{result.CreatedCount}");
+    }
+
+    // ── Прошивки ──────────────────────────────────────────────────────────────
+
+    private void LoadFirmwareTab()
+    {
+        _fwVersionsData = _services.Db.GetAllFwVersionsWithNames();
+        PopulateFwFilterCombos();
+        ApplyFwFilter();
+        UpdateRollbackAccess();
+        UpdateModerationCount();
+    }
+
+    /// <summary>Dropdown values are built from what's actually in _fwVersionsData (not the full
+    /// hierarchy) so a Группа/Контроллер with zero uploaded firmware never shows up as a selectable,
+    /// always-empty filter. Index 0 in each combo is the "no filter on this field" sentinel.</summary>
+    private void PopulateFwFilterCombos()
+    {
+        void Fill(ComboBox combo, string allLabel, IEnumerable<string> values)
+        {
+            var prev = combo.SelectedItem as string;
+            var items = new List<string> { allLabel };
+            items.AddRange(values.Where(v => !string.IsNullOrWhiteSpace(v)).Distinct()
+                .OrderBy(v => v, StringComparer.CurrentCultureIgnoreCase));
+            combo.ItemsSource = items;
+            combo.SelectedIndex = prev is not null ? Math.Max(0, items.IndexOf(prev)) : 0;
+        }
+
+        Fill(FwGroupFilterCombo, "Группа: все", _fwVersionsData.Select(v => v.GroupName));
+        Fill(FwSubtypeFilterCombo, "Подтип: все", _fwVersionsData.Select(v => v.SubtypeName));
+        Fill(FwControllerFilterCombo, "Контроллер: все", _fwVersionsData.Select(v => v.CtrlName));
+        Fill(FwStatusFilterCombo, "Статус: все", new[] { "Активна", "Откатана" });
+        Fill(FwTagFilterCombo, "Тег: все",
+            _fwVersionsData.SelectMany(v => v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
+    }
+
+    private void FwFilterCombo_Changed(object sender, SelectionChangedEventArgs e) => ApplyFwFilter();
+
+    private void UpdateModerationCount()
+    {
+        var count = _services.Db.GetUnreleasedFwVersionsCount();
+        TabBtnModeration.Content = count > 0 ? $"Модерация ({count})" : "Модерация";
+    }
+
+    private void LoadModerationTab()
+    {
+        var data = _services.Db.GetUnreleasedFwVersionsWithNames();
+        ModGrid.ItemsSource = data.Select(v => new FwRow { Record = v }).ToList();
+        ModerationCountText.Text = data.Count > 0
+            ? $"Версии, ожидающие модерации — {data.Count}"
+            : "Версии, ожидающие модерации — все загруженные версии уже выведены из модерации";
+        UpdateModerationCount();
+    }
+
+    private void RefreshModeration_Click(object sender, RoutedEventArgs e) => LoadModerationTab();
+
+    private void ModGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DataGridClickGuard.IsOverDataRow(e)) ModerateFirmware_Click(sender, e);
+    }
+
+    private void ModerateFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        if (ModGrid.SelectedItem is not FwRow row)
+        {
+            AppMessageBox.Show("Выберите версию в таблице.", "Модерация", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var v = row.Record;
+        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+        var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
+
+        var release = AppMessageBox.Show(
+            "Вывести версию из модерации и сделать релизной?",
+            "Модерация", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
+        if (release) _services.Db.MarkFwVersionReleased(v.Id!.Value);
+
+        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}");
+        LoadModerationTab();
+    }
+
+    private void PopulateFirmwareTable(List<FwVersionRecord> data) =>
+        FwGrid.ItemsSource = data.Select(v => new FwRow { Record = v }).ToList();
+
+    private void FwFilter_Changed(object sender, TextChangedEventArgs e) => ApplyFwFilter();
+
+    private void FwModerationFilter_Changed(object sender, RoutedEventArgs e) => ApplyFwFilter();
+
+    private void ApplyFwFilter()
+    {
+        IEnumerable<FwVersionRecord> rows = _fwVersionsData;
+        if (FwNeedsModerationCheck.IsChecked == true)
+            rows = rows.Where(v => !v.Released);
+
+        if (FwGroupFilterCombo.SelectedIndex > 0 && FwGroupFilterCombo.SelectedItem is string group)
+            rows = rows.Where(v => v.GroupName == group);
+        if (FwSubtypeFilterCombo.SelectedIndex > 0 && FwSubtypeFilterCombo.SelectedItem is string subtype)
+            rows = rows.Where(v => v.SubtypeName == subtype);
+        if (FwControllerFilterCombo.SelectedIndex > 0 && FwControllerFilterCombo.SelectedItem is string ctrl)
+            rows = rows.Where(v => v.CtrlName == ctrl);
+        if (FwStatusFilterCombo.SelectedIndex > 0 && FwStatusFilterCombo.SelectedItem is string status)
+            rows = rows.Where(v => (status == "Откатана") == (v.Status == "rolled_back"));
+        if (FwTagFilterCombo.SelectedIndex > 0 && FwTagFilterCombo.SelectedItem is string tag)
+            rows = rows.Where(v => v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(tag, StringComparer.OrdinalIgnoreCase));
+
+        var filter = FwFilterInput.Text.Trim().ToUpperInvariant();
+        if (!string.IsNullOrEmpty(filter))
+            rows = rows.Where(v =>
+                (v.GroupName + v.SubtypeName + v.CtrlName + v.VersionRaw + v.Tags + v.Status).ToUpperInvariant().Contains(filter));
+
+        PopulateFirmwareTable(rows.ToList());
+    }
+
+    private void RefreshFirmware_Click(object sender, RoutedEventArgs e) => LoadFirmwareTab();
+
+    private FwVersionRecord? GetSelectedFwVersion()
+    {
+        if (FwGrid.SelectedItem is not FwRow row)
+        {
+            AppMessageBox.Show("Выберите прошивку в таблице.", "Прошивки", MessageBoxButton.OK, MessageBoxImage.Information);
+            return null;
+        }
+        return row.Record;
+    }
+
+    private void FwGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DataGridClickGuard.IsOverDataRow(e)) EditFirmware_Click(sender, e);
+    }
+
+    private void EditFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+        var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
+        _host.ShowStatus($"Прошивка обновлена: {v.VersionRaw}");
+        LoadFirmwareTab();
+    }
+
+    private void DuplicateFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+        var reply = AppMessageBox.Show($"Создать копию записи:\n{title}?", "Дублировать",
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var newId = _services.Db.DuplicateFwVersion(v.Id!.Value);
+        if (newId > 0)
+        {
+            _host.ShowStatus($"Дублировано: {v.VersionRaw}");
+            LoadFirmwareTab();
+        }
+    }
+
+    private void RollbackFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        if (v.Status == "rolled_back")
+        {
+            AppMessageBox.Show("Эта версия уже откатана.", "Откат версии", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Откатить версию {v.VersionRaw}?\n\nЗапись в базе будет помечена как откатанная.\nСледующая загрузка получит тот же SW-номер заново.\nФайлы на диске останутся нетронутыми.",
+            "Откат версии", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.RollbackFwVersion(v.Id!.Value);
+        _host.ShowStatus($"Откатано: {v.VersionRaw}");
+        LoadFirmwareTab();
+    }
+
+    // ── Быстрый доступ ────────────────────────────────────────────────────────
+
+    private void LoadQuickApps()
+    {
+        var apps = _services.Cfg.QuickApps();
+        AppsGrid.ItemsSource = new ObservableCollection<AppRow>(apps.Select(a => new AppRow { Name = a.Name, Path = a.Path }));
+    }
+
+    private void AddApp_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать приложение",
+            Filter = "Исполняемые файлы (*.exe;*.bat;*.lnk)|*.exe;*.bat;*.lnk|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
+
+        apps.Add(new AppRow { Name = Path.GetFileNameWithoutExtension(dlg.FileName), Path = dlg.FileName });
+    }
+
+    private void DeleteApp_Click(object sender, RoutedEventArgs e)
+    {
+        if (AppsGrid.SelectedItem is not AppRow row) return;
+        (AppsGrid.ItemsSource as ObservableCollection<AppRow>)?.Remove(row);
+    }
+
+    private void SaveApps_Click(object sender, RoutedEventArgs e)
+    {
+        AppsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        AppsGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
+        if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
+        var list = apps
+            .Where(a => !string.IsNullOrWhiteSpace(a.Name) || !string.IsNullOrWhiteSpace(a.Path))
+            .Select(a => new QuickApp { Name = a.Name, Path = a.Path })
+            .ToList();
+        _services.Cfg.SetQuickApps(list);
+        _host.ReloadSidebarApps();
+        _host.ShowStatus("Быстрые приложения сохранены");
+    }
+}
