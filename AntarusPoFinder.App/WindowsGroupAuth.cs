@@ -39,9 +39,12 @@ public static class WindowsGroupAuth
     }
 
     /// <summary>Checks the configured per-role AD group names (Settings keys ad_group_administrator
-    /// / ad_group_programmer) against the AD identity supplied via login/password, highest
-    /// privilege first. Call only after <see cref="ValidateAdCredentials"/> has already succeeded.
-    /// Returns null if none match or none are configured.</summary>
+    /// / ad_group_programmer / ad_group_naladchik) against the AD identity supplied via
+    /// login/password, highest privilege first — наладчик last, since it's the most numerous/default
+    /// role and a login that happens to sit in both an admin/programmer group and a naladchik group
+    /// should resolve to the more privileged one. Call only after <see cref="ValidateAdCredentials"/>
+    /// has already succeeded. Returns null if none match or none are configured — the caller then
+    /// falls back to the app's own roster (see AppUserAuthService in AntarusPoFinder.Core.Services).</summary>
     public static string? DetectRoleForUser(ConfigService cfg, string domain, string login, string password)
     {
         try
@@ -50,7 +53,7 @@ public static class WindowsGroupAuth
             using var user = UserPrincipal.FindByIdentity(ctx, login);
             if (user is null) return null;
 
-            foreach (var role in new[] { "administrator", "programmer" })
+            foreach (var role in new[] { "administrator", "programmer", "naladchik" })
             {
                 var group = cfg.Get($"ad_group_{role}");
                 if (string.IsNullOrWhiteSpace(group)) continue;

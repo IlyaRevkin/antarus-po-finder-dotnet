@@ -169,6 +169,16 @@ public partial class Database : IDisposable
                  filename TEXT PRIMARY KEY,
                  payload  TEXT NOT NULL
              );
+
+             CREATE TABLE IF NOT EXISTS app_users (
+                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ad_login        TEXT    UNIQUE NOT NULL COLLATE NOCASE,
+                 role            TEXT    NOT NULL DEFAULT 'naladchik',
+                 first_login_at  TEXT    NOT NULL DEFAULT '',
+                 last_login_at   TEXT    NOT NULL DEFAULT '',
+                 role_updated_at TEXT    NOT NULL DEFAULT '',
+                 sync_id         TEXT    NOT NULL DEFAULT ''
+             );
              """);
 
         EnsureColumnsExist();

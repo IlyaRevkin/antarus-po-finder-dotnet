@@ -25,7 +25,7 @@ public static class ConfigSyncService
     {
         "exported_at", "exported_by", "equipment_groups", "equipment_subtypes", "controller_models",
         "controller_modifications", "param_manufacturers", "tags", "allowed_extensions",
-        "fw_version_reservations", "fw_versions", "param_files",
+        "fw_version_reservations", "fw_versions", "param_files", "app_users",
     };
 
     /// <summary>Every plain setting key lives on either Настройки → Общие or Настройки → Быстрый
@@ -39,7 +39,7 @@ public static class ConfigSyncService
     {
         "root_path", "second_disk_path", "inspection_folder", "admin_password", "programmer_password",
         "current_role", "theme", "keep_archives", "image_server_port", "ad_domain",
-        "ad_group_administrator", "ad_group_programmer", "sync_interval_min", "quick_apps",
+        "ad_group_administrator", "ad_group_programmer", "ad_group_naladchik", "sync_interval_min", "quick_apps",
         "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at",
         "scan_resolution_dpi", "config_auto_push", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "close_action", "inspection_auto_cleanup_days",

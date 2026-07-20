@@ -103,6 +103,16 @@ public class ExportedParamFile
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
 }
 
+public class ExportedAppUser
+{
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("ad_login")] public string AdLogin { get; set; } = "";
+    [JsonPropertyName("role")] public string Role { get; set; } = "naladchik";
+    [JsonPropertyName("first_login_at")] public string FirstLoginAt { get; set; } = "";
+    [JsonPropertyName("last_login_at")] public string LastLoginAt { get; set; } = "";
+    [JsonPropertyName("role_updated_at")] public string RoleUpdatedAt { get; set; } = "";
+}
+
 public class HierarchyExportData
 {
     [JsonPropertyName("equipment_groups")] public List<ExportedGroup> EquipmentGroups { get; set; } = new();
@@ -119,6 +129,12 @@ public class HierarchyExportData
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
     [JsonPropertyName("fw_versions")] public List<ExportedFwVersion> FwVersions { get; set; } = new();
     [JsonPropertyName("param_files")] public List<ExportedParamFile> ParamFiles { get; set; } = new();
+    // Always present with a default empty list (unlike Tags/AllowedExtensions/ParamManufacturers
+    // above) — an export from an older app version without this feature simply carries zero users,
+    // which correctly means "nothing to add/update", never "delete everyone" (app_users is
+    // additive + last-writer-wins-on-role only, see Database.ConfigExchange — nobody is ever
+    // removed from the roster via sync).
+    [JsonPropertyName("app_users")] public List<ExportedAppUser> AppUsers { get; set; } = new();
 }
 
 /// <summary>Per-category added/updated counts — drives both the "Экспортировано/Импортировано"
@@ -143,9 +159,12 @@ public class ImportCounts
     public int ReservationsUpdated { get; set; }
     public int FwVersions { get; set; }
     public int ParamFiles { get; set; }
+    public int AppUsersAdded { get; set; }
+    public int AppUsersUpdated { get; set; }
 
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + ControllersAdded + ControllersUpdated +
         ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
-        ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + ParamFiles;
+        ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + ParamFiles +
+        AppUsersAdded + AppUsersUpdated;
 }

@@ -121,6 +121,15 @@ public partial class Database
                     GroupName = GetString(r, "group_name"),
                 });
 
+        using (var r = ExecuteReader("SELECT sync_id, ad_login, role, first_login_at, last_login_at, role_updated_at FROM app_users ORDER BY ad_login"))
+            while (r.Read())
+                data.AppUsers.Add(new ExportedAppUser
+                {
+                    SyncId = GetString(r, "sync_id"), AdLogin = r.GetString(1), Role = GetString(r, "role", "naladchik"),
+                    FirstLoginAt = GetString(r, "first_login_at"), LastLoginAt = GetString(r, "last_login_at"),
+                    RoleUpdatedAt = GetString(r, "role_updated_at"),
+                });
+
         return data;
     }
 
@@ -423,6 +432,63 @@ public partial class Database
                         cmd.Parameters.AddWithValue("@h", res.HwVersion); cmd.Parameters.AddWithValue("@v", res.VersionRaw);
                     });
             }
+        }
+
+        // ── App users roster (Часть 2/3 — AD roster, see AppUserAuthService/AppUser). Natural key
+        //    is ad_login (COLLATE NOCASE), matched by sync_id first like every other entity here,
+        //    falling back to login for first contact. Role is last-writer-wins by role_updated_at IN
+        //    EITHER DIRECTION — unlike reservations/fw_versions below this is not a one-way "only
+        //    ever advances" state machine, an administrator can promote OR demote — so a role
+        //    changed more recently must win regardless of which side (local vs incoming) made the
+        //    more recent change. first_login_at keeps whichever side's is earlier (a historical
+        //    fact, never moved backwards); last_login_at keeps whichever is later (most recent login
+        //    witnessed by any machine). Nobody is ever removed from the roster via sync.
+        foreach (var u in data.AppUsers)
+        {
+            if (string.IsNullOrWhiteSpace(u.AdLogin)) continue;
+
+            var existing = FindAppUserBySyncOrLogin(u.SyncId, u.AdLogin);
+            if (existing is null)
+            {
+                counts.AppUsersAdded++;
+                if (apply)
+                {
+                    var sync = string.IsNullOrEmpty(u.SyncId) ? Guid.NewGuid().ToString() : u.SyncId;
+                    ExecuteNonQuery("""
+                        INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id)
+                        VALUES(@l,@r,@f,@la,@ru,@sy)
+                        """, cmd =>
+                    {
+                        cmd.Parameters.AddWithValue("@l", u.AdLogin); cmd.Parameters.AddWithValue("@r", u.Role);
+                        cmd.Parameters.AddWithValue("@f", u.FirstLoginAt); cmd.Parameters.AddWithValue("@la", u.LastLoginAt);
+                        cmd.Parameters.AddWithValue("@ru", u.RoleUpdatedAt); cmd.Parameters.AddWithValue("@sy", sync);
+                    });
+                }
+                continue;
+            }
+
+            var incomingRoleWins = string.CompareOrdinal(u.RoleUpdatedAt, existing.RoleUpdatedAt) > 0;
+            var wantRole = incomingRoleWins ? u.Role : existing.Role;
+            var wantRoleUpdatedAt = incomingRoleWins ? u.RoleUpdatedAt : existing.RoleUpdatedAt;
+            var wantFirst = string.IsNullOrEmpty(existing.FirstLoginAt) ||
+                (!string.IsNullOrEmpty(u.FirstLoginAt) && string.CompareOrdinal(u.FirstLoginAt, existing.FirstLoginAt) < 0)
+                ? u.FirstLoginAt : existing.FirstLoginAt;
+            var wantLast = string.CompareOrdinal(u.LastLoginAt, existing.LastLoginAt) > 0 ? u.LastLoginAt : existing.LastLoginAt;
+            var adoptSyncId = !string.IsNullOrEmpty(u.SyncId) && u.SyncId != existing.SyncId;
+
+            var changed = wantRole != existing.Role || wantFirst != existing.FirstLoginAt || wantLast != existing.LastLoginAt || adoptSyncId;
+            if (!changed) continue;
+
+            if (wantRole != existing.Role) counts.AppUsersUpdated++;
+            if (!apply) continue;
+
+            ExecuteNonQuery("UPDATE app_users SET role=@r, first_login_at=@f, last_login_at=@la, role_updated_at=@ru, sync_id=@sy WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@r", wantRole); cmd.Parameters.AddWithValue("@f", wantFirst);
+                cmd.Parameters.AddWithValue("@la", wantLast); cmd.Parameters.AddWithValue("@ru", wantRoleUpdatedAt);
+                cmd.Parameters.AddWithValue("@id", existing.Id!.Value);
+                cmd.Parameters.AddWithValue("@sy", adoptSyncId ? u.SyncId : existing.SyncId);
+            });
         }
 
         // ── fw_versions / param_files: additive-only, as before — each machine may have uploads
