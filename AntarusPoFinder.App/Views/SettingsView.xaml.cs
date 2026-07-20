@@ -115,7 +115,7 @@ public partial class SettingsView : UserControl
 
     private void Tab_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var btn in new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps })
+        foreach (var btn in new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps, TabBtnUsers })
             btn.Tag = null;
         ((Button)sender).Tag = "Active";
 
@@ -126,6 +126,7 @@ public partial class SettingsView : UserControl
         ReservationsTab.Visibility = Visibility.Collapsed;
         TagsTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
+        UsersTab.Visibility = Visibility.Collapsed;
 
         if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnHierarchy) HierarchyTab.Visibility = Visibility.Visible;
@@ -134,6 +135,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
+        else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
     }
 
     // ── Nested-scroll bubbling ───────────────────────────────────────────────
@@ -329,6 +331,7 @@ public partial class SettingsView : UserControl
         AdDomainInput.Text = _services.Cfg.Get("ad_domain");
         AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
         AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
+        AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
 
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
@@ -482,7 +485,47 @@ public partial class SettingsView : UserControl
         _services.Cfg.Set("ad_domain", AdDomainInput.Text.Trim());
         _services.Cfg.Set("ad_group_administrator", AdGroupAdminInput.Text.Trim());
         _services.Cfg.Set("ad_group_programmer", AdGroupProgInput.Text.Trim());
+        _services.Cfg.Set("ad_group_naladchik", AdGroupNaladchikInput.Text.Trim());
         _host.ShowStatus("Группы для входа через Windows сохранены");
+    }
+
+    // ── Пользователи (собственный AD-ростер, Часть 2/3) ────────────────────────
+
+    private class UserRow
+    {
+        public AppUser Record { get; init; } = null!;
+        public string AdLogin => Record.AdLogin;
+        public string RoleLabel => RolesConfig.RoleLabel(Record.Role);
+        public string FirstLoginAt => Record.FirstLoginAt;
+        public string LastLoginAt => Record.LastLoginAt;
+    }
+
+    private void LoadUsersTab()
+    {
+        UsersGrid.ItemsSource = _services.Db.GetAppUsers().Select(u => new UserRow { Record = u }).ToList();
+
+        UserRoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
+        UserRoleCombo.SelectedValuePath = "RoleId";
+    }
+
+    private void RefreshUsers_Click(object sender, RoutedEventArgs e) => LoadUsersTab();
+
+    private void SetUserRole_Click(object sender, RoutedEventArgs e)
+    {
+        if (UsersGrid.SelectedItem is not UserRow row)
+        {
+            AppMessageBox.Show("Выберите пользователя в таблице.", "Пользователи", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (UserRoleCombo.SelectedItem is not RoleOption selected)
+        {
+            AppMessageBox.Show("Выберите роль в списке.", "Пользователи", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _services.Db.SetAppUserRole(row.Record.Id!.Value, selected.RoleId);
+        LoadUsersTab();
+        _host.ShowStatus($"Роль «{row.AdLogin}» изменена на «{selected.Label}»");
     }
 
     private void SaveMisc_Click(object sender, RoutedEventArgs e)

@@ -34,8 +34,11 @@
             <Button x:Name="TabBtnTags" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Теги" Style="{StaticResource NavButtonContentText}"/>
             </Button>
-            <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+            <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Быстрый доступ" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+                <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
             </Button>
         </StackPanel>
 
@@ -77,7 +80,7 @@
                     <Button Content="Сохранить пароли" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SavePasswords_Click"/>
 
                     <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = вход по AD для этой роли отключён."
+                    <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = для этой роли группа не используется — такой вход попадает в собственный список пользователей приложения (см. вкладку «Пользователи»), а не блокируется."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
@@ -88,6 +91,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                         <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"/>
@@ -95,6 +99,8 @@
                         <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="напр. AntarusAdmins"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                         <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"/>
                     </Grid>
                     <Button Content="Сохранить группы" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
 
@@ -370,6 +376,30 @@
                                  Margin="0,0,0,4" Checked="QuickAppsMode_Changed"/>
                     <RadioButton x:Name="QuickAppsModeTopLabeledRadio" GroupName="QuickAppsMode" Content="Сверху над страницей — иконки с подписями"
                                  Margin="0,0,0,4" Checked="QuickAppsMode_Changed"/>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ПОЛЬЗОВАТЕЛИ (собственный AD-ростер) ═══════════════════════════ -->
+                <StackPanel x:Name="UsersTab" Visibility="Collapsed">
+                    <TextBlock Text="Пользователи, вошедшие через «Войти по AD» в диалоге смены роли, когда логин не входит ни в одну настроенную AD-группу (см. вкладку «Общие» → «Вход по логину/паролю AD»). Первый вход с новым AD-логином автоматически получает роль «Наладчик» — здесь администратор может её изменить. Вход по AD-группе и вход по общим паролям ролей в этот список не попадают."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <DataGrid x:Name="UsersGrid" Height="360" AutoGenerateColumns="False" IsReadOnly="True" Margin="0,0,0,10"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="AD-логин" Binding="{Binding AdLogin}" Width="180"/>
+                            <DataGridTextColumn Header="Роль" Binding="{Binding RoleLabel}" Width="140"/>
+                            <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="160"/>
+                            <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="160"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0" x:Name="UserRoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
+                        <Button Grid.Column="1" Content="Сменить роль" Click="SetUserRole_Click"/>
+                    </Grid>
+                    <Button Content="Обновить" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Click="RefreshUsers_Click"/>
                 </StackPanel>
 
             </Grid>
