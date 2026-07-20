@@ -11,14 +11,32 @@
 
         <TextBlock Grid.Row="0" Text="Настройки" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
 
+        <!-- Content is an explicit TextBlock (not Content="…") with NavButtonContentText, not a bare
+             string — see that style's comment in Themes/Styles.xaml: a bare string here left active-
+             tab text dark-on-blue in light theme, since the implicit TextBlock style outranks the
+             Foreground NavButton's Tag="Active" trigger sets on the Button itself. -->
         <StackPanel x:Name="TabBar" Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
-            <Button x:Name="TabBtnGeneral" Content="Общие" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnHierarchy" Content="Иерархия" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnFirmware" Content="Прошивки" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnModeration" Content="Модерация" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnReservations" Content="Резервация номеров" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnTags" Content="Теги" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnQuickApps" Content="Быстрый доступ" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click"/>
+            <Button x:Name="TabBtnGeneral" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Общие" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnHierarchy" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Иерархия" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnFirmware" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Прошивки" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnModeration" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Модерация" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnReservations" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Резервация номеров" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnTags" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Теги" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+                <TextBlock Text="Быстрый доступ" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
         </StackPanel>
 
         <ScrollViewer Grid.Row="2" x:Name="MainScrollViewer" VerticalScrollBarVisibility="Auto">

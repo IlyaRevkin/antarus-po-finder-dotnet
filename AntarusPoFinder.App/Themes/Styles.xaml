@@ -141,6 +141,22 @@
         </Setter>
     </Style>
 
+    <!-- Text style for plain-string Button.Content on a NavButton/CompactNavButton whose Tag is
+         toggled to "Active" from code-behind (e.g. SettingsView's tab bar) — a bare Content="…"
+         string gets wrapped by WPF in an implicit-styled TextBlock (Foreground=TextBrush per the
+         app-wide TextBlock style above), which has HIGHER precedence than the Foreground NavButton's
+         own Tag="Active" trigger sets on the Button — so without this, active-tab text stayed dark
+         on the accent-blue background in light theme. Same root cause/fix as the sidebar nav list's
+         and SearchModeSegment's per-instance TextBlock+DataTrigger, extracted here since SettingsView
+         repeats this exact button shape seven times. -->
+    <Style x:Key="NavButtonContentText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}}" Value="Active">
+                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- Icon-only square button -->
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="Width" Value="28"/>
