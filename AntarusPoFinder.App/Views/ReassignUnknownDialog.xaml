@@ -1,0 +1,28 @@
+<Window x:Class="AntarusPoFinder.App.Views.ReassignUnknownDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Переместить в…" Width="380" SizeToContent="Height"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <TextBlock x:Name="IntroText" Text="Куда перенести выбранные элементы:" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <TextBlock Text="Тип шкафа:" Margin="0,0,0,4"/>
+        <ComboBox x:Name="GroupCombo" Height="34" Margin="0,0,0,10" DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
+
+        <TextBlock Text="Подтип:" Margin="0,0,0,4"/>
+        <ComboBox x:Name="SubtypeCombo" Height="34" Margin="0,0,0,10" DisplayMemberPath="Name"/>
+
+        <TextBlock x:Name="ThirdLevelLabel" Text="Контроллер:" Margin="0,0,0,4"/>
+        <ComboBox x:Name="ThirdLevelCombo" Height="34" Margin="0,0,0,4" DisplayMemberPath="Name"/>
+        <TextBlock Text="Имя папки/файла на диске не меняется — переносится как есть в выбранное место."
+                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+        <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button Content="Перенести" Width="110" Click="Ok_Click" IsDefault="True"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

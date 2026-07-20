@@ -32,6 +32,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private UpdateRelease? _pendingUpdate;
     private int? _lastModerationCount;
     private List<FirmwareUpdateInfo> _pendingFwUpdates = new();
+    private List<UnknownEntry> _pendingUnknownItems = new();
 
     private bool _suppressThemeToggleHandler;
 
@@ -47,6 +48,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _updateActionEnabled = true;
     [ObservableProperty] private bool _fwUpdateBannerVisible;
     [ObservableProperty] private string _fwUpdateBannerText = "";
+    [ObservableProperty] private bool _unknownItemsBannerVisible;
+    [ObservableProperty] private string _unknownItemsBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
     /// <summary>Быстрый доступ display mode — see ConfigService.QuickAppsDisplayMode. Two separate
     /// Visibility-driving flags (rather than one enum bound with a converter) because MainWindow.xaml
@@ -283,6 +286,22 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     private void StartTimers()
     {
+        // 1000ms once: ensure disk folder structure exists. Deliberately BEFORE the 1500ms sync tick
+        // below (was 2000ms/after, until live-testing Task 3 exposed the race that ordering caused —
+        // see EnsureHierarchy's own doc): EnsureStructure silently auto-moves top-level unrecognised
+        // names into «Неизвестное» as a side effect, so if CheckForUnknownItems' scan (part of
+        // RunSync) ran first, its list could reference a path that got moved out from under it a
+        // moment later, and the operator's very first unknown-items banner would already be stale
+        // before they ever clicked "Показать". Running structure-and-cleanup first means the first
+        // scan the operator sees reflects reality: only genuinely still-unresolved items.
+        _hierarchy2sTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
+        _hierarchy2sTimer.Tick += (_, _) =>
+        {
+            _hierarchy2sTimer!.Stop();
+            EnsureHierarchy();
+        };
+        _hierarchy2sTimer.Start();
+
         // 1500ms once (always), then every sync_interval_min minutes — unless it's 0, which means
         // "periodic auto-sync disabled on this machine" (see ConfigService.SyncIntervalMin); the
         // one-time startup sync above still runs regardless, only the repeat is skipped.
@@ -298,15 +317,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             _syncRepeatTimer.Start();
         };
         _sync1500msTimer.Start();
-
-        // 2000ms once: ensure disk folder structure exists.
-        _hierarchy2sTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2000) };
-        _hierarchy2sTimer.Tick += (_, _) =>
-        {
-            _hierarchy2sTimer!.Stop();
-            EnsureHierarchy();
-        };
-        _hierarchy2sTimer.Start();
 
         // 2500ms once: check for app updates (folder if configured, else GitHub — see AppUpdateService).
         // Then, while the app stays open, re-check every PeriodicUpdateCheckInterval — a release that
@@ -498,6 +508,61 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [RelayCommand]
     private void DismissFwUpdateBanner() => FwUpdateBannerVisible = false;
 
+    // ── Unknown files/folders (Task 3 — see HierarchyService.ScanUnknownFiles) ──────────────────
+
+    /// <summary>Piggybacks on the same periodic tick as the rest of RunSync (startup + every
+    /// sync_interval_min) — same reasoning as CleanupInspectionFolder/EnsureHierarchy above.
+    /// ScanUnknownFiles is read-only (nothing gets moved/deleted here, unlike EnsureHierarchy's own
+    /// top-level auto-move) — the operator decides what happens to each item via
+    /// ShowUnknownItemsDetails, one at a time or in bulk.</summary>
+    private void CheckForUnknownItems()
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root)) return;
+
+        List<UnknownEntry> unknown;
+        try { unknown = _services.Hierarchy.ScanUnknownFiles(root); }
+        catch { return; } // best effort — flaky network mount, next tick retries
+
+        _pendingUnknownItems = unknown;
+        if (unknown.Count == 0)
+        {
+            UnknownItemsBannerVisible = false;
+            return;
+        }
+        if (!_services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.Hierarchy)) return;
+
+        UnknownItemsBannerText = $"Обнаружены неизвестные файлы/папки на диске: {unknown.Count}";
+        UnknownItemsBannerVisible = true;
+        // Same text as last time (nothing changed since) — AddNotification's own dedup just bumps
+        // the timestamp instead of piling up identical history rows.
+        AddNotification(UnknownItemsBannerText, NotificationCategory.Hierarchy, reopen: () => UnknownItemsBannerVisible = true);
+    }
+
+    [RelayCommand]
+    private void ShowUnknownItemsDetails()
+    {
+        // Re-scan right before showing, rather than trust whatever _pendingUnknownItems still holds
+        // from the last periodic tick (up to sync_interval_min minutes old, default 5) — on a shared
+        // network drive another machine (or this app's own auto-cleanup, see EnsureHierarchy) could
+        // have already moved/removed an item by the time the operator gets around to clicking
+        // "Показать". A live rescan is what the manual Настройки → Иерархия scan button already did;
+        // the notification path deserves the same freshness guarantee.
+        CheckForUnknownItems();
+        if (_pendingUnknownItems.Count == 0) return;
+
+        var dlg = new UnknownFilesDialog(_services, _services.Cfg.RootPath(), _pendingUnknownItems) { Owner = Application.Current.MainWindow };
+        dlg.ShowDialog();
+
+        // Re-scan again afterwards rather than trust the dialog's own bookkeeping — a reassign/move/
+        // delete can fail partway through (see UnknownFilesDialog's per-item error handling), and the
+        // disk is the single source of truth for what's still actually unresolved.
+        CheckForUnknownItems();
+    }
+
+    [RelayCommand]
+    private void DismissUnknownItemsBanner() => UnknownItemsBannerVisible = false;
+
     private void RefreshSearchIfActive()
     {
         if (_pageCache.TryGetValue("search", out var page) && page is SearchView searchView)
@@ -554,6 +619,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         catch { /* best effort — next tick will retry */ }
 
         CleanupInspectionFolder();
+        CheckForUnknownItems();
     }
 
     /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupDays() from the
@@ -589,6 +655,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         var result = _services.Hierarchy.EnsureStructure(root);
         if (result.CreatedCount > 0)
             ShowStatus($"Структура диска создана: {result.CreatedCount} папок", 6000, NotificationCategory.Sync);
+        // EnsureStructure also auto-moves top-level unrecognised names into «Неизвестное» — this used
+        // to happen completely silently (MovedCount was computed but never surfaced anywhere), which
+        // meant a folder could vanish from where the operator expected it with zero explanation. The
+        // moved items themselves are then picked up by the very next CheckForUnknownItems tick (they
+        // live in «Неизвестное», which ScanUnknownFiles treats as a known/skip name — but this status
+        // line is the only place their *disappearance* from the original spot gets explained at all).
+        if (result.MovedCount > 0)
+            ShowStatus($"Перенесено в «Неизвестное» при проверке структуры диска: {result.MovedCount}", 8000, NotificationCategory.Hierarchy);
     }
 
     // ── IAppHost ──────────────────────────────────────────────────────────────

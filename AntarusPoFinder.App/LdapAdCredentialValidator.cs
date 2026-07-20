@@ -10,13 +10,11 @@ public class LdapAdCredentialValidator : IAdCredentialValidator
 {
     public bool Validate(string domain, string login, string password, out string? error) =>
         WindowsGroupAuth.ValidateAdCredentials(domain, login, password, out error);
-}
 
-// Способ №2 (заготовка, НЕ реализован): HTTP-проверка логина/пароля через внутренний веб-сервер
-// компании (напр. disk.antarus.su) вместо прямого LDAP-бинда — понадобится, если у части рабочих
-// мест наладчиков нет прямого сетевого доступа к контроллеру домена, но есть доступ к внутреннему
-// сайту. Формат запроса/ответа НЕ подтверждён IT на момент написания этого кода (реальный AD-домен
-// был недоступен из песочницы разработки — см. заметки сессии) — реализовать здесь
-// HttpAdCredentialValidator : IAdCredentialValidator, когда появится рабочий контракт, и передать
-// его вместо LdapAdCredentialValidator туда, где он сейчас конструируется (RoleSwitchDialog) —
-// остальную логику входа (AppUserAuthService, ростер, UI) менять не придётся.
+    public AdValidationStatus ValidateWithStatus(string domain, string login, string password, out string? error)
+    {
+        var ok = WindowsGroupAuth.ValidateAdCredentials(domain, login, password, out error, out var unavailable);
+        if (ok) return AdValidationStatus.Success;
+        return unavailable ? AdValidationStatus.Unavailable : AdValidationStatus.InvalidCredentials;
+    }
+}

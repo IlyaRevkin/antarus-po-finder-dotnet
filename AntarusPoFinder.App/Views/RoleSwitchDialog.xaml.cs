@@ -17,17 +17,18 @@ public partial class RoleSwitchDialog : Window
 
     public string? SelectedRole { get; private set; }
 
-    /// <summary>adValidator defaults to the real LDAP bind (LdapAdCredentialValidator) — tests pass
-    /// a fake instead, since the app has no access to a real AD domain in a sandbox (see
+    /// <summary>adValidator defaults to whatever Настройки → Общие → «Способ проверки» currently
+    /// selects (see AdCredentialValidatorFactory — LDAP, HTTP or both) — tests pass a fake instead,
+    /// since the app has no access to a real AD domain/web server in a sandbox (see
     /// AppUserAuthServiceTests in AntarusPoFinder.Tests for the login-logic coverage this enables;
     /// this dialog itself is only exercised live, with the default validator, against a real or
-    /// unreachable domain).</summary>
+    /// unreachable domain/server).</summary>
     public RoleSwitchDialog(AppServices services, string currentRole, IAdCredentialValidator? adValidator = null)
     {
         InitializeComponent();
         _cfg = services.Cfg;
         _db = services.Db;
-        _adValidator = adValidator ?? new LdapAdCredentialValidator();
+        _adValidator = adValidator ?? AdCredentialValidatorFactory.Create(_cfg);
 
         foreach (var (roleId, label) in RolesConfig.Roles)
             RoleCombo.Items.Add(new RoleOption(roleId, label));

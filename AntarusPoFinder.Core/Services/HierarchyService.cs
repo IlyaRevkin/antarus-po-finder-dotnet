@@ -39,6 +39,12 @@ public class HierarchyService
     public string FwPath(string root, string groupName, string subName, string controller, string versionStr, bool isOpc = false) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, isOpc), versionStr);
 
+    /// <summary>Public wrapper over PoCtrlFolder — the controller (or ОПЦ, when isOpc) folder itself,
+    /// with no version segment appended. Used by the "reassign" action in UnknownFilesDialog to drop
+    /// a formerly-unknown folder/file straight into its correct place on disk.</summary>
+    public string ControllerFolder(string root, string groupName, string subName, string controller, bool isOpc = false) =>
+        PoCtrlFolder(root, groupName, subName, controller, isOpc);
+
     public string InstrPath(string root, string groupName, string subName, string controller) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, false), HierarchyFolders.Instructions);
 
@@ -297,30 +303,60 @@ public class HierarchyService
         }
     }
 
+    /// <summary>Was originally a single flat pass over the ПО/Параметры top level only — an unknown
+    /// GROUP folder (e.g. a mistyped cabinet-type name dropped straight under "ПО\") was caught, but
+    /// an unknown SUBTYPE folder nested under a real group, or an unknown CONTROLLER folder nested
+    /// under a real group/subtype, was silently invisible to this scan (only top-level names were
+    /// ever checked against KnownPoNames/KnownParamNames). Now recurses through group → subtype →
+    /// controller, using the same flat known-name set at every level (see KnownPoNames — some groups,
+    /// e.g. ВЗУ, mix a "—" placeholder subtype with a real one, so a group folder's *own* children can
+    /// legitimately be a blend of controller folders and subtype folders side by side; a strict
+    /// per-level schema would misclassify that as "unknown"). Recursion stops the moment it reaches a
+    /// controller/ОПЦ/manufacturer folder (see poLeafNames/paramsLeafNames) — those hold free-form
+    /// version-numbered subfolders or files that were never meant to be checked against a fixed name
+    /// list, so descending into them would misreport every real firmware version as "unknown".</summary>
     public List<UnknownEntry> ScanUnknownFiles(string root)
     {
         var result = new List<UnknownEntry>();
+
         var poRoot = Path.Combine(root, FolderPo);
         var poUnknown = Path.Combine(poRoot, HierarchyFolders.UnknownFw);
-        CollectEntries(poRoot, poUnknown, KnownPoNames(), "ПО", result);
+        var poLeafNames = new HashSet<string>(_db.GetAllControllerModels().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
+        {
+            HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap, HierarchyFolders.UnknownFw,
+        };
+        CollectEntriesRecursive(poRoot, poUnknown, KnownPoNames(), poLeafNames, "ПО", result, depth: 0);
 
         var paramsRoot = Path.Combine(root, FolderParams);
         var paramsUnknown = Path.Combine(paramsRoot, HierarchyFolders.UnknownParams);
-        CollectEntries(paramsRoot, paramsUnknown, KnownParamNames(), "Параметры", result);
+        var paramsLeafNames = new HashSet<string>(_db.GetParamManufacturers(), StringComparer.OrdinalIgnoreCase)
+        {
+            HierarchyFolders.UnknownParams,
+        };
+        CollectEntriesRecursive(paramsRoot, paramsUnknown, KnownParamNames(), paramsLeafNames, "Параметры", result, depth: 0);
 
         return result;
     }
 
-    private static void CollectEntries(string scanRoot, string unknownDir, HashSet<string> known, string section,
-        List<UnknownEntry> result)
+    /// <summary>depth is capped defensively (pathological/symlinked trees) — the real hierarchy is at
+    /// most 3 levels deep (group → subtype → controller) so this never gets close to the cap in
+    /// practice.</summary>
+    private static void CollectEntriesRecursive(string dir, string unknownDir, HashSet<string> known,
+        HashSet<string> leafNames, string section, List<UnknownEntry> result, int depth)
     {
-        if (!Directory.Exists(scanRoot)) return;
-        foreach (var entry in Directory.EnumerateFileSystemEntries(scanRoot))
+        if (depth > 6 || !Directory.Exists(dir)) return;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(dir))
         {
             var name = Path.GetFileName(entry);
-            if (known.Contains(name)) continue;
             if (string.Equals(Path.GetFullPath(entry), Path.GetFullPath(unknownDir), StringComparison.OrdinalIgnoreCase)) continue;
-            result.Add(new UnknownEntry(entry, name, Directory.Exists(entry) ? "dir" : "file", section));
+            var isDir = Directory.Exists(entry);
+            if (!known.Contains(name))
+            {
+                result.Add(new UnknownEntry(entry, name, isDir ? "dir" : "file", section));
+                continue;
+            }
+            if (isDir && !leafNames.Contains(name))
+                CollectEntriesRecursive(entry, unknownDir, known, leafNames, section, result, depth + 1);
         }
     }
 

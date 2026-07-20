@@ -42,6 +42,8 @@ public class ConfigService
         ["ad_group_administrator"] = "",
         ["ad_group_programmer"] = "",
         ["ad_group_naladchik"] = "",
+        ["ad_auth_mode"] = "ldap",
+        ["ad_http_url"] = "",
         ["sync_interval_min"] = "5",
         ["quick_apps"] = "[]",
         ["app_update_path"] = "",
@@ -112,6 +114,22 @@ public class ConfigService
     /// status-bar toast on every auto-push tick.</summary>
     public string ConfigLastPushedAt() => Get("config_last_pushed_at");
     public void SetConfigLastPushedAt(string exportedAt) => Set("config_last_pushed_at", exportedAt);
+
+    /// <summary>"ldap" (default — unchanged behaviour for existing installs) = only способ №1 (прямой
+    /// LDAP-бинд, требует сетевого доступа к контроллеру домена); "http" = только способ №2 (HTTP-
+    /// запрос к AdHttpUrl() с NTLM/Negotiate); "both" = пробовать LDAP, и только если домен
+    /// недоступен (не если пароль неверный) — попробовать HTTP как запасной вариант. См.
+    /// AntarusPoFinder.App.AdCredentialValidatorFactory за тем, как это значение превращается в
+    /// конкретный IAdCredentialValidator.</summary>
+    public string AdAuthMode() => Get("ad_auth_mode") switch { "http" => "http", "both" => "both", _ => "ldap" };
+    public void SetAdAuthMode(string mode) => Set("ad_auth_mode", mode is "http" or "both" ? mode : "ldap");
+
+    /// <summary>Базовый URL внутреннего веб-сервера компании для способа №2 (HTTP-проверка пароля,
+    /// см. HttpAdCredentialValidator) — например https://disk.antarus.su/. Пусто по умолчанию:
+    /// реальный адрес НЕ хардкодится в код, администратор вписывает его сюда, когда IT подтвердит
+    /// рабочий формат (см. AdHttpUrlPlaceholder в SettingsView для подсказки в самом поле).</summary>
+    public string AdHttpUrl() => Get("ad_http_url");
+    public void SetAdHttpUrl(string url) => Set("ad_http_url", url.Trim());
 
     public string AdminPassword() => Get("admin_password");
     public string ProgrammerPassword() => Get("programmer_password");

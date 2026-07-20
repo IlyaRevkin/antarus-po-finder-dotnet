@@ -102,7 +102,19 @@
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                         <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"/>
                     </Grid>
-                    <Button Content="Сохранить группы" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
+
+                    <TextBlock Text="Способ проверки пароля AD:" Margin="0,0,0,4"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"/>
+                        <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"/>
+                        <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"/>
+                    </StackPanel>
+                    <TextBlock Text="URL веб-сервера для проверки пароля (способ HTTP):" Margin="0,0,0,4"/>
+                    <TextBox x:Name="AdHttpUrlInput" Height="34" Margin="0,0,0,4"
+                             ToolTip="Например: https://disk.antarus.su/ — точный адрес и формат подтверждает IT компании."/>
+                    <TextBlock Text="Пусто = способ HTTP не сможет сработать, даже если выбран выше. Логин/пароль передаются в веб-сервер как введено (без разбиения на домен), через Negotiate/NTLM."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Button Content="Сохранить группы и способ" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
 
                     <TextBlock Text="ПРОЧЕЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>

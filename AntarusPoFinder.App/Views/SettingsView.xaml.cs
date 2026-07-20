@@ -332,6 +332,13 @@ public partial class SettingsView : UserControl
         AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
         AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
         AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
+        AdHttpUrlInput.Text = _services.Cfg.AdHttpUrl();
+        (_services.Cfg.AdAuthMode() switch
+        {
+            "http" => AdModeHttpRadio,
+            "both" => AdModeBothRadio,
+            _ => AdModeLdapRadio,
+        }).IsChecked = true;
 
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
@@ -486,7 +493,9 @@ public partial class SettingsView : UserControl
         _services.Cfg.Set("ad_group_administrator", AdGroupAdminInput.Text.Trim());
         _services.Cfg.Set("ad_group_programmer", AdGroupProgInput.Text.Trim());
         _services.Cfg.Set("ad_group_naladchik", AdGroupNaladchikInput.Text.Trim());
-        _host.ShowStatus("Группы для входа через Windows сохранены");
+        _services.Cfg.SetAdHttpUrl(AdHttpUrlInput.Text);
+        _services.Cfg.SetAdAuthMode(AdModeHttpRadio.IsChecked == true ? "http" : AdModeBothRadio.IsChecked == true ? "both" : "ldap");
+        _host.ShowStatus("Группы и способ проверки пароля AD сохранены");
     }
 
     // ── Пользователи (собственный AD-ростер, Часть 2/3) ────────────────────────
@@ -1044,9 +1053,9 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show("Неизвестных файлов/папок не найдено.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        var dlg = new UnknownFilesDialog(root, unknown) { Owner = Window.GetWindow(this) };
+        var dlg = new UnknownFilesDialog(_services, root, unknown) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
-        _host.ShowStatus($"Перенесено: {dlg.Moved}, удалено: {dlg.Deleted}", category: NotificationCategory.Sync);
+        _host.ShowStatus($"Перенесено: {dlg.Moved}, перемещено в раздел: {dlg.Reassigned}, удалено: {dlg.Deleted}", category: NotificationCategory.Sync);
     }
 
     private void MoveDeletedFolder(string folderName)

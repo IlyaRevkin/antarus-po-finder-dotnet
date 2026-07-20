@@ -13,8 +13,16 @@ public static class WindowsGroupAuth
     /// <summary>Validates a domain\login+password pair against AD directly (LDAP bind under those
     /// credentials). Never throws: unreachable domain / bad domain name / wrong credentials all
     /// come back as a false result with a human-readable error.</summary>
-    public static bool ValidateAdCredentials(string domain, string login, string password, out string? error)
+    public static bool ValidateAdCredentials(string domain, string login, string password, out string? error) =>
+        ValidateAdCredentials(domain, login, password, out error, out _);
+
+    /// <summary>Same check, plus <paramref name="unavailable"/> — true only for "the domain
+    /// controller itself couldn't be reached" (PrincipalServerDownException), false for every other
+    /// failure including a rejected password. Lets LdapAdCredentialValidator.ValidateWithStatus
+    /// classify the failure for the способ="оба" fallback without duplicating the try/catch here.</summary>
+    public static bool ValidateAdCredentials(string domain, string login, string password, out string? error, out bool unavailable)
     {
+        unavailable = false;
         try
         {
             using var ctx = new PrincipalContext(ContextType.Domain, domain, login, password);
@@ -28,6 +36,7 @@ public static class WindowsGroupAuth
         }
         catch (PrincipalServerDownException)
         {
+            unavailable = true;
             error = $"Не удалось связаться с доменом «{domain}» — проверьте сеть/имя домена.";
             return false;
         }
