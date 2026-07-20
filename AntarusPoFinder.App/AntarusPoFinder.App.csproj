@@ -27,7 +27,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
-    <Version>1.15.0</Version>
+    <Version>1.15.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
