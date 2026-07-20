@@ -19,13 +19,14 @@
 
         <Separator Margin="0,0,0,12"/>
         <TextBlock Text="ИЛИ ВОЙТИ ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+        <TextBlock Text="Проверяет логин/пароль в домене. Если логин входит в AD-группу, настроенную для роли (Настройки → Общие) — назначает эту роль. Иначе роль берётся из собственного списка пользователей приложения: уже известный логин получает сохранённую роль, новый — автоматически становится «Наладчиком» (администратор может сменить роль в Настройки → Пользователи)."
+                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
         <TextBlock Text="Домен:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
-        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i"/>
+        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i, revkin.i@Elita или Elita\revkin.i"/>
         <TextBlock Text="Пароль AD:" Margin="0,0,0,4"/>
         <PasswordBox x:Name="AdPasswordInput" Margin="0,0,0,12"/>
-        <Button x:Name="AdAuthBtn" Content="Войти по AD" HorizontalAlignment="Right" Click="AdAuth_Click"
-                ToolTip="Проверяет логин/пароль в домене и определяет роль по членству в настроенных AD-группах (Настройки → Общие)."/>
+        <Button x:Name="AdAuthBtn" Content="Войти по AD" HorizontalAlignment="Right" Click="AdAuth_Click"/>
     </StackPanel>
 </Window>

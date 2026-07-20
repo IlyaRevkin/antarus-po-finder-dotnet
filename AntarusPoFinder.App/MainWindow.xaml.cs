@@ -261,7 +261,7 @@ public partial class MainWindow : Window
 
     private void RoleSwitchButton_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new RoleSwitchDialog(_services.Cfg, _vm.CurrentRole) { Owner = this };
+        var dlg = new RoleSwitchDialog(_services, _vm.CurrentRole) { Owner = this };
         if (dlg.ShowDialog() == true && dlg.SelectedRole is not null)
         {
             _vm.SwitchRole(dlg.SelectedRole);
