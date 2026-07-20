@@ -28,6 +28,11 @@ public partial class InspectionView : UserControl
     private FileSystemWatcher? _watcher;
     private Microsoft.Web.WebView2.Wpf.WebView2? _pdfView;
 
+    // ── Image preview editing state (rotate + save) ──────────────────────────
+    private BitmapSource? _previewOriginalImage;
+    private string? _previewImagePath;
+    private int _previewRotationDeg;
+
     private class FileRow
     {
         public string FullPath { get; init; } = "";
@@ -271,6 +276,10 @@ public partial class InspectionView : UserControl
         PreviewImageScroll.Visibility = Visibility.Collapsed;
         PreviewImage.Source = null;
         PreviewPlaceholder.Text = "Выберите файл в списке слева";
+        _previewOriginalImage = null;
+        _previewImagePath = null;
+        _previewRotationDeg = 0;
+        ImageEditToolbar.Visibility = Visibility.Collapsed;
 
         if (FilesList.SelectedItem is not FileRow row || !File.Exists(row.FullPath))
         {
@@ -294,8 +303,16 @@ public partial class InspectionView : UserControl
                 bmp.StreamSource = stream;
                 bmp.EndInit();
                 bmp.Freeze();
+                // Viewbox (see XAML) auto-scales this to fit the preview pane, both down for a
+                // full-size photo and up for a small scan thumbnail — the Image control itself
+                // previously sat inside a ScrollViewer, which hands its child effectively unlimited
+                // space, so Stretch="Uniform" never had anything to actually fit against and every
+                // image just rendered at its native pixel size regardless of the pane's size.
+                _previewOriginalImage = bmp;
+                _previewImagePath = row.FullPath;
                 PreviewImage.Source = bmp;
                 PreviewImageScroll.Visibility = Visibility.Visible;
+                ImageEditToolbar.Visibility = Visibility.Visible;
             }
             catch
             {
@@ -313,6 +330,167 @@ public partial class InspectionView : UserControl
             PreviewPlaceholder.Visibility = Visibility.Visible;
             PreviewPlaceholder.Text = "Нет встроенного просмотра для этого типа файла — двойной клик открывает файл в связанном приложении.";
         }
+    }
+
+    // ── Image preview editing: rotate + save (minimal — no crop, see round notes) ────────────
+
+    private void RotateLeft_Click(object sender, RoutedEventArgs e) => Rotate(-90);
+    private void RotateRight_Click(object sender, RoutedEventArgs e) => Rotate(90);
+
+    private void Rotate(int deltaDeg)
+    {
+        if (_previewOriginalImage is null) return;
+        _previewRotationDeg = ((_previewRotationDeg + deltaDeg) % 360 + 360) % 360;
+        ApplyPreviewRotation();
+    }
+
+    /// <summary>Re-derives the displayed bitmap from the untouched original every time (never
+    /// rotates the already-rotated preview) — rotating 90°/90°/90° stays lossless and always ends up
+    /// pixel-identical to a single 270° rotation, instead of accumulating repeated re-render error.</summary>
+    private void ApplyPreviewRotation()
+    {
+        if (_previewOriginalImage is null) return;
+        if (_previewRotationDeg == 0)
+        {
+            PreviewImage.Source = _previewOriginalImage;
+            return;
+        }
+        var rotated = new TransformedBitmap(_previewOriginalImage, new System.Windows.Media.RotateTransform(_previewRotationDeg));
+        rotated.Freeze();
+        PreviewImage.Source = rotated;
+    }
+
+    private void SaveRotationOverwrite_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureRotationToSave(out var name)) return;
+
+        var reply = AppMessageBox.Show(
+            $"Перезаписать файл «{name}» повёрнутым изображением?\n\nИсходный файл будет заменён — отменить нельзя.",
+            "Сохранить поворот", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        if (!TrySaveRotatedImage(_previewImagePath!, out var error))
+        {
+            AppMessageBox.Show($"Не удалось сохранить: {error}", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _previewRotationDeg = 0;
+        _host.ShowStatus($"Файл перезаписан: {name}", category: NotificationCategory.Inspection);
+        RefreshFileList();
+        ReloadPreviewFromDisk();
+    }
+
+    private void SaveRotationAsCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureRotationToSave(out _)) return;
+
+        var proto = _services.Cfg.Get("inspection_folder");
+        var ext = Path.GetExtension(_previewImagePath!);
+        var suggested = Path.Combine(proto, $"{Path.GetFileNameWithoutExtension(_previewImagePath!)}_повёрнуто{ext}");
+
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Сохранить копию с поворотом",
+            InitialDirectory = proto,
+            FileName = Path.GetFileName(suggested),
+            Filter = $"Изображение (*{ext})|*{ext}",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        if (!TrySaveRotatedImage(dlg.FileName, out var error))
+        {
+            AppMessageBox.Show($"Не удалось сохранить: {error}", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _host.ShowStatus($"Копия сохранена: {Path.GetFileName(dlg.FileName)}", category: NotificationCategory.Inspection);
+        RefreshFileList();
+    }
+
+    private bool EnsureRotationToSave(out string name)
+    {
+        name = _previewImagePath is not null ? Path.GetFileName(_previewImagePath) : "";
+        if (_previewImagePath is null || _previewOriginalImage is null) return false;
+        if (_previewRotationDeg == 0)
+        {
+            AppMessageBox.Show("Сначала поверните изображение — сохранять нечего.", "Сохранить поворот", MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Encodes the currently-rotated bitmap and writes it to <paramref name="destPath"/>,
+    /// picking the encoder from its extension (falls back to PNG for anything not recognized —
+    /// lossless, never a wrong-format guess). Writes to a sibling temp file first and only replaces
+    /// the destination once the encode fully succeeded, so a mid-write failure never leaves a
+    /// half-written/corrupt file in the (working, not archival) inspection folder.</summary>
+    private bool TrySaveRotatedImage(string destPath, out string error)
+    {
+        error = "";
+        try
+        {
+            var rotated = _previewRotationDeg == 0
+                ? _previewOriginalImage!
+                : new TransformedBitmap(_previewOriginalImage!, new System.Windows.Media.RotateTransform(_previewRotationDeg));
+
+            var encoder = CreateEncoderForExtension(Path.GetExtension(destPath));
+            encoder.Frames.Add(BitmapFrame.Create(rotated));
+
+            var tmp = destPath + ".tmp";
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
+                encoder.Save(fs);
+
+            if (File.Exists(destPath)) File.Delete(destPath);
+            File.Move(tmp, destPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static BitmapEncoder CreateEncoderForExtension(string ext) => ext.ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => new JpegBitmapEncoder { QualityLevel = 92 },
+        ".bmp" => new BmpBitmapEncoder(),
+        ".gif" => new GifBitmapEncoder(),
+        ".tif" or ".tiff" => new TiffBitmapEncoder(),
+        _ => new PngBitmapEncoder(),
+    };
+
+    /// <summary>Re-reads the just-saved file from disk (instead of just resetting the in-memory
+    /// bitmap) so the preview reflects exactly what's now on disk, including whatever the encoder
+    /// actually produced (e.g. JPEG recompression), not the pre-save in-memory version.</summary>
+    private void ReloadPreviewFromDisk()
+    {
+        if (_previewImagePath is null || !File.Exists(_previewImagePath)) return;
+        try
+        {
+            var bmp = new BitmapImage();
+            using var stream = new FileStream(_previewImagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = stream;
+            bmp.EndInit();
+            bmp.Freeze();
+            _previewOriginalImage = bmp;
+            PreviewImage.Source = bmp;
+        }
+        catch { /* best effort — file list/thumbnail still updated, just the live preview stays stale */ }
+    }
+
+    private void PhoneInstructions_Click(object sender, RoutedEventArgs e)
+    {
+        var proto = _services.Cfg.Get("inspection_folder");
+        if (string.IsNullOrEmpty(proto))
+        {
+            AppMessageBox.Show("Сначала укажите папку осмотра в Настройках.", "Подключение с телефона", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        new PhoneNetworkInstructionsDialog(proto) { Owner = Window.GetWindow(this) }.ShowDialog();
     }
 
     /// <summary>The WebView2 control is created on demand, only while a PDF is actually selected —
