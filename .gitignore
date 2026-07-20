@@ -2,6 +2,8 @@
 bin/
 obj/
 publish/
+publish_test/
+release_out/
 *.user
 *.pdb
 
