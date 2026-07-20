@@ -15,12 +15,11 @@ public partial class MainWindow : Window
 
     private static readonly Dictionary<string, (string Title, string Body)> NavStepText = new()
     {
-        ["search"] = ("Поиск", "Ищите прошивки, параметры и схемы по названию, версии или тегу."),
         ["inspection"] = ("Осмотр", "Здесь сохраняются фото и сканы при осмотре оборудования — можно загрузить с телефона по QR-коду."),
-        ["newversions"] = ("Модерация тегов", "Новые прошивки без тегов ждут здесь, пока вы их не разметите. Цифра на кнопке — сколько сейчас в очереди."),
+        ["newversions"] = ("Модерация тегов", "Новые прошивки без тегов ждут здесь для разметки (прошивка всё равно отображается при поиске)."),
         ["upload"] = ("Загрузка ПО", "Здесь загружаются новые версии прошивок в общий архив."),
         ["params"] = ("Параметры ПЧ/УПП", "Файлы параметров преобразователей частоты и приводов."),
-        ["network"] = ("Сетевые диски", "Путь к диску, разрешение сканирования и интервал синхронизации — настраивается на каждом компьютере отдельно."),
+        ["network"] = ("Сетевые диски", "Путь к диску и интервал синхронизации — настраивается на каждом компьютере отдельно."),
     };
 
     public MainWindow(AppServices services)
@@ -65,23 +64,29 @@ public partial class MainWindow : Window
 
         foreach (var navItem in _vm.NavItems.Where(n => n.IsVisible))
         {
-            if (!NavStepText.TryGetValue(navItem.PageId, out var text)) continue;
             var pageId = navItem.PageId;
-            if (NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem) is not FrameworkElement container) continue;
-            steps.Add(new OnboardingStep(() => container, text.Title, text.Body));
 
             if (pageId == "search")
             {
+                // No separate "Поиск" nav-container intro step here — it only duplicated the nav
+                // label and the step below, while highlighting the wrong element (sidebar button,
+                // not the actual search box). Straight into the real search box.
                 steps.Add(new OnboardingStep(
                     () => NavigateAndResolve("search", () => (_vm.CurrentPageContent as SearchView)?.OnboardingTarget("input")),
-                    "Строка поиска",
-                    "Введите запрос и нажмите «Найти» (или Enter) — поиск запускается по кнопке/Enter, не на каждую букву."));
+                    "Поиск",
+                    "Просто «Найти» или Enter для поиска."));
                 steps.Add(new OnboardingStep(
                     () => (_vm.CurrentPageContent as SearchView)?.OnboardingTarget("mode"),
                     "Режим поиска",
-                    "Переключатель между прошивками, файлами параметров и электросхемами — ищет только в выбранном разделе."));
+                    "Переключатель между прошивками, файлами параметров и электросхемами — отображает результат только выбранного раздела."));
+                continue;
             }
-            else if (pageId == "upload")
+
+            if (!NavStepText.TryGetValue(pageId, out var text)) continue;
+            if (NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem) is not FrameworkElement container) continue;
+            steps.Add(new OnboardingStep(() => container, text.Title, text.Body));
+
+            if (pageId == "upload")
             {
                 steps.Add(new OnboardingStep(
                     () => NavigateAndResolve("upload", () => (_vm.CurrentPageContent as UploadView)?.OnboardingTarget("dropzone")),
@@ -93,24 +98,24 @@ public partial class MainWindow : Window
                     "Для нестандартных шкафов — два независимых чекбокса: № заявки и SN шкафа. Можно включить один, другой или оба сразу."));
                 steps.Add(new OnboardingStep(
                     () => (_vm.CurrentPageContent as UploadView)?.OnboardingTarget("reserve"),
-                    "Резерв номера версии",
-                    "Если номер нужно вписать в прошивку ДО сборки — зарезервируйте его заранее. У резерва есть срок действия (настраивается в Настройки → Резервы номеров)."));
+                    "Резервация номера версии",
+                    "Если номер нужно вписать в прошивку ДО сборки — зарезервируйте его заранее. У резервации есть срок действия (настраивается в Настройки → Резервация номеров)."));
             }
         }
 
         steps.Add(new OnboardingStep(() => SettingsNavButton, "Настройки",
-            "Иерархия шкафов, теги, резервы номеров и модерация — видно только администратору."));
+            "Иерархия шкафов, теги, резервация номеров и модерация тегов и прошивок — видно только администратору."));
         if (_vm.SettingsVisible)
         {
             steps.Add(new OnboardingStep(
                 () => NavigateAndResolve("settings", () => (_vm.CurrentPageContent as SettingsView)?.OnboardingTarget("tabbar")),
                 "Вкладки настроек",
-                "Общие, Иерархия, Прошивки, Модерация, Резервы номеров, Теги, Быстрый доступ — у каждой вкладки свой набор действий."));
+                "Общие, Иерархия, Прошивки, Модерация, Резервация номеров, Теги, Быстрый доступ — у каждой вкладки свой набор действий."));
         }
         steps.Add(new OnboardingStep(() => NotificationsNavButton, "Уведомления",
             "Всё, что показывалось в статус-баре или баннером сверху, остаётся здесь — даже после того как баннер сам скрылся через несколько секунд."));
         steps.Add(new OnboardingStep(() => RoleSwitchNavButton, "Роль",
-            "Наладчик, программист или администратор — от роли зависит, что видно в этом меню."));
+            "Наладчик, программист или администратор — от роли зависит, что видно в меню."));
         steps.Add(new OnboardingStep(() => ThemeToggleControl, "Тема оформления",
             "Переключение между светлой и тёмной темой."));
 

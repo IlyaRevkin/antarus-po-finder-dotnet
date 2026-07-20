@@ -50,8 +50,28 @@ public partial class InspectionView : UserControl
     private void Activate()
     {
         UpdateProtoLabel();
+        LoadScanResolution();
         StartPhotoServer();
         RefreshFileList();
+    }
+
+    /// <summary>Качество сканирования используется только здесь (WiaScanner.TryScan ниже) — раньше
+    /// жило в Настройки → Сетевые диски рядом с путями к дискам, что не имело отношения к делу и
+    /// было видно только наладчику там же, где он не сканирует. Значение сохраняется сразу при
+    /// смене — отдельная кнопка "Сохранить" не нужна для одной настройки прямо у кнопки "Сканировать".</summary>
+    private void LoadScanResolution()
+    {
+        var dpi = _services.Cfg.ScanResolutionDpi().ToString();
+        ScanResolutionCombo.SelectionChanged -= ScanResolutionCombo_SelectionChanged;
+        ScanResolutionCombo.SelectedItem = ScanResolutionCombo.Items.Cast<ComboBoxItem>()
+            .FirstOrDefault(i => (string)i.Content == dpi) ?? ScanResolutionCombo.Items[2];
+        ScanResolutionCombo.SelectionChanged += ScanResolutionCombo_SelectionChanged;
+    }
+
+    private void ScanResolutionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ScanResolutionCombo.SelectedItem is ComboBoxItem { Content: string dpiText } && int.TryParse(dpiText, out var dpi))
+            _services.Cfg.SetScanResolutionDpi(dpi);
     }
 
     private void Deactivate()

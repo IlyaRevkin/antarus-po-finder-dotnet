@@ -16,7 +16,7 @@
             <Button x:Name="TabBtnHierarchy" Content="Иерархия" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
             <Button x:Name="TabBtnFirmware" Content="Прошивки" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
             <Button x:Name="TabBtnModeration" Content="Модерация" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
-            <Button x:Name="TabBtnReservations" Content="Резервы номеров" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
+            <Button x:Name="TabBtnReservations" Content="Резервация номеров" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
             <Button x:Name="TabBtnTags" Content="Теги" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click"/>
             <Button x:Name="TabBtnQuickApps" Content="Быстрый доступ" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click"/>
         </StackPanel>

@@ -61,17 +61,21 @@ public partial class UploadView : UserControl
         var prevGroupId = (GroupCombo.SelectedItem as EquipmentGroup)?.Id;
         var prevModId = (CtrlCombo.SelectedItem as ControllerModification)?.Id;
 
+        // No previous selection (first load of the page) leaves the combo EMPTY (-1), not auto-
+        // picked to the first item — autodetect may fail to match a file (wrong/unknown model), and
+        // a silently pre-selected group/controller meant it was easy to upload under the wrong one
+        // without noticing. The user must pick explicitly.
         _groups = _services.Db.GetAllEquipmentGroups();
         GroupCombo.ItemsSource = _groups;
         GroupCombo.SelectedIndex = prevGroupId is not null
             ? Math.Max(0, _groups.FindIndex(g => g.Id == prevGroupId))
-            : (_groups.Count > 0 ? 0 : -1);
+            : -1;
 
         _mods = _services.Db.GetAllModifications();
         CtrlCombo.ItemsSource = _mods;
         CtrlCombo.SelectedIndex = prevModId is not null
             ? Math.Max(0, _mods.FindIndex(m => m.Id == prevModId))
-            : (_mods.Count > 0 ? 0 : -1);
+            : -1;
 
         PopulateSubtypes();
         OnCtrlChanged();
@@ -94,7 +98,7 @@ public partial class UploadView : UserControl
         SubCombo.ItemsSource = options;
         SubCombo.SelectedIndex = prevSubId is not null
             ? Math.Max(0, options.FindIndex(o => o.Subtype.Id == prevSubId))
-            : (options.Count > 0 ? 0 : -1);
+            : -1;
 
         RefreshReservationPicker();
         UpdatePreview();

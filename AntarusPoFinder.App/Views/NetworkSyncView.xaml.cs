@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
@@ -8,9 +7,10 @@ using AntarusPoFinder.App.ViewModels;
 
 namespace AntarusPoFinder.App.Views;
 
-/// <summary>Общая для всех ролей страница "Сетевые диски и синхронизация" — раньше пути к дискам,
-/// разрешение сканирования и интервал синхронизации жили только в Настройки → Общие, доступной
-/// одному администратору, хотя их реально нужно настраивать на каждом компьютере отдельно.</summary>
+/// <summary>Общая для всех ролей страница "Сетевые диски и синхронизация" — раньше пути к дискам
+/// и интервал синхронизации жили только в Настройки → Общие, доступной одному администратору, хотя
+/// их реально нужно настраивать на каждом компьютере отдельно. Качество сканирования сюда не
+/// относится (используется только в Осмотре при самом сканировании) — живёт в InspectionView.</summary>
 public partial class NetworkSyncView : UserControl
 {
     private readonly AppServices _services;
@@ -36,9 +36,6 @@ public partial class NetworkSyncView : UserControl
         RootPathInput.Text = _services.Cfg.RootPath();
         SecondDiskInput.Text = _services.Cfg.SecondDiskPath();
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
-        var dpi = _services.Cfg.ScanResolutionDpi().ToString();
-        ScanResolutionCombo.SelectedItem = ScanResolutionCombo.Items.Cast<ComboBoxItem>()
-            .FirstOrDefault(i => (string)i.Content == dpi) ?? ScanResolutionCombo.Items[2];
         SyncIntervalInput.Text = _services.Cfg.SyncIntervalMin().ToString();
 
         AutoPushCheck.IsChecked = _services.Cfg.ConfigAutoPush();
@@ -85,24 +82,16 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus("Папка осмотра сохранена");
     }
 
-    private void SaveScanResolution_Click(object sender, RoutedEventArgs e)
-    {
-        if (ScanResolutionCombo.SelectedItem is ComboBoxItem { Content: string dpiText } && int.TryParse(dpiText, out var dpi))
-            _services.Cfg.SetScanResolutionDpi(dpi);
-        _host.ShowStatus("Разрешение сканирования сохранено");
-    }
-
     private void SaveSyncInterval_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(SyncIntervalInput.Text.Trim(), out var v))
+        if (!int.TryParse(SyncIntervalInput.Text.Trim(), out var v) || v < 0)
         {
-            AppMessageBox.Show("Введите целое число минут.", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show("Введите целое число минут (0 — отключить автосинхронизацию).", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        v = Math.Max(1, v);
         _services.Cfg.SetSyncIntervalMin(v);
         _host.SetSyncIntervalMinutes(v);
-        _host.ShowStatus($"Интервал синхронизации: {v} мин");
+        _host.ShowStatus(v == 0 ? "Автосинхронизация с диском отключена" : $"Интервал синхронизации: {v} мин");
     }
 
     private void SyncNow_Click(object sender, RoutedEventArgs e)
@@ -146,15 +135,14 @@ public partial class NetworkSyncView : UserControl
 
     private void SavePushInterval_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(PushIntervalInput.Text.Trim(), out var v))
+        if (!int.TryParse(PushIntervalInput.Text.Trim(), out var v) || v < 0)
         {
-            AppMessageBox.Show("Введите целое число минут.", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show("Введите целое число минут (0 — отключить автоотправку).", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        v = Math.Max(1, v);
         _services.Cfg.SetConfigPushIntervalMin(v);
         _host.RefreshConfigSync();
-        _host.ShowStatus($"Интервал отправки: {v} мин");
+        _host.ShowStatus(v == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {v} мин");
     }
 
     private void PushNow_Click(object sender, RoutedEventArgs e)

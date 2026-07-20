@@ -18,13 +18,25 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="Папка осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBlock Grid.Column="1" x:Name="ProtoPathLabel" Text="не задана" Style="{StaticResource MutedText}"
                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"/>
             <Button Grid.Column="3" Content="Очистить папку осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ClearProtocolFolder_Click"/>
-            <Button Grid.Column="4" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
+            <TextBlock Grid.Column="4" Text="Качество сканирования:" VerticalAlignment="Center" Margin="16,0,8,0"/>
+            <ComboBox Grid.Column="5" x:Name="ScanResolutionCombo" Width="90" VerticalAlignment="Center"
+                      ToolTip="DPI скана — выше значение, чётче скан, но больше размер файла"
+                      SelectionChanged="ScanResolutionCombo_SelectionChanged">
+                <ComboBoxItem Content="100"/>
+                <ComboBoxItem Content="150"/>
+                <ComboBoxItem Content="200"/>
+                <ComboBoxItem Content="300"/>
+                <ComboBoxItem Content="600"/>
+            </ComboBox>
+            <Button Grid.Column="6" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
         </Grid>
 
         <Grid Grid.Row="2">

@@ -167,7 +167,7 @@ public partial class SettingsView : UserControl
         return null;
     }
 
-    // ── Резервы номеров ───────────────────────────────────────────────────────
+    // ── Резервация номеров ───────────────────────────────────────────────────
 
     private void LoadReservationsTab()
     {
@@ -181,18 +181,18 @@ public partial class SettingsView : UserControl
     {
         if (!int.TryParse(ReservationTtlInput.Text.Trim(), out var hours) || hours < 0)
         {
-            AppMessageBox.Show("Введите целое число часов (0 — без ограничения).", "Резервы номеров", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show("Введите целое число часов (0 — без ограничения).", "Резервация номеров", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         _services.Cfg.SetReservationTtlHours(hours);
-        _host.ShowStatus(hours == 0 ? "Резервы номеров больше не истекают по умолчанию" : $"Срок резерва по умолчанию: {hours} ч");
+        _host.ShowStatus(hours == 0 ? "Резервация номеров больше не истекает по умолчанию" : $"Срок резерва по умолчанию: {hours} ч");
     }
 
     private void CancelReservation_Click(object sender, RoutedEventArgs e)
     {
         if (ReservationsGrid.SelectedItem is not ReservationRow row)
         {
-            AppMessageBox.Show("Выберите резерв в таблице.", "Резервы номеров", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show("Выберите резерв в таблице.", "Резервация номеров", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         var reply = AppMessageBox.Show(
@@ -1132,8 +1132,18 @@ public partial class SettingsView : UserControl
         var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
+        // "Прошивка обновлена" is misleading when the only thing that changed is tags (no new
+        // firmware version, nothing re-uploaded) — same distinction ModerateFirmware_Click already
+        // makes below. Compare tags as an unordered set (space-joined, order isn't meaningful).
+        bool tagsChanged = !new HashSet<string>(v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase)
+            .SetEquals(dlg.ResultTags.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        bool otherChanged = v.Description != dlg.ResultDescription ||
+            !new HashSet<string>(v.LaunchTypes, StringComparer.OrdinalIgnoreCase).SetEquals(dlg.ResultLaunchTypes);
+
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
-        _host.ShowStatus($"Прошивка обновлена: {v.VersionRaw}");
+        _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
+            : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
+            : $"Без изменений: {v.VersionRaw}");
         LoadFirmwareTab();
     }
 

@@ -6,7 +6,7 @@
                 CornerRadius="6" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
 
         <Border x:Name="CalloutBorder" Background="{DynamicResource BgSidebarBrush}" CornerRadius="8"
-                Padding="16" Width="300" HorizontalAlignment="Left" VerticalAlignment="Top"
+                Padding="16" Width="330" HorizontalAlignment="Left" VerticalAlignment="Top"
                 BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
             <StackPanel>
                 <TextBlock x:Name="StepCounterText" Style="{StaticResource MutedText}" Margin="0,0,0,6"/>
@@ -16,6 +16,7 @@
                            Foreground="{DynamicResource TextBrush}"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="Пропустить всё" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Skip_Click"/>
+                    <Button x:Name="BackButton" Content="Назад" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Back_Click"/>
                     <Button x:Name="NextButton" Content="Далее" Click="Next_Click"/>
                 </StackPanel>
             </StackPanel>

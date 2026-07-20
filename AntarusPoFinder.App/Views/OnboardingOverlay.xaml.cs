@@ -35,7 +35,7 @@ public partial class OnboardingOverlay : UserControl
         SizeChanged += (_, _) => { if (_currentTarget is not null) PositionAgainst(_currentTarget); };
     }
 
-    private void ShowStep(int index)
+    private void ShowStep(int index, int direction = 1)
     {
         _index = index;
         var step = _steps[index];
@@ -44,10 +44,12 @@ public partial class OnboardingOverlay : UserControl
         if (_currentTarget is null || !_currentTarget.IsVisible || _currentTarget.ActualWidth == 0)
         {
             // Target isn't reachable for this role/state (e.g. a page hidden for a naladchik, or
-            // an element that's conditionally absent) — skip straight past it rather than
-            // highlighting an invisible rectangle at (0,0).
-            if (_index + 1 < _steps.Count) ShowStep(_index + 1);
-            else Finished?.Invoke(this, EventArgs.Empty);
+            // an element that's conditionally absent) — skip straight past it (in whichever
+            // direction we're moving) rather than highlighting an invisible rectangle at (0,0).
+            var next = _index + direction;
+            if (next >= 0 && next < _steps.Count) ShowStep(next, direction);
+            else if (direction > 0) Finished?.Invoke(this, EventArgs.Empty);
+            // direction < 0 and nothing reachable behind us — stay put rather than close the tour.
             return;
         }
 
@@ -55,6 +57,7 @@ public partial class OnboardingOverlay : UserControl
         TitleText.Text = step.Title;
         BodyText.Text = step.Body;
         NextButton.Content = index == _steps.Count - 1 ? "Готово" : "Далее";
+        BackButton.IsEnabled = index > 0;
         PositionAgainst(_currentTarget);
     }
 
@@ -78,7 +81,13 @@ public partial class OnboardingOverlay : UserControl
     private void Next_Click(object sender, RoutedEventArgs e)
     {
         if (_index + 1 >= _steps.Count) { Finished?.Invoke(this, EventArgs.Empty); return; }
-        ShowStep(_index + 1);
+        ShowStep(_index + 1, direction: 1);
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        if (_index == 0) return;
+        ShowStep(_index - 1, direction: -1);
     }
 
     private void Skip_Click(object sender, RoutedEventArgs e) => Finished?.Invoke(this, EventArgs.Empty);

@@ -247,16 +247,17 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     private void StartTimers()
     {
-        // 1500ms once, then every sync_interval_min minutes.
+        // 1500ms once (always), then every sync_interval_min minutes — unless it's 0, which means
+        // "periodic auto-sync disabled on this machine" (see ConfigService.SyncIntervalMin); the
+        // one-time startup sync above still runs regardless, only the repeat is skipped.
         _sync1500msTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
         _sync1500msTimer.Tick += (_, _) =>
         {
             _sync1500msTimer!.Stop();
             RunSync();
-            _syncRepeatTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMinutes(_services.Cfg.SyncIntervalMin())
-            };
+            var minutes = _services.Cfg.SyncIntervalMin();
+            if (minutes <= 0) return;
+            _syncRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
             _syncRepeatTimer.Tick += (_, _) => RunSync();
             _syncRepeatTimer.Start();
         };
@@ -297,10 +298,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             _configCheckTimer!.Stop();
             CheckForConfigUpdate();
-            _configPullRepeatTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMinutes(_services.Cfg.SyncIntervalMin())
-            };
+            var minutes = _services.Cfg.SyncIntervalMin();
+            if (minutes <= 0) return;
+            _configPullRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
             _configPullRepeatTimer.Tick += (_, _) => CheckForConfigUpdate();
             _configPullRepeatTimer.Start();
         };
@@ -546,12 +546,42 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             QuickApps.Add(new QuickAppItem(app.Name, app.Path));
     }
 
+    /// <summary>0 disables periodic auto-sync — stops any running repeat timer instead of setting a
+    /// zero interval (which would fire continuously). A non-zero value re-arms a repeat timer even
+    /// if one wasn't running before (interval was previously 0), reusing the same Tick handlers as
+    /// StartTimers.</summary>
     public void SetSyncIntervalMinutes(int minutes)
     {
+        if (minutes <= 0)
+        {
+            _syncRepeatTimer?.Stop();
+            _syncRepeatTimer = null;
+            _configPullRepeatTimer?.Stop();
+            _configPullRepeatTimer = null;
+            return;
+        }
+
         if (_syncRepeatTimer is not null)
+        {
             _syncRepeatTimer.Interval = TimeSpan.FromMinutes(minutes);
+        }
+        else
+        {
+            _syncRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
+            _syncRepeatTimer.Tick += (_, _) => RunSync();
+            _syncRepeatTimer.Start();
+        }
+
         if (_configPullRepeatTimer is not null)
+        {
             _configPullRepeatTimer.Interval = TimeSpan.FromMinutes(minutes);
+        }
+        else
+        {
+            _configPullRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
+            _configPullRepeatTimer.Tick += (_, _) => CheckForConfigUpdate();
+            _configPullRepeatTimer.Start();
+        }
     }
 
     void IAppHost.Navigate(string pageId) => Navigate(pageId);
@@ -566,7 +596,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _configPushTimer = null;
         if (CurrentRole != "administrator" || !_services.Cfg.ConfigAutoPush()) return;
 
-        _configPushTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(_services.Cfg.ConfigPushIntervalMin()) };
+        var minutes = _services.Cfg.ConfigPushIntervalMin();
+        if (minutes <= 0) return; // 0 = auto-push disabled even if the checkbox is on — see footnote in NetworkSyncView
+
+        _configPushTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
         _configPushTimer.Tick += (_, _) => PushConfigNow();
         _configPushTimer.Start();
     }

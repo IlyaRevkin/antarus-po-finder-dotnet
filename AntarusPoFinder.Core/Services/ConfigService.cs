@@ -110,11 +110,13 @@ public class ConfigService
 
     public bool KeepArchives() => Get("keep_archives").Equals("true", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>0 = automatic pull sync disabled on this machine (see MainWindowViewModel.StartTimers/
+    /// SetSyncIntervalMinutes) — manual "Синхронизировать сейчас" still works either way.</summary>
     public int SyncIntervalMin()
     {
-        return int.TryParse(Get("sync_interval_min"), out var v) ? Math.Max(1, v) : 5;
+        return int.TryParse(Get("sync_interval_min"), out var v) ? Math.Max(0, v) : 5;
     }
-    public void SetSyncIntervalMin(int minutes) => Set("sync_interval_min", Math.Max(1, minutes).ToString());
+    public void SetSyncIntervalMin(int minutes) => Set("sync_interval_min", Math.Max(0, minutes).ToString());
 
     /// <summary>Administrator-only: periodically export the local config to the shared drive so
     /// naladchik/programmer clients pick up hierarchy/tag/reservation changes without the admin
@@ -122,11 +124,13 @@ public class ConfigService
     public bool ConfigAutoPush() => Get("config_auto_push").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetConfigAutoPush(bool value) => Set("config_auto_push", value ? "true" : "false");
 
+    /// <summary>0 = automatic push disabled (see MainWindowViewModel.RefreshConfigSync) — manual
+    /// "Отправить сейчас" still works either way.</summary>
     public int ConfigPushIntervalMin()
     {
-        return int.TryParse(Get("config_push_interval_min"), out var v) ? Math.Max(1, v) : 30;
+        return int.TryParse(Get("config_push_interval_min"), out var v) ? Math.Max(0, v) : 30;
     }
-    public void SetConfigPushIntervalMin(int minutes) => Set("config_push_interval_min", Math.Max(1, minutes).ToString());
+    public void SetConfigPushIntervalMin(int minutes) => Set("config_push_interval_min", Math.Max(0, minutes).ToString());
 
     /// <summary>Whether the first-launch interactive onboarding tour has already run on this machine
     /// (per-machine, not synced — see ConfigSyncService.SkipSettingsKeys). The manual replay button
@@ -135,7 +139,7 @@ public class ConfigService
     public void SetOnboardingShown(bool value) => Set("onboarding_shown", value ? "true" : "false");
 
     /// <summary>Default lifetime for a new version reservation before Database.ExpireStaleReservations
-    /// auto-cancels it — see Настройки → Резервы номеров. 0 = reservations never expire by default;
+    /// auto-cancels it — see Настройки → Резервация номеров. 0 = reservations never expire by default;
     /// a programmer can still override this per-reservation (see UploadView.ReserveVersion_Click).</summary>
     public int ReservationTtlHours() => int.TryParse(Get("reservation_ttl_hours"), out var v) && v >= 0 ? v : 72;
     public void SetReservationTtlHours(int hours) => Set("reservation_ttl_hours", Math.Max(0, hours).ToString());
