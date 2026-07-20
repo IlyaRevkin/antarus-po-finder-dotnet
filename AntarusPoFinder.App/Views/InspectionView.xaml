@@ -55,8 +55,9 @@
                     <TextBlock TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0"
                                Foreground="{DynamicResource WarningBrush}" FontWeight="SemiBold"
                                Text="⚠ Телефон должен быть в той же Wi-Fi сети, что и этот компьютер — иначе QR-код не откроется."/>
-                    <Button Content="Как подключить папку с телефона" Style="{StaticResource SecondaryButton}"
-                            Margin="0,10,0,0" HorizontalAlignment="Stretch" Click="PhoneInstructions_Click"/>
+                    <Button Style="{StaticResource SecondaryButton}" Margin="0,10,0,0" HorizontalAlignment="Stretch" Click="PhoneInstructions_Click">
+                        <TextBlock Text="Как подключить папку с телефона" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </Button>
                 </StackPanel>
             </Border>
 
