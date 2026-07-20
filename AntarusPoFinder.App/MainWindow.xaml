@@ -8,7 +8,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -54,26 +53,7 @@
             </Grid>
         </Border>
 
-        <!-- Config sync banner -->
-        <Border Grid.Row="2" Background="{DynamicResource AccentBrush}"
-                Visibility="{Binding ConfigUpdateBannerVisible, Converter={StaticResource BoolToVis}}">
-            <Grid Margin="16,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding ConfigUpdateBannerText}" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
-                <Button Grid.Column="2" Content="Подробно" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
-                        Command="{Binding ShowConfigUpdateDetailsCommand}"/>
-                <Button Grid.Column="3" Content="Скрыть" Style="{StaticResource SecondaryButton}"
-                        Command="{Binding DismissConfigUpdateBannerCommand}"/>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="215"/>
                 <ColumnDefinition Width="*"/>
@@ -226,7 +206,7 @@
         </Grid>
 
         <!-- Status bar -->
-        <Border Grid.Row="4" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid Margin="10,4">
                 <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" HorizontalAlignment="Left"/>
                 <TextBlock Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}" HorizontalAlignment="Right"/>
@@ -234,6 +214,6 @@
         </Border>
 
         <!-- Onboarding tour overlay — sits on top of everything, only populated while the tour runs -->
-        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="5" Focusable="False"/>
+        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="4" Focusable="False"/>
     </Grid>
 </Window>

@@ -145,6 +145,7 @@ public static class ConfigSyncService
         // We're by definition current with what we just wrote — otherwise this same machine's own
         // pull check would immediately offer to "update" from the file it just exported.
         services.Cfg.SetConfigLastSyncedAt(exportedAt);
+        services.Cfg.SetConfigLastPushedAt(exportedAt);
 
         return new ConfigExportResult(exportedAt, exportedBy, hierarchy);
     }

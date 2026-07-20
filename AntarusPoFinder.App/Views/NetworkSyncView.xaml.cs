@@ -25,10 +25,20 @@ public partial class NetworkSyncView : UserControl
     }
 
     /// <summary>Called on every navigation to this page (it's cached, not recreated) so a role
-    /// switch immediately shows/hides the admin-only push section without needing a fresh instance.</summary>
+    /// switch immediately shows/hides the admin-only push section without needing a fresh instance.
+    /// Also re-reads the last-sync/last-push timestamps — these are updated silently in the
+    /// background (auto-pull/auto-push timers no longer show a banner, see MainWindowViewModel.
+    /// CheckForConfigUpdate), so this is the only place the user sees them, and it must reflect
+    /// whatever happened since the page was last visited, not just its own construction time.</summary>
     public void RefreshIfActive()
     {
         PushSection.Visibility = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
+
+        var lastSync = _services.Cfg.ConfigLastSyncedAt();
+        LastSyncText.Text = string.IsNullOrEmpty(lastSync) ? "" : $"Последняя синхронизация: {lastSync}";
+
+        var lastPush = _services.Cfg.ConfigLastPushedAt();
+        LastPushText.Text = string.IsNullOrEmpty(lastPush) ? "" : $"Последняя отправка: {lastPush}";
     }
 
     private void Load()
@@ -40,8 +50,6 @@ public partial class NetworkSyncView : UserControl
 
         AutoPushCheck.IsChecked = _services.Cfg.ConfigAutoPush();
         PushIntervalInput.Text = _services.Cfg.ConfigPushIntervalMin().ToString();
-        var lastSync = _services.Cfg.ConfigLastSyncedAt();
-        LastSyncText.Text = string.IsNullOrEmpty(lastSync) ? "" : $"Последняя синхронизация: {lastSync}";
 
         RefreshIfActive();
     }

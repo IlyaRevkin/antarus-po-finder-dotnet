@@ -30,7 +30,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private UpdateRelease? _pendingUpdate;
     private int? _lastModerationCount;
     private List<FirmwareUpdateInfo> _pendingFwUpdates = new();
-    private ConfigUpdateInfo? _pendingConfigUpdate;
 
     private bool _suppressThemeToggleHandler;
 
@@ -46,8 +45,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _updateActionEnabled = true;
     [ObservableProperty] private bool _fwUpdateBannerVisible;
     [ObservableProperty] private string _fwUpdateBannerText = "";
-    [ObservableProperty] private bool _configUpdateBannerVisible;
-    [ObservableProperty] private string _configUpdateBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
 
     public string CurrentRole { get; private set; } = "naladchik";
@@ -460,7 +457,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     /// <summary>Every role auto-pulls the shared config on this interval — no confirmation click,
     /// per the operator's decision that naladchik/programmer should just stay in sync in the
-    /// background. The banner below is purely informational (what just changed), not a prompt.</summary>
+    /// background. Applied silently: no banner, no notification-history entry (previously fired on
+    /// every tick that found a real diff, which — with several people pushing firmware/config changes
+    /// throughout the day — read as constant spam). The result is only visible as a passive "last
+    /// synced" timestamp on the Сетевые диски page (NetworkSyncView.RefreshIfActive), which the user
+    /// can check whenever they care, rather than being interrupted by it.</summary>
     private void CheckForConfigUpdate()
     {
         var info = ConfigSyncService.CheckForUpdate(_services, out var error);
@@ -475,36 +476,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (info is null) return;
 
         var root = _services.Cfg.RootPath();
-        var result = ConfigSyncService.Apply(_services, info.ConfigPath, root);
-        _pendingConfigUpdate = info;
+        ConfigSyncService.Apply(_services, info.ConfigPath, root);
         ReloadSidebarApps();
         RefreshSearchIfActive();
-
-        ConfigUpdateBannerText = $"Конфиг обновлён от {info.ExportedBy} ({info.ExportedAt}): настроек {result.SettingsApplied}, изменений в справочнике {result.Counts.TotalChanges}.";
-        ConfigUpdateBannerVisible = true;
-        AddNotification(ConfigUpdateBannerText);
-        ScheduleBannerAutoHide(() => ConfigUpdateBannerVisible = false);
     }
-
-    [RelayCommand]
-    private void ShowConfigUpdateDetails()
-    {
-        if (_pendingConfigUpdate is null) return;
-        var d = _pendingConfigUpdate.Diff;
-        AppMessageBox.Show(
-            $"От кого: {_pendingConfigUpdate.ExportedBy}\nКогда: {_pendingConfigUpdate.ExportedAt}\n\n" +
-            $"Настроек изменится: {_pendingConfigUpdate.SettingsChanged}\n" +
-            $"Групп: +{d.GroupsAdded}/~{d.GroupsUpdated}, Подтипов: +{d.SubtypesAdded}/~{d.SubtypesUpdated}\n" +
-            $"Контроллеров: +{d.ControllersAdded}/~{d.ControllersUpdated}, Модификаций: +{d.ModificationsAdded}/~{d.ModificationsUpdated}\n" +
-            $"Производителей: +{d.ManufacturersAdded}/-{d.ManufacturersRemoved}, Тегов: +{d.TagsAdded}/-{d.TagsRemoved}, Расширений: +{d.ExtensionsAdded}/-{d.ExtensionsRemoved}\n" +
-            $"Резервов: +{d.ReservationsAdded}/~{d.ReservationsUpdated}\n" +
-            $"Прошивок: +{d.FwVersions}, Файлов параметров: +{d.ParamFiles}\n\n" +
-            "«+» — добавится, «~» — обновится (переименование/правка), «-» — будет удалено (производители/теги/расширения).",
-            "Что изменится при обновлении конфига", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    [RelayCommand]
-    private void DismissConfigUpdateBanner() => ConfigUpdateBannerVisible = false;
 
     private void RunSync()
     {
@@ -604,21 +579,23 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _configPushTimer.Start();
     }
 
+    /// <summary>Runs silently — no status-bar toast — same reasoning as CheckForConfigUpdate: this
+    /// fires every config_push_interval_min minutes, and a repeated toast for routine background
+    /// activity reads as spam. ConfigSyncService.Export already persists config_last_pushed_at, which
+    /// NetworkSyncView.RefreshIfActive surfaces passively whenever the user opens that page.</summary>
     private void PushConfigNow()
     {
         var root = _services.Cfg.RootPath();
         try
         {
             var exportedBy = $"{Environment.UserName} ({RoleLabel})";
-            var result = ConfigSyncService.Export(_services, root, exportedBy);
-            ShowStatus($"Конфиг автоматически отправлен на диск ({result.Hierarchy.FwVersions.Count} прошивок, {result.Hierarchy.EquipmentGroups.Count} групп)", 6000);
+            ConfigSyncService.Export(_services, root, exportedBy);
         }
-        catch (Exception ex)
+        catch
         {
-            // Best-effort background tick — share may be temporarily unreachable; don't nag with a
-            // dialog, just leave a status trace. The manual "Отправить сейчас" button surfaces the
-            // same exception via a message box if the user wants an explicit answer.
-            ShowStatus($"Не удалось автоматически отправить конфиг: {ex.Message}", 8000);
+            // Best-effort background tick — share may be temporarily unreachable. The manual
+            // "Отправить сейчас" button surfaces the same exception via a message box if the user
+            // wants an explicit answer; a silent background failure just tries again next interval.
         }
     }
 }

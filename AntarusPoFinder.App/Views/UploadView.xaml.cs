@@ -649,6 +649,8 @@ public partial class UploadView : UserControl
         _srcPath = null;
         _autoDetectedModId = null;
         DropZoneLabel.Text = "Перетащите файл или папку сюда\n\nили нажмите для выбора";
+        GroupCombo.SelectedIndex = -1;
+        CtrlCombo.SelectedIndex = -1;
         OpcReqNumCheck.IsChecked = false;
         OpcSnCheck.IsChecked = false;
         ReqNumInput.Text = "";

@@ -99,6 +99,12 @@ public class ConfigService
     public string ConfigLastSyncedAt() => Get("config_last_synced_at");
     public void SetConfigLastSyncedAt(string exportedAt) => Set("config_last_synced_at", exportedAt);
 
+    /// <summary>exported_at value this machine last wrote to the share (manual "Отправить сейчас" or
+    /// the administrator's auto-push timer) — surfaced passively on NetworkSyncView instead of a
+    /// status-bar toast on every auto-push tick.</summary>
+    public string ConfigLastPushedAt() => Get("config_last_pushed_at");
+    public void SetConfigLastPushedAt(string exportedAt) => Set("config_last_pushed_at", exportedAt);
+
     public string AdminPassword() => Get("admin_password");
     public string ProgrammerPassword() => Get("programmer_password");
 
