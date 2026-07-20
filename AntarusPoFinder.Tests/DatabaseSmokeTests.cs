@@ -157,6 +157,33 @@ public class DatabaseSmokeTests
     }
 
     [Fact]
+    public void DeleteEquipmentGroup_FreshGroupWithSingleSubtype_DoesNotThrow()
+    {
+        // Regression test: DeleteEquipmentGroup used to bind IN(...) params via unnamed
+        // SqliteParameter objects against literal '?' placeholders — Microsoft.Data.Sqlite has no
+        // positional binding and throws "ParameterName must be set" the moment the command runs.
+        // This fired on every real group deletion, since Database.EnsureEveryGroupHasSubtype
+        // guarantees every group has at least one subtype (subtypeIds.Count is never 0).
+        var tmpDb = Path.Combine(Path.GetTempPath(), $"antarus_delgroup_test_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var db = new Database(tmpDb);
+            var groupId = db.UpsertEquipmentGroup(new EquipmentGroup { Name = "ТестШкаф", Prefix = 999, SortOrder = 1 });
+            db.UpsertEquipmentSubtype(new EquipmentSubType { GroupId = groupId, Name = "—", Prefix = 0, FolderName = "ТестШкаф", SortOrder = 1 });
+
+            db.DeleteEquipmentGroup(groupId);
+
+            Assert.DoesNotContain(db.GetAllEquipmentGroups(), g => g.Id == groupId);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            foreach (var f in new[] { tmpDb, tmpDb + "-wal", tmpDb + "-shm" })
+                if (File.Exists(f)) File.Delete(f);
+        }
+    }
+
+    [Fact]
     public void FulfillReservation_MarksFulfilled_RemovesFromOpenList()
     {
         var tmpDb = Path.Combine(Path.GetTempPath(), $"antarus_resv_test_{Guid.NewGuid():N}.db");

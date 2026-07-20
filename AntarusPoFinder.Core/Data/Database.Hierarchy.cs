@@ -83,7 +83,7 @@ public partial class Database
         var subtypeIds = QueryIntsParam("SELECT id FROM equipment_subtypes WHERE group_id=@g", "@g", groupId);
         if (subtypeIds.Count > 0)
         {
-            var ph = string.Join(",", subtypeIds.ConvertAll(_ => "?"));
+            var ph = IntParamPlaceholders(subtypeIds);
             ExecWithIntParams($"DELETE FROM fw_versions WHERE subtype_id IN ({ph})", subtypeIds);
             ExecWithIntParams($"DELETE FROM param_files WHERE subtype_id IN ({ph})", subtypeIds);
         }

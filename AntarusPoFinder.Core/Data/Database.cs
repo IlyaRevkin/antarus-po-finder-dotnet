@@ -285,7 +285,7 @@ public partial class Database : IDisposable
             """);
         if (staleIds.Count == 0) return;
 
-        var placeholders = string.Join(",", staleIds.ConvertAll(_ => "?"));
+        var placeholders = IntParamPlaceholders(staleIds);
         ExecWithIntParams($"DELETE FROM fw_versions WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM param_files WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM equipment_subtypes WHERE name = '—' AND id IN ({placeholders})", staleIds);

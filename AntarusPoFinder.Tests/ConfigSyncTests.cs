@@ -191,6 +191,50 @@ public class ConfigSyncTests
         }
     }
 
+    [Fact]
+    public void Import_ManufacturerAddedAndRemovedOnA_FullyMirrorsOnB()
+    {
+        // Regression test: a colleague added a new manufacturer and deleted an old one on their
+        // machine; after exchanging configs, the new one showed up locally but the deleted one
+        // never disappeared. ImportHierarchyDataCore used to only ever INSERT param_manufacturers
+        // rows found in the incoming export, with no removal half — unlike tags/extensions, which
+        // are fully mirrored (added-and-removed). Manufacturers are name-keyed with no FK-by-id
+        // reference from param_files, so mirroring them the same way is safe.
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            // Both machines start with a manufacturer in common.
+            dbA.AddParamManufacturer("Yaskawa");
+            dbB.AddParamManufacturer("Yaskawa");
+
+            // Colleague (A): adds a new manufacturer, removes the shared old one.
+            dbA.AddParamManufacturer("Mitsubishi");
+            dbA.DeleteParamManufacturer("Yaskawa");
+
+            var exported = dbA.ExportHierarchyData();
+            var counts = dbB.ImportHierarchyData(exported);
+            Assert.Equal(1, counts.ManufacturersAdded);
+            Assert.Equal(1, counts.ManufacturersRemoved);
+
+            var manufacturersB = dbB.GetParamManufacturers();
+            Assert.Contains("Mitsubishi", manufacturersB);
+            Assert.DoesNotContain("Yaskawa", manufacturersB); // deleted on A must disappear on B too
+
+            // Re-importing the same export must be a no-op (idempotent).
+            var secondPass = dbB.ImportHierarchyData(exported);
+            Assert.Equal(0, secondPass.ManufacturersAdded);
+            Assert.Equal(0, secondPass.ManufacturersRemoved);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
     /// <summary>There's no in-app rename UI for subtypes yet — this opens a second raw connection
     /// to the same SQLite file to simulate one (WAL mode allows concurrent readers/writers), so the
     /// test exercises the sync layer's rename handling without needing that feature to exist yet.</summary>

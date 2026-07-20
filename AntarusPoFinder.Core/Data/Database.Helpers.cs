@@ -48,13 +48,25 @@ public partial class Database
         return result;
     }
 
-    /// <summary>Executes SQL whose only parameters are literal '?' placeholders (e.g. an IN(...) clause) bound positionally.</summary>
+    /// <summary>Builds a "@p0,@p1,..." placeholder list for an IN(...) clause — pair with
+    /// ExecWithIntParams, which binds the same names. Microsoft.Data.Sqlite has no positional-'?'
+    /// binding (an unnamed SqliteParameter throws "ParameterName must be set" the moment the
+    /// command actually runs), so every placeholder needs an explicit matching name.</summary>
+    private static string IntParamPlaceholders(List<int> ids)
+    {
+        var names = new string[ids.Count];
+        for (int i = 0; i < ids.Count; i++)
+            names[i] = $"@p{i}";
+        return string.Join(",", names);
+    }
+
+    /// <summary>Executes SQL built with IntParamPlaceholders, binding @p0,@p1,... to ids in order.</summary>
     private void ExecWithIntParams(string sql, List<int> ids)
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = sql;
-        foreach (var id in ids)
-            cmd.Parameters.Add(new SqliteParameter { Value = id });
+        for (int i = 0; i < ids.Count; i++)
+            cmd.Parameters.AddWithValue($"@p{i}", ids[i]);
         cmd.ExecuteNonQuery();
     }
 

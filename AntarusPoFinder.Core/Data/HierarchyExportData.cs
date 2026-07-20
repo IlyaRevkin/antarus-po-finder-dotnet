@@ -109,11 +109,11 @@ public class HierarchyExportData
     [JsonPropertyName("equipment_subtypes")] public List<ExportedSubType> EquipmentSubtypes { get; set; } = new();
     [JsonPropertyName("controller_models")] public List<ExportedController> ControllerModels { get; set; } = new();
     [JsonPropertyName("controller_modifications")] public List<ExportedModification> ControllerModifications { get; set; } = new();
-    [JsonPropertyName("param_manufacturers")] public List<ExportedManufacturer> ParamManufacturers { get; set; } = new();
     // Deliberately nullable with NO default: an export written by an older app version simply omits
     // these keys, which System.Text.Json leaves as null (vs. an empty array, which means "the
     // source genuinely has zero of these"). Database.ConfigExchange relies on telling those two
     // cases apart before doing a full-mirror delete of what's missing locally.
+    [JsonPropertyName("param_manufacturers")] public List<ExportedManufacturer>? ParamManufacturers { get; set; }
     [JsonPropertyName("tags")] public List<string>? Tags { get; set; }
     [JsonPropertyName("allowed_extensions")] public List<string>? AllowedExtensions { get; set; }
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
@@ -133,7 +133,8 @@ public class ImportCounts
     public int ControllersUpdated { get; set; }
     public int ModificationsAdded { get; set; }
     public int ModificationsUpdated { get; set; }
-    public int Manufacturers { get; set; }
+    public int ManufacturersAdded { get; set; }
+    public int ManufacturersRemoved { get; set; }
     public int TagsAdded { get; set; }
     public int TagsRemoved { get; set; }
     public int ExtensionsAdded { get; set; }
@@ -145,6 +146,6 @@ public class ImportCounts
 
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + ControllersAdded + ControllersUpdated +
-        ModificationsAdded + ModificationsUpdated + Manufacturers + TagsAdded + TagsRemoved +
+        ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + ParamFiles;
 }

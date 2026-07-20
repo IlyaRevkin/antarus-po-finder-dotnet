@@ -496,10 +496,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             $"Настроек изменится: {_pendingConfigUpdate.SettingsChanged}\n" +
             $"Групп: +{d.GroupsAdded}/~{d.GroupsUpdated}, Подтипов: +{d.SubtypesAdded}/~{d.SubtypesUpdated}\n" +
             $"Контроллеров: +{d.ControllersAdded}/~{d.ControllersUpdated}, Модификаций: +{d.ModificationsAdded}/~{d.ModificationsUpdated}\n" +
-            $"Производителей: +{d.Manufacturers}, Тегов: +{d.TagsAdded}/-{d.TagsRemoved}, Расширений: +{d.ExtensionsAdded}/-{d.ExtensionsRemoved}\n" +
+            $"Производителей: +{d.ManufacturersAdded}/-{d.ManufacturersRemoved}, Тегов: +{d.TagsAdded}/-{d.TagsRemoved}, Расширений: +{d.ExtensionsAdded}/-{d.ExtensionsRemoved}\n" +
             $"Резервов: +{d.ReservationsAdded}/~{d.ReservationsUpdated}\n" +
             $"Прошивок: +{d.FwVersions}, Файлов параметров: +{d.ParamFiles}\n\n" +
-            "«+» — добавится, «~» — обновится (переименование/правка), «-» — будет удалено (только теги/расширения).",
+            "«+» — добавится, «~» — обновится (переименование/правка), «-» — будет удалено (производители/теги/расширения).",
             "Что изменится при обновлении конфига", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 

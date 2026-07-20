@@ -47,6 +47,7 @@ public partial class Database
                     ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
 
+        data.ParamManufacturers = new();
         using (var r = ExecuteReader("SELECT name, sort_order FROM param_manufacturers ORDER BY sort_order, name"))
             while (r.Read())
                 data.ParamManufacturers.Add(new ExportedManufacturer { Name = r.GetString(0), SortOrder = r.GetInt32(1) });
@@ -313,19 +314,32 @@ public partial class Database
                 { cmd.Parameters.AddWithValue("@sy", m.SyncId); cmd.Parameters.AddWithValue("@id", id); });
         }
 
-        // ── Manufacturers (name-keyed, no FK-by-id references it — safe upsert-by-name) ─
-        foreach (var m in data.ParamManufacturers)
+        // ── Manufacturers (name-keyed, no FK-by-id references it — safe full mirror, same
+        //    add-and-remove reasoning as tags/extensions below: a manufacturer deleted on the
+        //    exporting machine used to never disappear locally, since this only ever inserted). ─
+        var incomingManufacturers = data.ParamManufacturers ?? new();
+        foreach (var m in incomingManufacturers)
         {
             var exists = ExecuteScalar("SELECT sort_order FROM param_manufacturers WHERE name=@n", cmd => cmd.Parameters.AddWithValue("@n", m.Name));
             if (exists is null)
             {
-                counts.Manufacturers++;
+                counts.ManufacturersAdded++;
                 if (apply)
                     ExecuteNonQuery("INSERT INTO param_manufacturers(name,sort_order) VALUES(@n,@s)", cmd =>
                     {
                         cmd.Parameters.AddWithValue("@n", m.Name); cmd.Parameters.AddWithValue("@s", m.SortOrder);
                     });
             }
+        }
+        if (data.ParamManufacturers is not null)
+        {
+            var incomingNames = new HashSet<string>(incomingManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (var localName in GetParamManufacturers())
+                if (!incomingNames.Contains(localName))
+                {
+                    counts.ManufacturersRemoved++;
+                    if (apply) DeleteParamManufacturer(localName);
+                }
         }
 
         // ── Tags (name-keyed, full mirror — safe: only referenced as free text, never by id).
