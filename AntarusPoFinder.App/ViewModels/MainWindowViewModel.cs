@@ -318,6 +318,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         };
         _sync1500msTimer.Start();
 
+        // A self-update from a previous run may have failed silently after this process had already
+        // closed (network share denied the file move, AV briefly locked the staged .exe, etc.) — see
+        // AppUpdateService.InstallAndRestart. Surface it now instead of leaving it invisible.
+        var lastUpdateError = AppUpdateService.TakeLastUpdateError();
+        if (lastUpdateError is not null)
+            AddNotification($"Автообновление не удалось: {lastUpdateError}", NotificationCategory.AppUpdates);
+
         // 2500ms once: check for app updates (folder if configured, else GitHub — see AppUpdateService).
         // Then, while the app stays open, re-check every PeriodicUpdateCheckInterval — a release that
         // ships after the app was already running used to only surface the next time someone

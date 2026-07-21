@@ -186,6 +186,10 @@ public static class AppUpdateService
     /// команда — известная сигнатура вредоносных техник, и её блокировка выглядела как «скачалось,
     /// но не открывается» — сам файл на месте, просто процесс его переноса/перезапуска тихо
     /// убивался защитой до того, как успевал сработать.</summary>
+    /// <summary>Fixed path (not per-PID) so the next app startup can find it regardless of which
+    /// process wrote it — see <see cref="TakeLastUpdateError"/>.</summary>
+    private static readonly string UpdateErrorLogPath = Path.Combine(Path.GetTempPath(), "antarus_update_error.log");
+
     private static void InstallAndRestart(string releaseFilePath)
     {
         var currentExe = Process.GetCurrentProcess().MainModule?.FileName
@@ -194,12 +198,22 @@ public static class AppUpdateService
 
         File.Copy(releaseFilePath, stagedExe, overwrite: true);
 
+        // The script runs hidden, after this process (and its UI) is already gone — a failure here
+        // (e.g. Move-Item denied on a read-only network share, or an antivirus/EDR briefly locking the
+        // staged .exe) used to be completely invisible: the app just closed and, on next manual
+        // launch, was still the old version with no clue why. Wrapping the risky part in try/catch and
+        // writing failures to a fixed log path lets TakeLastUpdateError surface it on next startup.
         var script = $$"""
             $ErrorActionPreference = 'Stop'
             $targetPid = {{Environment.ProcessId}}
             while (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }
-            Move-Item -LiteralPath '{{EscapeSingleQuoted(stagedExe)}}' -Destination '{{EscapeSingleQuoted(currentExe)}}' -Force
-            Start-Process -FilePath '{{EscapeSingleQuoted(currentExe)}}'
+            try {
+                Move-Item -LiteralPath '{{EscapeSingleQuoted(stagedExe)}}' -Destination '{{EscapeSingleQuoted(currentExe)}}' -Force
+                Start-Process -FilePath '{{EscapeSingleQuoted(currentExe)}}'
+            } catch {
+                $_.Exception.Message | Out-File -LiteralPath '{{EscapeSingleQuoted(UpdateErrorLogPath)}}' -Encoding utf8
+                Start-Process -FilePath '{{EscapeSingleQuoted(currentExe)}}'
+            }
             Remove-Item -LiteralPath $PSCommandPath -Force
             """;
         var scriptPath = Path.Combine(Path.GetTempPath(), $"antarus_update_{Environment.ProcessId}.ps1");
@@ -218,6 +232,21 @@ public static class AppUpdateService
         // place), not get cancelled by the window hiding itself instead. See MainWindow.ForceRealExit.
         MainWindow.ForceRealExit = true;
         Application.Current.Shutdown();
+    }
+
+    /// <summary>Called once on startup (see MainWindowViewModel) to surface a self-update failure
+    /// that happened after the previous process had already closed — see InstallAndRestart. Consumes
+    /// the log file so the same failure isn't reported again on the next launch.</summary>
+    public static string? TakeLastUpdateError()
+    {
+        if (!File.Exists(UpdateErrorLogPath)) return null;
+        try
+        {
+            var message = File.ReadAllText(UpdateErrorLogPath).Trim();
+            File.Delete(UpdateErrorLogPath);
+            return string.IsNullOrEmpty(message) ? null : message;
+        }
+        catch { return null; }
     }
 
     private static string EscapeSingleQuoted(string value) => value.Replace("'", "''");
