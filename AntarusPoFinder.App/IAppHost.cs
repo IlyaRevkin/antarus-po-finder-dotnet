@@ -16,8 +16,8 @@ public interface IAppHost
     void SwitchRole(string role);
     void Navigate(string pageId);
 
-    /// <summary>Restarts the administrator auto-push timer against the current config_auto_push/
-    /// config_push_interval_min settings — called from NetworkSyncView right after either is saved,
-    /// so the change takes effect immediately instead of waiting for the next role switch.</summary>
+    /// <summary>Restarts the administrator auto-push timer against the current
+    /// config_push_interval_min setting — called from NetworkSyncView right after it's saved, so the
+    /// change takes effect immediately instead of waiting for the next role switch.</summary>
     void RefreshConfigSync();
 }

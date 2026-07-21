@@ -80,14 +80,13 @@
                     <TextBlock Text="ОТПРАВКА ИЗМЕНЕНИЙ НА ДИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock Text="Изменения, сделанные на этом компьютере (иерархия, теги, резервы), отправляются на общий диск, откуда их подтянут остальные компьютеры."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                    <CheckBox x:Name="AutoPushCheck" Content="Отправлять автоматически" Margin="0,0,0,10" Checked="AutoPushCheck_Changed" Unchecked="AutoPushCheck_Changed"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                         <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
                         <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
                         <Button Content="Сохранить" Click="SavePushInterval_Click"/>
                     </StackPanel>
-                    <TextBlock Text="0 — автоотправка отключена, даже если галочка выше включена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
+                    <TextBlock Text="0 — автоотправка отключена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Отправить сейчас" Style="{StaticResource SecondaryButton}" Click="PushNow_Click" Margin="0,0,12,0"/>

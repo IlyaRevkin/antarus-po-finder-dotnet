@@ -53,8 +53,7 @@ public class ConfigService
         ["fw_auto_update_dirs"] = "[]",
         ["config_last_synced_at"] = "",
         ["scan_resolution_dpi"] = "200",
-        ["config_auto_push"] = "false",
-        ["config_push_interval_min"] = "30",
+        ["config_push_interval_min"] = "0",
         ["reservation_ttl_hours"] = "72",
         ["onboarding_shown"] = "false",
         ["notification_categories_disabled"] = "[]",
@@ -187,15 +186,15 @@ public class ConfigService
 
     /// <summary>Administrator-only: periodically export the local config to the shared drive so
     /// naladchik/programmer clients pick up hierarchy/tag/reservation changes without the admin
-    /// having to remember to click "Отправить сейчас" — see Настройки → Общие → "СИНХРОНИЗАЦИЯ".</summary>
-    public bool ConfigAutoPush() => Get("config_auto_push").Equals("true", StringComparison.OrdinalIgnoreCase);
-    public void SetConfigAutoPush(bool value) => Set("config_auto_push", value ? "true" : "false");
-
-    /// <summary>0 = automatic push disabled (see MainWindowViewModel.RefreshConfigSync) — manual
-    /// "Отправить сейчас" still works either way.</summary>
+    /// having to remember to click "Отправить сейчас" — see Настройки → Сетевые диски →
+    /// "ОТПРАВКА ИЗМЕНЕНИЙ НА ДИСК". 0 = automatic push disabled (see
+    /// MainWindowViewModel.RefreshConfigSync) — manual "Отправить сейчас" still works either way.
+    /// No separate on/off checkbox — used to have one (config_auto_push), removed as a redundant
+    /// second way to express what this field's own 0-means-off already covered, same pattern as
+    /// sync_interval_min/inspection_auto_cleanup_days. Defaults to 0 (off) for fresh installs.</summary>
     public int ConfigPushIntervalMin()
     {
-        return int.TryParse(Get("config_push_interval_min"), out var v) ? Math.Max(0, v) : 30;
+        return int.TryParse(Get("config_push_interval_min"), out var v) ? Math.Max(0, v) : 0;
     }
     public void SetConfigPushIntervalMin(int minutes) => Set("config_push_interval_min", Math.Max(0, minutes).ToString());
 

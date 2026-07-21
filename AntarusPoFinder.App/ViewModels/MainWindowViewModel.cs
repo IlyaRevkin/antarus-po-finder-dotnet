@@ -798,16 +798,17 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     /// <summary>Only the administrator gets an auto-push timer — everyone else just pulls (see
     /// StartTimers/_configPullRepeatTimer above). Safe to call any time (role switch, or right
-    /// after NetworkSyncView saves config_auto_push/config_push_interval_min) since it always
-    /// stops any previous timer before deciding whether to start a new one.</summary>
+    /// after NetworkSyncView saves config_push_interval_min) since it always stops any previous
+    /// timer before deciding whether to start a new one. No separate on/off checkbox — the interval
+    /// alone carries that (0 = disabled), same pattern as sync_interval_min/inspection auto-cleanup.</summary>
     public void RefreshConfigSync()
     {
         _configPushTimer?.Stop();
         _configPushTimer = null;
-        if (CurrentRole != "administrator" || !_services.Cfg.ConfigAutoPush()) return;
+        if (CurrentRole != "administrator") return;
 
         var minutes = _services.Cfg.ConfigPushIntervalMin();
-        if (minutes <= 0) return; // 0 = auto-push disabled even if the checkbox is on — see footnote in NetworkSyncView
+        if (minutes <= 0) return; // 0 = auto-push disabled — see footnote in NetworkSyncView
 
         _configPushTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
         _configPushTimer.Tick += (_, _) => PushConfigNow();

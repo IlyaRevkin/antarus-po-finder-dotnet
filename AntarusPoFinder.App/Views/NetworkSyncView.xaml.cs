@@ -73,7 +73,6 @@ public partial class NetworkSyncView : UserControl
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
         SyncIntervalInput.Text = _services.Cfg.SyncIntervalMin().ToString();
 
-        AutoPushCheck.IsChecked = _services.Cfg.ConfigAutoPush();
         PushIntervalInput.Text = _services.Cfg.ConfigPushIntervalMin().ToString();
 
         RefreshIfActive();
@@ -176,12 +175,11 @@ public partial class NetworkSyncView : UserControl
         }
     }
 
-    private void AutoPushCheck_Changed(object sender, RoutedEventArgs e)
-    {
-        _services.Cfg.SetConfigAutoPush(AutoPushCheck.IsChecked == true);
-        _host.RefreshConfigSync();
-    }
-
+    /// <summary>Same "0 = off, any other number = on with that interval" pattern as Осмотра's
+    /// auto-cleanup — a separate "отправлять автоматически" checkbox used to sit next to this field,
+    /// redundant with it (the interval already had its own "0 disables" meaning, see the footnote
+    /// text below the field), so it was removed rather than kept as a second way to express the same
+    /// on/off state.</summary>
     private void SavePushInterval_Click(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(PushIntervalInput.Text.Trim(), out var v) || v < 0)
