@@ -31,8 +31,16 @@ public partial class App : Application
     // update never actually landed. A named Mutex makes sure only one instance is ever running: a
     // second launch just asks the first one to come to the foreground (see ShowRequestEventName) and
     // exits immediately instead of starting a second process.
-    private const string InstanceMutexName = "AntarusPoFinder_SingleInstance_5B2E1A";
-    private const string ShowRequestEventName = "AntarusPoFinder_ShowRequest_5B2E1A";
+    // Test-only seam, same pattern as ConfigService.AppData/ANTARUS_TEST_APPDATA: a live two-machine
+    // GUI test needs two REAL AntarusPoFinder.App.exe processes running at once on the same dev
+    // machine (one per simulated PC), which this machine-wide named Mutex/Event otherwise makes
+    // structurally impossible regardless of ANTARUS_TEST_APPDATA — the second process would always
+    // detect itself as "already running" and immediately hand off to the first + exit. Unset (the
+    // production default) leaves the exact original fixed names untouched.
+    private static readonly string InstanceIdSuffix =
+        Environment.GetEnvironmentVariable("ANTARUS_TEST_INSTANCE_ID") is { Length: > 0 } id ? $"_{id}" : "";
+    private static readonly string InstanceMutexName = "AntarusPoFinder_SingleInstance_5B2E1A" + InstanceIdSuffix;
+    private static readonly string ShowRequestEventName = "AntarusPoFinder_ShowRequest_5B2E1A" + InstanceIdSuffix;
     private static Mutex? _singleInstanceMutex;
 
     protected override void OnStartup(StartupEventArgs e)
