@@ -44,10 +44,15 @@
                 <Button Grid.Column="6" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
             </Grid>
             <StackPanel Grid.Row="1" Orientation="Horizontal">
-                <TextBlock Text="Автоочистка папки осмотра, дней:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="InspectionCleanupDaysInput" Width="56" Height="30" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="Автоочистка папки осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="InspectionCleanupDaysInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Дни"/>
+                <TextBlock Text="дн." VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="InspectionCleanupHoursInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Часы"/>
+                <TextBlock Text="ч." VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="InspectionCleanupMinutesInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Минуты"/>
+                <TextBlock Text="мин." VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveInspectionCleanupDays_Click"/>
-                <TextBlock Text="0 — отключено. Иначе файлы старше указанного числа дней периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
+                <TextBlock Text="0/0/0 — отключено. Иначе файлы старше указанного времени периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
                            Style="{StaticResource MutedText}" FontStyle="Italic" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="480"/>
             </StackPanel>
         </Grid>

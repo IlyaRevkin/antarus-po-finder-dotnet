@@ -622,27 +622,27 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         CheckForUnknownItems();
     }
 
-    /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupDays() from the
+    /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupMinutes() from the
     /// Осмотр folder — 0 (default) means disabled, see ConfigService for why. Piggybacks on the same
     /// timer as the rest of RunSync (startup + every sync_interval_min) instead of a dedicated timer,
     /// same reasoning as EnsureHierarchy/ExpireStaleReservations above: one more periodic background
     /// check, not a whole new schedule.</summary>
     private void CleanupInspectionFolder()
     {
-        var days = _services.Cfg.InspectionAutoCleanupDays();
-        if (days <= 0) return;
+        var minutes = _services.Cfg.InspectionAutoCleanupMinutes();
+        if (minutes <= 0) return;
 
         var folder = _services.Cfg.Get("inspection_folder");
         if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder)) return;
 
         try
         {
-            var result = InspectionCleanupService.Cleanup(folder, days, DateTime.Now);
+            var result = InspectionCleanupService.Cleanup(folder, minutes, DateTime.Now);
             if (result.DeletedCount == 0) return;
 
             var preview = string.Join(", ", result.DeletedNames.Take(3));
             var more = result.DeletedNames.Count > 3 ? $" и ещё {result.DeletedNames.Count - 3}" : "";
-            ShowStatus($"Автоочистка папки осмотра: удалено файлов старше {days} дн. — {result.DeletedCount} ({preview}{more})",
+            ShowStatus($"Автоочистка папки осмотра: удалено файлов старше {InspectionCleanupService.FormatAge(minutes)} — {result.DeletedCount} ({preview}{more})",
                 8000, NotificationCategory.Inspection);
         }
         catch { /* best effort — next tick will retry */ }

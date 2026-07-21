@@ -58,6 +58,7 @@ public class ConfigService
         ["notification_categories_disabled"] = "[]",
         ["close_action"] = "close",
         ["inspection_auto_cleanup_days"] = "0",
+        ["inspection_auto_cleanup_minutes"] = "",
         ["quick_apps_display_mode"] = "sidebar",
     };
 
@@ -237,13 +238,30 @@ public class ConfigService
     public void SetCloseAction(string action) => Set("close_action", action);
 
     /// <summary>0 (default for new installs — never surprise anyone with unexpected deletion) means
-    /// auto-cleanup of the Осмотр folder is off. Any other N means files older than N days get
+    /// auto-cleanup of the Осмотр folder is off. Any other N means files older than N minutes get
     /// deleted from it periodically — see InspectionCleanupService.Cleanup, called from
     /// MainWindowViewModel.RunSync alongside the app's other periodic background checks. Per-machine
     /// (not synced — see ConfigSyncService.SkipSettingsKeys), same reasoning as inspection_folder
-    /// itself: what one operator wants cleaned has nothing to do with another machine's folder.</summary>
-    public int InspectionAutoCleanupDays() => int.TryParse(Get("inspection_auto_cleanup_days"), out var v) && v >= 0 ? v : 0;
-    public void SetInspectionAutoCleanupDays(int days) => Set("inspection_auto_cleanup_days", Math.Max(0, days).ToString());
+    /// itself: what one operator wants cleaned has nothing to do with another machine's folder.
+    ///
+    /// Round 34: widened from whole days (old key inspection_auto_cleanup_days) to minutes, so the
+    /// UI can offer days/hours/minutes inputs instead of days only. The new key defaults to "" (an
+    /// explicit "never configured on this machine" sentinel, distinct from "0") — as long as it's
+    /// unset, this reads the OLD days key instead and converts it, so an existing install that had
+    /// already configured e.g. "5 days" doesn't silently have its cleanup disabled just because it
+    /// upgraded before ever touching the new inputs. The very first time this machine saves through
+    /// the new UI (even to explicitly disable it, 0/0/0), the new key is written and takes over for
+    /// good — the old key is left in place but never consulted again after that.</summary>
+    public int InspectionAutoCleanupMinutes()
+    {
+        var raw = Get("inspection_auto_cleanup_minutes");
+        if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var minutes) && minutes >= 0)
+            return minutes;
+
+        var days = int.TryParse(Get("inspection_auto_cleanup_days"), out var d) && d >= 0 ? d : 0;
+        return days * 24 * 60;
+    }
+    public void SetInspectionAutoCleanupMinutes(int minutes) => Set("inspection_auto_cleanup_minutes", Math.Max(0, minutes).ToString());
 
     /// <summary>"sidebar" (default — unchanged from how it always worked) = Быстрый доступ is a
     /// vertical list of labeled buttons at the bottom of the left sidebar's scrollable area; "top" =

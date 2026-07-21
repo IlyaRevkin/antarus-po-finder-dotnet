@@ -60,22 +60,40 @@ public partial class InspectionView : UserControl
     {
         UpdateProtoLabel();
         LoadScanResolution();
-        InspectionCleanupDaysInput.Text = _services.Cfg.InspectionAutoCleanupDays().ToString();
+        LoadInspectionCleanupInputs();
         StartPhotoServer();
         RefreshFileList();
     }
 
+    /// <summary>Splits the stored total-minutes setting back into the three inputs — see
+    /// ConfigService.InspectionAutoCleanupMinutes for the days->minutes migration this also
+    /// transparently picks up for existing installs that only ever configured whole days.</summary>
+    private void LoadInspectionCleanupInputs()
+    {
+        var totalMinutes = _services.Cfg.InspectionAutoCleanupMinutes();
+        InspectionCleanupDaysInput.Text = (totalMinutes / 1440).ToString();
+        InspectionCleanupHoursInput.Text = (totalMinutes % 1440 / 60).ToString();
+        InspectionCleanupMinutesInput.Text = (totalMinutes % 60).ToString();
+    }
+
     /// <summary>Moved here from Настройки → Сетевые диски — logically belongs right next to the
-    /// folder it actually cleans, same reasoning as scan resolution living here instead of there.</summary>
+    /// folder it actually cleans, same reasoning as scan resolution living here instead of there.
+    /// Round 34: days-only widened to days/hours/minutes (see ConfigService.
+    /// InspectionAutoCleanupMinutes) so a short age like "2 hours" can actually be configured
+    /// instead of rounding down to whole days.</summary>
     private void SaveInspectionCleanupDays_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(InspectionCleanupDaysInput.Text.Trim(), out var v) || v < 0)
+        if (!int.TryParse(InspectionCleanupDaysInput.Text.Trim(), out var d) || d < 0 ||
+            !int.TryParse(InspectionCleanupHoursInput.Text.Trim(), out var h) || h < 0 ||
+            !int.TryParse(InspectionCleanupMinutesInput.Text.Trim(), out var m) || m < 0)
         {
-            AppMessageBox.Show("Введите целое число дней (0 — отключить автоочистку).", "Автоочистка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show("Введите целые неотрицательные числа (0/0/0 — отключить автоочистку).", "Автоочистка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        _services.Cfg.SetInspectionAutoCleanupDays(v);
-        _host.ShowStatus(v == 0 ? "Автоочистка папки осмотра отключена" : $"Автоочистка папки осмотра: файлы старше {v} дн.", category: NotificationCategory.Inspection);
+
+        var totalMinutes = d * 24 * 60 + h * 60 + m;
+        _services.Cfg.SetInspectionAutoCleanupMinutes(totalMinutes);
+        _host.ShowStatus(totalMinutes == 0 ? "Автоочистка папки осмотра отключена" : $"Автоочистка папки осмотра: файлы старше {InspectionCleanupService.FormatAge(totalMinutes)}", category: NotificationCategory.Inspection);
     }
 
     /// <summary>Качество сканирования используется только здесь (WiaScanner.TryScan ниже) — раньше
