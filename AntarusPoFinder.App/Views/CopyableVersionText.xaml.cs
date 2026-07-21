@@ -34,7 +34,16 @@ public partial class CopyableVersionText : UserControl
         catch { return; }
 
         var original = Label.Foreground;
-        Label.Foreground = (Brush)Application.Current.Resources["SuccessBrush"];
+        // Every use of this control is inside a DataGrid cell (Прошивки/Модерация/Резервация номеров/
+        // NewVersionsView/HistoryDialog) — clicking to copy on an already-SELECTED row was flashing the
+        // plain SuccessBrush (tuned to read on the normal card background) on top of the row's own
+        // accent-blue selection highlight, which in both themes turns out low-contrast (light theme:
+        // medium green #40A02B on medium blue #1E66F5; dark theme: light green #A6E3A1 on light blue
+        // #89B4FA — same problem, just with the light/dark roles swapped). SuccessOnAccentBrush is each
+        // theme's color swapped from the OTHER theme's SuccessBrush, which happens to read correctly
+        // against that theme's own accent blue — see Light.xaml/Dark.xaml for the actual values.
+        var onSelectedBackground = IsOnSelectedBackground(Label);
+        Label.Foreground = (Brush)Application.Current.Resources[onSelectedBackground ? "SuccessOnAccentBrush" : "SuccessBrush"];
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
         timer.Tick += (_, _) =>
         {
@@ -42,5 +51,15 @@ public partial class CopyableVersionText : UserControl
             Label.Foreground = original;
         };
         timer.Start();
+    }
+
+    private static bool IsOnSelectedBackground(DependencyObject start)
+    {
+        for (var current = start; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is DataGridCell cell) return cell.IsSelected;
+            if (current is ListBoxItem item) return item.IsSelected;
+        }
+        return false;
     }
 }

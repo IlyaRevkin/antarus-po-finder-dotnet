@@ -15,6 +15,12 @@
     <Color x:Key="TextMutedColor">#6C6F85</Color>
     <Color x:Key="TextOnAccentColor">#FFFFFF</Color>
     <Color x:Key="SuccessColor">#40A02B</Color>
+    <!-- Same green family as SuccessColor, but light enough to still read on top of AccentColor
+         (#1E66F5) — see CopyableVersionText.Label_Click, which flashes this instead of SuccessBrush
+         specifically when the click happened on an already-selected (accent-highlighted) grid row/
+         list item. Borrowed from Dark.xaml's own SuccessColor, which was tuned for exactly this kind
+         of "green on a saturated blue" contrast already. -->
+    <Color x:Key="SuccessOnAccentColor">#A6E3A1</Color>
     <Color x:Key="WarningColor">#FE640B</Color>
     <Color x:Key="ErrorColor">#D20F39</Color>
     <Color x:Key="TagBgColor">#CCD0DA</Color>
@@ -31,6 +37,7 @@
     <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
     <SolidColorBrush x:Key="TextOnAccentBrush" Color="{StaticResource TextOnAccentColor}"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="SuccessOnAccentBrush" Color="{StaticResource SuccessOnAccentColor}"/>
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
     <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
