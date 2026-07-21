@@ -120,7 +120,14 @@ public partial class App : Application
         // If "закрытие окна -> трей" is also on, MainWindow's own StateChanged handler (already
         // subscribed inside the constructor above, i.e. before Show() runs) hides it straight to
         // the tray the moment Show() realizes this Minimized state — no separate code path needed.
-        if (services.Cfg.AppStartMinimized())
+        //
+        // EXCEPT on the very first run (onboarding not shown yet, see ConfigService.OnboardingShown
+        // / MainWindow.MainWindow_ContentRendered): a brand-new install has this setting on by
+        // default (Раунд 38), so a genuinely new user launching for the first time would otherwise
+        // see nothing but a tray icon and never discover the onboarding tour or the window at all.
+        // Every later launch respects the setting normally — this only overrides the one and only
+        // first launch, before onboarding_shown ever gets set to true.
+        if (services.Cfg.AppStartMinimized() && services.Cfg.OnboardingShown())
             window.WindowState = WindowState.Minimized;
 
         window.Show();
