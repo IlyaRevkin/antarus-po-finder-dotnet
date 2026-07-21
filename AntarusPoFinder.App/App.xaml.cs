@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -18,9 +19,37 @@ public partial class App : Application
     /// to) just falls back to crash.log only, same as before this feature existed.</summary>
     private AppServices? _services;
 
+    // ── Single instance ──────────────────────────────────────────────────────
+    // Root cause of "обновление ставится, а после перезапуска всё равно старая версия": nothing
+    // ever stopped the app being launched more than once — a double-click of the desktop shortcut
+    // that looked like it did nothing (because the previous launch was already sitting minimized in
+    // the tray) just spawned another full process. AppUpdateService.InstallAndRestart only waits for the
+    // ONE process that triggered the update to exit before moving the staged .exe into place — if a
+    // second copy was still alive, it still had the same self-contained single-file exe open/mapped,
+    // so Move-Item failed (silently, until the earlier "самообновление молча падало" fix) and the
+    // update never actually landed. A named Mutex makes sure only one instance is ever running: a
+    // second launch just asks the first one to come to the foreground (see ShowRequestEventName) and
+    // exits immediately instead of starting a second process.
+    private const string InstanceMutexName = "AntarusPoFinder_SingleInstance_5B2E1A";
+    private const string ShowRequestEventName = "AntarusPoFinder_ShowRequest_5B2E1A";
+    private static Mutex? _singleInstanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            try
+            {
+                using var showRequest = EventWaitHandle.OpenExisting(ShowRequestEventName);
+                showRequest.Set();
+            }
+            catch { /* first instance hasn't created the event yet (very first startup race) — nothing to signal, not worth retrying for a launcher click */ }
+            Shutdown();
+            return;
+        }
 
         DispatcherUnhandledException += (_, args) =>
         {
@@ -60,6 +89,26 @@ public partial class App : Application
             window.WindowState = WindowState.Minimized;
 
         window.Show();
+
+        StartShowRequestListener(window);
+    }
+
+    /// <summary>Background thread that waits on the named event a second (blocked) launch signals
+    /// in OnStartup above, and brings this — the only — instance to the foreground in response.
+    /// AutoReset so it keeps listening across repeated shortcut clicks for the lifetime of the app.</summary>
+    private static void StartShowRequestListener(MainWindow window)
+    {
+        var showRequest = new EventWaitHandle(false, EventResetMode.AutoReset, ShowRequestEventName);
+        var thread = new Thread(() =>
+        {
+            while (true)
+            {
+                showRequest.WaitOne();
+                window.Dispatcher.Invoke(window.RestoreFromTray);
+            }
+        })
+        { IsBackground = true };
+        thread.Start();
     }
 
     private void LogAndShow(Exception ex)

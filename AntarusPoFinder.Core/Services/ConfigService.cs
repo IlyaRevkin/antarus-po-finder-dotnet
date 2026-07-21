@@ -60,7 +60,7 @@ public class ConfigService
         ["inspection_auto_cleanup_days"] = "0",
         ["inspection_auto_cleanup_minutes"] = "",
         ["quick_apps_display_mode"] = "sidebar",
-        ["app_start_minimized"] = "false",
+        ["app_start_minimized"] = "true",
     };
 
     private readonly Database _db;

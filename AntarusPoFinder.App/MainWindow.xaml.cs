@@ -85,7 +85,10 @@ public partial class MainWindow : Window
         catch { /* best effort — if the exe's icon can't be extracted, tray support silently degrades to "always close" */ }
     }
 
-    private void RestoreFromTray()
+    /// <summary>Called both from the tray menu/icon click and from App's single-instance listener
+    /// (a second launch of the shortcut while this instance is already running signals this one to
+    /// come to the foreground instead of a new process starting — see App.OnStartup).</summary>
+    internal void RestoreFromTray()
     {
         Show();
         WindowState = WindowState.Normal;
