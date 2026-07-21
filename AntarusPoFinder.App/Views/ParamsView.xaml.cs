@@ -67,6 +67,12 @@ public partial class ParamsView : UserControl
         var expanding = ListContentPanel.Visibility != Visibility.Visible;
         ListContentPanel.Visibility = expanding ? Visibility.Visible : Visibility.Collapsed;
         ShowAllButton.Content = expanding ? "Свернуть список" : "Все загруженные";
+        // Row actions need the table actually open to act on a selection — collapsed together with
+        // it, not just left dangling above a hidden grid (see the XAML comment on this StackPanel).
+        var rowActionsVisibility = expanding ? Visibility.Visible : Visibility.Collapsed;
+        OpenFolderBtn.Visibility = rowActionsVisibility;
+        EditTagsBtn.Visibility = rowActionsVisibility;
+        DeleteRowBtn.Visibility = rowActionsVisibility;
         if (expanding) ReloadTable();
     }
 
@@ -95,9 +101,7 @@ public partial class ParamsView : UserControl
     private void SetFile(string path)
     {
         _srcPath = path;
-        var name = Path.GetFileName(path);
-        FileLabel.Text = name;
-        DropZoneLabel.Text = name;
+        DropZoneLabel.Text = Path.GetFileName(path);
     }
 
     private void DropZone_DragOver(object sender, DragEventArgs e)
@@ -164,8 +168,7 @@ public partial class ParamsView : UserControl
 
         DescInput.Text = "";
         _srcPath = null;
-        FileLabel.Text = "Файл не выбран";
-        DropZoneLabel.Text = "Перетащите файл сюда";
+        DropZoneLabel.Text = "Перетащите файл сюда, или нажмите «Выбрать файл…»";
 
         ReloadTable();
     }

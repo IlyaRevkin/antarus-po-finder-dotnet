@@ -31,36 +31,36 @@
             <Border Grid.Row="0" Style="{StaticResource CardBorder}">
                 <StackPanel>
                     <TextBlock Text="ЗАГРУЗИТЬ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                    <!-- Both combos get a fixed, content-reasonable width instead of stretching across
-                         the whole card on a "*" column — a 2-3 word equipment-group/subtype name
-                         doesn't need anywhere near the card's full width, and letting them stretch
-                         just left the row looking oversized for what it holds. -->
+                    <!-- Тип шкафа/Подтип/Производитель side by side, one row — all three are short
+                         values (2-3 words at most), so stretching each across the whole card on its
+                         own row (as Тип+Подтип already were, with Производитель a full row further
+                         down) wasted height for what they hold. Same "*" trailing column reasoning as
+                         UploadView's combo row. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="180"/>
                             <ColumnDefinition Width="20"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="180"/>
+                            <ColumnDefinition Width="20"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="180"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Тип шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="GroupCombo" Grid.Column="1" Width="190" Height="34" HorizontalAlignment="Left"
+                        <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
                                   DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
                         <TextBlock Grid.Column="3" Text="Подтип:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="SubCombo" Grid.Column="4" Width="190" Height="34" HorizontalAlignment="Left" DisplayMemberPath="Label"/>
+                        <ComboBox x:Name="SubCombo" Grid.Column="4" Height="34" DisplayMemberPath="Label"/>
+                        <TextBlock Grid.Column="6" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="ManufCombo" Grid.Column="7" Height="34"/>
                     </Grid>
 
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="110"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="ManufCombo" Grid.Column="1" Width="220" Height="34" HorizontalAlignment="Left"/>
-                    </Grid>
-
+                    <!-- Кнопка выбора файла и drag&amp;drop-зона merged into one row instead of two
+                         separate-looking rows stacked on top of each other — the drop zone itself now
+                         also shows the picked filename (DropZoneLabel doubles as what FileLabel used
+                         to be, they were always kept in sync anyway, see SetFile). -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
@@ -68,15 +68,13 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Файл:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Grid.Column="1" x:Name="FileLabel" Text="Файл не выбран" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        <Button Grid.Column="2" Content="Выбрать файл…" Style="{StaticResource SecondaryButton}" Height="32" Click="BrowseFile_Click"/>
+                        <Border Grid.Column="1" Style="{StaticResource DropZoneBorder}" Height="46" Margin="0,0,8,0"
+                                AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver">
+                            <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл сюда, или нажмите «Выбрать файл…»" Style="{StaticResource MutedText}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Border>
+                        <Button Grid.Column="2" Content="Выбрать файл…" Style="{StaticResource SecondaryButton}" Height="32" VerticalAlignment="Center" Click="BrowseFile_Click"/>
                     </Grid>
-
-                    <Border Style="{StaticResource DropZoneBorder}" Height="46" Margin="0,0,0,6"
-                            AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver">
-                        <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл сюда" Style="{StaticResource MutedText}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -105,17 +103,19 @@
 
                     <TextBlock Grid.Row="0" Text="ЗАГРУЖЕННЫЕ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
 
-                    <!-- Свернуть/Развернуть + the row actions live together in one header row, always
-                         visible regardless of expand state — they used to sit below the table itself,
-                         so collapsing the list (the default on tab open) hid "Открыть папку"/"Теги"/
-                         "Удалить запись" along with it, even though all three only need a selection,
-                         not the table being visually expanded. Each still shows "Выберите строку." if
-                         nothing is selected (unchanged behavior), same as before. -->
+                    <!-- Свернуть/Развернуть + the row actions live together in one header row (same
+                         physical position regardless of expand state — moved here from below the table
+                         so they're not hunted for at the bottom of a possibly-tall grid), but
+                         "Открыть папку"/"Теги"/"Удалить запись" only make sense once there's a visible,
+                         selectable row to act on: collapsed by default together with the table itself,
+                         shown again the moment "Все загруженные" expands it (ShowAllButton_Click).
+                         CountLabel stays visible either way — the count itself doesn't need the table
+                         open to be meaningful. -->
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="ShowAllButton" Content="Все загруженные" Click="ShowAllButton_Click"/>
-                        <Button Content="Открыть папку" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="OpenFolder_Click"/>
-                        <Button Content="Теги" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="EditTags_Click"/>
-                        <Button Content="Удалить запись" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="DeleteRow_Click"/>
+                        <Button x:Name="OpenFolderBtn" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="OpenFolder_Click" Visibility="Collapsed"/>
+                        <Button x:Name="EditTagsBtn" Content="Теги" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="EditTags_Click" Visibility="Collapsed"/>
+                        <Button x:Name="DeleteRowBtn" Content="Удалить запись" Style="{StaticResource SecondaryButton}" Height="32" Margin="8,0,0,0" Click="DeleteRow_Click" Visibility="Collapsed"/>
                         <TextBlock x:Name="CountLabel" Text="Записей: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     </StackPanel>
 
