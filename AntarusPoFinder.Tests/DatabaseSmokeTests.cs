@@ -36,6 +36,45 @@ public class DatabaseSmokeTests
         Assert.True(allVersions.Count >= 2, "Expected the real upload history to be preserved.");
     }
 
+    /// <summary>Repro for pre-existing duplicate rows left over from the sync-duplication bug
+    /// (see ConfigSyncTests.Import_SameParamFile_RepeatedSyncRounds_NeverDuplicates for the sync-side
+    /// fix). Creates 3 identical param_files rows directly (as AddParamFile calls, not through sync,
+    /// so it doesn't depend on the import fix), reopens the DB — RunDataMigrations must collapse them
+    /// to one row and union their tags, same as it does for stale '—' subtypes.</summary>
+    [Fact]
+    public void ReopeningDb_DedupesExistingDuplicateParamFiles_MergesTags()
+    {
+        var tmpDb = Path.Combine(Path.GetTempPath(), $"antarus_dedupe_test_{Guid.NewGuid():N}.db");
+        try
+        {
+            int subtypeId;
+            using (var db = new Database(tmpDb))
+            {
+                var group = db.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+                subtypeId = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "ХП").Id!.Value;
+
+                var id1 = db.AddParamFile(new ParamFile { SubtypeId = subtypeId, Manufacturer = "Danfoss", Filename = "dup.dcfx", DiskPath = @"Z:\A" });
+                var id2 = db.AddParamFile(new ParamFile { SubtypeId = subtypeId, Manufacturer = "Danfoss", Filename = "dup.dcfx", DiskPath = @"Y:\B" });
+                db.AddParamFile(new ParamFile { SubtypeId = subtypeId, Manufacturer = "Danfoss", Filename = "dup.dcfx", DiskPath = @"C:\C" });
+                db.UpdateParamFileTags(id1, "жара");
+                db.UpdateParamFileTags(id2, "холод");
+                Assert.Equal(3, db.GetParamFiles().Count(f => f.Filename == "dup.dcfx"));
+            }
+
+            using var reopened = new Database(tmpDb);
+            var files = reopened.GetParamFiles().Where(f => f.Filename == "dup.dcfx").ToList();
+            Assert.Single(files);
+            Assert.Contains("жара", files[0].Tags);
+            Assert.Contains("холод", files[0].Tags);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            foreach (var f in new[] { tmpDb, tmpDb + "-wal", tmpDb + "-shm" })
+                if (File.Exists(f)) File.Delete(f);
+        }
+    }
+
     [Fact]
     public void FwVersionNumber_BuildAndParse_RoundTrips()
     {

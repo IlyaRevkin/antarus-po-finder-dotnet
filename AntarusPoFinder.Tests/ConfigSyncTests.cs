@@ -328,6 +328,57 @@ public class ConfigSyncTests
     /// <summary>There's no in-app rename UI for subtypes yet — this opens a second raw connection
     /// to the same SQLite file to simulate one (WAL mode allows concurrent readers/writers), so the
     /// test exercises the sync layer's rename handling without needing that feature to exist yet.</summary>
+    /// <summary>Repro for the "178 записей вместо 2 файлов" bug: param_files used to be matched on
+    /// import by (subtype, manufacturer, filename, disk_path), but disk_path is an absolute path
+    /// baked in on the exporting machine (root_path\Параметры\...) which essentially never matches
+    /// the importing machine's own root — so every sync round re-inserted the same file as "new".
+    /// Simulates exactly that: A and B have different local roots (hence different disk_path for
+    /// the very same file), sync repeatedly, must converge to ONE row, not grow every round.</summary>
+    [Fact]
+    public void Import_SameParamFile_RepeatedSyncRounds_NeverDuplicates()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            // Handshake first, as required (see class doc) so the shared subtype correlates by sync_id.
+            dbB.ImportHierarchyData(dbA.ExportHierarchyData());
+
+            var groupA = dbA.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+            var subtypeA = dbA.GetSubtypesForGroup(groupA.Id!.Value).First(s => s.Name == "ХП");
+            dbA.AddParamFile(new ParamFile
+            {
+                SubtypeId = subtypeA.Id!.Value,
+                Manufacturer = "Danfoss",
+                Filename = "params_v1.dcfx",
+                DiskPath = @"Z:\Software\Antarus Finder\Параметры\ПЖ\ХП\Danfoss", // machine A's own root
+                Description = "тестовый файл параметров",
+                UploadDate = "2026-07-21 10:00:00",
+            });
+
+            var exported = dbA.ExportHierarchyData();
+
+            // Machine B imports the same export three times in a row (mirrors the reported "every
+            // minute" auto-sync) — must land exactly one row every time, even though B's local
+            // disk_path for this same logical file (were it uploaded locally) would be totally
+            // different from A's (different root/drive letter).
+            dbB.ImportHierarchyData(exported);
+            dbB.ImportHierarchyData(exported);
+            var counts3 = dbB.ImportHierarchyData(exported);
+
+            Assert.Equal(0, counts3.ParamFiles); // third+ round must add nothing at all
+            var filesB = dbB.GetParamFiles().Where(f => f.Filename == "params_v1.dcfx").ToList();
+            Assert.Single(filesB);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
     private static void RenameSubtype(string dbPath, int subtypeId, string newName)
     {
         using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");

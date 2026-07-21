@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace AntarusPoFinder.Core.Data;
@@ -326,6 +327,8 @@ public partial class Database : IDisposable
 
     private void RunDataMigrations()
     {
+        DedupeParamFiles();
+
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
         // group folder, mixed in with subtype folders).
@@ -341,6 +344,48 @@ public partial class Database : IDisposable
         ExecWithIntParams($"DELETE FROM fw_versions WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM param_files WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM equipment_subtypes WHERE name = '—' AND id IN ({placeholders})", staleIds);
+    }
+
+    /// <summary>One-off cleanup for the config-sync duplication bug: param_files used to be matched
+    /// by (subtype, manufacturer, filename, disk_path) on import, but disk_path is an absolute path
+    /// baked in on the EXPORTING machine, which almost never matches the local root — so every sync
+    /// round re-inserted the same file as a "new" row (repro: 178 rows for 2 real files after
+    /// repeated syncs). The match key is fixed (see ImportHierarchyDataCore), this collapses the
+    /// duplicates that already accumulated: keeps the oldest row per (subtype, manufacturer,
+    /// filename), unions everyone's tags onto it, deletes the rest. Idempotent — a clean DB has
+    /// nothing to group, runs in O(rows) every startup after that.</summary>
+    private void DedupeParamFiles()
+    {
+        var groups = new Dictionary<(int SubtypeId, string Manufacturer, string Filename), List<(int Id, string Tags)>>();
+        using (var r = ExecuteReader("SELECT id, subtype_id, manufacturer, filename, tags FROM param_files WHERE archived = 0 ORDER BY id"))
+        {
+            while (r.Read())
+            {
+                if (r.IsDBNull(1)) continue;
+                var key = (r.GetInt32(1), r.GetString(2), r.GetString(3));
+                if (!groups.TryGetValue(key, out var list)) groups[key] = list = new();
+                list.Add((r.GetInt32(0), GetString(r, "tags")));
+            }
+        }
+
+        foreach (var list in groups.Values)
+        {
+            if (list.Count < 2) continue;
+
+            var keepId = list[0].Id;
+            var mergedTags = string.Join(' ', list
+                .SelectMany(x => x.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            ExecuteNonQuery("UPDATE param_files SET tags=@t WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@t", mergedTags);
+                cmd.Parameters.AddWithValue("@id", keepId);
+            });
+
+            var dupIds = list.Skip(1).Select(x => x.Id).ToList();
+            var ph = IntParamPlaceholders(dupIds);
+            ExecWithIntParams($"DELETE FROM param_files WHERE id IN ({ph})", dupIds);
+        }
     }
 
     /// <summary>A cabinet type (group) must never exist without at least one subtype — "—" is the

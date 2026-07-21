@@ -565,13 +565,18 @@ public partial class Database
             var subId = ResolveId("equipment_subtypes", pf.SubtypeSyncId, subtypeSyncToId, "name", pf.SubtypeName, pf.GroupName);
             if (subId is null) continue;
 
+            // Matched by (subtype, manufacturer, filename) only — NOT disk_path, which is an
+            // absolute path baked in on the EXPORTING machine (see HierarchyService.ParamsPath):
+            // two machines almost never share the exact same root path/drive letter, so a
+            // disk_path-inclusive match never hit and every sync cycle re-inserted the same file
+            // as a "new" row (178 rows for 2 real files, one per sync round). Mirrors how
+            // fw_versions is matched below (subtype_id+controller_id+version_raw, no path).
             var exists = ExecuteScalar(
-                "SELECT 1 FROM param_files WHERE subtype_id=@s AND manufacturer=@m AND filename=@f AND disk_path=@d", cmd =>
+                "SELECT 1 FROM param_files WHERE subtype_id=@s AND manufacturer=@m AND filename=@f", cmd =>
                 {
                     cmd.Parameters.AddWithValue("@s", subId.Value);
                     cmd.Parameters.AddWithValue("@m", pf.Manufacturer);
                     cmd.Parameters.AddWithValue("@f", pf.Filename);
-                    cmd.Parameters.AddWithValue("@d", pf.DiskPath);
                 });
             if (exists is not null) continue;
 
