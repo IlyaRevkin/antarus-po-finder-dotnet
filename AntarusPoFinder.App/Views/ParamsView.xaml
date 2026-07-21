@@ -16,8 +16,11 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- Upload section -->
-            <Border Grid.Row="0" Style="{StaticResource CardBorder}">
+            <!-- Upload section — capped height (own internal scrollbar) so on a short/non-maximized
+                 window it can never squeeze the list card below to zero height; see round about
+                 "the loaded-params table was invisible unless the window was maximized". -->
+            <Border Grid.Row="0" Style="{StaticResource CardBorder}" Height="320">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <TextBlock Text="ЗАГРУЗИТЬ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
                     <Grid>
@@ -63,10 +66,11 @@
                     </Grid>
                     <Button Content="Загрузить параметры" HorizontalAlignment="Right" Height="38" Margin="0,12,0,0" Click="Upload_Click"/>
                 </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <!-- List section -->
-            <Border Grid.Row="2" Style="{StaticResource CardBorder}">
+            <Border Grid.Row="2" Style="{StaticResource CardBorder}" MinHeight="220">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -98,7 +102,7 @@
                         </StackPanel>
 
                         <DataGrid Grid.Row="1" x:Name="FilesGrid" SelectionMode="Single" SelectionUnit="FullRow"
-                                  AutoGenerateColumns="False" IsReadOnly="True">
+                                  MinHeight="120" AutoGenerateColumns="False" IsReadOnly="True">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Файл" Binding="{Binding Filename}" Width="*"/>
                                 <DataGridTextColumn Header="Группа / Подтип" Binding="{Binding GroupSubtypeDisplay}" Width="160"/>
