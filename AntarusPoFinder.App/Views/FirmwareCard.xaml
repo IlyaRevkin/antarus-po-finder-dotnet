@@ -11,7 +11,8 @@
                 <TextBlock x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0"/>
-            <TextBlock x:Name="DescLabel" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            <TextBlock x:Name="DescLabel" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" Margin="0,4,0,0"
+                       MouseLeftButtonUp="DescLabel_Click"/>
             <views:TagBubbleEditor x:Name="TagsView" Margin="0,4,0,0"/>
 
             <Grid Margin="0,8,0,0">
