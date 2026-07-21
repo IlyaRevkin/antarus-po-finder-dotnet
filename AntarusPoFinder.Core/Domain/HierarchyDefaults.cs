@@ -5,6 +5,7 @@ public static class HierarchyFolders
 {
     public const string Instructions = "Инструкция";
     public const string IoMap = "Карта ВВ";
+    public const string Hmi = "HMI";
     public const string Opc = "ОПЦ";
     public const string UnknownFw = "! Неизвестное";
     public const string UnknownParams = "! Неизвестные параметры";

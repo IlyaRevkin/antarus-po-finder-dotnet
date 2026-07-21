@@ -23,6 +23,18 @@ public class FwVersionRecord
     public List<string> LaunchTypes { get; set; } = new();
     public string IoMapPath { get; set; } = "";
     public string InstructionsPath { get; set; } = "";
+    /// <summary>Optional second project — some controllers (e.g. Segnetics) ship a PLC file
+    /// (.psl/.lfs, the main Filename/DiskPath above) plus a separate HMI project (.fsprj) with its
+    /// own resources; kept as an independent optional slot rather than folded into DiskPath so the
+    /// two can be uploaded, browsed and cleared separately (mirrors IoMapPath/InstructionsPath).</summary>
+    public string HmiPath { get; set; } = "";
+    /// <summary>When the main upload is a folder without a recognizable firmware extension inside
+    /// (drivers/support files alongside the real executable), the operator picks which file in the
+    /// folder is the one to actually run — recorded here purely for display, never used for copying
+    /// (the whole folder is always copied, see UploadView.Upload_Click).</summary>
+    public string ExecutableHint { get; set; } = "";
+    /// <summary>Same as ExecutableHint but for HmiPath when it's a folder.</summary>
+    public string HmiExecutableHint { get; set; } = "";
     public bool IsOpc { get; set; }
     public string RequestNum { get; set; } = "";
     /// <summary>Заводской SN шкафа — отдельно от RequestNum, т.к. для нестандартных (ОПЦ) прошивок

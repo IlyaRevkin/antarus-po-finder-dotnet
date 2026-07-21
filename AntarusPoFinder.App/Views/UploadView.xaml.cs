@@ -23,6 +23,14 @@ public partial class UploadView : UserControl
     private List<ControllerModification> _mods = new();
     private string? _srcPath;
     private int? _autoDetectedModId;
+    private string? _executableHint;
+    private string? _hmiExecutableHint;
+
+    /// <summary>Recognized firmware-project extensions per field — used only to decide whether a
+    /// picked FOLDER needs the operator to disambiguate which file inside is the executable (see
+    /// PromptExecutableHint). Single-file picks never need this: the file itself is unambiguous.</summary>
+    private static readonly string[] MainExecutableExts = { ".psl", ".lfs", ".kpr", ".kpj", ".dpj" };
+    private static readonly string[] HmiExecutableExts = { ".fsprj" };
     private readonly Dictionary<string, CheckBox> _launchChecks = new();
 
     private record SubtypeOption(string Label, EquipmentSubType Subtype);
@@ -337,6 +345,7 @@ public partial class UploadView : UserControl
         _srcPath = path;
         IoMapInput.Text = "";
         InstructionsInput.Text = "";
+        _executableHint = null;
         StatusLabel.Text = $"Файл: {Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar))}";
         _autoDetectedModId = null;
         DropZoneLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
@@ -349,8 +358,38 @@ public partial class UploadView : UserControl
             else if (KincoProjectExtensions.Contains(ext))
                 TryKincoAutodetect();
         }
+        else
+        {
+            _executableHint = PromptExecutableHint(path, MainExecutableExts, "прошивки");
+            if (!string.IsNullOrEmpty(_executableHint))
+                StatusLabel.Text += $"  —  исполняемый: {_executableHint}";
+        }
 
         UpdatePreview();
+    }
+
+    /// <summary>When a picked FOLDER has no file matching a known extension, content-based/extension
+    /// autodetect (TryPslAutodetect/TryKincoAutodetect above) has nothing to go on — this is the
+    /// fallback: ask the operator directly which file in the folder is the one to run. Purely a
+    /// display hint (FwVersionRecord.ExecutableHint/HmiExecutableHint); the whole folder is always
+    /// copied regardless (support files/drivers alongside the executable are often required).
+    /// Silent when exactly one candidate matches a known extension — only ambiguous/empty cases
+    /// interrupt the operator.</summary>
+    private string? PromptExecutableHint(string folderPath, string[] knownExts, string contextLabel)
+    {
+        List<string> topLevelFiles;
+        try { topLevelFiles = Directory.EnumerateFiles(folderPath).Select(Path.GetFileName).ToList()!; }
+        catch { return null; }
+        if (topLevelFiles.Count == 0) return null;
+
+        var matches = topLevelFiles.Where(f => knownExts.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).ToList();
+        if (matches.Count == 1) return matches[0];
+
+        var folderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar));
+        return PickFileDialog.Pick(Window.GetWindow(this), "Выбрать исполняемый файл",
+            $"В папке «{folderName}» не найден файл со стандартным расширением для {contextLabel}.\n" +
+            "Укажите, какой файл в папке является исполняемым — сама папка будет скопирована целиком в любом случае:",
+            topLevelFiles);
     }
 
     // ── PSL / KINCO auto-detection ────────────────────────────────────────────
@@ -435,6 +474,43 @@ public partial class UploadView : UserControl
     }
 
     private void InstructionsClear_Click(object sender, RoutedEventArgs e) => InstructionsInput.Text = "";
+
+    private void HmiCheck_Toggled(object sender, RoutedEventArgs e)
+    {
+        bool isChecked = HmiCheck.IsChecked == true;
+        HmiRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        if (!isChecked)
+        {
+            HmiInput.Text = "";
+            _hmiExecutableHint = null;
+        }
+    }
+
+    private void HmiBrowseFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл HMI-проекта",
+            Filter = "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        HmiInput.Text = dlg.FileName;
+        _hmiExecutableHint = null;
+    }
+
+    private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Выбрать папку HMI-проекта" };
+        if (dlg.ShowDialog() != true) return;
+        HmiInput.Text = dlg.FolderName;
+        _hmiExecutableHint = PromptExecutableHint(dlg.FolderName, HmiExecutableExts, "HMI-проекта");
+    }
+
+    private void HmiClear_Click(object sender, RoutedEventArgs e)
+    {
+        HmiInput.Text = "";
+        _hmiExecutableHint = null;
+    }
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
 
@@ -564,6 +640,28 @@ public partial class UploadView : UserControl
             try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(InstructionsInput.Text, _services.Hierarchy.InstrPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
+        string hmiStored = "";
+        if (HmiCheck.IsChecked == true && !string.IsNullOrEmpty(HmiInput.Text))
+        {
+            try
+            {
+                var hmiDstFolder = _services.Hierarchy.HmiPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName);
+                Directory.CreateDirectory(hmiDstFolder);
+                // Deep copy (not the shallow IoMap/Instructions helper) — the operator explicitly
+                // flagged that an HMI project folder can carry drivers/resources in subfolders
+                // alongside the .fsprj itself, all of which need to travel with it.
+                if (Directory.Exists(HmiInput.Text))
+                {
+                    CopyDirectoryContents(HmiInput.Text, hmiDstFolder);
+                    hmiStored = hmiDstFolder;
+                }
+                else
+                {
+                    hmiStored = FileSystemHelpers.CopyFileOrFolderShallow(HmiInput.Text, hmiDstFolder);
+                }
+            }
+            catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
+        }
 
         // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
         // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
@@ -592,6 +690,9 @@ public partial class UploadView : UserControl
             LaunchTypes = launchTypes,
             IoMapPath = ioMapStored,
             InstructionsPath = instrStored,
+            HmiPath = hmiStored,
+            ExecutableHint = _executableHint ?? "",
+            HmiExecutableHint = HmiCheck.IsChecked == true ? _hmiExecutableHint ?? "" : "",
             IsOpc = isOpc,
             RequestNum = reqNum,
             CabinetSn = cabinetSn,
@@ -651,6 +752,8 @@ public partial class UploadView : UserControl
     {
         _srcPath = null;
         _autoDetectedModId = null;
+        _executableHint = null;
+        _hmiExecutableHint = null;
         DropZoneLabel.Text = "Перетащите файл или папку сюда\n\nили нажмите для выбора";
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
@@ -663,6 +766,9 @@ public partial class UploadView : UserControl
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
         IoMapInput.Text = "";
         InstructionsInput.Text = "";
+        HmiCheck.IsChecked = false;
+        HmiRow.Visibility = Visibility.Collapsed;
+        HmiInput.Text = "";
         StatusLabel.Text = "";
         RefreshReservationPicker();
         UpdatePreview();

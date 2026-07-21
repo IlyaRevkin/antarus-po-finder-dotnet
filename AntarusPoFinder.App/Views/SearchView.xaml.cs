@@ -150,6 +150,7 @@ public partial class SearchView : UserControl
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
             card.InstructionsRequested += (s, _) => OpenInstructions(((FirmwareCard)s!).Result);
+            card.HmiProjectRequested += (s, _) => OpenHmiProject(((FirmwareCard)s!).Result);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -334,11 +335,22 @@ public partial class SearchView : UserControl
 
     private static bool HasAnyLocal(HierarchyResult result) => LocalFirmwareCache.HasAny(result.Name);
 
-    private static string? FindUsableFile(string dir) =>
-        Directory.Exists(dir)
-            ? Directory.EnumerateFiles(dir).FirstOrDefault(f =>
-                Path.GetExtension(f).ToLowerInvariant() is var ext && ext != ".md" && ext != ".txt" && ext != ".log")
-            : null;
+    /// <summary>preferredName, when set, is FwVersionRecord.ExecutableHint — the file the operator
+    /// explicitly picked at upload time because the folder had nothing matching a recognized
+    /// extension (see UploadView.PromptExecutableHint). Takes priority over the "first non-doc
+    /// file" heuristic below, which is otherwise arbitrary when a folder holds several files
+    /// (driver DLLs etc. alongside the real executable).</summary>
+    private static string? FindUsableFile(string dir, string? preferredName = null)
+    {
+        if (!Directory.Exists(dir)) return null;
+        if (!string.IsNullOrEmpty(preferredName))
+        {
+            var preferred = Path.Combine(dir, preferredName);
+            if (File.Exists(preferred)) return preferred;
+        }
+        return Directory.EnumerateFiles(dir).FirstOrDefault(f =>
+            Path.GetExtension(f).ToLowerInvariant() is var ext && ext != ".md" && ext != ".txt" && ext != ".log");
+    }
 
     private static string? FindFilteredIn(string dir, string[] exts) =>
         Directory.Exists(dir)
@@ -366,7 +378,7 @@ public partial class SearchView : UserControl
     private static string? ResolveOpenTarget(HierarchyResult result)
     {
         var localDir = SanitizeName(result.Name);
-        string? target = FindUsableFile(Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw));
+        string? target = FindUsableFile(Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw), result.ExecutableHint);
 
         if (target is null)
         {
@@ -375,14 +387,14 @@ public partial class SearchView : UserControl
             {
                 foreach (var sub in Directory.EnumerateDirectories(baseDir).OrderByDescending(d => d))
                 {
-                    target = FindUsableFile(sub);
+                    target = FindUsableFile(sub, result.ExecutableHint);
                     if (target is not null) break;
                 }
             }
         }
 
         if (target is null && Directory.Exists(result.FirmwareDir))
-            target = FindUsableFile(result.FirmwareDir) ?? result.FirmwareDir;
+            target = FindUsableFile(result.FirmwareDir, result.ExecutableHint) ?? result.FirmwareDir;
 
         return target;
     }
@@ -496,6 +508,31 @@ public partial class SearchView : UserControl
         {
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
+        }
+        TryOpen(path);
+    }
+
+    /// <summary>Opens the separately-uploaded HMI project (see UploadView's "Добавить HMI-проект"
+    /// checkbox — distinct from the KINCO same-folder PLC/HMI split above, OpenFiltered/hasHmi).
+    /// When HmiPath is a folder and the operator recorded which file inside is the executable
+    /// (HmiExecutableHint, set via PickFileDialog at upload time), that file is opened directly
+    /// instead of just revealing the folder.</summary>
+    private void OpenHmiProject(HierarchyResult result)
+    {
+        var path = result.HmiPath;
+        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+            path = FindSiblingFolder(result, "HMI") ?? path;
+
+        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+        {
+            AppMessageBox.Show($"HMI-проект не найден.\nПуть: {result.HmiPath}", "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (Directory.Exists(path) && !string.IsNullOrEmpty(result.HmiExecutableHint))
+        {
+            var exePath = Path.Combine(path, result.HmiExecutableHint);
+            if (File.Exists(exePath)) { TryOpen(exePath); return; }
         }
         TryOpen(path);
     }

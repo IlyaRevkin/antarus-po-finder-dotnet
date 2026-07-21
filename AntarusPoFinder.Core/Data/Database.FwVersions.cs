@@ -14,11 +14,13 @@ public partial class Database
             INSERT INTO fw_versions
                (subtype_id,controller_id,eq_prefix,sub_prefix,hw_version,sw_version,
                 dt_str,version_raw,filename,disk_path,local_path,description,changelog,
-                launch_types,io_map_path,instructions_path,is_opc,request_num,cabinet_sn,archived,
+                launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
+                is_opc,request_num,cabinet_sn,archived,
                 upload_date,tags,author_id,status)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
-                @launch_types,@io_map_path,@instructions_path,@is_opc,@request_num,@cabinet_sn,0,
+                @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
+                @is_opc,@request_num,@cabinet_sn,0,
                 @upload_date,@tags,@author_id,@status)
             """, cmd =>
         {
@@ -38,6 +40,9 @@ public partial class Database
             cmd.Parameters.AddWithValue("@launch_types", JsonSerializer.Serialize(v.LaunchTypes));
             cmd.Parameters.AddWithValue("@io_map_path", v.IoMapPath);
             cmd.Parameters.AddWithValue("@instructions_path", v.InstructionsPath);
+            cmd.Parameters.AddWithValue("@hmi_path", v.HmiPath);
+            cmd.Parameters.AddWithValue("@executable_hint", v.ExecutableHint);
+            cmd.Parameters.AddWithValue("@hmi_executable_hint", v.HmiExecutableHint);
             cmd.Parameters.AddWithValue("@is_opc", v.IsOpc ? 1 : 0);
             cmd.Parameters.AddWithValue("@request_num", v.RequestNum);
             cmd.Parameters.AddWithValue("@cabinet_sn", v.CabinetSn);
@@ -77,11 +82,13 @@ public partial class Database
             INSERT INTO fw_versions
                (subtype_id,controller_id,eq_prefix,sub_prefix,hw_version,sw_version,
                 dt_str,version_raw,filename,disk_path,local_path,description,changelog,
-                launch_types,io_map_path,instructions_path,is_opc,request_num,cabinet_sn,archived,
+                launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
+                is_opc,request_num,cabinet_sn,archived,
                 upload_date,tags)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
-                @launch_types,@io_map_path,@instructions_path,@is_opc,@request_num,@cabinet_sn,0,
+                @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
+                @is_opc,@request_num,@cabinet_sn,0,
                 @upload_date,@tags)
             """, cmd =>
         {
@@ -101,6 +108,9 @@ public partial class Database
             cmd.Parameters.AddWithValue("@launch_types", JsonSerializer.Serialize(row.LaunchTypes));
             cmd.Parameters.AddWithValue("@io_map_path", row.IoMapPath);
             cmd.Parameters.AddWithValue("@instructions_path", row.InstructionsPath);
+            cmd.Parameters.AddWithValue("@hmi_path", row.HmiPath);
+            cmd.Parameters.AddWithValue("@executable_hint", row.ExecutableHint);
+            cmd.Parameters.AddWithValue("@hmi_executable_hint", row.HmiExecutableHint);
             cmd.Parameters.AddWithValue("@is_opc", row.IsOpc ? 1 : 0);
             cmd.Parameters.AddWithValue("@request_num", row.RequestNum);
             cmd.Parameters.AddWithValue("@cabinet_sn", row.CabinetSn);
@@ -378,6 +388,9 @@ public partial class Database
             LaunchTypes = launchTypes,
             IoMapPath = GetString(r, "io_map_path"),
             InstructionsPath = GetString(r, "instructions_path"),
+            HmiPath = GetString(r, "hmi_path"),
+            ExecutableHint = GetString(r, "executable_hint"),
+            HmiExecutableHint = GetString(r, "hmi_executable_hint"),
             IsOpc = GetBool(r, "is_opc"),
             RequestNum = GetString(r, "request_num"),
             CabinetSn = GetString(r, "cabinet_sn"),

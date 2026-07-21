@@ -19,6 +19,9 @@ public class HierarchyResult
     public string WorkType { get; init; } = "";
     public string IoMapPath { get; init; } = "";
     public string InstructionsPath { get; init; } = "";
+    public string HmiPath { get; init; } = "";
+    public string ExecutableHint { get; init; } = "";
+    public string HmiExecutableHint { get; init; } = "";
 
     /// <summary>Absolute path to the version folder on the network disk.</summary>
     public string FirmwareDir { get; init; } = "";
@@ -127,6 +130,9 @@ public static class SearchService
             WorkType = string.Join(", ", row.LaunchTypes),
             IoMapPath = row.IoMapPath,
             InstructionsPath = row.InstructionsPath,
+            HmiPath = row.HmiPath,
+            ExecutableHint = row.ExecutableHint,
+            HmiExecutableHint = row.HmiExecutableHint,
             FirmwareDir = row.DiskPath,
             VersionRaw = row.VersionRaw,
             Description = row.Description,

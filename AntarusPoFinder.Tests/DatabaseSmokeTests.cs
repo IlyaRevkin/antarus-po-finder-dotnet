@@ -227,6 +227,56 @@ public class DatabaseSmokeTests
                 if (File.Exists(f)) File.Delete(f);
         }
     }
+
+    /// <summary>Regression coverage for the HMI-project fields (separate optional upload for
+    /// controllers like Segnetics, where PLC is a single .psl/.lfs but HMI is its own multi-file
+    /// project — see UploadView's "Добавить HMI-проект" checkbox) and the executable-hint fields
+    /// (which file inside a folder-without-a-recognized-extension the operator flagged as the one
+    /// to actually run). Both are plain columns on fw_versions — this just confirms AddFwVersion/
+    /// GetFwVersionById round-trip them instead of silently dropping them.</summary>
+    [Fact]
+    public void AddFwVersion_RoundTripsHmiPathAndExecutableHints()
+    {
+        var tmpDb = Path.Combine(Path.GetTempPath(), $"antarus_hmi_test_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var db = new Database(tmpDb);
+            var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+            var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+
+            var fwId = db.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtype.Id!.Value,
+                ControllerId = mod.ControllerId,
+                EqPrefix = group.Prefix,
+                SubPrefix = subtype.Prefix,
+                HwVersion = mod.HwVersion,
+                SwVersion = 1,
+                DtStr = "20260101_0000",
+                VersionRaw = "9.9.9.1.20260101_0000",
+                Filename = "unrecognized_folder",
+                DiskPath = @"C:\po\fw",
+                Description = "test",
+                Status = "active",
+                HmiPath = @"C:\po\fw\HMI",
+                ExecutableHint = "run.exe",
+                HmiExecutableHint = "project.fsprj",
+            });
+
+            var row = db.GetFwVersionById(fwId);
+            Assert.NotNull(row);
+            Assert.Equal(@"C:\po\fw\HMI", row!.HmiPath);
+            Assert.Equal("run.exe", row.ExecutableHint);
+            Assert.Equal("project.fsprj", row.HmiExecutableHint);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            foreach (var f in new[] { tmpDb, tmpDb + "-wal", tmpDb + "-shm" })
+                if (File.Exists(f)) File.Delete(f);
+        }
+    }
 }
 
 public class ServiceSmokeTests

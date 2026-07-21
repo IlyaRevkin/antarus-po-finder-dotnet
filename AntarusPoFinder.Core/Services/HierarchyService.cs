@@ -51,6 +51,9 @@ public class HierarchyService
     public string IoMapPath(string root, string groupName, string subName, string controller) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, false), HierarchyFolders.IoMap);
 
+    public string HmiPath(string root, string groupName, string subName, string controller) =>
+        Path.Combine(PoCtrlFolder(root, groupName, subName, controller, false), HierarchyFolders.Hmi);
+
     public string ParamsPath(string root, string groupName, string subName, string manufacturer)
     {
         var parts = new List<string> { root, FolderParams, groupName };
@@ -165,6 +168,7 @@ public class HierarchyService
                     EnsureDir(ctrlPath);
                     EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.Instructions));
                     EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
+                    EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
                 }
                 EnsureDir(Path.Combine(groupSubPath, HierarchyFolders.Opc));
 
@@ -198,6 +202,7 @@ public class HierarchyService
         names.Add(HierarchyFolders.UnknownFw);
         names.Add(HierarchyFolders.Instructions);
         names.Add(HierarchyFolders.IoMap);
+        names.Add(HierarchyFolders.Hmi);
         return names;
     }
 
@@ -323,7 +328,7 @@ public class HierarchyService
         var poUnknown = Path.Combine(poRoot, HierarchyFolders.UnknownFw);
         var poLeafNames = new HashSet<string>(_db.GetAllControllerModels().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
         {
-            HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap, HierarchyFolders.UnknownFw,
+            HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap, HierarchyFolders.Hmi, HierarchyFolders.UnknownFw,
         };
         CollectEntriesRecursive(poRoot, poUnknown, KnownPoNames(), poLeafNames, "ПО", result, depth: 0);
 

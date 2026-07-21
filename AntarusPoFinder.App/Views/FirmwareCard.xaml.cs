@@ -21,6 +21,10 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? MapRequested;
     public event EventHandler? ParamsRequested;
     public event EventHandler? InstructionsRequested;
+    /// <summary>Separately-uploaded HMI project (see UploadView "Добавить HMI-проект") — not to be
+    /// confused with OpenHmiRequested above, which opens the HMI file inside a KINCO folder that
+    /// already mixes PLC+HMI files together (hasHmi in SearchView).</summary>
+    public event EventHandler? HmiProjectRequested;
     public event EventHandler? HistoryRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
@@ -76,7 +80,10 @@ public partial class FirmwareCard : UserControl
             // like KINCO above). "Открыть прошивку" reads clearer than a bare "Открыть". If a future
             // vendor (e.g. Owen) needs its own split — module firmware vs. PLC firmware — add another
             // branch here the same way hasHmi does for KINCO, rather than overloading this one.
-            ActionsPanel.Children.Add(MakeActionButton("Открыть прошивку", (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty)));
+            var openBtn = MakeActionButton("Открыть прошивку", (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
+            if (!string.IsNullOrEmpty(result.ExecutableHint))
+                openBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
+            ActionsPanel.Children.Add(openBtn);
         }
 
         ActionsPanel.Children.Add(MakeActionButton("Открыть папку с файлом", (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty)));
@@ -95,6 +102,9 @@ public partial class FirmwareCard : UserControl
 
         if (!string.IsNullOrEmpty(result.InstructionsPath))
             ActionsPanel.Children.Add(MakeActionButton("Инструкции", (_, _) => InstructionsRequested?.Invoke(this, EventArgs.Empty)));
+
+        if (!string.IsNullOrEmpty(result.HmiPath))
+            ActionsPanel.Children.Add(MakeActionButton("HMI-проект", (_, _) => HmiProjectRequested?.Invoke(this, EventArgs.Empty)));
 
         ActionsPanel.Children.Add(MakeActionButton("История", (_, _) => HistoryRequested?.Invoke(this, EventArgs.Empty)));
 
