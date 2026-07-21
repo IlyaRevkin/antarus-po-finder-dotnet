@@ -504,9 +504,15 @@ public partial class SearchView : UserControl
         dlg.ShowDialog();
     }
 
+    /// <summary>Copies just the numeric version stem — since Round 31 (see FirmwareNaming.
+    /// BuildFirmwareFilename) that IS the on-disk firmware filename; the group/subtype/controller
+    /// prefix this used to also copy (e.g. "НГР-КПЧ_SMH5_2.1.042...") was the OLD naming convention,
+    /// dropped when the filename was simplified — copying it here was stale and no longer matched
+    /// what's actually on disk. ToUpperInvariant matches BuildFirmwareFilename's own casing (moot in
+    /// practice since VersionRaw is purely digits/dots/underscore, but kept for consistency/safety).</summary>
     private void CopyName(HierarchyResult result)
     {
-        var text = $"{result.Name}_{result.VersionRaw}".ToUpperInvariant().Replace(' ', '_');
+        var text = result.VersionRaw.ToUpperInvariant();
         Clipboard.SetText(text);
         _host.ShowStatus($"Скопировано: {text}");
     }

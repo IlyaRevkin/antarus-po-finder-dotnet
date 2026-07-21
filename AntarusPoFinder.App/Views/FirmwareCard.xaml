@@ -5,7 +5,7 @@
     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
         <StackPanel>
             <StackPanel Orientation="Horizontal" Cursor="Hand" MouseLeftButtonUp="Header_Click"
-                        ToolTip="Нажмите, чтобы скопировать имя и версию">
+                        ToolTip="Нажмите, чтобы скопировать номер версии (имя файла на диске)">
                 <TextBlock x:Name="NameLabel" FontWeight="Bold" FontSize="14"/>
                 <TextBlock Text="   "/>
                 <TextBlock x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
