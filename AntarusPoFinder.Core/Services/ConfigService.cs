@@ -62,6 +62,9 @@ public class ConfigService
         ["quick_apps_display_mode"] = "sidebar",
         ["app_start_minimized"] = "true",
         ["layout_fallback_enabled"] = "true",
+        ["ad_require_login"] = "false",
+        ["ad_require_login_default_days"] = "14",
+        ["ad_last_login"] = "",
     };
 
     private readonly Database _db;
@@ -301,4 +304,25 @@ public class ConfigService
     public string QuickAppsDisplayMode() => Get("quick_apps_display_mode");
     public void SetQuickAppsDisplayMode(string mode) =>
         Set("quick_apps_display_mode", mode is "top" or "top_labeled" ? mode : "sidebar");
+
+    /// <summary>Administrator-only, per-machine (this computer's policy, like every other AD setting
+    /// below it — see ConfigSyncService.SkipSettingsKeys). Off by default so existing installs keep
+    /// starting exactly as before. On = App.OnStartup shows AdStartupLoginDialog before MainWindow
+    /// unless this machine already has a still-valid cached session (see AdSessionService) for
+    /// whichever login last authenticated here (AdLastLogin below).</summary>
+    public bool AdRequireLogin() => Get("ad_require_login").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetAdRequireLogin(bool value) => Set("ad_require_login", value ? "true" : "false");
+
+    /// <summary>Default "remember me" period (days) offered in the AD login UI — used whenever the
+    /// operator leaves the picker on "как задано администратором" instead of choosing their own
+    /// number of days or "всегда". Replaces what used to be a hardcoded 14.</summary>
+    public int AdRequireLoginDefaultDays() => int.TryParse(Get("ad_require_login_default_days"), out var v) && v > 0 ? v : 14;
+    public void SetAdRequireLoginDefaultDays(int days) => Set("ad_require_login_default_days", Math.Max(1, days).ToString());
+
+    /// <summary>Normalized AD login (see AppUserAuthService.NormalizeAdLogin) that last successfully
+    /// authenticated on THIS machine — the one AdRequireLogin's startup gate checks a cached session
+    /// for. Set on every successful AD login (mandatory gate or the optional in-app switch-role
+    /// dialog), never on the administrator escape hatch (that one is deliberately never cached).</summary>
+    public string AdLastLogin() => Get("ad_last_login");
+    public void SetAdLastLogin(string normalizedLogin) => Set("ad_last_login", normalizedLogin);
 }

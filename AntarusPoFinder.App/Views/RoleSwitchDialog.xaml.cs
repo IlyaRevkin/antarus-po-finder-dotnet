@@ -38,6 +38,52 @@ public partial class RoleSwitchDialog : Window
         RoleCombo.SelectedValue = currentRole;
 
         AdDomainInput.Text = _cfg.Get("ad_domain");
+
+        RememberCombo.ItemsSource = RememberOptions.All(_cfg.AdRequireLoginDefaultDays());
+        RememberCombo.SelectedValuePath = "Key";
+        RememberCombo.SelectedValue = RememberOptions.DefaultKey;
+    }
+
+    /// <summary>Best-effort personalization, not a security check: if this login already chose a
+    /// "remember me" duration on this machine before, pre-select it instead of always defaulting
+    /// back to "как задано администратором" — see RecordRememberChoice for where it's saved.</summary>
+    private void AdLoginInput_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var login = AdLoginInput.Text.Trim();
+        if (login.Length == 0) return;
+
+        var session = _db.GetAdLoginSession(AppUserAuthService.NormalizeAdLogin(login));
+        RememberCombo.SelectedValue = session?.Mode switch
+        {
+            AntarusPoFinder.Core.Services.AdSessionMode.Always => RememberOptions.AlwaysKey,
+            AntarusPoFinder.Core.Services.AdSessionMode.Custom => session.CustomDays.ToString(),
+            _ => RememberOptions.DefaultKey,
+        };
+    }
+
+    private void RememberCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        RememberAlwaysWarning.Visibility = (string?)RememberCombo.SelectedValue == RememberOptions.AlwaysKey
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Persists whatever the "Запомнить вход" combo is currently set to for this login on
+    /// this machine — called right after a successful AD auth, both from the AD-group branch and the
+    /// app-roster branch of <see cref="AdAuth_Click"/>, and also mirrored in AdStartupLoginDialog for
+    /// the mandatory-gate path (see AdSessionService for the shared expiry logic).</summary>
+    private void RecordRememberChoice(string normalizedLogin)
+    {
+        var key = (string?)RememberCombo.SelectedValue ?? RememberOptions.DefaultKey;
+        var mode = key switch
+        {
+            RememberOptions.AlwaysKey => AntarusPoFinder.Core.Services.AdSessionMode.Always,
+            RememberOptions.DefaultKey => AntarusPoFinder.Core.Services.AdSessionMode.Default,
+            _ => AntarusPoFinder.Core.Services.AdSessionMode.Custom,
+        };
+        var customDays = mode == AntarusPoFinder.Core.Services.AdSessionMode.Custom && int.TryParse(key, out var d) ? d : 0;
+        AntarusPoFinder.Core.Services.AdSessionService.RecordLogin(
+            _db, normalizedLogin, mode, customDays, _cfg.AdRequireLoginDefaultDays(), System.DateTime.Now);
+        _cfg.SetAdLastLogin(normalizedLogin);
     }
 
     /// <summary>Способ 1 (Часть 1) — AD-группа, если настроена и логин в неё входит, побеждает: это
@@ -71,6 +117,7 @@ public partial class RoleSwitchDialog : Window
         var groupRole = WindowsGroupAuth.DetectRoleForUser(_cfg, domain, login, password);
         if (groupRole is not null)
         {
+            RecordRememberChoice(normalized);
             _services.CurrentAdLogin = normalized;
             SelectedRole = groupRole;
             DialogResult = true;
@@ -94,6 +141,7 @@ public partial class RoleSwitchDialog : Window
                 "Администратор может изменить её в Настройки → Пользователи.",
                 "Новый пользователь", MessageBoxButton.OK, MessageBoxImage.Information);
 
+        RecordRememberChoice(normalized);
         _services.CurrentAdLogin = normalized;
         SelectedRole = user.Role;
         DialogResult = true;

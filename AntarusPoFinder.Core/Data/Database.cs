@@ -189,6 +189,13 @@ public partial class Database : IDisposable
                  no_count   INTEGER NOT NULL DEFAULT 0,
                  decision   TEXT    NOT NULL DEFAULT ''
              );
+
+             CREATE TABLE IF NOT EXISTS ad_login_sessions (
+                 ad_login    TEXT    PRIMARY KEY NOT NULL COLLATE NOCASE,
+                 mode        TEXT    NOT NULL DEFAULT 'default',
+                 custom_days INTEGER NOT NULL DEFAULT 0,
+                 valid_until TEXT    NOT NULL DEFAULT ''
+             );
              """);
 
         EnsureColumnsExist();

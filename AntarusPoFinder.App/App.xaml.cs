@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using AntarusPoFinder.App.Services;
+using AntarusPoFinder.App.Views;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -76,6 +77,32 @@ public partial class App : Application
 
         var services = new AppServices();
         _services = services;
+
+        // Настройки → Общие → «Требовать вход по AD при запуске» (per-machine, off by default —
+        // see ConfigService.AdRequireLogin). AdLastLogin is whichever login last authenticated on
+        // THIS machine (set by this gate or the optional in-app switch-role dialog); if their cached
+        // session (AdSessionService) already covers "now", skip straight to MainWindow with whatever
+        // role is already persisted (cfg.CurrentRole()) — same as if this setting were off. Closing
+        // the dialog without a successful login (Cancel/X/Alt+F4) exits the app entirely rather than
+        // opening MainWindow half-authenticated.
+        if (services.Cfg.AdRequireLogin() && !AdSessionService.IsValid(services.Db, services.Cfg.AdLastLogin(), DateTime.Now))
+        {
+            // Default ShutdownMode (OnLastWindowClose) would otherwise auto-shutdown the moment this
+            // dialog — the only open window so far — closes, whether it succeeded or not, racing the
+            // MainWindow this method still needs to create right below on success. Restored to the
+            // normal OnLastWindowClose just before MainWindow.Show() so closing IT still exits the
+            // app exactly as before this gate existed.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            var loginDialog = new AdStartupLoginDialog(services);
+            if (loginDialog.ShowDialog() != true)
+            {
+                Shutdown();
+                return;
+            }
+        }
+
+        ShutdownMode = ShutdownMode.OnLastWindowClose;
         var window = new MainWindow(services);
         MainWindow = window;
 

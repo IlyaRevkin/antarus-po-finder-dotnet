@@ -24,9 +24,16 @@
         <TextBlock Text="Домен:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
-        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i, revkin.i@Elita или Elita\revkin.i"/>
+        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i, revkin.i@Elita или Elita\revkin.i"
+                 LostFocus="AdLoginInput_LostFocus"/>
         <TextBlock Text="Пароль AD:" Margin="0,0,0,4"/>
-        <PasswordBox x:Name="AdPasswordInput" Margin="0,0,0,12"/>
+        <PasswordBox x:Name="AdPasswordInput" Margin="0,0,0,10"/>
+        <TextBlock Text="Запомнить вход на этом компьютере:" Margin="0,0,0,4"/>
+        <ComboBox x:Name="RememberCombo" Margin="0,0,0,4" DisplayMemberPath="Label" SelectedValuePath="Key"
+                  SelectionChanged="RememberCombo_SelectionChanged"/>
+        <TextBlock x:Name="RememberAlwaysWarning" Style="{StaticResource MutedText}" Foreground="{DynamicResource ErrorBrush}"
+                   TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
+                   Text="⚠ Вход по AD не будет запрашиваться повторно на этом компьютере, пока вы не выйдете вручную — менее безопасно, если к компьютеру есть доступ у посторонних."/>
         <Button x:Name="AdAuthBtn" Content="Войти по AD" HorizontalAlignment="Right" Click="AdAuth_Click"/>
     </StackPanel>
 </Window>

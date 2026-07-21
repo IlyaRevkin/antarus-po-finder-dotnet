@@ -1,0 +1,34 @@
+<Window x:Class="AntarusPoFinder.App.Views.AdStartupLoginDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Вход в Antarus ПО Finder" Width="380" SizeToContent="Height"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <TextBlock Text="ВХОД ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+        <TextBlock Text="Домен:" Margin="0,0,0,4"/>
+        <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
+        <TextBlock Text="Логин:" Margin="0,0,0,4"/>
+        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i, revkin.i@Elita или Elita\revkin.i"
+                 LostFocus="AdLoginInput_LostFocus"/>
+        <TextBlock Text="Пароль AD:" Margin="0,0,0,4"/>
+        <PasswordBox x:Name="AdPasswordInput" Margin="0,0,0,10"/>
+        <TextBlock Text="Запомнить вход на этом компьютере:" Margin="0,0,0,4"/>
+        <ComboBox x:Name="RememberCombo" Margin="0,0,0,4" DisplayMemberPath="Label" SelectedValuePath="Key"
+                  SelectionChanged="RememberCombo_SelectionChanged"/>
+        <TextBlock x:Name="RememberAlwaysWarning" Style="{StaticResource MutedText}" Foreground="{DynamicResource ErrorBrush}"
+                   TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
+                   Text="⚠ Вход по AD не будет запрашиваться повторно на этом компьютере, пока вы не выйдете вручную — менее безопасно, если к компьютеру есть доступ у посторонних."/>
+        <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+        <Button Content="Войти" HorizontalAlignment="Right" Click="AdAuth_Click" IsDefault="True" Margin="0,0,0,4"/>
+
+        <Separator Margin="0,8,0,12"/>
+        <TextBlock Text="АВАРИЙНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
+                   Text="Домен недоступен или AD ещё не настроен? Паролем администратора можно войти без AD — например, чтобы затем в Настройки → Пользователи назначить нужную AD-учётку администратором. Такой вход не запоминается — при следующем запуске снова потребуется войти по AD или этим же паролем."
+                   Style="{StaticResource MutedText}"/>
+        <PasswordBox x:Name="AdminEscapePasswordInput" Margin="0,0,0,8"/>
+        <Button Content="Войти как администратор" HorizontalAlignment="Right" Click="AdminEscape_Click"/>
+    </StackPanel>
+</Window>

@@ -341,6 +341,9 @@ public partial class SettingsView : UserControl
             _ => AdModeLdapRadio,
         }).IsChecked = true;
 
+        AdRequireLoginCheck.IsChecked = _services.Cfg.AdRequireLogin();
+        AdRequireLoginDaysInput.Text = _services.Cfg.AdRequireLoginDefaultDays().ToString();
+
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
         var tray = _services.Cfg.CloseAction() == "tray";
@@ -566,6 +569,11 @@ public partial class SettingsView : UserControl
         _services.Cfg.Set("ad_group_naladchik", AdGroupNaladchikInput.Text.Trim());
         _services.Cfg.SetAdHttpUrl(AdHttpUrlInput.Text);
         _services.Cfg.SetAdAuthMode(AdModeHttpRadio.IsChecked == true ? "http" : AdModeBothRadio.IsChecked == true ? "both" : "ldap");
+
+        _services.Cfg.SetAdRequireLogin(AdRequireLoginCheck.IsChecked == true);
+        if (int.TryParse(AdRequireLoginDaysInput.Text.Trim(), out var days) && days > 0)
+            _services.Cfg.SetAdRequireLoginDefaultDays(days);
+
         _host.ShowStatus("Группы и способ проверки пароля AD сохранены");
     }
 
