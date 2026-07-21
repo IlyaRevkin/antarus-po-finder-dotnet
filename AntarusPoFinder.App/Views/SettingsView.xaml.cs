@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -72,7 +73,44 @@ public partial class SettingsView : UserControl
         public string SubtypeName => Record.SubtypeName;
         public string CtrlName => Record.CtrlName;
         public string DateOnly => Record.ReservedAt.Length >= 10 ? Record.ReservedAt[..10] : Record.ReservedAt;
-        public string ExpiresLabel => string.IsNullOrEmpty(Record.ExpiresAt) ? "не истекает" : Record.ExpiresAt;
+
+        /// <summary>Human-readable countdown instead of just the raw expires_at timestamp — computed
+        /// live from DateTime.Now each time this is read, so re-evaluating the binding (see
+        /// SettingsView's reservation countdown timer, which calls ReservationsGrid.Items.Refresh()
+        /// every 30s while this tab is visible) is enough to make the number tick down without a
+        /// full DB reload. Same "yyyy-MM-dd HH:mm:ss" shape as Database.NowIso()/IsoPlusHours.</summary>
+        public string ExpiresLabel
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(Record.ExpiresAt)) return "не истекает";
+                if (!DateTime.TryParseExact(Record.ExpiresAt, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var expiry))
+                    return Record.ExpiresAt; // unexpected format — fall back to showing it raw
+
+                var remaining = expiry - DateTime.Now;
+                return remaining <= TimeSpan.Zero ? "истёк" : $"истечёт через {HumanizeRemaining(remaining)}";
+            }
+        }
+
+        private static string HumanizeRemaining(TimeSpan ts)
+        {
+            if (ts.TotalDays >= 1)
+            {
+                var days = (int)ts.TotalDays;
+                var hours = ts.Hours;
+                return hours > 0 ? $"{days} дн {hours} ч" : $"{days} дн";
+            }
+            if (ts.TotalHours >= 1)
+            {
+                var hours = (int)ts.TotalHours;
+                var minutes = ts.Minutes;
+                return minutes > 0 ? $"{hours} ч {minutes} мин" : $"{hours} ч";
+            }
+            // Under an hour: show minutes, rounding up so "59 sec left" doesn't read as "0 мин".
+            var totalMinutes = Math.Max(1, (int)Math.Ceiling(ts.TotalMinutes));
+            return $"{totalMinutes} мин";
+        }
     }
 
     private class AppRow
@@ -98,6 +136,12 @@ public partial class SettingsView : UserControl
         _ => null,
     };
 
+    /// <summary>Ticks the "истечёт через …" reservation labels down without a DB round-trip — see
+    /// ReservationRow.ExpiresLabel, which recomputes from DateTime.Now on every read, so a plain
+    /// Items.Refresh() is enough. Only runs while the Reservations tab is actually visible.</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _reservationCountdownTimer =
+        new() { Interval = TimeSpan.FromSeconds(30) };
+
     public SettingsView(AppServices services, IAppHost host)
     {
         InitializeComponent();
@@ -109,6 +153,13 @@ public partial class SettingsView : UserControl
             LoadHierarchy();
             LoadFirmwareTab();
             LoadQuickApps();
+            _reservationCountdownTimer.Start();
+        };
+        Unloaded += (_, _) => _reservationCountdownTimer.Stop();
+        _reservationCountdownTimer.Tick += (_, _) =>
+        {
+            if (ReservationsTab.Visibility == Visibility.Visible)
+                ReservationsGrid.Items.Refresh();
         };
     }
 

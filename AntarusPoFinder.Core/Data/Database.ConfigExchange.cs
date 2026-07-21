@@ -143,15 +143,19 @@ public partial class Database
 
     /// <summary>Applies the import for real. Catalog tables (groups/subtypes/controllers/
     /// modifications) are matched by SyncId first (falls back to name for older exports/first
-    /// contact) and updated IN PLACE — never deleted — because fw_versions/param_files reference
-    /// them by integer id with no ON DELETE CASCADE from this direction; deleting and re-inserting
-    /// a "renamed" row would silently orphan or (with foreign_keys=ON) outright fail against any
-    /// locally-uploaded firmware under it. Tags/allowed_extensions have no such reference (they're
-    /// copied into fw_versions.tags/param_files.tags as plain text, not FKs) so those two are safe
-    /// to fully mirror — anything missing locally is added, anything absent from the incoming set
-    /// is removed (via the existing tag-stripping DeleteTag, so removing a tag here also strips it
-    /// from every record's tags text). fw_versions/param_files themselves stay additive-only, as
-    /// before — each install may have uploads the exporting machine never saw.</summary>
+    /// contact) and updated IN PLACE — deleting and re-inserting a "renamed" row would silently
+    /// orphan or (with foreign_keys=ON) outright fail against any locally-uploaded firmware under
+    /// it. Subtypes and controllers ALSO get their deletion mirrored (see the two dedicated blocks
+    /// below, each guarded by "nothing local still references this row") — without that, a row
+    /// deleted on one machine would resurrect the moment any sync partner (or a stale JSON on a
+    /// shared drive) still listed it; this is exactly what kept bringing the FORTUS controller back.
+    /// Groups and modifications don't have this guard yet — deleting one is rarer in practice and
+    /// was judged lower priority; if either starts resurrecting the same way, apply the identical
+    /// pattern. Tags/allowed_extensions/manufacturers have no FK reference at all (they're copied
+    /// into fw_versions.tags/param_files.tags as plain text) so those are safe to fully mirror —
+    /// anything missing locally is added, anything absent from the incoming set is removed.
+    /// fw_versions/param_files themselves stay additive-only, as before — each install may have
+    /// uploads the exporting machine never saw.</summary>
     public ImportCounts ImportHierarchyData(HierarchyExportData data) => ImportHierarchyDataCore(data, apply: true);
 
     private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply)
@@ -425,6 +429,42 @@ public partial class Database
                     { cmd.Parameters.AddWithValue("@sy", c.SyncId); cmd.Parameters.AddWithValue("@id", id); });
                 if (apply) SetHierarchyWatermark(effectiveSyncId, syncNow);
             }
+        }
+
+        // ── Controllers removed on the exporting machine — same "resurrected row" gap that
+        //    subtypes had (see the block above), just never closed for controller_models. This is
+        //    the actual root cause behind the FORTUS controller repeatedly reappearing: the class
+        //    doc above ("Catalog tables ... updated IN PLACE — never deleted") was accurate for
+        //    controllers/modifications even after subtypes got deletion propagation, so a controller
+        //    deleted locally would silently come back the moment ANY sync partner (or a stale JSON
+        //    on the network drive) still listed it — nothing above this point ever removed it again.
+        //    Same safety rule as subtypes: only delete a controller nothing local still references
+        //    (modifications/fw_versions/reservations), and only for rows that have a sync_id to
+        //    correlate against the incoming snapshot.
+        var incomingControllerSyncIds = new HashSet<string>(
+            data.ControllerModels.Where(c => !string.IsNullOrEmpty(c.SyncId)).Select(c => c.SyncId));
+        var localControllers = new List<(int Id, string SyncId)>();
+        using (var r = ExecuteReader("SELECT id, sync_id FROM controller_models WHERE sync_id IS NOT NULL AND sync_id != ''"))
+            while (r.Read())
+                localControllers.Add((r.GetInt32(0), r.GetString(1)));
+
+        foreach (var (id, syncId) in localControllers)
+        {
+            if (incomingControllerSyncIds.Contains(syncId)) continue;
+
+            var referenced = ExecuteScalar("""
+                SELECT 1 WHERE EXISTS(SELECT 1 FROM controller_modifications WHERE controller_id=@id)
+                   OR EXISTS(SELECT 1 FROM fw_versions WHERE controller_id=@id)
+                   OR EXISTS(SELECT 1 FROM fw_version_reservations WHERE controller_id=@id)
+                """, cmd => cmd.Parameters.AddWithValue("@id", id)) is not null;
+            if (referenced)
+            {
+                counts.ControllersSkippedDelete++;
+                continue;
+            }
+
+            counts.ControllersRemoved++;
+            if (apply) ExecuteNonQuery("DELETE FROM controller_models WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
         }
 
         // ── Controller modifications (upsert by sync_id, fallback to (controller,display_name)) ──

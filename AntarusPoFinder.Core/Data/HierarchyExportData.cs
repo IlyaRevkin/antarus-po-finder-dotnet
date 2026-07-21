@@ -160,6 +160,8 @@ public class ImportCounts
     public int SubtypesSkippedDelete { get; set; }
     public int ControllersAdded { get; set; }
     public int ControllersUpdated { get; set; }
+    public int ControllersRemoved { get; set; }
+    public int ControllersSkippedDelete { get; set; }
     public int ModificationsAdded { get; set; }
     public int ModificationsUpdated { get; set; }
     public int ManufacturersAdded { get; set; }
@@ -183,7 +185,7 @@ public class ImportCounts
     public int ConflictsFound { get; set; }
 
     public int TotalChanges =>
-        GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated +
+        GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
         ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + ParamFiles +
         AppUsersAdded + AppUsersUpdated;

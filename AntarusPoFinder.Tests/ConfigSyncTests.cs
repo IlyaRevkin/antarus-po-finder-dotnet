@@ -325,6 +325,104 @@ public class ConfigSyncTests
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Regression test for the repeatedly-reported "FORTUS controller resurrects" bug:
+    /// controller_models was upsert-only in ImportHierarchyDataCore, same gap equipment_subtypes had
+    /// before the fix above — a controller deleted on one machine kept coming back the moment any
+    /// sync partner (or a stale JSON export) still listed it, because nothing ever mirrored the
+    /// deletion. Uses two brand-new custom controllers rather than the seeded SMH4/KINCO/PIXEL family
+    /// — every default controller ships with its own default modification (see HierarchyDefaults),
+    /// which would make it look "referenced" on both machines regardless of this fix, masking the
+    /// bug. Mirrors the subtype test above: one deleted controller nobody locally references (must
+    /// disappear on B), one B still has a local upload under (must be kept) — same shape "FORTUS"
+    /// actually had: a controller someone added, then deleted, that another machine still had
+    /// firmware filed under.</summary>
+    [Fact]
+    public void Import_DeletedController_PropagatesButKeepsLocallyReferencedOnes()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            var unusedId = dbA.UpsertControllerModel(new ControllerModel { Name = "FORTUS-TEST-UNUSED", SortOrder = 900 });
+            var usedId = dbA.UpsertControllerModel(new ControllerModel { Name = "FORTUS-TEST-USED", SortOrder = 901 });
+
+            // Handshake so sync_ids correlate before anything diverges (see class doc) — B now has
+            // both custom controllers too, with matching sync_ids, but none of A's default modifications.
+            dbB.ImportHierarchyData(dbA.ExportHierarchyData());
+
+            var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var subtypeB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "УПД");
+            var usedB = dbB.GetAllControllerModels().First(c => c.Name == "FORTUS-TEST-USED");
+            var localFwId = dbB.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtypeB.Id!.Value,
+                ControllerId = usedB.Id!.Value,
+                EqPrefix = groupB.Prefix,
+                SubPrefix = subtypeB.Prefix,
+                HwVersion = 1,
+                SwVersion = 1,
+                DtStr = "20260101_0000",
+                VersionRaw = "9.9.1.1.20260101_0000",
+                Filename = "local_only_fortus_test.psl",
+                DiskPath = "",
+                Description = "локальная загрузка только на этой машине",
+                Status = "active",
+            });
+
+            // A deletes both custom controllers locally.
+            DeleteControllerRaw(pathA, unusedId);
+            DeleteControllerRaw(pathA, usedId);
+
+            var exported = dbA.ExportHierarchyData();
+            Assert.DoesNotContain(exported.ControllerModels, c => c.Name == "FORTUS-TEST-UNUSED");
+            Assert.DoesNotContain(exported.ControllerModels, c => c.Name == "FORTUS-TEST-USED");
+
+            var preview = dbB.PreviewImportHierarchyData(exported);
+            Assert.Equal(1, preview.ControllersRemoved);
+            Assert.Equal(1, preview.ControllersSkippedDelete);
+            // Preview must not have written anything.
+            Assert.Contains(dbB.GetAllControllerModels(), c => c.Name == "FORTUS-TEST-UNUSED");
+
+            var counts = dbB.ImportHierarchyData(exported);
+            Assert.Equal(1, counts.ControllersRemoved);
+            Assert.Equal(1, counts.ControllersSkippedDelete);
+
+            var controllersB = dbB.GetAllControllerModels();
+            Assert.DoesNotContain(controllersB, c => c.Name == "FORTUS-TEST-UNUSED"); // unreferenced -> gone
+            Assert.Contains(controllersB, c => c.Name == "FORTUS-TEST-USED"); // still referenced locally -> kept
+
+            // The local fw_version under the kept controller must survive untouched.
+            var fwAfter = dbB.GetAllFwVersionsWithNames(includeArchived: true).First(f => f.Id == localFwId);
+            Assert.Equal("local_only_fortus_test.psl", fwAfter.Filename);
+            Assert.Equal("FORTUS-TEST-USED", fwAfter.CtrlName);
+
+            // Idempotent on a second pass.
+            var secondPass = dbB.ImportHierarchyData(exported);
+            Assert.Equal(0, secondPass.ControllersRemoved);
+            Assert.Equal(1, secondPass.ControllersSkippedDelete);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    private static void DeleteControllerRaw(string dbPath, int controllerId)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        using var pragma = conn.CreateCommand();
+        pragma.CommandText = "PRAGMA foreign_keys=ON;";
+        pragma.ExecuteNonQuery();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM controller_models WHERE id=@id";
+        cmd.Parameters.AddWithValue("@id", controllerId);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>There's no in-app rename UI for subtypes yet — this opens a second raw connection
     /// to the same SQLite file to simulate one (WAL mode allows concurrent readers/writers), so the
     /// test exercises the sync layer's rename handling without needing that feature to exist yet.</summary>
