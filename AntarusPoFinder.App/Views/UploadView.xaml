@@ -29,13 +29,13 @@
                               ToolTip="Если для этого шкафа/подтипа/контроллера есть открытый резерв номера — выберите его, чтобы загрузка использовала ровно тот номер, который уже вписан в прошивку."/>
                 </StackPanel>
 
-                <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="180" Cursor="Hand"
+                <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="130" Cursor="Hand"
                         AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
                     <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл или папку сюда&#x0a;&#x0a;или нажмите для выбора"
                                Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <Grid Margin="0,8,0,0">
+                <Grid Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="8"/>
@@ -45,16 +45,16 @@
                     <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
                 </Grid>
 
-                <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,16,0,0"
+                <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,12,0,0"
                           Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
-                          ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки."/>
-                <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="120" Cursor="Hand" Margin="0,8,0,0"
+                          ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки.&#x0a;HMI прикладывается к версии прошивки — файл/папка прошивки ПЛК всё равно нужно выбрать выше."/>
+                <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="86" Cursor="Hand" Margin="0,6,0,0"
                         Visibility="Collapsed" AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
                     <TextBlock x:Name="HmiDropZoneLabel" Text="Перетащите файл или папку HMI-проекта сюда&#x0a;&#x0a;или нажмите для выбора"
                                Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <Grid x:Name="HmiButtonsRow" Margin="0,8,0,0" Visibility="Collapsed">
+                <Grid x:Name="HmiButtonsRow" Margin="0,6,0,0" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="8"/>
@@ -64,16 +64,16 @@
                     <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="HmiBrowseFolder_Click"/>
                 </Grid>
 
-                <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,16,0,6"/>
+                <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,12,0,6"/>
                 <Border Style="{StaticResource CardBorder}">
                     <TextBlock x:Name="PreviewLabel" Text="—" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
                 </Border>
 
-                <Button x:Name="ReserveVersionBtn" Content="Зарезервировать номер версии" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0"
+                <Button x:Name="ReserveVersionBtn" Content="Зарезервировать номер версии" Style="{StaticResource SecondaryButton}" Margin="0,6,0,0"
                         Click="ReserveVersion_Click"
                         ToolTip="Зафиксировать следующий номер версии заранее — чтобы вписать его в прошивку до сборки и не рисковать, что номер уйдёт вперёд, пока идёт разработка."/>
 
-                <Button Content="Очистить данные" Style="{StaticResource SecondaryButton}" Margin="0,8,0,16"
+                <Button Content="Очистить данные" Style="{StaticResource SecondaryButton}" Margin="0,6,0,8"
                         Click="ClearData_Click" ToolTip="Сбросить выбранный файл и все поля формы (если загружен не тот файл)"/>
             </StackPanel>
             </ScrollViewer>
@@ -100,28 +100,28 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,8,8"
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,8,6"
                                    ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
-                        <ComboBox x:Name="GroupCombo" Grid.Row="0" Grid.Column="1" Height="36" Margin="0,0,0,8"
+                        <ComboBox x:Name="GroupCombo" Grid.Row="0" Grid.Column="1" Height="34" Margin="0,0,0,6"
                                   DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <ComboBox x:Name="SubCombo" Grid.Row="1" Grid.Column="1" Height="36" Margin="0,0,0,8"
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,8,6"/>
+                        <ComboBox x:Name="SubCombo" Grid.Row="1" Grid.Column="1" Height="34" Margin="0,0,0,6"
                                   DisplayMemberPath="Label" SelectionChanged="SubCombo_SelectionChanged"/>
 
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,8,0"
                                    ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
-                        <ComboBox x:Name="CtrlCombo" Grid.Row="2" Grid.Column="1" Height="36" Margin="0,0,0,0"
+                        <ComboBox x:Name="CtrlCombo" Grid.Row="2" Grid.Column="1" Height="34" Margin="0,0,0,0"
                                   DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
 
                         <TextBlock Grid.Row="3" Grid.Column="1" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
-                                   FontSize="11" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                                   FontSize="11" Margin="0,2,0,6" TextWrapping="Wrap"/>
 
-                        <CheckBox Grid.Row="4" Grid.Column="1" x:Name="IncludeDateCheck" Content="Добавлять дату/время в номер версии" IsChecked="True" Margin="0,0,0,8"
+                        <CheckBox Grid.Row="4" Grid.Column="1" x:Name="IncludeDateCheck" Content="Добавлять дату/время в номер версии" IsChecked="True" Margin="0,0,0,6"
                                   Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
                                   ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
 
-                        <StackPanel x:Name="OpcPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <StackPanel x:Name="OpcPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
                             <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,0"
                                       Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
                                       ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
@@ -130,68 +130,81 @@
                                       ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
                         </StackPanel>
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,8" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReqNumInput" Height="36" Margin="0,0,0,8"
+                        <TextBlock Grid.Row="6" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
 
-                        <TextBlock Grid.Row="7" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,8" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="7" Grid.Column="1" x:Name="CabinetSnInput" Height="36" Margin="0,0,0,8"
+                        <TextBlock Grid.Row="7" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
 
                         <TextBlock Grid.Row="8" Grid.Column="0" Text="Тип пуска *:" Margin="0,0,8,0"/>
                         <StackPanel Grid.Row="8" Grid.Column="1" x:Name="LaunchTypesPanel" Orientation="Horizontal"/>
                     </Grid>
 
-                    <TextBlock Text="Изменения в этой версии *:" Margin="0,12,0,4"/>
-                    <TextBox x:Name="DescInput" Height="72" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
+                    <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
 
-                    <TextBlock Text="Теги:" Margin="0,12,0,4"/>
+                    <TextBlock Text="Теги:" Margin="0,10,0,4"/>
                     <views:TagBubbleEditor x:Name="TagsEditor"/>
 
-                    <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,18,0,10"/>
-                    <Grid Margin="0,0,0,8">
+                    <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,14,0,8"/>
+                    <!-- Карта in/out + Карта modbus side by side — both are the same shape (label/textbox/
+                         3 icon buttons) and rarely need much width for a path, so pairing them saves a
+                         full row of vertical space vs. stacking every optional field one under another
+                         (see round 39 layout-compacting pass: buttons were going off the bottom of the
+                         window with HMI expanded, scroll alone was papering over a form that was simply
+                         too tall — this trims real height instead of just hiding the overflow). -->
+                    <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="130"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
-                        <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                    </Grid>
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
-                        <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
+                        <Grid Grid.Column="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
+                            <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
+                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
+                                <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                            <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                                <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                            <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
+                                <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                        </Grid>
+                        <Grid Grid.Column="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
+                            <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
+                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
+                                <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                            <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                                <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                            <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
+                                <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                            </Button>
+                        </Grid>
                     </Grid>
-                    <Grid Margin="0,0,0,8">
+                    <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="130"/>
                             <ColumnDefinition Width="*"/>
@@ -213,7 +226,7 @@
                         </Button>
                     </Grid>
 
-                    <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,10,0,10" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,8,0,8" TextWrapping="Wrap"/>
 
                     <Button x:Name="UploadBtn" Content="Загрузить прошивку" Height="40" Click="Upload_Click"/>
                     <Button x:Name="RollbackBtn" Content="Откатить последнюю версию" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Click="Rollback_Click"

@@ -551,7 +551,18 @@ public partial class UploadView : UserControl
     {
         if (string.IsNullOrEmpty(_srcPath))
         {
-            AppMessageBox.Show("Выберите файл прошивки.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            // HMI is versioned as an attachment to a firmware upload (see the "{fwv.Raw}_hmi" naming
+            // below and 2f21975) — there is no standalone "just the HMI project" slot to drop it into,
+            // so a user who filled in only the HMI drop zone and left the main one empty needs a
+            // specific explanation, not the generic firmware-missing warning: they may not realize HMI
+            // rides along with a PLC firmware version rather than replacing it. Filed after a real
+            // report of "загрузил папку с HMI, а он просит .psl" — the operator had only used the HMI
+            // zone and had no idea the main drop zone was still mandatory.
+            var noFwMsg = HmiCheck.IsChecked == true && !string.IsNullOrEmpty(_hmiPath)
+                ? "HMI-проект не загружается отдельно — он прикладывается к версии прошивки ПЛК.\n\n" +
+                  "Выберите файл или папку прошивки ПЛК в верхней области (даже если в этой версии изменился только HMI) — HMI-проект уйдёт вместе с ней."
+                : "Выберите файл прошивки.";
+            AppMessageBox.Show(noFwMsg, "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (GroupCombo.SelectedItem is not EquipmentGroup group ||
