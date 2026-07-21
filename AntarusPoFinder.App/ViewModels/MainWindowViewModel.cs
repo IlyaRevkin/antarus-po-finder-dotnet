@@ -772,7 +772,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         var root = _services.Cfg.RootPath();
         try
         {
-            var exportedBy = $"{Environment.UserName} ({RoleLabel})";
+            var exportedBy = $"{_services.CurrentUserName} ({RoleLabel})";
             ConfigSyncService.Export(_services, root, exportedBy);
             if (_configPushLastFailed)
             {

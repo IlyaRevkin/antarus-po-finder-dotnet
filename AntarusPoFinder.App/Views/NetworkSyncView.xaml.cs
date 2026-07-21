@@ -169,7 +169,7 @@ public partial class NetworkSyncView : UserControl
 
         try
         {
-            var exportedBy = $"{Environment.UserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
+            var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
             var result = ConfigSyncService.Export(_services, root, exportedBy);
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
             AppMessageBox.Show(

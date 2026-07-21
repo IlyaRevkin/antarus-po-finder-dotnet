@@ -198,7 +198,7 @@ public partial class UploadView : UserControl
 
         var reservation = _services.Db.ReserveNextVersion(
             subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
-            group.Prefix, subOption.Subtype.Prefix, Environment.UserName, IncludeDateCheck.IsChecked == true, ttlHours);
+            group.Prefix, subOption.Subtype.Prefix, _services.CurrentUserName, IncludeDateCheck.IsChecked == true, ttlHours);
         var fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
 
         var subDisplay = subOption.Subtype.Name == "—" ? "" : subOption.Subtype.Name;
@@ -622,7 +622,7 @@ public partial class UploadView : UserControl
             return;
         }
 
-        var user = _services.Db.GetOrCreateUser(Environment.UserName, Environment.UserName);
+        var user = _services.Db.GetOrCreateUser(_services.CurrentUserName, _services.CurrentUserName);
 
         var warnings = new List<string>();
         try { WriteChangelog(dstFolder, fwv, launchTypes, desc); }

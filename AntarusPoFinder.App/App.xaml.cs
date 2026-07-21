@@ -152,7 +152,7 @@ public partial class App : Application
                 Type = TicketType.Bug,
                 Text = $"[Автоматический отчёт о сбое]\n{ex.GetType().FullName}: {ex.Message}\n\n{ex}",
                 Status = TicketStatus.Open,
-                CreatedBy = Environment.UserName,
+                CreatedBy = _services.CurrentUserName,
                 CreatedByRole = "system",
                 CreatedAt = now,
                 UpdatedAt = now,

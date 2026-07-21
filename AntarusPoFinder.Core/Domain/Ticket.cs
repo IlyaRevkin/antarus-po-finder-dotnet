@@ -11,11 +11,12 @@ public class Ticket
     public string Type { get; set; } = TicketType.Other;
     public string Text { get; set; } = "";
     public string Status { get; set; } = TicketStatus.Open;
-    /// <summary>Windows login (Environment.UserName) of whoever created the ticket — the app has no
-    /// per-person accounts (roles are shared passwords), so this is the only stable "who" the app
-    /// already relies on elsewhere (see UploadView reservations/authors, ConfigSyncService's
+    /// <summary>Whoever created the ticket — AppServices.CurrentUserName, which is the AD login if
+    /// this session authenticated via AD (see RoleSwitchDialog.AdAuth_Click), else the shared
+    /// Windows/machine login (roles themselves are still shared passwords, not per-person accounts).
+    /// Same source used elsewhere for "who" (UploadView reservations/authors, ConfigSyncService's
     /// exported_by). "Свои тикеты" for наладчик/программист means tickets with this value equal to
-    /// the current machine's Windows login.</summary>
+    /// the current session's CurrentUserName.</summary>
     public string CreatedBy { get; set; } = "";
     public string CreatedByRole { get; set; } = "";
     public string CreatedAt { get; set; } = "";

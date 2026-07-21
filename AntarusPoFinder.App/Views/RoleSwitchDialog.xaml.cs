@@ -66,15 +66,17 @@ public partial class RoleSwitchDialog : Window
             return;
         }
 
+        var normalized = AppUserAuthService.NormalizeAdLogin(login);
+
         var groupRole = WindowsGroupAuth.DetectRoleForUser(_cfg, domain, login, password);
         if (groupRole is not null)
         {
+            _services.CurrentAdLogin = normalized;
             SelectedRole = groupRole;
             DialogResult = true;
             return;
         }
 
-        var normalized = AppUserAuthService.NormalizeAdLogin(login);
         var isNewUser = _db.FindAppUserByLogin(normalized) is null;
         var user = _db.TouchOrCreateAppUser(normalized);
 
@@ -92,6 +94,7 @@ public partial class RoleSwitchDialog : Window
                 "Администратор может изменить её в Настройки → Пользователи.",
                 "Новый пользователь", MessageBoxButton.OK, MessageBoxImage.Information);
 
+        _services.CurrentAdLogin = normalized;
         SelectedRole = user.Role;
         DialogResult = true;
     }

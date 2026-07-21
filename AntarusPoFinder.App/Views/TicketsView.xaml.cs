@@ -76,7 +76,7 @@ public partial class TicketsView : UserControl
     private void ReloadGrid()
     {
         var all = _services.Db.GetTickets();
-        var visible = IsAdmin ? all : all.Where(t => string.Equals(t.CreatedBy, Environment.UserName, StringComparison.OrdinalIgnoreCase));
+        var visible = IsAdmin ? all : all.Where(t => string.Equals(t.CreatedBy, _services.CurrentUserName, StringComparison.OrdinalIgnoreCase));
         TicketsGrid.ItemsSource = visible.Select(t => new TicketRow { Ticket = t }).ToList();
         UpdateActionButtons();
     }
@@ -110,7 +110,7 @@ public partial class TicketsView : UserControl
             Type = type,
             Text = text,
             Status = TicketStatus.Open,
-            CreatedBy = Environment.UserName,
+            CreatedBy = _services.CurrentUserName,
             CreatedByRole = _services.Cfg.CurrentRole(),
             CreatedAt = now,
             UpdatedAt = now,
@@ -211,7 +211,7 @@ public partial class TicketsView : UserControl
         var at = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff");
         _services.Db.ApplyTicketStatusIfNewer(row.Ticket.Id, newStatus, at);
 
-        var (filename, payload) = TicketSyncService.BuildStatusEvent(row.Ticket.Id, newStatus, Environment.UserName, _services.Cfg.CurrentRole(), at);
+        var (filename, payload) = TicketSyncService.BuildStatusEvent(row.Ticket.Id, newStatus, _services.CurrentUserName, _services.Cfg.CurrentRole(), at);
         _services.Db.EnqueueTicketOutbox(filename, payload);
         TryFlush();
 
