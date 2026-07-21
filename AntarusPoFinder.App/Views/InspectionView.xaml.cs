@@ -76,6 +76,13 @@ public partial class InspectionView : UserControl
         InspectionCleanupMinutesInput.Text = (totalMinutes % 60).ToString();
     }
 
+    /// <summary>Автоочистка/качество сканирования are "set once, rarely touched" settings — collapsed
+    /// behind this toggle instead of sitting permanently on the toolbar, so the main Осмотр area isn't
+    /// cluttered with controls most sessions never need to look at again.</summary>
+    private void InspectionSettingsToggle_Click(object sender, RoutedEventArgs e) =>
+        InspectionSettingsPanel.Visibility = InspectionSettingsPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
+
     /// <summary>Moved here from Настройки → Сетевые диски — logically belongs right next to the
     /// folder it actually cleans, same reasoning as scan resolution living here instead of there.
     /// Round 34: days-only widened to days/hours/minutes (see ConfigService.

@@ -16,11 +16,10 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -30,31 +29,47 @@
                 <TextBlock Grid.Column="1" x:Name="ProtoPathLabel" Text="не задана" Style="{StaticResource MutedText}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"/>
-                <Button Grid.Column="3" Content="Очистить папку осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ClearProtocolFolder_Click"/>
-                <TextBlock Grid.Column="4" Text="Качество сканирования:" VerticalAlignment="Center" Margin="16,0,8,0"/>
-                <ComboBox Grid.Column="5" x:Name="ScanResolutionCombo" Width="90" VerticalAlignment="Center"
-                          ToolTip="DPI скана — выше значение, чётче скан, но больше размер файла"
-                          SelectionChanged="ScanResolutionCombo_SelectionChanged">
-                    <ComboBoxItem Content="100"/>
-                    <ComboBoxItem Content="150"/>
-                    <ComboBoxItem Content="200"/>
-                    <ComboBoxItem Content="300"/>
-                    <ComboBoxItem Content="600"/>
-                </ComboBox>
-                <Button Grid.Column="6" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"/>
+                <Button Grid.Column="3" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"
+                        ToolTip="Использует сохранённое качество сканирования — настраивается ниже, в «Настройки осмотра»."/>
+                <!-- Redundant "Очистить папку осмотра" button removed from here — same action lives in
+                     the settings drawer below, right next to the auto-cleanup interval it's a manual
+                     override of, which is a more natural place for it than the main toolbar. -->
+                <Button Grid.Column="5" x:Name="InspectionSettingsToggle" Content="⚙ Настройки осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="InspectionSettingsToggle_Click"/>
             </Grid>
-            <StackPanel Grid.Row="1" Orientation="Horizontal">
-                <TextBlock Text="Автоочистка папки осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="InspectionCleanupDaysInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Дни"/>
-                <TextBlock Text="дн." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="InspectionCleanupHoursInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Часы"/>
-                <TextBlock Text="ч." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="InspectionCleanupMinutesInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Минуты"/>
-                <TextBlock Text="мин." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveInspectionCleanupDays_Click"/>
-                <TextBlock Text="0/0/0 — отключено. Иначе файлы старше указанного времени периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
-                           Style="{StaticResource MutedText}" FontStyle="Italic" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="480"/>
-            </StackPanel>
+
+            <!-- Автоочистка/качество сканирования — редко трогаемые настройки "один раз задал и забыл",
+                 убраны за переключатель вместо постоянного места на панели инструментов, чтобы не
+                 загромождать основную область страницы. Same collapsed-by-default toggle-button
+                 pattern as ParamsView's "Все загруженные"/ListContentPanel. -->
+            <Border Grid.Row="1" x:Name="InspectionSettingsPanel" Style="{StaticResource CardBorder}" Margin="0,8,0,0" Visibility="Collapsed">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="Качество сканирования:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="ScanResolutionCombo" Width="90" VerticalAlignment="Center"
+                                  ToolTip="DPI скана — выше значение, чётче скан, но больше размер файла"
+                                  SelectionChanged="ScanResolutionCombo_SelectionChanged">
+                            <ComboBoxItem Content="100"/>
+                            <ComboBoxItem Content="150"/>
+                            <ComboBoxItem Content="200"/>
+                            <ComboBoxItem Content="300"/>
+                            <ComboBoxItem Content="600"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Автоочистка папки осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="InspectionCleanupDaysInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Дни"/>
+                        <TextBlock Text="дн." VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="InspectionCleanupHoursInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Часы"/>
+                        <TextBlock Text="ч." VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="InspectionCleanupMinutesInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Минуты"/>
+                        <TextBlock Text="мин." VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveInspectionCleanupDays_Click"/>
+                        <Button Content="Очистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ClearProtocolFolder_Click"/>
+                    </StackPanel>
+                    <TextBlock Text="0/0/0 — отключено. Иначе файлы старше указанного времени периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
+                               Style="{StaticResource MutedText}" FontStyle="Italic" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+            </Border>
         </Grid>
 
         <Grid Grid.Row="2">
