@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
@@ -346,6 +347,9 @@ public partial class SettingsView : UserControl
         CloseActionCloseRadio.IsChecked = !tray;
         CloseActionTrayRadio.IsChecked = tray;
 
+        AutostartCheck.IsChecked = AutostartService.IsEnabled();
+        StartMinimizedCheck.IsChecked = _services.Cfg.AppStartMinimized();
+
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
@@ -357,6 +361,22 @@ public partial class SettingsView : UserControl
     /// other), and by the time it does both controls already reflect the final desired state.</summary>
     private void CloseAction_Changed(object sender, RoutedEventArgs e) =>
         _services.Cfg.SetCloseAction(CloseActionTrayRadio.IsChecked == true ? "tray" : "close");
+
+    private void Autostart_Changed(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            AutostartService.SetEnabled(AutostartCheck.IsChecked == true);
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось изменить автозапуск:\n{ex.Message}", "Автозапуск", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AutostartCheck.IsChecked = AutostartService.IsEnabled(); // reflect whatever actually happened
+        }
+    }
+
+    private void StartMinimized_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetAppStartMinimized(StartMinimizedCheck.IsChecked == true);
 
     private void BrowseAppUpdatePath_Click(object sender, RoutedEventArgs e)
     {

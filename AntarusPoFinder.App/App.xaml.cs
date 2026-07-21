@@ -49,6 +49,16 @@ public partial class App : Application
         _services = services;
         var window = new MainWindow(services);
         MainWindow = window;
+
+        // Set BEFORE Show() so the window never flashes visible-then-minimizes — see
+        // ConfigService.AppStartMinimized (per-machine, applies regardless of whether this launch
+        // came from a double-click or the Windows autostart Run-key entry, see AutostartService).
+        // If "закрытие окна -> трей" is also on, MainWindow's own StateChanged handler (already
+        // subscribed inside the constructor above, i.e. before Show() runs) hides it straight to
+        // the tray the moment Show() realizes this Minimized state — no separate code path needed.
+        if (services.Cfg.AppStartMinimized())
+            window.WindowState = WindowState.Minimized;
+
         window.Show();
     }
 

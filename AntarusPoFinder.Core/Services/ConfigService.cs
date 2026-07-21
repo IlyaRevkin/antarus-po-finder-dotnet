@@ -60,6 +60,7 @@ public class ConfigService
         ["inspection_auto_cleanup_days"] = "0",
         ["inspection_auto_cleanup_minutes"] = "",
         ["quick_apps_display_mode"] = "sidebar",
+        ["app_start_minimized"] = "false",
     };
 
     private readonly Database _db;
@@ -236,6 +237,14 @@ public class ConfigService
     /// трей вместо закрытия. Per-machine — трей на одном ПК не должен навязываться другому.</summary>
     public string CloseAction() => Get("close_action");
     public void SetCloseAction(string action) => Set("close_action", action);
+
+    /// <summary>Per-machine (not synced — same reasoning as close_action/theme): whether the window
+    /// should start minimized regardless of how the process was launched (double-click, or the
+    /// Windows autostart Run-key entry — see AutostartService in AntarusPoFinder.App, which is the
+    /// source of truth for whether autostart itself is on, not a setting stored here). Read once at
+    /// startup by App.OnStartup, before the window is first shown.</summary>
+    public bool AppStartMinimized() => Get("app_start_minimized").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetAppStartMinimized(bool value) => Set("app_start_minimized", value ? "true" : "false");
 
     /// <summary>0 (default for new installs — never surprise anyone with unexpected deletion) means
     /// auto-cleanup of the Осмотр folder is off. Any other N means files older than N minutes get

@@ -128,6 +128,11 @@
                     <RadioButton x:Name="CloseActionCloseRadio" GroupName="CloseAction" Content="Закрывать приложение" Margin="0,0,0,4" Checked="CloseAction_Changed"/>
                     <RadioButton x:Name="CloseActionTrayRadio" GroupName="CloseAction" Content="Сворачивать в системный трей" Margin="0,0,0,16" Checked="CloseAction_Changed"/>
 
+                    <TextBlock Text="ЗАПУСК ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="AutostartCheck" Content="Запускать автоматически при входе в Windows" Margin="0,0,0,8" Checked="Autostart_Changed" Unchecked="Autostart_Changed"/>
+                    <CheckBox x:Name="StartMinimizedCheck" Content="Запускать свёрнутым" Margin="0,0,0,16" Checked="StartMinimized_Changed" Unchecked="StartMinimized_Changed"
+                              ToolTip="Если выше выбрано «Сворачивать в системный трей» — окно вообще не появится при запуске, сразу свернётся в трей."/>
+
                     <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" Margin="0,0,0,6"/>
                     <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
