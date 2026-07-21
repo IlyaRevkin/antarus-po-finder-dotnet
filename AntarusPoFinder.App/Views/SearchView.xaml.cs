@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using AntarusPoFinder.App.Services;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -115,15 +116,16 @@ public partial class SearchView : UserControl
             PerformFirmwareSearch(query);
     }
 
+    private const string NoResultsHint = "Ничего не найдено — попробуйте другой запрос или снимите «Точное совпадение слова»";
+
     private void PerformFirmwareSearch(string query)
     {
         var exact = ExactWordCheck.IsChecked == true;
-        var results = SearchService.Search(_services.Db, query, exact);
+        var results = SearchService.Search(_services.Db, query, exact,
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
         if (results.Count == 0)
         {
-            StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
-            EmptyLabel.Text = "Ничего не найдено — попробуйте другой запрос или снимите «Точное совпадение слова»";
-            EmptyLabel.Visibility = Visibility.Visible;
+            ShowNoResults(query, NoResultsHint);
             return;
         }
 
@@ -156,6 +158,9 @@ public partial class SearchView : UserControl
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
         }
+
+        if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+            ShowNoResults(query, NoResultsHint);
     }
 
     private void PerformParamsSearch(string query)
@@ -165,12 +170,10 @@ public partial class SearchView : UserControl
         {
             var tokens = SearchService.Normalize(q).Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return _services.Db.SearchParamFilesByTokens(tokens, ex);
-        });
+        }, LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
         if (files.Count == 0)
         {
-            StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
-            EmptyLabel.Text = "Ничего не найдено — попробуйте другой запрос или снимите «Точное совпадение слова»";
-            EmptyLabel.Visibility = Visibility.Visible;
+            ShowNoResults(query, NoResultsHint);
             return;
         }
 
@@ -178,6 +181,9 @@ public partial class SearchView : UserControl
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         foreach (var file in files)
             ResultsPanel.Children.Add(MakeParamFileCard(file, canEditTags));
+
+        if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+            ShowNoResults(query, NoResultsHint);
     }
 
     private Border MakeParamFileCard(ParamFile file, bool canEditTags)
@@ -235,19 +241,61 @@ public partial class SearchView : UserControl
             return;
         }
 
+        const string schemaNotFoundHint = "Схема не найдена — проверьте название шкафа или второй диск";
         var exact = ExactWordCheck.IsChecked == true;
-        var hits = _services.Schematics.Matches(diskPath, query, exact);
+        var hits = _services.Schematics.Matches(diskPath, query, exact,
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
         if (hits.Count == 0)
         {
-            StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
-            EmptyLabel.Text = "Схема не найдена — проверьте название шкафа или второй диск";
-            EmptyLabel.Visibility = Visibility.Visible;
+            ShowNoResults(query, schemaNotFoundHint);
             return;
         }
 
         StatusLabel.Text = $"Найдено: {hits.Count}";
         foreach (var hit in hits)
             ResultsPanel.Children.Add(MakeSchematicCard(hit));
+
+        if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+            ShowNoResults(query, schemaNotFoundHint);
+    }
+
+    // ── Keyboard-layout fallback prompt / learning ──────────────────────────
+    // See SearchService.SearchWithLayoutFallback and Database.LayoutFallback — a search that found
+    // nothing as typed but did find something after remapping the query to the other keyboard layout
+    // asks the operator once whether that guess was right, and remembers the answer per exact query
+    // string so a consistent answer eventually stops (or permanently skips) the prompt.
+
+    private static string LayoutFallbackKey(string query) => query.Trim().ToUpperInvariant();
+
+    private bool LayoutFallbackAllowed(string query) =>
+        _services.Cfg.LayoutFallbackEnabled() &&
+        _services.Db.GetLayoutFallbackDecision(LayoutFallbackKey(query)) != LayoutFallbackDecision.Never;
+
+    /// <summary>Call after rendering results. Returns false when the operator rejected the converted
+    /// query — the caller should then discard the just-rendered results and show "not found" instead,
+    /// since they weren't what was actually searched for.</summary>
+    private bool ConfirmLayoutFallback(string originalQuery, bool usedFallback, string convertedQuery)
+    {
+        if (!usedFallback) return true;
+
+        var key = LayoutFallbackKey(originalQuery);
+        if (_services.Db.GetLayoutFallbackDecision(key) == LayoutFallbackDecision.Always) return true;
+
+        var reply = AppMessageBox.Show(
+            $"По запросу «{originalQuery}» ничего не найдено. Похоже, была включена не та раскладка " +
+            $"клавиатуры — показаны результаты по «{convertedQuery}».\n\nЭто то, что вы искали?",
+            "Проверка раскладки клавиатуры", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+
+        _services.Db.RecordLayoutFallbackFeedback(key, reply == MessageBoxResult.Yes);
+        return reply == MessageBoxResult.Yes;
+    }
+
+    private void ShowNoResults(string query, string hint)
+    {
+        ResultsPanel.Children.Clear();
+        StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
+        EmptyLabel.Text = hint;
+        EmptyLabel.Visibility = Visibility.Visible;
     }
 
     private Border MakeSchematicCard(SchematicHit hit)

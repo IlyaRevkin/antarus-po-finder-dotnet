@@ -47,6 +47,11 @@ public class SchematicService
     public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false) =>
         SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex));
 
+    public List<SchematicHit> Matches(string diskPath, string query, bool exactWord,
+        bool allowFallback, out bool usedFallback, out string convertedQuery) =>
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex),
+            allowFallback, out usedFallback, out convertedQuery);
+
     private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord)
     {
         var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);

@@ -46,6 +46,7 @@ public static class ConfigSyncService
         "scan_resolution_dpi", "config_auto_push", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
+        "layout_fallback_enabled",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");

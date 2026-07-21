@@ -182,6 +182,13 @@ public partial class Database : IDisposable
                  role_updated_at TEXT    NOT NULL DEFAULT '',
                  sync_id         TEXT    NOT NULL DEFAULT ''
              );
+
+             CREATE TABLE IF NOT EXISTS layout_fallback_feedback (
+                 query_key  TEXT    PRIMARY KEY,
+                 yes_count  INTEGER NOT NULL DEFAULT 0,
+                 no_count   INTEGER NOT NULL DEFAULT 0,
+                 decision   TEXT    NOT NULL DEFAULT ''
+             );
              """);
 
         EnsureColumnsExist();

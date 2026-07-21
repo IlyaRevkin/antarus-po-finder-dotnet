@@ -60,4 +60,32 @@ public class SearchServiceLayoutTests
         Assert.Single(result);
         Assert.Equal(new[] { "gj;fh", "пожар" }, seenQueries);
     }
+
+    [Fact]
+    public void SearchWithLayoutFallback_AllowFallbackFalse_NeverRetries()
+    {
+        var calls = 0;
+        var result = SearchService.SearchWithLayoutFallback("gj;fh", false, (q, ex) =>
+        {
+            calls++;
+            return new System.Collections.Generic.List<int>();
+        }, allowFallback: false, out var usedFallback, out var convertedQuery);
+
+        Assert.Empty(result);
+        Assert.Equal(1, calls);
+        Assert.False(usedFallback);
+        Assert.Equal("gj;fh", convertedQuery);
+    }
+
+    [Fact]
+    public void SearchWithLayoutFallback_ReportsConversionOnlyWhenItProducedResults()
+    {
+        var result = SearchService.SearchWithLayoutFallback("gj;fh", false, (q, ex) =>
+            q == "пожар" ? new System.Collections.Generic.List<int> { 1 } : new System.Collections.Generic.List<int>(),
+            allowFallback: true, out var usedFallback, out var convertedQuery);
+
+        Assert.Single(result);
+        Assert.True(usedFallback);
+        Assert.Equal("пожар", convertedQuery);
+    }
 }

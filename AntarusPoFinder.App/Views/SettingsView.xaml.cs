@@ -353,6 +353,57 @@ public partial class SettingsView : UserControl
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
+
+        LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
+        RefreshLayoutFallbackGrid();
+    }
+
+    // ── Раскладка клавиатуры (обучение подсказки поиска) ────────────────────
+
+    private class LayoutFallbackRow
+    {
+        public string QueryKey { get; init; } = "";
+        public int YesCount { get; init; }
+        public int NoCount { get; init; }
+        public string DecisionLabel { get; init; } = "";
+    }
+
+    private void RefreshLayoutFallbackGrid()
+    {
+        LayoutFallbackGrid.ItemsSource = _services.Db.GetAllLayoutFallbackLearning()
+            .Select(r => new LayoutFallbackRow
+            {
+                QueryKey = r.QueryKey,
+                YesCount = r.YesCount,
+                NoCount = r.NoCount,
+                DecisionLabel = r.Decision switch
+                {
+                    LayoutFallbackDecision.Always => "Всегда подставлять",
+                    LayoutFallbackDecision.Never => "Никогда не пробовать",
+                    _ => "Спрашивать",
+                },
+            })
+            .ToList();
+    }
+
+    private void LayoutFallback_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetLayoutFallbackEnabled(LayoutFallbackCheck.IsChecked == true);
+
+    private void ResetLayoutFallbackSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (LayoutFallbackGrid.SelectedItem is not LayoutFallbackRow row) return;
+        _services.Db.ResetLayoutFallbackLearning(row.QueryKey);
+        RefreshLayoutFallbackGrid();
+    }
+
+    private void ResetLayoutFallbackAll_Click(object sender, RoutedEventArgs e)
+    {
+        var reply = AppMessageBox.Show("Сбросить всю накопленную статистику по раскладке клавиатуры?",
+            "Сброс обучения", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.ResetAllLayoutFallbackLearning();
+        RefreshLayoutFallbackGrid();
     }
 
     /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the

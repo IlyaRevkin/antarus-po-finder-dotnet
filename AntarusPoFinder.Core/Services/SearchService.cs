@@ -84,17 +84,37 @@ public static class SearchService
     /// retries once with <see cref="ConvertLayout"/> applied. Shared by firmware/parameter/schematic
     /// search so a forgotten keyboard-layout switch is forgiven the same way in all three search
     /// modes.</summary>
-    public static List<T> SearchWithLayoutFallback<T>(string query, bool exactWord, Func<string, bool, List<T>> searchFn)
-    {
-        var results = searchFn(query, exactWord);
-        if (results.Count > 0) return results;
+    public static List<T> SearchWithLayoutFallback<T>(string query, bool exactWord, Func<string, bool, List<T>> searchFn) =>
+        SearchWithLayoutFallback(query, exactWord, searchFn, allowFallback: true, out _, out _);
 
-        var converted = ConvertLayout(query);
-        return converted != query ? searchFn(converted, exactWord) : results;
+    /// <summary>Same fallback as above, but lets a caller (a) skip the retry entirely — used when
+    /// either the "Настройки → Общие" toggle is off or the operator's own history has taught the app
+    /// this exact query is never a layout mistake — and (b) find out whether the converted query is
+    /// what actually produced the results, so the UI can ask "это точно оно?" only when it's not
+    /// already sure from past feedback (see Database.LayoutFallback and SearchView's usage).</summary>
+    public static List<T> SearchWithLayoutFallback<T>(string query, bool exactWord, Func<string, bool, List<T>> searchFn,
+        bool allowFallback, out bool usedFallback, out string convertedQuery)
+    {
+        usedFallback = false;
+        convertedQuery = query;
+
+        var results = searchFn(query, exactWord);
+        if (results.Count > 0 || !allowFallback) return results;
+
+        convertedQuery = ConvertLayout(query);
+        if (convertedQuery == query) return results;
+
+        var converted = searchFn(convertedQuery, exactWord);
+        if (converted.Count > 0) usedFallback = true;
+        return converted;
     }
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false) =>
         SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex));
+
+    public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
+        bool allowFallback, out bool usedFallback, out string convertedQuery) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex), allowFallback, out usedFallback, out convertedQuery);
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord)
     {

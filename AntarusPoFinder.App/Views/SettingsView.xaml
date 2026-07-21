@@ -161,6 +161,23 @@
                         <ComboBox Grid.Column="0" x:Name="AppVersionsCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
                         <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"/>
                     </Grid>
+
+                    <TextBlock Text="РАСКЛАДКА КЛАВИАТУРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="LayoutFallbackCheck" Content="Подсказывать, если запрос похож на набранный не в той раскладке клавиатуры" Margin="0,0,0,8" Checked="LayoutFallback_Changed" Unchecked="LayoutFallback_Changed"/>
+                    <TextBlock Text="Если запрос ничего не находит как введён, но находит после смены раскладки — поиск спросит один раз, это ли имелось в виду. Ответы запоминаются по точному тексту запроса: после нескольких одинаковых ответов подряд вопрос для этого запроса перестаёт появляться (он либо всегда подставляется, либо больше не пробуется)." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <DataGrid x:Name="LayoutFallbackGrid" Height="160" AutoGenerateColumns="False" IsReadOnly="True" Margin="0,0,0,8"
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Запрос" Binding="{Binding QueryKey}" Width="*"/>
+                            <DataGridTextColumn Header="Да" Binding="{Binding YesCount}" Width="60"/>
+                            <DataGridTextColumn Header="Нет" Binding="{Binding NoCount}" Width="60"/>
+                            <DataGridTextColumn Header="Решение" Binding="{Binding DecisionLabel}" Width="140"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Сбросить выбранное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetLayoutFallbackSelected_Click"/>
+                        <Button Content="Сбросить всё обучение" Style="{StaticResource SecondaryButton}" Click="ResetLayoutFallbackAll_Click"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- ═══════════════════════════ ИЕРАРХИЯ ═══════════════════════════ -->

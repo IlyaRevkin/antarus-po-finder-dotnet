@@ -61,6 +61,7 @@ public class ConfigService
         ["inspection_auto_cleanup_minutes"] = "",
         ["quick_apps_display_mode"] = "sidebar",
         ["app_start_minimized"] = "true",
+        ["layout_fallback_enabled"] = "true",
     };
 
     private readonly Database _db;
@@ -91,6 +92,13 @@ public class ConfigService
     /// Если выключено — показывается плашка с кнопкой «Обновить», которую нажимает пользователь.</summary>
     public bool AppAutoUpdate() => Get("app_auto_update").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetAppAutoUpdate(bool value) => Set("app_auto_update", value ? "true" : "false");
+
+    /// <summary>Если включено (по умолчанию) — поиск по прошивкам/параметрам/схемам, не нашедший
+    /// ничего по запросу как он введён, повторяет попытку с раскладкой клавиатуры "наоборот"
+    /// (см. SearchService.ConvertLayout) — на случай, если оператор забыл переключить раскладку.
+    /// Выключение полностью отключает и саму подстановку, и всплывающий вопрос "это точно оно?".</summary>
+    public bool LayoutFallbackEnabled() => Get("layout_fallback_enabled").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetLayoutFallbackEnabled(bool value) => Set("layout_fallback_enabled", value ? "true" : "false");
 
     /// <summary>Папка осмотра (фото/сканы). Defaults to LocalFw if not set.</summary>
     public string InspectionFolder()
