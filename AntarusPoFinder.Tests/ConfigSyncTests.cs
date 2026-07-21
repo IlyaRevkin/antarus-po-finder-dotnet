@@ -235,6 +235,96 @@ public class ConfigSyncTests
         }
     }
 
+    [Fact]
+    public void Import_SubtypeDeletedOnA_RemovesUnreferencedCopyOnB_ButKeepsOneStillInUse()
+    {
+        // Regression test: a colleague deleted a subtype on their machine, but it kept "resurrecting"
+        // on other machines after every sync — equipment_subtypes was upsert-only, never mirrored a
+        // deletion (unlike tags/extensions/manufacturers, see class doc). Two subtypes deleted on A:
+        // one nobody has uploaded firmware under (must disappear on B), one B itself has a local
+        // upload under (must be kept — deleting it would orphan that fw_version's subtype_id).
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            // Handshake so sync_ids correlate before anything diverges (see class doc).
+            dbB.ImportHierarchyData(dbA.ExportHierarchyData());
+
+            var groupA = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var unreferencedA = dbA.GetSubtypesForGroup(groupA.Id!.Value).First(s => s.Name == "КР");
+            var stillUsedA = dbA.GetSubtypesForGroup(groupA.Id!.Value).First(s => s.Name == "УПД");
+
+            var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var stillUsedB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "УПД");
+            var mod = dbB.GetAllModifications().First(m => m.ControllerName == "SMH4");
+            var localFwId = dbB.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = stillUsedB.Id!.Value,
+                ControllerId = mod.ControllerId,
+                EqPrefix = groupB.Prefix,
+                SubPrefix = stillUsedB.Prefix,
+                HwVersion = mod.HwVersion,
+                SwVersion = 1,
+                DtStr = "20260101_0000",
+                VersionRaw = "9.9.9.1.20260101_0000",
+                Filename = "local_only.psl",
+                DiskPath = "",
+                Description = "локальная загрузка только на этой машине",
+                Status = "active",
+            });
+
+            // A deletes both subtypes locally (no in-app rename/delete UI yet — same raw-SQL
+            // approach RenameSubtype below uses to simulate one).
+            DeleteSubtype(pathA, unreferencedA.Id!.Value);
+            DeleteSubtype(pathA, stillUsedA.Id!.Value);
+
+            var exported = dbA.ExportHierarchyData();
+            Assert.DoesNotContain(exported.EquipmentSubtypes, s => s.Name == "КР");
+            Assert.DoesNotContain(exported.EquipmentSubtypes, s => s.Name == "УПД");
+
+            var preview = dbB.PreviewImportHierarchyData(exported);
+            Assert.Equal(1, preview.SubtypesRemoved);
+            Assert.Equal(1, preview.SubtypesSkippedDelete);
+            // Preview must not have written anything.
+            Assert.Contains(dbB.GetSubtypesForGroup(groupB.Id!.Value), s => s.Name == "КР");
+
+            var counts = dbB.ImportHierarchyData(exported);
+            Assert.Equal(1, counts.SubtypesRemoved);
+            Assert.Equal(1, counts.SubtypesSkippedDelete);
+
+            var subtypesB = dbB.GetSubtypesForGroup(groupB.Id!.Value);
+            Assert.DoesNotContain(subtypesB, s => s.Name == "КР"); // unreferenced -> gone
+            Assert.Contains(subtypesB, s => s.Name == "УПД"); // still referenced locally -> kept
+
+            // The local fw_version under the kept subtype must survive untouched.
+            var fwAfter = dbB.GetAllFwVersionsWithNames(includeArchived: true).First(f => f.Id == localFwId);
+            Assert.Equal("local_only.psl", fwAfter.Filename);
+            Assert.Equal("УПД", fwAfter.SubtypeName);
+
+            // Idempotent on a second pass.
+            var secondPass = dbB.ImportHierarchyData(exported);
+            Assert.Equal(0, secondPass.SubtypesRemoved);
+            Assert.Equal(1, secondPass.SubtypesSkippedDelete);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    private static void DeleteSubtype(string dbPath, int subtypeId)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM equipment_subtypes WHERE id=@id";
+        cmd.Parameters.AddWithValue("@id", subtypeId);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>There's no in-app rename UI for subtypes yet — this opens a second raw connection
     /// to the same SQLite file to simulate one (WAL mode allows concurrent readers/writers), so the
     /// test exercises the sync layer's rename handling without needing that feature to exist yet.</summary>

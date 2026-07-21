@@ -241,6 +241,42 @@ public partial class Database
                 { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
         }
 
+        // ── Subtypes removed on the exporting machine — unlike groups/controllers/modifications
+        //    above (upsert-only, see class doc: never deleted because fw_versions/param_files hold
+        //    them by plain integer FK with no cascade), a subtype the operator explicitly deleted
+        //    used to never disappear on any OTHER machine ("resurrected" subtype, reported live).
+        //    Safe to mirror the deletion here because it's a full, unfiltered snapshot (same
+        //    reasoning as tags/allowed_extensions) — but only for a subtype nothing local still
+        //    references; one that still has uploads/params/reservations under it is left alone
+        //    (SubtypesSkippedDelete) rather than orphaning that data or silently losing it.
+        //    Rows without a sync_id predate this feature and are never auto-deleted — no reliable
+        //    way to correlate them against the incoming set.
+        var incomingSubtypeSyncIds = new HashSet<string>(
+            data.EquipmentSubtypes.Where(s => !string.IsNullOrEmpty(s.SyncId)).Select(s => s.SyncId));
+        var localSubtypes = new List<(int Id, string SyncId)>();
+        using (var r = ExecuteReader("SELECT id, sync_id FROM equipment_subtypes WHERE sync_id IS NOT NULL AND sync_id != ''"))
+            while (r.Read())
+                localSubtypes.Add((r.GetInt32(0), r.GetString(1)));
+
+        foreach (var (id, syncId) in localSubtypes)
+        {
+            if (incomingSubtypeSyncIds.Contains(syncId)) continue;
+
+            var referenced = ExecuteScalar("""
+                SELECT 1 WHERE EXISTS(SELECT 1 FROM fw_versions WHERE subtype_id=@id)
+                   OR EXISTS(SELECT 1 FROM param_files WHERE subtype_id=@id)
+                   OR EXISTS(SELECT 1 FROM fw_version_reservations WHERE subtype_id=@id)
+                """, cmd => cmd.Parameters.AddWithValue("@id", id)) is not null;
+            if (referenced)
+            {
+                counts.SubtypesSkippedDelete++;
+                continue;
+            }
+
+            counts.SubtypesRemoved++;
+            if (apply) ExecuteNonQuery("DELETE FROM equipment_subtypes WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+        }
+
         // ── Controller models (upsert by sync_id, fallback to name) ─────────────
         var controllerSyncToId = new Dictionary<string, int>();
         foreach (var c in data.ControllerModels)
