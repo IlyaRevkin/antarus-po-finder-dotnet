@@ -57,6 +57,21 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <!-- A bare Content="…" string gets wrapped by WPF in an implicit-styled
+                             TextBlock, and the app-wide TextBlock style (Foreground=TextBrush, dark
+                             in light theme) has HIGHER precedence than Foreground inherited from this
+                             Button — so every plain-text primary button ("Сохранить", "Найти",
+                             "Загрузить прошивку", "Все загруженные", …) rendered dark text on the
+                             accent-blue background in light theme. A local implicit TextBlock style,
+                             scoped to just this template, wins the resource lookup before the
+                             app-wide one because it's nearer in the tree. Same root cause as
+                             NavButtonContentText below, fixed centrally here instead of per-callsite
+                             since PrimaryButton's background is unconditionally accent-colored. -->
+                        <Border.Resources>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                            </Style>
+                        </Border.Resources>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -255,6 +270,15 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
                     <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <!-- Same implicit-TextBlock-style precedence bug as PrimaryButton: DisplayMemberPath
+                             items render as a plain string, wrapped in a TextBlock that otherwise picks up
+                             the app-wide TextBlock style (dark TextBrush) over this item's own Foreground,
+                             leaving highlighted (accent-blue) rows unreadable in light theme. -->
+                        <Border.Resources>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}"/>
+                            </Style>
+                        </Border.Resources>
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -358,6 +382,13 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
                     <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <!-- Same implicit-TextBlock-style precedence bug as PrimaryButton/ComboBoxItem
+                             above — see those for the full explanation. -->
+                        <Border.Resources>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}"/>
+                            </Style>
+                        </Border.Resources>
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -472,6 +503,16 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="10,6"/>
+        <!-- DataGridTextColumn generates a plain TextBlock as each cell's content — same
+             implicit-style-precedence issue as PrimaryButton above: the app-wide TextBlock style
+             (Foreground=TextBrush) beats whatever this cell's own Foreground is, so a selected
+             row (Background=AccentBrush) still showed dark, unreadable text in light theme. Bound
+             (not hardcoded) so it tracks whichever Foreground the trigger below currently applies. -->
+        <Style.Resources>
+            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=DataGridCell}, Path=Foreground}"/>
+            </Style>
+        </Style.Resources>
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
                 <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>

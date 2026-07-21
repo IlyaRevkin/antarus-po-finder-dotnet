@@ -170,13 +170,14 @@ public partial class ParamsView : UserControl
         ReloadTable();
     }
 
-    private void Filter_Changed(object sender, SelectionChangedEventArgs e) => ReloadTable();
+    private void Filter_Changed(object sender, RoutedEventArgs e) => ReloadTable();
     private void Refresh_Click(object sender, RoutedEventArgs e) => ReloadTable();
 
     private void ReloadTable()
     {
         if (FilterGroupCombo.SelectedItem is not EquipmentGroup filterGroup) return;
         var manufFilter = FilterManufCombo.SelectedIndex > 0 ? FilterManufCombo.SelectedItem as string : null;
+        var searchText = SearchInput.Text.Trim();
 
         System.Collections.Generic.List<int>? subtypeIds = null;
         if (filterGroup.Id is not null)
@@ -185,6 +186,11 @@ public partial class ParamsView : UserControl
         var files = _services.Db.GetParamFiles(manufacturer: manufFilter);
         if (subtypeIds is not null)
             files = files.Where(f => f.SubtypeId is not null && subtypeIds.Contains(f.SubtypeId.Value)).ToList();
+        if (!string.IsNullOrEmpty(searchText))
+            files = files.Where(f =>
+                f.Filename.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                f.Description.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                f.Tags.Contains(searchText, StringComparison.OrdinalIgnoreCase)).ToList();
 
         var rows = files.Select(f => new ParamFileRow
         {

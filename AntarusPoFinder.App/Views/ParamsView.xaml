@@ -9,16 +9,21 @@
 
         <TextBlock Grid.Row="0" Text="Параметры ПЧ / УПП" Style="{StaticResource TitleText}" Margin="0,0,0,16"/>
 
-        <Grid Grid.Row="1">
+        <!-- Whole page scrolls — the previous fix (capping the upload card's height) still left the
+             list card fighting the upload card for whatever was left of a non-maximized window, down
+             to 0 visible rows on the default 1280x800 size. A page-level scrollbar means the table is
+             always reachable regardless of window size, and the list card below gets a fixed, always-
+             adequate height instead of a shrinkable "*" share. -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="12"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Upload section — capped height (own internal scrollbar) so on a short/non-maximized
-                 window it can never squeeze the list card below to zero height; see round about
-                 "the loaded-params table was invisible unless the window was maximized". -->
+            <!-- Upload section — capped height (own internal scrollbar) so it can never squeeze the
+                 list card below it to zero height. -->
             <Border Grid.Row="0" Style="{StaticResource CardBorder}" Height="320">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
@@ -69,13 +74,15 @@
                 </ScrollViewer>
             </Border>
 
-            <!-- List section -->
-            <Border Grid.Row="2" Style="{StaticResource CardBorder}" MinHeight="220">
+            <!-- List section — fixed height (own internal scrollbar via the DataGrid, same pattern
+                 as the upload card above) instead of a "*" share of whatever the page grid had left,
+                 so the table always shows several rows without needing to maximize the window. -->
+            <Border Grid.Row="2" Style="{StaticResource CardBorder}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="ЗАГРУЖЕННЫЕ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
@@ -89,7 +96,7 @@
                     <Grid Grid.Row="2" x:Name="ListContentPanel" Visibility="Collapsed">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
@@ -98,11 +105,14 @@
                             <ComboBox x:Name="FilterGroupCombo" Width="150" Margin="0,0,16,0" DisplayMemberPath="Name" SelectionChanged="Filter_Changed"/>
                             <TextBlock Text="Производитель:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                             <ComboBox x:Name="FilterManufCombo" Width="150" Margin="0,0,16,0" SelectionChanged="Filter_Changed"/>
+                            <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="SearchInput" Width="180" Margin="0,0,16,0" VerticalContentAlignment="Center"
+                                     ToolTip="Файл / описание / теги" TextChanged="Filter_Changed"/>
                             <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="Refresh_Click"/>
                         </StackPanel>
 
                         <DataGrid Grid.Row="1" x:Name="FilesGrid" SelectionMode="Single" SelectionUnit="FullRow"
-                                  MinHeight="120" AutoGenerateColumns="False" IsReadOnly="True">
+                                  Height="320" AutoGenerateColumns="False" IsReadOnly="True">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Файл" Binding="{Binding Filename}" Width="*"/>
                                 <DataGridTextColumn Header="Группа / Подтип" Binding="{Binding GroupSubtypeDisplay}" Width="160"/>
@@ -123,5 +133,6 @@
                 </Grid>
             </Border>
         </Grid>
+        </ScrollViewer>
     </Grid>
 </UserControl>

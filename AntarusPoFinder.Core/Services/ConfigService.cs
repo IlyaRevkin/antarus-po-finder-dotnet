@@ -19,7 +19,9 @@ public class QuickApp
 public class ConfigService
 {
     public static readonly string AppData =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AntarusPOFinder");
+        Environment.GetEnvironmentVariable("ANTARUS_TEST_APPDATA") is { Length: > 0 } testDir
+            ? testDir
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AntarusPOFinder");
     public static readonly string DbPath = Path.Combine(AppData, "po_finder.db");
     public static readonly string LocalFw = Path.Combine(AppData, "firmware");
     public static readonly string LocalTemplates = Path.Combine(AppData, "templates");
