@@ -34,4 +34,19 @@ public class AppServices
         Hierarchy = new HierarchyService(Db);
         Schematics = new SchematicService();
     }
+
+    /// <summary>Test-only seam: ConfigService.AppData/DbPath are `static readonly`, resolved once
+    /// per process from ANTARUS_TEST_APPDATA — so a single test process can never construct two
+    /// independent AppServices() instances representing two separate machines/profiles the normal
+    /// way. This overload takes already-built, independently-pathed instances (see
+    /// AntarusPoFinder.Tests EndToEndSyncTests) so ConfigSyncService/TicketSyncService — which take
+    /// an AppServices, not a bare Database — can be exercised against two simulated machines sharing
+    /// one on-disk "network drive" root in-process, instead of only unit-testing Database directly.</summary>
+    public AppServices(Database db, ConfigService cfg, HierarchyService hierarchy)
+    {
+        Db = db;
+        Cfg = cfg;
+        Hierarchy = hierarchy;
+        Schematics = new SchematicService();
+    }
 }

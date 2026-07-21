@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- windows7.0 (not plain net8.0) so this project can reference AntarusPoFinder.App (WPF) for
+         EndToEndSyncTests — see that file's header comment. -->
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -22,6 +24,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AntarusPoFinder.Core\AntarusPoFinder.Core.csproj" />
+    <!-- App is net8.0-windows (WPF) — referenced only for AppServices/ConfigSyncService/
+         TicketSyncService, which are plain C# with no XAML/UI dependency, so this test project
+         itself stays net8.0 (no UseWPF needed). See EndToEndSyncTests. -->
+    <ProjectReference Include="..\AntarusPoFinder.App\AntarusPoFinder.App.csproj" />
   </ItemGroup>
 
 </Project>
