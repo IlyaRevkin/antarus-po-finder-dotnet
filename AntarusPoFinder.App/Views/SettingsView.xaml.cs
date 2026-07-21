@@ -358,6 +358,7 @@ public partial class SettingsView : UserControl
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
 
         LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
+        LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
         RefreshLayoutFallbackGrid();
     }
 
@@ -391,6 +392,13 @@ public partial class SettingsView : UserControl
 
     private void LayoutFallback_Changed(object sender, RoutedEventArgs e) =>
         _services.Cfg.SetLayoutFallbackEnabled(LayoutFallbackCheck.IsChecked == true);
+
+    private void LayoutFallbackThreshold_Changed(object sender, RoutedEventArgs e)
+    {
+        if (int.TryParse(LayoutFallbackThresholdInput.Text.Trim(), out var v) && v > 0)
+            _services.Cfg.SetLayoutFallbackThreshold(v);
+        LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
+    }
 
     private void ResetLayoutFallbackSelected_Click(object sender, RoutedEventArgs e)
     {
@@ -614,6 +622,24 @@ public partial class SettingsView : UserControl
         _services.Db.SetAppUserRole(row.Record.Id!.Value, selected.RoleId);
         LoadUsersTab();
         _host.ShowStatus($"Роль «{row.AdLogin}» изменена на «{selected.Label}»");
+    }
+
+    private void DeleteUser_Click(object sender, RoutedEventArgs e)
+    {
+        if (UsersGrid.SelectedItem is not UserRow row)
+        {
+            AppMessageBox.Show("Выберите пользователя в таблице.", "Пользователи", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = AppMessageBox.Show(
+            $"Удалить пользователя «{row.AdLogin}» из ростера?\n\nПри следующем входе по AD он будет создан заново с ролью «Наладчик».",
+            "Удаление пользователя", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteAppUser(row.Record.Id!.Value);
+        LoadUsersTab();
+        _host.ShowStatus($"Пользователь «{row.AdLogin}» удалён");
     }
 
     private void SaveMisc_Click(object sender, RoutedEventArgs e)

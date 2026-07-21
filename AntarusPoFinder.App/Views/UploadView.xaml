@@ -17,8 +17,12 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Left column: drop zone + preview -->
-            <StackPanel Grid.Column="0">
+            <!-- Left column: drop zone + preview. Scrollable — with the HMI drop zone expanded,
+                 this column's content can be taller than the window (esp. in windowed/non-maximized
+                 mode), and without a ScrollViewer the bottom buttons ("Очистить данные" etc.) become
+                 unreachable with no way to scroll down to them. -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
                 <StackPanel x:Name="ReservationPanel" Visibility="Collapsed" Margin="0,0,0,10">
                     <TextBlock Text="ИСПОЛЬЗОВАТЬ ЗАРЕЗЕРВИРОВАННЫЙ НОМЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <ComboBox x:Name="ReservationCombo" Height="36" DisplayMemberPath="Label" SelectionChanged="ReservationCombo_SelectionChanged"
@@ -69,9 +73,10 @@
                         Click="ReserveVersion_Click"
                         ToolTip="Зафиксировать следующий номер версии заранее — чтобы вписать его в прошивку до сборки и не рисковать, что номер уйдёт вперёд, пока идёт разработка."/>
 
-                <Button Content="Очистить данные" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0"
+                <Button Content="Очистить данные" Style="{StaticResource SecondaryButton}" Margin="0,8,0,16"
                         Click="ClearData_Click" ToolTip="Сбросить выбранный файл и все поля формы (если загружен не тот файл)"/>
             </StackPanel>
+            </ScrollViewer>
 
             <!-- Right column: metadata form -->
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
@@ -152,7 +157,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта in/out (опц.):" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center"
                                    ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
                         <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
                         <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
@@ -173,7 +178,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта modbus (опц.):" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center"
                                    ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
                         <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
                         <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
@@ -194,7 +199,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Инструкция (опц.):" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="0" Text="Инструкция:" VerticalAlignment="Center"
                                    ToolTip="Копируется в папку контроллера &quot;Инструкция&quot;. Необязательное поле."/>
                         <TextBox Grid.Column="1" x:Name="InstructionsInput" Height="34" Margin="0,0,4,0"/>
                         <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFile_Click" ToolTip="Выбрать файл">

@@ -28,8 +28,10 @@ public partial class Database
 
     /// <summary>Records whether an operator confirmed ("да, ошибся раскладкой") or rejected ("нет,
     /// ввёл верно") the layout-converted query, then re-derives the decision from the accumulated
-    /// counts — so answering consistently eventually stops the prompt for that exact input.</summary>
-    public void RecordLayoutFallbackFeedback(string queryKey, bool wasCorrectGuess)
+    /// counts — so answering consistently eventually stops the prompt for that exact input. threshold
+    /// defaults to LayoutFallbackDecisionThreshold but callers pass ConfigService.LayoutFallbackThreshold()
+    /// so an administrator can tune how many consecutive same-answers it takes to "learn" a decision.</summary>
+    public void RecordLayoutFallbackFeedback(string queryKey, bool wasCorrectGuess, int threshold = LayoutFallbackDecisionThreshold)
     {
         ExecuteNonQuery(
             """
@@ -53,9 +55,9 @@ public partial class Database
         var no = GetInt(reader, "no_count");
         reader.Close();
 
-        if (yes - no >= LayoutFallbackDecisionThreshold)
+        if (yes - no >= threshold)
             SetLayoutFallbackDecision(queryKey, "always");
-        else if (no - yes >= LayoutFallbackDecisionThreshold)
+        else if (no - yes >= threshold)
             SetLayoutFallbackDecision(queryKey, "never");
     }
 

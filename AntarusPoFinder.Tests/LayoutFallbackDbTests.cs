@@ -80,6 +80,42 @@ public class LayoutFallbackDbTests
     }
 
     [Fact]
+    public void CustomThreshold_LearnsAlways_AfterFewerConfirmationsThanDefault()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            const int customThreshold = 1;
+            Assert.True(customThreshold < Database.LayoutFallbackDecisionThreshold);
+
+            db.RecordLayoutFallbackFeedback("GJ;FH", wasCorrectGuess: true, customThreshold);
+
+            Assert.Equal(LayoutFallbackDecision.Always, db.GetLayoutFallbackDecision("GJ;FH"));
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
+    public void CustomThreshold_HigherThanDefault_KeepsAskingPastTheDefaultCount()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var customThreshold = Database.LayoutFallbackDecisionThreshold + 2;
+
+            for (var i = 0; i < Database.LayoutFallbackDecisionThreshold; i++)
+                db.RecordLayoutFallbackFeedback("GJ;FH", wasCorrectGuess: true, customThreshold);
+
+            // Would have flipped to Always by now under the default threshold (see
+            // RepeatedConfirmations_EventuallyLearnsAlways above) but must still be asking here.
+            Assert.Equal(LayoutFallbackDecision.Ask, db.GetLayoutFallbackDecision("GJ;FH"));
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
     public void ResetOne_ClearsOnlyThatQuery()
     {
         var path = NewTempDb();

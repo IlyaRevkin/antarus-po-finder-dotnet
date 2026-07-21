@@ -119,6 +119,54 @@ public static class FileSystemHelpers
         }
     }
 
+    /// <summary>Renames a rolled-back version's file/folder in place, appending a marker suffix —
+    /// otherwise a future upload that reuses the version number it just freed up would land on the
+    /// exact same path (CopyDirectoryContents/File.Copy overwrite=true) and silently merge into or
+    /// clobber whatever the rolled-back version left behind. Returns the new path, or the original
+    /// path unchanged if nothing exists there (e.g. no HMI project was ever attached).</summary>
+    public static string MarkRolledBackOnDisk(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        var isDir = Directory.Exists(path);
+        if (!isDir && !File.Exists(path)) return path;
+
+        var dir = Path.GetDirectoryName(path) ?? "";
+        var ext = isDir ? "" : Path.GetExtension(path);
+        var stem = isDir ? Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) : Path.GetFileNameWithoutExtension(path);
+
+        var candidate = Path.Combine(dir, $"{stem}_ОТКАТАНО{ext}");
+        int suffix = 1;
+        while (Directory.Exists(candidate) || File.Exists(candidate))
+            candidate = Path.Combine(dir, $"{stem}_ОТКАТАНО_{++suffix}{ext}");
+
+        if (isDir) Directory.Move(path, candidate);
+        else File.Move(path, candidate);
+        return candidate;
+    }
+
+    /// <summary>Clears the ReadOnly attribute (if set) so the app itself can rewrite a file it
+    /// previously protected with <see cref="ProtectFromExternalEdits"/> — see that method's doc.
+    /// Best-effort: some network shares/WebDAV mounts don't support attributes at all, which must
+    /// never block the app's own write.</summary>
+    public static void UnprotectForOwnWrite(string path)
+    {
+        try { if (File.Exists(path)) File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly); }
+        catch { /* best effort — see doc */ }
+    }
+
+    /// <summary>Sets the ReadOnly attribute on a file the app just wrote, as a speed bump against a
+    /// colleague deleting/hand-editing it straight from Explorer/Notepad — asked for alongside
+    /// ConfigFileCrypto for the shared network config file. This is NOT a real access-control
+    /// boundary (a network share's NTFS ACLs are per-Windows-account, not per-application — there is
+    /// no OS mechanism to say "only this .exe may touch this file" on a plain file share/WebDAV
+    /// mount), and a determined user can always clear the attribute themselves. Best-effort, like
+    /// UnprotectForOwnWrite above.</summary>
+    public static void ProtectFromExternalEdits(string path)
+    {
+        try { if (File.Exists(path)) File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly); }
+        catch { /* best effort — see doc */ }
+    }
+
     /// <summary>Numeric major.minor(.YYMMDD) subfolder scan — returns the path with the highest
     /// (major, minor, date) key, or null if firmwareDir doesn't exist or has no matches.</summary>
     public static string? FindLatestVersionFolder(string firmwareDir)

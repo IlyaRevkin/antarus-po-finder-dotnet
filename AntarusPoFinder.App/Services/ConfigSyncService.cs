@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Infrastructure;
 
 namespace AntarusPoFinder.App.Services;
 
@@ -46,7 +48,7 @@ public static class ConfigSyncService
         "scan_resolution_dpi", "config_auto_push", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
-        "layout_fallback_enabled",
+        "layout_fallback_enabled", "layout_fallback_threshold",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
     };
 
@@ -135,8 +137,17 @@ public static class ConfigSyncService
             ["exported_at"] = exportedAt,
             ["exported_by"] = exportedBy,
         };
+        // SkipSettingsKeys is per-machine-only data (passwords, this machine's own disk paths,
+        // AD-login-gate timers, inspection auto-cleanup schedule, etc. — see that field's doc).
+        // Apply()/CheckForUpdate() already refuse to READ these back from a shared config, but
+        // until now nothing stopped them from being WRITTEN into it in the first place — every
+        // export silently leaked this machine's local settings (including admin/programmer
+        // passwords in plaintext) onto the shared drive for every other machine to see.
         foreach (var kv in services.Db.GetAllSettings())
+        {
+            if (SkipSettingsKeys.Contains(kv.Key)) continue;
             payload[kv.Key] = kv.Value;
+        }
 
         var hierarchy = services.Db.ExportHierarchyData();
         var hierarchyNode = JsonSerializer.SerializeToNode(hierarchy)!.AsObject();
@@ -146,8 +157,10 @@ public static class ConfigSyncService
             payload[kv.Key] = kv.Value;
         }
 
-        File.WriteAllText(Path.Combine(configDir, "po_finder_config.json"),
-            payload.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var exportPath = Path.Combine(configDir, "po_finder_config.json");
+        FileSystemHelpers.UnprotectForOwnWrite(exportPath);
+        File.WriteAllBytes(exportPath, ConfigFileCrypto.Encrypt(payload.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+        FileSystemHelpers.ProtectFromExternalEdits(exportPath);
 
         // We're by definition current with what we just wrote — otherwise this same machine's own
         // pull check would immediately offer to "update" from the file it just exported.
@@ -201,7 +214,9 @@ public static class ConfigSyncService
         rootNode["exported_at"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
         rootNode["exported_by"] = exportedBy;
 
-        File.WriteAllText(path, rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        FileSystemHelpers.UnprotectForOwnWrite(path);
+        File.WriteAllBytes(path, ConfigFileCrypto.Encrypt(rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+        FileSystemHelpers.ProtectFromExternalEdits(path);
     }
 
     private static int CountSettingsChanges(AppServices services, JsonObject rootNode)
@@ -216,9 +231,15 @@ public static class ConfigSyncService
         return changed;
     }
 
+    /// <summary>ConfigFileCrypto.TryDecrypt returns null for a file that isn't in our encrypted
+    /// format — that's what a shared config exported by a pre-encryption app version (or, before
+    /// this feature existed at all, any config file on the share) looks like, so falling back to
+    /// reading the bytes as plain UTF-8 JSON keeps those working during the rollout instead of
+    /// erroring out on every machine that hasn't upgraded yet.</summary>
     private static (JsonObject RootNode, HierarchyExportData Hierarchy) Parse(string configPath)
     {
-        var text = File.ReadAllText(configPath);
+        var bytes = File.ReadAllBytes(configPath);
+        var text = ConfigFileCrypto.TryDecrypt(bytes) ?? Encoding.UTF8.GetString(bytes);
         var rootNode = JsonNode.Parse(text)!.AsObject();
         var hierarchyData = JsonSerializer.Deserialize<HierarchyExportData>(text) ?? new HierarchyExportData();
         return (rootNode, hierarchyData);

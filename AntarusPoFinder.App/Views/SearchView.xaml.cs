@@ -287,7 +287,7 @@ public partial class SearchView : UserControl
             $"клавиатуры — показаны результаты по «{convertedQuery}».\n\nЭто то, что вы искали?",
             "Проверка раскладки клавиатуры", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
 
-        _services.Db.RecordLayoutFallbackFeedback(key, reply == MessageBoxResult.Yes);
+        _services.Db.RecordLayoutFallbackFeedback(key, reply == MessageBoxResult.Yes, _services.Cfg.LayoutFallbackThreshold());
         return reply == MessageBoxResult.Yes;
     }
 

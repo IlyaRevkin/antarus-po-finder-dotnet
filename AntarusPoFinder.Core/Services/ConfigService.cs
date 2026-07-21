@@ -64,6 +64,7 @@ public class ConfigService
         ["quick_apps_display_mode"] = "sidebar",
         ["app_start_minimized"] = "true",
         ["layout_fallback_enabled"] = "true",
+        ["layout_fallback_threshold"] = "3",
         ["ad_require_login"] = "false",
         ["ad_require_login_default_days"] = "14",
         ["ad_last_login"] = "",
@@ -104,6 +105,14 @@ public class ConfigService
     /// Выключение полностью отключает и саму подстановку, и всплывающий вопрос "это точно оно?".</summary>
     public bool LayoutFallbackEnabled() => Get("layout_fallback_enabled").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetLayoutFallbackEnabled(bool value) => Set("layout_fallback_enabled", value ? "true" : "false");
+
+    /// <summary>How many consecutive net "да"/"нет" answers for the exact same query it takes before
+    /// Database.RecordLayoutFallbackFeedback stops asking and either always applies the layout
+    /// conversion or stops trying it — replaces what used to be the hardcoded
+    /// Database.LayoutFallbackDecisionThreshold (still the default here and in the DB layer).</summary>
+    public int LayoutFallbackThreshold() =>
+        int.TryParse(Get("layout_fallback_threshold"), out var v) && v > 0 ? v : Data.Database.LayoutFallbackDecisionThreshold;
+    public void SetLayoutFallbackThreshold(int value) => Set("layout_fallback_threshold", Math.Max(1, value).ToString());
 
     /// <summary>Папка осмотра (фото/сканы). Defaults to LocalFw if not set.</summary>
     public string InspectionFolder()

@@ -74,6 +74,14 @@ public partial class Database
         });
     }
 
+    /// <summary>Administrator removing a stale/mistaken roster entry from Настройки → Пользователи.
+    /// Local-only: MergeAppUsersInto never deletes (see its doc — "Nobody is ever removed from the
+    /// roster via sync"), so if another machine still has this login in its own local roster, the
+    /// next config exchange will re-add it here. That's an acceptable trade-off for a rarely-used
+    /// cleanup action rather than building a sync-wide tombstone mechanism for it.</summary>
+    public void DeleteAppUser(int id) =>
+        ExecuteNonQuery("DELETE FROM app_users WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+
     /// <summary>Merges an incoming AD roster into the local table — natural key is ad_login
     /// (COLLATE NOCASE), matched by sync_id first like every other entity in Database.ConfigExchange,
     /// falling back to login for first contact. Role is last-writer-wins by role_updated_at IN EITHER

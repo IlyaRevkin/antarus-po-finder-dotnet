@@ -275,11 +275,31 @@ public partial class Database
         return new User { Id = id is long l2 ? (int)l2 : -1, Name = name, WindowsLogin = windowsLogin };
     }
 
+    /// <summary>Marks a version rolled back and renames its on-disk firmware folder / HMI project
+    /// (if any) with a "_ОТКАТАНО" marker — see FileSystemHelpers.MarkRolledBackOnDisk. Without this,
+    /// a later upload reusing the sw_version this rollback frees up would land on the exact same
+    /// version_raw-named path and silently merge into (or overwrite) the rolled-back version's files.
+    /// The rename is best-effort: a locked file or unmounted share must not block the DB rollback.</summary>
     public bool RollbackFwVersion(int fwVersionId)
     {
-        var exists = ExecuteScalar("SELECT status FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
-        if (exists is null) return false;
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null) return false;
+
         ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back' WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+
+        string newDiskPath = v.DiskPath, newHmiPath = v.HmiPath;
+        try { newDiskPath = Infrastructure.FileSystemHelpers.MarkRolledBackOnDisk(v.DiskPath); } catch { /* best effort */ }
+        try { newHmiPath = Infrastructure.FileSystemHelpers.MarkRolledBackOnDisk(v.HmiPath); } catch { /* best effort */ }
+
+        if (newDiskPath != v.DiskPath || newHmiPath != v.HmiPath)
+        {
+            ExecuteNonQuery("UPDATE fw_versions SET disk_path=@d, hmi_path=@h WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@d", newDiskPath);
+                cmd.Parameters.AddWithValue("@h", newHmiPath);
+                cmd.Parameters.AddWithValue("@id", fwVersionId);
+            });
+        }
         return true;
     }
 

@@ -195,6 +195,50 @@ public class AppUsersDbTests
         finally { Cleanup(pathA, pathB); }
     }
 
+    [Fact]
+    public void DeleteAppUser_RemovesLocalRosterEntry()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var u = db.TouchOrCreateAppUser("revkin.i");
+
+            db.DeleteAppUser(u.Id!.Value);
+
+            Assert.Null(db.FindAppUserByLogin("revkin.i"));
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
+    public void DeleteAppUser_ThenReImportFromAnotherMachine_ReAddsAsNaladchik()
+    {
+        // Documents the known trade-off from Database.DeleteAppUser's doc comment: deletion is
+        // local-only, so a machine that still has the login in its own roster will bring it back.
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            var uA = dbA.TouchOrCreateAppUser("revkin.i");
+            dbA.SetAppUserRole(uA.Id!.Value, "administrator");
+            dbB.ImportHierarchyData(dbA.ExportHierarchyData());
+            var uB = dbB.FindAppUserByLogin("revkin.i")!;
+
+            dbB.DeleteAppUser(uB.Id!.Value);
+            Assert.Null(dbB.FindAppUserByLogin("revkin.i"));
+
+            dbB.ImportHierarchyData(dbA.ExportHierarchyData());
+            var reAdded = dbB.FindAppUserByLogin("revkin.i");
+            Assert.NotNull(reAdded);
+            Assert.Equal("administrator", reAdded!.Role);
+        }
+        finally { Cleanup(pathA, pathB); }
+    }
+
     private static List<ExportedAppUser> ToExported(List<AppUser> users) =>
         users.Select(u => new ExportedAppUser
         {
