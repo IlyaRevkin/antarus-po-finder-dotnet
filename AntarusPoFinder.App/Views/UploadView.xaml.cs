@@ -491,32 +491,23 @@ public partial class UploadView : UserControl
 
     private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => ModbusMapInput.Text = "";
 
+    private const string HmiPathPlaceholder = "Не выбран";
+
     private void HmiCheck_Toggled(object sender, RoutedEventArgs e)
     {
         bool isChecked = HmiCheck.IsChecked == true;
-        HmiDropZone.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
-        HmiButtonsRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        HmiPathRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
         if (!isChecked)
         {
             _hmiPath = null;
             _hmiExecutableHint = null;
-            HmiDropZoneLabel.Text = "Перетащите файл или папку HMI-проекта сюда\n\nили нажмите для выбора";
+            HmiPathInput.Text = HmiPathPlaceholder;
         }
     }
 
+    /// <summary>Clicking the (read-only) path textbox itself is a shortcut for "Файл..." — same as
+    /// clicking used to open the file picker on the old drop-zone box.</summary>
     private void HmiDropZone_Click(object sender, MouseButtonEventArgs e) => HmiBrowseFile_Click(sender, e);
-
-    private void HmiDropZone_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    private void HmiDropZone_Drop(object sender, DragEventArgs e)
-    {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
-            OnHmiPathPicked(paths[0]);
-    }
 
     private void HmiBrowseFile_Click(object sender, RoutedEventArgs e)
     {
@@ -536,11 +527,18 @@ public partial class UploadView : UserControl
         OnHmiPathPicked(dlg.FolderName);
     }
 
+    private void HmiClear_Click(object sender, RoutedEventArgs e)
+    {
+        _hmiPath = null;
+        _hmiExecutableHint = null;
+        HmiPathInput.Text = HmiPathPlaceholder;
+    }
+
     private void OnHmiPathPicked(string path)
     {
         _hmiPath = path;
         _hmiExecutableHint = Directory.Exists(path) ? PromptExecutableHint(path, HmiExecutableExts, "HMI-проекта") : null;
-        HmiDropZoneLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+        HmiPathInput.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
     }
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
@@ -826,11 +824,10 @@ public partial class UploadView : UserControl
         InstructionsInput.Text = "";
         ModbusMapInput.Text = "";
         HmiCheck.IsChecked = false;
-        HmiDropZone.Visibility = Visibility.Collapsed;
-        HmiButtonsRow.Visibility = Visibility.Collapsed;
+        HmiPathRow.Visibility = Visibility.Collapsed;
         _hmiPath = null;
         _hmiExecutableHint = null;
-        HmiDropZoneLabel.Text = "Перетащите файл или папку HMI-проекта сюда\n\nили нажмите для выбора";
+        HmiPathInput.Text = HmiPathPlaceholder;
         StatusLabel.Text = "";
         RefreshReservationPicker();
         UpdatePreview();

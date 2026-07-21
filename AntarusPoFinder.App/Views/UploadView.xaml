@@ -48,20 +48,32 @@
                 <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,12,0,0"
                           Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
                           ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки.&#x0a;HMI прикладывается к версии прошивки — файл/папка прошивки ПЛК всё равно нужно выбрать выше."/>
-                <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="86" Cursor="Hand" Margin="0,6,0,0"
-                        Visibility="Collapsed" AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
-                    <TextBlock x:Name="HmiDropZoneLabel" Text="Перетащите файл или папку HMI-проекта сюда&#x0a;&#x0a;или нажмите для выбора"
-                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <Grid x:Name="HmiButtonsRow" Margin="0,6,0,0" Visibility="Collapsed">
+                <!-- Same label+textbox+file/folder/clear-icon-buttons style as Карта in/out / Карта
+                     modbus / Инструкция on the right (see ДОП. ФАЙЛЫ) instead of its own separate
+                     drop-zone-plus-two-buttons look — was the one field visually inconsistent with
+                     the other three optional attachments. HmiPathInput is a display-only readout of
+                     _hmiPath (unlike those three, HMI needs the extra "pick main executable inside a
+                     multi-file project folder" prompt on selection — see OnHmiPathPicked — so typing a
+                     path directly here wouldn't trigger it; kept read-only rather than silently
+                     accepting typed text that skips that step). -->
+                <Grid x:Name="HmiPathRow" Margin="0,6,0,0" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="8"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="HmiBrowseFile_Click"/>
-                    <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="HmiBrowseFolder_Click"/>
+                    <TextBox Grid.Column="0" x:Name="HmiPathInput" Height="34" Margin="0,0,4,0" IsReadOnly="True"
+                             Text="Не выбран" MouseLeftButtonUp="HmiDropZone_Click"/>
+                    <Button Grid.Column="1" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFile_Click" ToolTip="Выбрать файл">
+                        <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                    </Button>
+                    <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFolder_Click" ToolTip="Выбрать папку">
+                        <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                    </Button>
+                    <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiClear_Click" ToolTip="Очистить">
+                        <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                    </Button>
                 </Grid>
 
                 <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,12,0,6"/>
@@ -96,32 +108,47 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,8,6"
-                                   ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
-                        <ComboBox x:Name="GroupCombo" Grid.Row="0" Grid.Column="1" Height="34" Margin="0,0,0,6"
-                                  DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
+                        <!-- Тип/Подтип/Контроллер side by side, one row — values here are always short
+                             (НГР, ХП, SMH4…), so stretching each combo across the whole form width like
+                             a free-text field wasted most of a wide column on empty space three rows in
+                             a row. Fixed-ish widths (150/130/170) instead of "*" give back that height
+                             for the rest of the form, same nested-grid-in-a-row technique ДОП. ФАЙЛЫ
+                             below already uses for Карта in/out + Карта modbus. -->
+                        <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="170"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
+                            <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
+                                      DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
+                            <TextBlock Grid.Column="3" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="SubCombo" Grid.Column="4" Height="34"
+                                      DisplayMemberPath="Label" SelectionChanged="SubCombo_SelectionChanged"/>
+                            <TextBlock Grid.Column="6" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
+                            <ComboBox x:Name="CtrlCombo" Grid.Column="7" Height="34"
+                                      DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
+                        </Grid>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,8,6"/>
-                        <ComboBox x:Name="SubCombo" Grid.Row="1" Grid.Column="1" Height="34" Margin="0,0,0,6"
-                                  DisplayMemberPath="Label" SelectionChanged="SubCombo_SelectionChanged"/>
-
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                   ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
-                        <ComboBox x:Name="CtrlCombo" Grid.Row="2" Grid.Column="1" Height="34" Margin="0,0,0,0"
-                                  DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
-
-                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
+                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
                                    FontSize="11" Margin="0,2,0,6" TextWrapping="Wrap"/>
 
-                        <CheckBox Grid.Row="4" Grid.Column="1" x:Name="IncludeDateCheck" Content="Добавлять дату/время в номер версии" IsChecked="True" Margin="0,0,0,6"
+                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="IncludeDateCheck" Content="Добавлять дату/время в номер версии" IsChecked="True" Margin="0,0,0,6"
                                   Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
                                   ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
 
-                        <StackPanel x:Name="OpcPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                        <StackPanel x:Name="OpcPanel" Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
                             <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,0"
                                       Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
                                       ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
@@ -130,16 +157,16 @@
                                       ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
                         </StackPanel>
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
+                        <TextBlock Grid.Row="4" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
 
-                        <TextBlock Grid.Row="7" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="7" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
+                        <TextBlock Grid.Row="5" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
 
-                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Тип пуска *:" Margin="0,0,8,0"/>
-                        <StackPanel Grid.Row="8" Grid.Column="1" x:Name="LaunchTypesPanel" Orientation="Horizontal"/>
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Тип пуска *:" Margin="0,0,8,0"/>
+                        <StackPanel Grid.Row="6" Grid.Column="1" x:Name="LaunchTypesPanel" Orientation="Horizontal"/>
                     </Grid>
 
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
