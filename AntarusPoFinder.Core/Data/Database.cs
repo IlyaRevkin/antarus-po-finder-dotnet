@@ -198,6 +198,40 @@ public partial class Database : IDisposable
                  custom_days INTEGER NOT NULL DEFAULT 0,
                  valid_until TEXT    NOT NULL DEFAULT ''
              );
+
+             -- Per-hierarchy-row "last time this specific entity round-tripped through a successful
+             -- (non-conflicting) config sync on this machine" — see Database.ConflictResolution.cs.
+             -- Deliberately separate from equipment_groups.updated_at/etc: updated_at tracks the row's
+             -- own last edit, this tracks the last point both sides were known to agree, which is what
+             -- the conflict detector actually needs (was THIS row edited on BOTH sides since they last
+             -- agreed, not just "is updated_at recent").
+             CREATE TABLE IF NOT EXISTS hierarchy_sync_watermarks (
+                 sync_id                  TEXT PRIMARY KEY,
+                 last_synced_at           TEXT NOT NULL DEFAULT '',
+                 -- Set only by Database.ResolveHierarchyConflict — the incoming.updated_at value that
+                 -- was actually part of the conflict the operator just ruled on. Lets a later sync of
+                 -- that SAME still-unchanged incoming snapshot be recognized as "already decided"
+                 -- unambiguously, without depending on how last_synced_at's own timestamp happens to
+                 -- compare (NowIso() has 1-second resolution, and a resolution can legitimately land
+                 -- in the same wall-clock second as an earlier, unrelated reconcile of this row).
+                 last_resolved_incoming_at TEXT NOT NULL DEFAULT ''
+             );
+
+             -- A hierarchy row held back by ImportHierarchyDataCore because both the local copy and the
+             -- incoming one were edited since their last agreed watermark — see Database.
+             -- ConflictResolution.cs. Survives app restarts (same reasoning as ticket_outbox) so an
+             -- operator who closes the app before resolving still sees it next launch. One row per
+             -- sync_id — a second detection of the same still-unresolved conflict just replaces it
+             -- (INSERT OR REPLACE), it doesn't pile up duplicates.
+             CREATE TABLE IF NOT EXISTS hierarchy_pending_conflicts (
+                 sync_id       TEXT PRIMARY KEY,
+                 entity_type   TEXT NOT NULL,
+                 local_id      INTEGER NOT NULL,
+                 display_label TEXT NOT NULL DEFAULT '',
+                 local_json    TEXT NOT NULL,
+                 incoming_json TEXT NOT NULL,
+                 created_at    TEXT NOT NULL DEFAULT ''
+             );
              """);
 
         EnsureColumnsExist();
@@ -214,6 +248,23 @@ public partial class Database : IDisposable
         // (they're plain INSERTs, not the sync_id-aware Upsert* methods), so backfilling here —
         // after all seeding — is what actually gives fresh installs a sync_id on every row.
         BackfillSyncIds();
+        // Same reasoning, same "run after every seeding step" placement — backfills updated_at on
+        // rows the seeding above inserted with plain INSERTs (never through the Upsert*/Rename*/Add*
+        // methods, which are the only places that stamp it going forward).
+        BackfillHierarchyUpdatedAt();
+    }
+
+    /// <summary>Gives every pre-existing hierarchy row (both genuinely old databases picking up the
+    /// ALTER TABLE column for the first time, AND rows this very Migrate() call just seeded above) a
+    /// real updated_at instead of the schema's '' default — an empty updated_at would otherwise look
+    /// "infinitely old" to the config-sync conflict detector (Database.ConflictResolution.cs), making
+    /// its very first real edit look like it raced an edit that never actually happened.</summary>
+    private void BackfillHierarchyUpdatedAt()
+    {
+        var now = NowIso();
+        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications" })
+            ExecuteNonQuery($"UPDATE {table} SET updated_at=@n WHERE updated_at IS NULL OR updated_at = ''",
+                cmd => cmd.Parameters.AddWithValue("@n", now));
     }
 
     /// <summary>Backfills the tags table from words already used in fw_versions.tags, so tags typed
@@ -240,10 +291,10 @@ public partial class Database : IDisposable
     /// </summary>
     private void EnsureColumnsExist()
     {
-        AddColumnsIfMissing("equipment_groups", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"));
-        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"));
-        AddColumnsIfMissing("controller_models", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"));
-        AddColumnsIfMissing("controller_modifications", ("hw_version", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("description", "TEXT NOT NULL DEFAULT ''"), ("sync_id", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("equipment_groups", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("controller_models", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("controller_modifications", ("hw_version", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("description", "TEXT NOT NULL DEFAULT ''"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
 
         // Backfilling `released` from existing tags is only correct the ONE TIME this column is
         // introduced on an old database — after that, release status must come solely from the
@@ -286,6 +337,9 @@ public partial class Database : IDisposable
 
         AddColumnsIfMissing("fw_version_reservations",
             ("expires_at", "TEXT NOT NULL DEFAULT ''"));
+
+        AddColumnsIfMissing("hierarchy_sync_watermarks",
+            ("last_resolved_incoming_at", "TEXT NOT NULL DEFAULT ''"));
     }
 
     /// <summary>Assigns a stable GUID to any row left with an empty sync_id — either a brand-new

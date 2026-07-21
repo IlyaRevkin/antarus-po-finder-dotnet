@@ -12,4 +12,7 @@ public class EquipmentSubType
 
     /// <summary>Stable cross-machine identity for config sync — survives renames, unlike Name.</summary>
     public string SyncId { get; set; } = "";
+
+    /// <summary>Last local edit timestamp — see EquipmentGroup.UpdatedAt for format/purpose.</summary>
+    public string UpdatedAt { get; set; } = "";
 }

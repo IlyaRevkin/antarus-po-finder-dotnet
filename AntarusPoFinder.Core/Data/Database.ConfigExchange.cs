@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -11,12 +12,12 @@ public partial class Database
     {
         var data = new HierarchyExportData();
 
-        using (var r = ExecuteReader("SELECT name, prefix, sort_order, sync_id FROM equipment_groups ORDER BY sort_order"))
+        using (var r = ExecuteReader("SELECT name, prefix, sort_order, sync_id, updated_at FROM equipment_groups ORDER BY sort_order"))
             while (r.Read())
-                data.EquipmentGroups.Add(new ExportedGroup { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id") });
+                data.EquipmentGroups.Add(new ExportedGroup { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at") });
 
         using (var r = ExecuteReader("""
-            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, eg.name AS group_name, eg.sync_id AS group_sync_id
+            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, es.updated_at, eg.name AS group_name, eg.sync_id AS group_sync_id
             FROM equipment_subtypes es JOIN equipment_groups eg ON es.group_id = eg.id
             ORDER BY es.sort_order
             """))
@@ -24,16 +25,16 @@ public partial class Database
                 data.EquipmentSubtypes.Add(new ExportedSubType
                 {
                     Name = r.GetString(0), Prefix = r.GetInt32(1), FolderName = r.GetString(2),
-                    SortOrder = r.GetInt32(3), SyncId = GetString(r, "sync_id"),
+                    SortOrder = r.GetInt32(3), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at"),
                     GroupName = GetString(r, "group_name"), GroupSyncId = GetString(r, "group_sync_id"),
                 });
 
-        using (var r = ExecuteReader("SELECT name, prefix, sort_order, sync_id FROM controller_models ORDER BY sort_order"))
+        using (var r = ExecuteReader("SELECT name, prefix, sort_order, sync_id, updated_at FROM controller_models ORDER BY sort_order"))
             while (r.Read())
-                data.ControllerModels.Add(new ExportedController { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id") });
+                data.ControllerModels.Add(new ExportedController { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at") });
 
         using (var r = ExecuteReader("""
-            SELECT cm.display_name, cm.hw_version, cm.sort_order, cm.description, cm.sync_id,
+            SELECT cm.display_name, cm.hw_version, cm.sort_order, cm.description, cm.sync_id, cm.updated_at,
                    c.name AS controller_name, c.sync_id AS controller_sync_id
             FROM controller_modifications cm JOIN controller_models c ON cm.controller_id = c.id
             ORDER BY c.sort_order, cm.sort_order
@@ -43,7 +44,7 @@ public partial class Database
                 {
                     DisplayName = GetString(r, "display_name"), HwVersion = GetInt(r, "hw_version"),
                     SortOrder = GetInt(r, "sort_order"), Description = GetString(r, "description"),
-                    SyncId = GetString(r, "sync_id"), ControllerName = GetString(r, "controller_name"),
+                    SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at"), ControllerName = GetString(r, "controller_name"),
                     ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
 
@@ -156,6 +157,12 @@ public partial class Database
     private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply)
     {
         var counts = new ImportCounts();
+        // Captured ONCE per import pass, not per-row — every row that successfully reconciles in
+        // THIS pass (inserted, updated, or confirmed-already-matching) shares the same watermark,
+        // representing "as of this sync, both sides are known to agree on this row". See
+        // ClassifyHierarchyChange for how it's used to tell a genuine two-sided edit apart from a
+        // normal one-sided update. Never touched when apply is false (preview must be side-effect-free).
+        var syncNow = NowIso();
 
         // ── Groups (upsert by sync_id, fallback to name) ────────────────────────
         var groupSyncToId = new Dictionary<string, int>();
@@ -168,35 +175,70 @@ public partial class Database
                 if (apply)
                 {
                     var sync = string.IsNullOrEmpty(g.SyncId) ? Guid.NewGuid().ToString() : g.SyncId;
-                    ExecuteNonQuery("INSERT INTO equipment_groups(name,prefix,sort_order,sync_id) VALUES(@n,@p,@s,@sy)", cmd =>
+                    var updatedAt = string.IsNullOrEmpty(g.UpdatedAt) ? syncNow : g.UpdatedAt;
+                    ExecuteNonQuery("INSERT INTO equipment_groups(name,prefix,sort_order,sync_id,updated_at) VALUES(@n,@p,@s,@sy,@u)", cmd =>
                     {
                         cmd.Parameters.AddWithValue("@n", g.Name); cmd.Parameters.AddWithValue("@p", g.Prefix);
                         cmd.Parameters.AddWithValue("@s", g.SortOrder); cmd.Parameters.AddWithValue("@sy", sync);
+                        cmd.Parameters.AddWithValue("@u", updatedAt);
                     });
                     if (!string.IsNullOrEmpty(g.SyncId)) groupSyncToId[g.SyncId] = Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()"));
+                    SetHierarchyWatermark(sync, syncNow);
                 }
                 continue;
             }
-            var (id, name, prefix, sort, localSyncId) = existing.Value;
+            var (id, name, prefix, sort, localSyncId, localUpdatedAt) = existing.Value;
             if (!string.IsNullOrEmpty(g.SyncId)) groupSyncToId[g.SyncId] = id;
             // First contact between two independently-seeded databases: this row matched by NAME,
             // not sync_id (their sync_ids started out different, generated independently). Adopt
             // the incoming sync_id now so a FUTURE rename can correlate via sync_id instead of name.
             var adoptSyncId = !string.IsNullOrEmpty(g.SyncId) && g.SyncId != localSyncId;
+            var effectiveSyncId = adoptSyncId ? g.SyncId : localSyncId;
             if (name != g.Name || prefix != g.Prefix || sort != g.SortOrder)
             {
-                counts.GroupsUpdated++;
-                if (apply)
-                    ExecuteNonQuery("UPDATE equipment_groups SET name=@n, prefix=@p, sort_order=@s, sync_id=@sy WHERE id=@id", cmd =>
+                var (conflict, applyIncoming) = ClassifyHierarchyChange(effectiveSyncId, localUpdatedAt, g.UpdatedAt);
+                if (conflict)
+                {
+                    counts.ConflictsFound++;
+                    if (apply)
+                        RecordPendingConflict("group", effectiveSyncId, id, $"Группа «{name}»",
+                            JsonSerializer.Serialize(new ExportedGroup { SyncId = effectiveSyncId, Name = name, Prefix = prefix, SortOrder = sort, UpdatedAt = localUpdatedAt }),
+                            JsonSerializer.Serialize(g));
+                }
+                else if (applyIncoming)
+                {
+                    counts.GroupsUpdated++;
+                    if (apply)
                     {
-                        cmd.Parameters.AddWithValue("@n", g.Name); cmd.Parameters.AddWithValue("@p", g.Prefix);
-                        cmd.Parameters.AddWithValue("@s", g.SortOrder); cmd.Parameters.AddWithValue("@id", id);
-                        cmd.Parameters.AddWithValue("@sy", adoptSyncId ? g.SyncId : localSyncId);
-                    });
+                        ExecuteNonQuery("UPDATE equipment_groups SET name=@n, prefix=@p, sort_order=@s, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
+                        {
+                            cmd.Parameters.AddWithValue("@n", g.Name); cmd.Parameters.AddWithValue("@p", g.Prefix);
+                            cmd.Parameters.AddWithValue("@s", g.SortOrder); cmd.Parameters.AddWithValue("@id", id);
+                            cmd.Parameters.AddWithValue("@sy", effectiveSyncId);
+                            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(g.UpdatedAt) ? syncNow : g.UpdatedAt);
+                        });
+                        SetHierarchyWatermark(effectiveSyncId, syncNow);
+                    }
+                }
+                else if (apply)
+                {
+                    // Local wins (unchanged, or newer than the incoming snapshot) — nothing to write
+                    // to the row itself, but the sync_id may still need adopting, and the watermark
+                    // still advances (both sides were compared just now, even though local kept its
+                    // own value).
+                    if (adoptSyncId)
+                        ExecuteNonQuery("UPDATE equipment_groups SET sync_id=@sy WHERE id=@id", cmd =>
+                        { cmd.Parameters.AddWithValue("@sy", g.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                    SetHierarchyWatermark(effectiveSyncId, syncNow);
+                }
             }
-            else if (adoptSyncId && apply)
-                ExecuteNonQuery("UPDATE equipment_groups SET sync_id=@sy WHERE id=@id", cmd =>
-                { cmd.Parameters.AddWithValue("@sy", g.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+            else
+            {
+                if (adoptSyncId && apply)
+                    ExecuteNonQuery("UPDATE equipment_groups SET sync_id=@sy WHERE id=@id", cmd =>
+                    { cmd.Parameters.AddWithValue("@sy", g.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                if (apply) SetHierarchyWatermark(effectiveSyncId, syncNow);
+            }
         }
 
         // ── Subtypes (upsert by sync_id, fallback to (group,name)) ──────────────
@@ -213,35 +255,70 @@ public partial class Database
                 if (apply)
                 {
                     var sync = string.IsNullOrEmpty(s.SyncId) ? Guid.NewGuid().ToString() : s.SyncId;
-                    ExecuteNonQuery("INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id) VALUES(@g,@n,@p,@f,@s,@sy)", cmd =>
+                    var updatedAt = string.IsNullOrEmpty(s.UpdatedAt) ? syncNow : s.UpdatedAt;
+                    ExecuteNonQuery("INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id,updated_at) VALUES(@g,@n,@p,@f,@s,@sy,@u)", cmd =>
                     {
                         cmd.Parameters.AddWithValue("@g", groupId.Value); cmd.Parameters.AddWithValue("@n", s.Name);
                         cmd.Parameters.AddWithValue("@p", s.Prefix); cmd.Parameters.AddWithValue("@f", string.IsNullOrEmpty(s.FolderName) ? s.Name : s.FolderName);
                         cmd.Parameters.AddWithValue("@s", s.SortOrder); cmd.Parameters.AddWithValue("@sy", sync);
+                        cmd.Parameters.AddWithValue("@u", updatedAt);
                     });
                     if (!string.IsNullOrEmpty(s.SyncId)) subtypeSyncToId[s.SyncId] = Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()"));
+                    SetHierarchyWatermark(sync, syncNow);
                 }
                 continue;
             }
-            var (id, name, prefix, folder, sort, localSyncId) = existing.Value;
+            var (id, name, prefix, folder, sort, localSyncId, localUpdatedAt) = existing.Value;
             if (!string.IsNullOrEmpty(s.SyncId)) subtypeSyncToId[s.SyncId] = id;
             var wantFolder = string.IsNullOrEmpty(s.FolderName) ? s.Name : s.FolderName;
             var adoptSyncId = !string.IsNullOrEmpty(s.SyncId) && s.SyncId != localSyncId;
+            var effectiveSyncId = adoptSyncId ? s.SyncId : localSyncId;
             if (name != s.Name || prefix != s.Prefix || folder != wantFolder || sort != s.SortOrder)
             {
-                counts.SubtypesUpdated++;
-                if (apply)
-                    ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, prefix=@p, folder_name=@f, sort_order=@s, sync_id=@sy WHERE id=@id", cmd =>
+                var (conflict, applyIncoming) = ClassifyHierarchyChange(effectiveSyncId, localUpdatedAt, s.UpdatedAt);
+                if (conflict)
+                {
+                    counts.ConflictsFound++;
+                    if (apply)
+                        RecordPendingConflict("subtype", effectiveSyncId, id, $"Подтип «{name}»",
+                            JsonSerializer.Serialize(new ExportedSubType
+                            {
+                                SyncId = effectiveSyncId, Name = name, Prefix = prefix, FolderName = folder, SortOrder = sort,
+                                UpdatedAt = localUpdatedAt, GroupName = s.GroupName, GroupSyncId = s.GroupSyncId,
+                            }),
+                            JsonSerializer.Serialize(s));
+                }
+                else if (applyIncoming)
+                {
+                    counts.SubtypesUpdated++;
+                    if (apply)
                     {
-                        cmd.Parameters.AddWithValue("@n", s.Name); cmd.Parameters.AddWithValue("@p", s.Prefix);
-                        cmd.Parameters.AddWithValue("@f", wantFolder); cmd.Parameters.AddWithValue("@s", s.SortOrder);
-                        cmd.Parameters.AddWithValue("@id", id);
-                        cmd.Parameters.AddWithValue("@sy", adoptSyncId ? s.SyncId : localSyncId);
-                    });
+                        ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, prefix=@p, folder_name=@f, sort_order=@s, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
+                        {
+                            cmd.Parameters.AddWithValue("@n", s.Name); cmd.Parameters.AddWithValue("@p", s.Prefix);
+                            cmd.Parameters.AddWithValue("@f", wantFolder); cmd.Parameters.AddWithValue("@s", s.SortOrder);
+                            cmd.Parameters.AddWithValue("@id", id);
+                            cmd.Parameters.AddWithValue("@sy", effectiveSyncId);
+                            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(s.UpdatedAt) ? syncNow : s.UpdatedAt);
+                        });
+                        SetHierarchyWatermark(effectiveSyncId, syncNow);
+                    }
+                }
+                else if (apply)
+                {
+                    if (adoptSyncId)
+                        ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
+                        { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                    SetHierarchyWatermark(effectiveSyncId, syncNow);
+                }
             }
-            else if (adoptSyncId && apply)
-                ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
-                { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+            else
+            {
+                if (adoptSyncId && apply)
+                    ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
+                    { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                if (apply) SetHierarchyWatermark(effectiveSyncId, syncNow);
+            }
         }
 
         // ── Subtypes removed on the exporting machine — unlike groups/controllers/modifications
@@ -291,32 +368,63 @@ public partial class Database
                 if (apply)
                 {
                     var sync = string.IsNullOrEmpty(c.SyncId) ? Guid.NewGuid().ToString() : c.SyncId;
-                    ExecuteNonQuery("INSERT INTO controller_models(name,prefix,sort_order,sync_id) VALUES(@n,@p,@s,@sy)", cmd =>
+                    var updatedAt = string.IsNullOrEmpty(c.UpdatedAt) ? syncNow : c.UpdatedAt;
+                    ExecuteNonQuery("INSERT INTO controller_models(name,prefix,sort_order,sync_id,updated_at) VALUES(@n,@p,@s,@sy,@u)", cmd =>
                     {
                         cmd.Parameters.AddWithValue("@n", c.Name); cmd.Parameters.AddWithValue("@p", c.Prefix);
                         cmd.Parameters.AddWithValue("@s", c.SortOrder); cmd.Parameters.AddWithValue("@sy", sync);
+                        cmd.Parameters.AddWithValue("@u", updatedAt);
                     });
                     if (!string.IsNullOrEmpty(c.SyncId)) controllerSyncToId[c.SyncId] = Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()"));
+                    SetHierarchyWatermark(sync, syncNow);
                 }
                 continue;
             }
-            var (id, name, prefix, sort, localSyncId) = existing.Value;
+            var (id, name, prefix, sort, localSyncId, localUpdatedAt) = existing.Value;
             if (!string.IsNullOrEmpty(c.SyncId)) controllerSyncToId[c.SyncId] = id;
             var adoptSyncId = !string.IsNullOrEmpty(c.SyncId) && c.SyncId != localSyncId;
+            var effectiveSyncId = adoptSyncId ? c.SyncId : localSyncId;
             if (name != c.Name || prefix != c.Prefix || sort != c.SortOrder)
             {
-                counts.ControllersUpdated++;
-                if (apply)
-                    ExecuteNonQuery("UPDATE controller_models SET name=@n, prefix=@p, sort_order=@s, sync_id=@sy WHERE id=@id", cmd =>
+                var (conflict, applyIncoming) = ClassifyHierarchyChange(effectiveSyncId, localUpdatedAt, c.UpdatedAt);
+                if (conflict)
+                {
+                    counts.ConflictsFound++;
+                    if (apply)
+                        RecordPendingConflict("controller", effectiveSyncId, id, $"Контроллер «{name}»",
+                            JsonSerializer.Serialize(new ExportedController { SyncId = effectiveSyncId, Name = name, Prefix = prefix, SortOrder = sort, UpdatedAt = localUpdatedAt }),
+                            JsonSerializer.Serialize(c));
+                }
+                else if (applyIncoming)
+                {
+                    counts.ControllersUpdated++;
+                    if (apply)
                     {
-                        cmd.Parameters.AddWithValue("@n", c.Name); cmd.Parameters.AddWithValue("@p", c.Prefix);
-                        cmd.Parameters.AddWithValue("@s", c.SortOrder); cmd.Parameters.AddWithValue("@id", id);
-                        cmd.Parameters.AddWithValue("@sy", adoptSyncId ? c.SyncId : localSyncId);
-                    });
+                        ExecuteNonQuery("UPDATE controller_models SET name=@n, prefix=@p, sort_order=@s, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
+                        {
+                            cmd.Parameters.AddWithValue("@n", c.Name); cmd.Parameters.AddWithValue("@p", c.Prefix);
+                            cmd.Parameters.AddWithValue("@s", c.SortOrder); cmd.Parameters.AddWithValue("@id", id);
+                            cmd.Parameters.AddWithValue("@sy", effectiveSyncId);
+                            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(c.UpdatedAt) ? syncNow : c.UpdatedAt);
+                        });
+                        SetHierarchyWatermark(effectiveSyncId, syncNow);
+                    }
+                }
+                else if (apply)
+                {
+                    if (adoptSyncId)
+                        ExecuteNonQuery("UPDATE controller_models SET sync_id=@sy WHERE id=@id", cmd =>
+                        { cmd.Parameters.AddWithValue("@sy", c.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                    SetHierarchyWatermark(effectiveSyncId, syncNow);
+                }
             }
-            else if (adoptSyncId && apply)
-                ExecuteNonQuery("UPDATE controller_models SET sync_id=@sy WHERE id=@id", cmd =>
-                { cmd.Parameters.AddWithValue("@sy", c.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+            else
+            {
+                if (adoptSyncId && apply)
+                    ExecuteNonQuery("UPDATE controller_models SET sync_id=@sy WHERE id=@id", cmd =>
+                    { cmd.Parameters.AddWithValue("@sy", c.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                if (apply) SetHierarchyWatermark(effectiveSyncId, syncNow);
+            }
         }
 
         // ── Controller modifications (upsert by sync_id, fallback to (controller,display_name)) ──
@@ -332,34 +440,69 @@ public partial class Database
                 if (apply)
                 {
                     var sync = string.IsNullOrEmpty(m.SyncId) ? Guid.NewGuid().ToString() : m.SyncId;
+                    var updatedAt = string.IsNullOrEmpty(m.UpdatedAt) ? syncNow : m.UpdatedAt;
                     ExecuteNonQuery(
-                        "INSERT INTO controller_modifications(controller_id,display_name,hw_version,sort_order,description,sync_id) VALUES(@c,@n,@h,@s,@d,@sy)",
+                        "INSERT INTO controller_modifications(controller_id,display_name,hw_version,sort_order,description,sync_id,updated_at) VALUES(@c,@n,@h,@s,@d,@sy,@u)",
                         cmd =>
                         {
                             cmd.Parameters.AddWithValue("@c", ctrlId.Value); cmd.Parameters.AddWithValue("@n", m.DisplayName);
                             cmd.Parameters.AddWithValue("@h", m.HwVersion); cmd.Parameters.AddWithValue("@s", m.SortOrder);
                             cmd.Parameters.AddWithValue("@d", m.Description); cmd.Parameters.AddWithValue("@sy", sync);
+                            cmd.Parameters.AddWithValue("@u", updatedAt);
                         });
+                    SetHierarchyWatermark(sync, syncNow);
                 }
                 continue;
             }
-            var (id, name, hw, sort, desc, localSyncId2) = existing.Value;
+            var (id, name, hw, sort, desc, localSyncId2, localUpdatedAt2) = existing.Value;
             var adoptSyncId2 = !string.IsNullOrEmpty(m.SyncId) && m.SyncId != localSyncId2;
+            var effectiveSyncId2 = adoptSyncId2 ? m.SyncId : localSyncId2;
             if (name != m.DisplayName || hw != m.HwVersion || sort != m.SortOrder || desc != m.Description)
             {
-                counts.ModificationsUpdated++;
-                if (apply)
-                    ExecuteNonQuery("UPDATE controller_modifications SET display_name=@n, hw_version=@h, sort_order=@s, description=@d, sync_id=@sy WHERE id=@id", cmd =>
+                var (conflict, applyIncoming) = ClassifyHierarchyChange(effectiveSyncId2, localUpdatedAt2, m.UpdatedAt);
+                if (conflict)
+                {
+                    counts.ConflictsFound++;
+                    if (apply)
+                        RecordPendingConflict("modification", effectiveSyncId2, id, $"Модификация «{name}»",
+                            JsonSerializer.Serialize(new ExportedModification
+                            {
+                                SyncId = effectiveSyncId2, DisplayName = name, HwVersion = hw, SortOrder = sort, Description = desc,
+                                UpdatedAt = localUpdatedAt2, ControllerName = m.ControllerName, ControllerSyncId = m.ControllerSyncId,
+                            }),
+                            JsonSerializer.Serialize(m));
+                }
+                else if (applyIncoming)
+                {
+                    counts.ModificationsUpdated++;
+                    if (apply)
                     {
-                        cmd.Parameters.AddWithValue("@n", m.DisplayName); cmd.Parameters.AddWithValue("@h", m.HwVersion);
-                        cmd.Parameters.AddWithValue("@s", m.SortOrder); cmd.Parameters.AddWithValue("@d", m.Description);
-                        cmd.Parameters.AddWithValue("@id", id);
-                        cmd.Parameters.AddWithValue("@sy", adoptSyncId2 ? m.SyncId : localSyncId2);
-                    });
+                        ExecuteNonQuery("UPDATE controller_modifications SET display_name=@n, hw_version=@h, sort_order=@s, description=@d, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
+                        {
+                            cmd.Parameters.AddWithValue("@n", m.DisplayName); cmd.Parameters.AddWithValue("@h", m.HwVersion);
+                            cmd.Parameters.AddWithValue("@s", m.SortOrder); cmd.Parameters.AddWithValue("@d", m.Description);
+                            cmd.Parameters.AddWithValue("@id", id);
+                            cmd.Parameters.AddWithValue("@sy", effectiveSyncId2);
+                            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(m.UpdatedAt) ? syncNow : m.UpdatedAt);
+                        });
+                        SetHierarchyWatermark(effectiveSyncId2, syncNow);
+                    }
+                }
+                else if (apply)
+                {
+                    if (adoptSyncId2)
+                        ExecuteNonQuery("UPDATE controller_modifications SET sync_id=@sy WHERE id=@id", cmd =>
+                        { cmd.Parameters.AddWithValue("@sy", m.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                    SetHierarchyWatermark(effectiveSyncId2, syncNow);
+                }
             }
-            else if (adoptSyncId2 && apply)
-                ExecuteNonQuery("UPDATE controller_modifications SET sync_id=@sy WHERE id=@id", cmd =>
-                { cmd.Parameters.AddWithValue("@sy", m.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+            else
+            {
+                if (adoptSyncId2 && apply)
+                    ExecuteNonQuery("UPDATE controller_modifications SET sync_id=@sy WHERE id=@id", cmd =>
+                    { cmd.Parameters.AddWithValue("@sy", m.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                if (apply) SetHierarchyWatermark(effectiveSyncId2, syncNow);
+            }
         }
 
         // ── Manufacturers (name-keyed, no FK-by-id references it — safe full mirror, same
@@ -647,41 +790,41 @@ public partial class Database
 
     // ── Sync-id-aware lookup helpers ─────────────────────────────────────────
 
-    private (int Id, string Name, int Prefix, int SortOrder, string SyncId)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
+    private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {
         if (!string.IsNullOrEmpty(syncId))
         {
-            using var r1 = ExecuteReader($"SELECT id, {nameCol}, prefix, sort_order, sync_id FROM {table} WHERE sync_id=@sy", cmd => cmd.Parameters.AddWithValue("@sy", syncId));
-            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetInt32(3), GetString(r1, "sync_id"));
+            using var r1 = ExecuteReader($"SELECT id, {nameCol}, prefix, sort_order, sync_id, updated_at FROM {table} WHERE sync_id=@sy", cmd => cmd.Parameters.AddWithValue("@sy", syncId));
+            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetInt32(3), GetString(r1, "sync_id"), GetString(r1, "updated_at"));
         }
-        using var r2 = ExecuteReader($"SELECT id, {nameCol}, prefix, sort_order, sync_id FROM {table} WHERE {nameCol}=@n", cmd => cmd.Parameters.AddWithValue("@n", name));
-        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), GetString(r2, "sync_id")) : null;
+        using var r2 = ExecuteReader($"SELECT id, {nameCol}, prefix, sort_order, sync_id, updated_at FROM {table} WHERE {nameCol}=@n", cmd => cmd.Parameters.AddWithValue("@n", name));
+        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
     }
 
-    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId)? FindSubtype(string syncId, int groupId, string name)
+    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId, string UpdatedAt)? FindSubtype(string syncId, int groupId, string name)
     {
         if (!string.IsNullOrEmpty(syncId))
         {
-            using var r1 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id FROM equipment_subtypes WHERE sync_id=@sy AND group_id=@g",
+            using var r1 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE sync_id=@sy AND group_id=@g",
                 cmd => { cmd.Parameters.AddWithValue("@sy", syncId); cmd.Parameters.AddWithValue("@g", groupId); });
-            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetString(3), r1.GetInt32(4), GetString(r1, "sync_id"));
+            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetString(3), r1.GetInt32(4), GetString(r1, "sync_id"), GetString(r1, "updated_at"));
         }
-        using var r2 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id FROM equipment_subtypes WHERE group_id=@g AND name=@n",
+        using var r2 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND name=@n",
             cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@n", name); });
-        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id")) : null;
+        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
     }
 
-    private (int Id, string Name, int HwVersion, int SortOrder, string Description, string SyncId)? FindModification(string syncId, int controllerId, string displayName)
+    private (int Id, string Name, int HwVersion, int SortOrder, string Description, string SyncId, string UpdatedAt)? FindModification(string syncId, int controllerId, string displayName)
     {
         if (!string.IsNullOrEmpty(syncId))
         {
-            using var r1 = ExecuteReader("SELECT id, display_name, hw_version, sort_order, description, sync_id FROM controller_modifications WHERE sync_id=@sy AND controller_id=@c",
+            using var r1 = ExecuteReader("SELECT id, display_name, hw_version, sort_order, description, sync_id, updated_at FROM controller_modifications WHERE sync_id=@sy AND controller_id=@c",
                 cmd => { cmd.Parameters.AddWithValue("@sy", syncId); cmd.Parameters.AddWithValue("@c", controllerId); });
-            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetInt32(3), r1.GetString(4), GetString(r1, "sync_id"));
+            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetInt32(3), r1.GetString(4), GetString(r1, "sync_id"), GetString(r1, "updated_at"));
         }
-        using var r2 = ExecuteReader("SELECT id, display_name, hw_version, sort_order, description, sync_id FROM controller_modifications WHERE controller_id=@c AND display_name=@n",
+        using var r2 = ExecuteReader("SELECT id, display_name, hw_version, sort_order, description, sync_id, updated_at FROM controller_modifications WHERE controller_id=@c AND display_name=@n",
             cmd => { cmd.Parameters.AddWithValue("@c", controllerId); cmd.Parameters.AddWithValue("@n", displayName); });
-        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), r2.GetString(4), GetString(r2, "sync_id")) : null;
+        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), r2.GetString(4), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
     }
 
     /// <summary>Resolves a hierarchy row's local id: prefer the sync_id map built earlier in THIS

@@ -21,6 +21,7 @@ public partial class Database
                 Prefix = GetInt(reader, "prefix"),
                 SortOrder = GetInt(reader, "sort_order"),
                 SyncId = GetString(reader, "sync_id"),
+                UpdatedAt = GetString(reader, "updated_at"),
             });
         }
         return result;
@@ -29,14 +30,15 @@ public partial class Database
     public int UpsertEquipmentGroup(EquipmentGroup g)
     {
         ExecuteNonQuery(
-            "INSERT INTO equipment_groups(name,prefix,sort_order,sync_id) VALUES(@n,@p,@s,@sy) " +
-            "ON CONFLICT(name) DO UPDATE SET prefix=excluded.prefix, sort_order=excluded.sort_order",
+            "INSERT INTO equipment_groups(name,prefix,sort_order,sync_id,updated_at) VALUES(@n,@p,@s,@sy,@u) " +
+            "ON CONFLICT(name) DO UPDATE SET prefix=excluded.prefix, sort_order=excluded.sort_order, updated_at=excluded.updated_at",
             cmd =>
             {
                 cmd.Parameters.AddWithValue("@n", g.Name);
                 cmd.Parameters.AddWithValue("@p", g.Prefix);
                 cmd.Parameters.AddWithValue("@s", g.SortOrder);
                 cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+                cmd.Parameters.AddWithValue("@u", NowIso());
             });
         var id = ExecuteScalar("SELECT id FROM equipment_groups WHERE name=@n",
             cmd => cmd.Parameters.AddWithValue("@n", g.Name));
@@ -61,10 +63,11 @@ public partial class Database
     /// name column — calling Upsert with a changed name would INSERT a second row instead of
     /// renaming the existing one.</summary>
     public void RenameEquipmentGroup(int id, string newName) =>
-        ExecuteNonQuery("UPDATE equipment_groups SET name=@n WHERE id=@id", cmd =>
+        ExecuteNonQuery("UPDATE equipment_groups SET name=@n, updated_at=@u WHERE id=@id", cmd =>
         {
             cmd.Parameters.AddWithValue("@n", newName);
             cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@u", NowIso());
         });
 
     public bool GroupNameTaken(string name, int? excludeGroupId = null)
@@ -120,13 +123,14 @@ public partial class Database
         FolderName = GetString(r, "folder_name"),
         SortOrder = GetInt(r, "sort_order"),
         SyncId = GetString(r, "sync_id"),
+        UpdatedAt = GetString(r, "updated_at"),
     };
 
     public int UpsertEquipmentSubtype(EquipmentSubType s)
     {
         ExecuteNonQuery(
-            "INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id) VALUES(@g,@n,@p,@f,@s,@sy) " +
-            "ON CONFLICT(group_id,name) DO UPDATE SET prefix=excluded.prefix, folder_name=excluded.folder_name, sort_order=excluded.sort_order",
+            "INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id,updated_at) VALUES(@g,@n,@p,@f,@s,@sy,@u) " +
+            "ON CONFLICT(group_id,name) DO UPDATE SET prefix=excluded.prefix, folder_name=excluded.folder_name, sort_order=excluded.sort_order, updated_at=excluded.updated_at",
             cmd =>
             {
                 cmd.Parameters.AddWithValue("@g", s.GroupId);
@@ -135,6 +139,7 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@f", s.FolderName);
                 cmd.Parameters.AddWithValue("@s", s.SortOrder);
                 cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+                cmd.Parameters.AddWithValue("@u", NowIso());
             });
         var id = ExecuteScalar("SELECT id FROM equipment_subtypes WHERE group_id=@g AND name=@n", cmd =>
         {
@@ -165,11 +170,12 @@ public partial class Database
     /// AddSubtype_Click) — kept in sync here purely for cosmetic consistency; nothing reads it to
     /// build the actual on-disk path, that's always live off Name (see HierarchyService).</summary>
     public void RenameEquipmentSubtype(int id, string newName, string newFolderName) =>
-        ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, folder_name=@f WHERE id=@id", cmd =>
+        ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, folder_name=@f, updated_at=@u WHERE id=@id", cmd =>
         {
             cmd.Parameters.AddWithValue("@n", newName);
             cmd.Parameters.AddWithValue("@f", newFolderName);
             cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@u", NowIso());
         });
 
     public bool SubtypeNameTakenInGroup(int groupId, string name, int? excludeSubtypeId = null)
@@ -211,6 +217,7 @@ public partial class Database
                 Prefix = GetInt(reader, "prefix"),
                 SortOrder = GetInt(reader, "sort_order"),
                 SyncId = GetString(reader, "sync_id"),
+                UpdatedAt = GetString(reader, "updated_at"),
             });
         }
         return result;
@@ -219,14 +226,15 @@ public partial class Database
     public int UpsertControllerModel(ControllerModel c)
     {
         ExecuteNonQuery(
-            "INSERT INTO controller_models(name,prefix,sort_order,sync_id) VALUES(@n,@p,@s,@sy) " +
-            "ON CONFLICT(name) DO UPDATE SET prefix=excluded.prefix, sort_order=excluded.sort_order",
+            "INSERT INTO controller_models(name,prefix,sort_order,sync_id,updated_at) VALUES(@n,@p,@s,@sy,@u) " +
+            "ON CONFLICT(name) DO UPDATE SET prefix=excluded.prefix, sort_order=excluded.sort_order, updated_at=excluded.updated_at",
             cmd =>
             {
                 cmd.Parameters.AddWithValue("@n", c.Name);
                 cmd.Parameters.AddWithValue("@p", c.Prefix);
                 cmd.Parameters.AddWithValue("@s", c.SortOrder);
                 cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+                cmd.Parameters.AddWithValue("@u", NowIso());
             });
         var id = ExecuteScalar("SELECT id FROM controller_models WHERE name=@n", cmd => cmd.Parameters.AddWithValue("@n", c.Name));
         return id is long l ? (int)l : -1;
@@ -274,13 +282,14 @@ public partial class Database
         SortOrder = GetInt(r, "sort_order"),
         Description = GetString(r, "description"),
         SyncId = GetString(r, "sync_id"),
+        UpdatedAt = GetString(r, "updated_at"),
         ControllerName = includeControllerName ? GetString(r, "controller_name") : "",
     };
 
     public int AddControllerModification(int controllerId, string displayName, int hwVersion, string description = "")
     {
         ExecuteNonQuery(
-            "INSERT INTO controller_modifications (controller_id, display_name, hw_version, description, sync_id) VALUES (@c,@d,@h,@desc,@sy)",
+            "INSERT INTO controller_modifications (controller_id, display_name, hw_version, description, sync_id, updated_at) VALUES (@c,@d,@h,@desc,@sy,@u)",
             cmd =>
             {
                 cmd.Parameters.AddWithValue("@c", controllerId);
@@ -288,6 +297,7 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@h", hwVersion);
                 cmd.Parameters.AddWithValue("@desc", description);
                 cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+                cmd.Parameters.AddWithValue("@u", NowIso());
             });
         var id = ExecuteScalar("SELECT last_insert_rowid()");
         return id is long l ? (int)l : -1;

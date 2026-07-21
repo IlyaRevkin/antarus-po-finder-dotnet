@@ -10,4 +10,10 @@ public class EquipmentGroup
 
     /// <summary>Stable cross-machine identity for config sync — survives renames, unlike Name.</summary>
     public string SyncId { get; set; } = "";
+
+    /// <summary>Last local edit timestamp (Database.NowIso() format — "yyyy-MM-dd HH:mm:ss", the same
+    /// space-separated format as fw_version_reservations.expires_at) — used by the config-sync
+    /// conflict detector to tell an actual concurrent edit apart from a normal one-sided update. Set
+    /// automatically by every Database method that changes this row; never set by hand.</summary>
+    public string UpdatedAt { get; set; } = "";
 }

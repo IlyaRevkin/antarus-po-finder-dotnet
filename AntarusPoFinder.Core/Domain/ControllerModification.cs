@@ -13,6 +13,9 @@ public class ControllerModification
     /// <summary>Stable cross-machine identity for config sync — survives renames, unlike DisplayName.</summary>
     public string SyncId { get; set; } = "";
 
+    /// <summary>Last local edit timestamp — see EquipmentGroup.UpdatedAt for format/purpose.</summary>
+    public string UpdatedAt { get; set; } = "";
+
     /// <summary>Populated by DB join, not stored in this table.</summary>
     public string ControllerName { get; set; } = "";
 }

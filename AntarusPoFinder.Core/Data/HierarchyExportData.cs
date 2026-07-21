@@ -9,6 +9,10 @@ public class ExportedGroup
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("prefix")] public int Prefix { get; set; }
     [JsonPropertyName("sort_order")] public int SortOrder { get; set; }
+    // Missing (older export) deserializes to "" — treated as "no edit history known" by the conflict
+    // detector, which falls back to the pre-conflict-detection behavior for that row. See
+    // Database.ConflictResolution.ClassifyHierarchyChange.
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
 }
 
 public class ExportedSubType
@@ -20,6 +24,7 @@ public class ExportedSubType
     [JsonPropertyName("sort_order")] public int SortOrder { get; set; }
     [JsonPropertyName("group_sync_id")] public string GroupSyncId { get; set; } = "";
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
 }
 
 public class ExportedController
@@ -28,6 +33,7 @@ public class ExportedController
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("prefix")] public int Prefix { get; set; }
     [JsonPropertyName("sort_order")] public int SortOrder { get; set; }
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
 }
 
 public class ExportedModification
@@ -39,6 +45,7 @@ public class ExportedModification
     [JsonPropertyName("description")] public string Description { get; set; } = "";
     [JsonPropertyName("controller_sync_id")] public string ControllerSyncId { get; set; } = "";
     [JsonPropertyName("controller_name")] public string ControllerName { get; set; } = "";
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
 }
 
 public class ExportedManufacturer
@@ -167,6 +174,13 @@ public class ImportCounts
     public int ParamFiles { get; set; }
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
+
+    /// <summary>Hierarchy rows where BOTH the local copy and the incoming one were edited since they
+    /// last agreed — held back, NOT applied, NOT counted in TotalChanges (nothing was actually
+    /// changed). See Database.ConflictResolution.cs — the caller checks
+    /// Database.PendingHierarchyConflictCount()/GetPendingHierarchyConflicts() after a real Apply()
+    /// to find out what's waiting on the operator.</summary>
+    public int ConflictsFound { get; set; }
 
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated +
