@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AntarusPoFinder.Core.Data;
@@ -151,6 +152,53 @@ public static class ConfigSyncService
         services.Cfg.SetConfigLastPushedAt(exportedAt);
 
         return new ConfigExportResult(exportedAt, exportedBy, hierarchy);
+    }
+
+    /// <summary>Lets a non-administrator contribute their own AD-login roster entry to the shared
+    /// config. Only the administrator gets the full Export() above (auto-push timer + manual button
+    /// — see NetworkSyncView.PushSection/RefreshConfigSync) because it overwrites the WHOLE shared
+    /// snapshot, and a random naladchik/programmer machine pushing its own possibly-stale local
+    /// hierarchy could wipe tags/manufacturers other machines already have (see the "remove
+    /// locally-extra" comments in Database.ImportHierarchyDataCore). That restriction had an
+    /// unintended side effect: a first-time AD login on a naladchik/programmer machine created a new
+    /// app_users row locally, but that row could never reach the shared file (nothing on that machine
+    /// ever pushes), so no OTHER machine — including the administrator's — would ever see that
+    /// colleague in Настройки → Пользователи. This reads the existing shared file (if any), merges
+    /// ONLY app_users both ways (same last-writer-wins rule as a normal import), and writes back the
+    /// merged roster leaving every other key exactly as read — no hierarchy/settings data from this
+    /// machine is ever pushed.</summary>
+    public static void PushAppUsersOnly(AppServices services, string root, string exportedBy)
+    {
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            throw new DirectoryNotFoundException("Сетевой диск недоступен.");
+
+        var configDir = Path.Combine(root, "Конфиг");
+        Directory.CreateDirectory(configDir);
+        var path = Path.Combine(configDir, "po_finder_config.json");
+
+        JsonObject rootNode;
+        if (File.Exists(path))
+        {
+            var (existingRoot, existingHierarchy) = Parse(path);
+            rootNode = existingRoot;
+            services.Db.MergeAppUsersOnly(existingHierarchy.AppUsers);
+        }
+        else
+        {
+            rootNode = new JsonObject();
+        }
+
+        var mergedUsers = services.Db.GetAppUsers().Select(u => new ExportedAppUser
+        {
+            SyncId = u.SyncId, AdLogin = u.AdLogin, Role = u.Role,
+            FirstLoginAt = u.FirstLoginAt, LastLoginAt = u.LastLoginAt, RoleUpdatedAt = u.RoleUpdatedAt,
+        }).ToList();
+
+        rootNode["app_users"] = JsonSerializer.SerializeToNode(mergedUsers);
+        rootNode["exported_at"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+        rootNode["exported_by"] = exportedBy;
+
+        File.WriteAllText(path, rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static int CountSettingsChanges(AppServices services, JsonObject rootNode)

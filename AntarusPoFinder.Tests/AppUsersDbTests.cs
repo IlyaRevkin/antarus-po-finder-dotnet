@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -157,6 +159,48 @@ public class AppUsersDbTests
         }
         finally { Cleanup(pathA, pathB); }
     }
+
+    [Fact]
+    public void MergeAppUsersOnly_LetsANonAdminRosterEntryReachAnotherMachine_WithoutAFullImport()
+    {
+        // Regression for the reported bug: A (administrator, the only role with a full config push)
+        // never saw B (naladchik, first-time AD login) in Настройки → Пользователи, because only
+        // the administrator's machine ever pushed — B's own new roster row had no way out. This
+        // simulates ConfigSyncService.PushAppUsersOnly's round trip in-memory: B merges A's roster
+        // into its own DB (what a "pull" already did before this fix), then produces its OWN merged
+        // roster and hands it to A via MergeAppUsersOnly (the new narrow non-admin "push") — after
+        // that, A must see B too, without B ever running a full hierarchy export/import.
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            var uA = dbA.TouchOrCreateAppUser("revkin.i");
+            dbA.SetAppUserRole(uA.Id!.Value, "administrator");
+            dbB.TouchOrCreateAppUser("ivanov.p"); // naladchik on B, never pushed anywhere yet
+
+            // B already pulls A's roster today (existing auto-pull behavior).
+            dbB.MergeAppUsersOnly(ToExported(dbA.GetAppUsers()));
+            Assert.NotNull(dbB.FindAppUserByLogin("revkin.i"));
+
+            // Without this fix, A never receives anything back from B.
+            var countsOnA = dbA.MergeAppUsersOnly(ToExported(dbB.GetAppUsers()));
+            Assert.Equal(1, countsOnA.AppUsersAdded); // ivanov.p is new to A
+
+            Assert.NotNull(dbA.FindAppUserByLogin("ivanov.p"));
+            Assert.NotNull(dbA.FindAppUserByLogin("revkin.i"));
+        }
+        finally { Cleanup(pathA, pathB); }
+    }
+
+    private static List<ExportedAppUser> ToExported(List<AppUser> users) =>
+        users.Select(u => new ExportedAppUser
+        {
+            SyncId = u.SyncId, AdLogin = u.AdLogin, Role = u.Role,
+            FirstLoginAt = u.FirstLoginAt, LastLoginAt = u.LastLoginAt, RoleUpdatedAt = u.RoleUpdatedAt,
+        }).ToList();
 
     [Fact]
     public void Import_NeverDeletesAUserEvenIfMissingFromTheIncomingExport()

@@ -1,4 +1,5 @@
 using System.Windows;
+using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Services;
@@ -11,6 +12,7 @@ public record RoleOption(string RoleId, string Label);
 
 public partial class RoleSwitchDialog : Window
 {
+    private readonly AppServices _services;
     private readonly ConfigService _cfg;
     private readonly Database _db;
     private readonly IAdCredentialValidator _adValidator;
@@ -26,6 +28,7 @@ public partial class RoleSwitchDialog : Window
     public RoleSwitchDialog(AppServices services, string currentRole, IAdCredentialValidator? adValidator = null)
     {
         InitializeComponent();
+        _services = services;
         _cfg = services.Cfg;
         _db = services.Db;
         _adValidator = adValidator ?? AdCredentialValidatorFactory.Create(_cfg);
@@ -74,6 +77,14 @@ public partial class RoleSwitchDialog : Window
         var normalized = AppUserAuthService.NormalizeAdLogin(login);
         var isNewUser = _db.FindAppUserByLogin(normalized) is null;
         var user = _db.TouchOrCreateAppUser(normalized);
+
+        // Best-effort — see ConfigSyncService.PushAppUsersOnly: this machine may not be an
+        // administrator (the only role with a full config push), so without this, a brand new AD
+        // login here would sit in this machine's local roster forever and never reach any other
+        // machine, including the administrator's own "Пользователи" list. Never blocks login on a
+        // slow/unreachable share.
+        try { ConfigSyncService.PushAppUsersOnly(_services, _cfg.RootPath(), $"{login} ({RolesConfig.RoleLabel(user.Role)})"); }
+        catch { /* share unreachable — next successful login or manual retry will catch it up */ }
 
         if (isNewUser)
             AppMessageBox.Show(
