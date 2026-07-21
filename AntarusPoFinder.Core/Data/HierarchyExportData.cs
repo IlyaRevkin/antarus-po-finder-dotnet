@@ -76,6 +76,10 @@ public class ExportedFwVersion
     [JsonPropertyName("launch_types")] public string LaunchTypes { get; set; } = "[]";
     [JsonPropertyName("io_map_path")] public string IoMapPath { get; set; } = "";
     [JsonPropertyName("instructions_path")] public string InstructionsPath { get; set; } = "";
+    [JsonPropertyName("hmi_path")] public string HmiPath { get; set; } = "";
+    [JsonPropertyName("executable_hint")] public string ExecutableHint { get; set; } = "";
+    [JsonPropertyName("hmi_executable_hint")] public string HmiExecutableHint { get; set; } = "";
+    [JsonPropertyName("modbus_map_path")] public string ModbusMapPath { get; set; } = "";
     [JsonPropertyName("is_opc")] public int IsOpc { get; set; }
     [JsonPropertyName("request_num")] public string RequestNum { get; set; } = "";
     [JsonPropertyName("upload_date")] public string UploadDate { get; set; } = "";

@@ -41,6 +41,25 @@
                     <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
                 </Grid>
 
+                <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,16,0,0"
+                          Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
+                          ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки."/>
+                <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="120" Cursor="Hand" Margin="0,8,0,0"
+                        Visibility="Collapsed" AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
+                    <TextBlock x:Name="HmiDropZoneLabel" Text="Перетащите файл или папку HMI-проекта сюда&#x0a;&#x0a;или нажмите для выбора"
+                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <Grid x:Name="HmiButtonsRow" Margin="0,8,0,0" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="HmiBrowseFile_Click"/>
+                    <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="HmiBrowseFolder_Click"/>
+                </Grid>
+
                 <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,16,0,6"/>
                 <Border Style="{StaticResource CardBorder}">
                     <TextBlock x:Name="PreviewLabel" Text="—" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
@@ -133,8 +152,8 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта ВВ:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;"/>
+                        <TextBlock Grid.Column="0" Text="Карта in/out (опц.):" VerticalAlignment="Center"
+                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
                         <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
                         <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
                             <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
@@ -154,8 +173,29 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Инструкция:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;Инструкция&quot;"/>
+                        <TextBlock Grid.Column="0" Text="Карта modbus (опц.):" VerticalAlignment="Center"
+                                   ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
+                        <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
+                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
+                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Инструкция (опц.):" VerticalAlignment="Center"
+                                   ToolTip="Копируется в папку контроллера &quot;Инструкция&quot;. Необязательное поле."/>
                         <TextBox Grid.Column="1" x:Name="InstructionsInput" Height="34" Margin="0,0,4,0"/>
                         <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFile_Click" ToolTip="Выбрать файл">
                             <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
@@ -164,31 +204,6 @@
                             <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                         </Button>
                         <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                    </Grid>
-
-                    <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,4,0,8"
-                              Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
-                              ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки."/>
-                    <Grid x:Name="HmiRow" Margin="0,0,0,8" Visibility="Collapsed">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="130"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="HMI-проект:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;HMI&quot;. Если это папка без узнаваемого расширения внутри — будет предложено выбрать исполняемый файл."/>
-                        <TextBox Grid.Column="1" x:Name="HmiInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiClear_Click" ToolTip="Очистить">
                             <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                         </Button>
                     </Grid>

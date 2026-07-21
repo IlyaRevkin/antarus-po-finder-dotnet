@@ -23,6 +23,9 @@ public class FwVersionRecord
     public List<string> LaunchTypes { get; set; } = new();
     public string IoMapPath { get; set; } = "";
     public string InstructionsPath { get; set; } = "";
+    /// <summary>Optional Modbus register map — same shallow-copy/optional-attachment pattern as
+    /// IoMapPath, kept as an independent slot for the same reason (browsed/cleared separately).</summary>
+    public string ModbusMapPath { get; set; } = "";
     /// <summary>Optional second project — some controllers (e.g. Segnetics) ship a PLC file
     /// (.psl/.lfs, the main Filename/DiskPath above) plus a separate HMI project (.fsprj) with its
     /// own resources; kept as an independent optional slot rather than folded into DiskPath so the

@@ -79,7 +79,8 @@ public partial class Database
                    fv.dt_str, fv.filename, fv.disk_path, fv.local_path, fv.description,
                    fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
-                   fv.status, fv.released,
+                   fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
+                   fv.modbus_map_path,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -98,7 +99,9 @@ public partial class Database
                     IoMapPath = r.GetString(12), InstructionsPath = r.GetString(13), IsOpc = r.GetInt32(14),
                     RequestNum = r.GetString(15), UploadDate = r.GetString(16), Archived = r.GetInt32(17),
                     Tags = r.GetString(18), Status = GetString(r, "status"), Released = GetInt(r, "released"),
-                    GroupName = r.GetString(21),
+                    HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
+                    HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
+                    GroupName = GetString(r, "group_name"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
@@ -489,31 +492,66 @@ public partial class Database
             if (subId is null || ctrlId is null) continue;
 
             var existing = ExecuteReader(
-                "SELECT id, status, released FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v", cmd =>
+                """
+                SELECT id, status, released, io_map_path, instructions_path, hmi_path,
+                       executable_hint, hmi_executable_hint, modbus_map_path
+                FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
+                """, cmd =>
                 {
                     cmd.Parameters.AddWithValue("@s", subId.Value);
                     cmd.Parameters.AddWithValue("@c", ctrlId.Value);
                     cmd.Parameters.AddWithValue("@v", fv.VersionRaw);
                 });
-            (int Id, string Status, int Released)? existingRow = null;
+            (int Id, string Status, int Released, string IoMapPath, string InstructionsPath, string HmiPath,
+                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath)? existingRow = null;
             using (existing)
                 if (existing.Read())
-                    existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"));
+                    existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"),
+                        GetString(existing, "io_map_path"), GetString(existing, "instructions_path"), GetString(existing, "hmi_path"),
+                        GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"));
 
             if (existingRow is not null)
             {
-                var (id, localStatus, localReleased) = existingRow.Value;
+                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus) = existingRow.Value;
                 var incomingStatus = string.IsNullOrEmpty(fv.Status) ? "active" : fv.Status;
+
+                // A version can be uploaded on one machine, exported/synced BEFORE its HMI project
+                // (or Карта ВВ/Инструкция/Карта modbus) is attached, and only get those attachments
+                // afterwards on the originating machine — without this, every OTHER machine's copy
+                // of that row stays permanently blank on these fields (see root-cause note above:
+                // this exact gap made a colleague's "HMI-проект" button show up while it silently
+                // never appeared for machines that only ever received the row via config sync).
+                // Never overwrites a locally-filled value — only fills in what's still empty here.
+                string Backfill(string local, string incoming) => string.IsNullOrEmpty(local) ? incoming : local;
+                var newIoMap = Backfill(localIoMap, fv.IoMapPath);
+                var newInstr = Backfill(localInstr, fv.InstructionsPath);
+                var newHmi = Backfill(localHmi, fv.HmiPath);
+                var newExecHint = Backfill(localExecHint, fv.ExecutableHint);
+                var newHmiExecHint = Backfill(localHmiExecHint, fv.HmiExecutableHint);
+                var newModbus = Backfill(localModbus, fv.ModbusMapPath);
+                var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
+                                    newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus;
+
                 var advances = (localStatus == "active" && incomingStatus != "active") ||
-                               (localReleased == 0 && fv.Released != 0);
+                               (localReleased == 0 && fv.Released != 0) || fieldsChanged;
                 if (!advances) continue;
 
                 counts.FwVersions++;
                 if (!apply) continue;
-                ExecuteNonQuery("UPDATE fw_versions SET status=@st, released=@rel WHERE id=@id", cmd =>
+                ExecuteNonQuery("""
+                    UPDATE fw_versions SET status=@st, released=@rel, io_map_path=@io, instructions_path=@instr,
+                        hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb
+                    WHERE id=@id
+                    """, cmd =>
                 {
                     cmd.Parameters.AddWithValue("@st", localStatus == "active" ? incomingStatus : localStatus);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
+                    cmd.Parameters.AddWithValue("@io", newIoMap);
+                    cmd.Parameters.AddWithValue("@instr", newInstr);
+                    cmd.Parameters.AddWithValue("@hmi", newHmi);
+                    cmd.Parameters.AddWithValue("@eh", newExecHint);
+                    cmd.Parameters.AddWithValue("@heh", newHmiExecHint);
+                    cmd.Parameters.AddWithValue("@mb", newModbus);
                     cmd.Parameters.AddWithValue("@id", id);
                 });
                 continue;
@@ -526,11 +564,13 @@ public partial class Database
                 INSERT INTO fw_versions
                    (subtype_id, controller_id, eq_prefix, sub_prefix, hw_version, sw_version,
                     dt_str, version_raw, filename, disk_path, local_path, description, changelog,
-                    launch_types, io_map_path, instructions_path, is_opc, request_num,
+                    launch_types, io_map_path, instructions_path, hmi_path, executable_hint, hmi_executable_hint,
+                    modbus_map_path, is_opc, request_num,
                     upload_date, archived, tags, status, released)
                 VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                     @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
-                    @launch_types,@io_map_path,@instructions_path,@is_opc,@request_num,
+                    @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
+                    @modbus_map_path,@is_opc,@request_num,
                     @upload_date,@archived,@tags,@status,@released)
                 """, cmd =>
             {
@@ -550,6 +590,10 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@launch_types", fv.LaunchTypes);
                 cmd.Parameters.AddWithValue("@io_map_path", fv.IoMapPath);
                 cmd.Parameters.AddWithValue("@instructions_path", fv.InstructionsPath);
+                cmd.Parameters.AddWithValue("@hmi_path", fv.HmiPath);
+                cmd.Parameters.AddWithValue("@executable_hint", fv.ExecutableHint);
+                cmd.Parameters.AddWithValue("@hmi_executable_hint", fv.HmiExecutableHint);
+                cmd.Parameters.AddWithValue("@modbus_map_path", fv.ModbusMapPath);
                 cmd.Parameters.AddWithValue("@is_opc", fv.IsOpc);
                 cmd.Parameters.AddWithValue("@request_num", fv.RequestNum);
                 cmd.Parameters.AddWithValue("@upload_date", string.IsNullOrEmpty(fv.UploadDate) ? NowIso() : fv.UploadDate);
@@ -691,22 +735,30 @@ public partial class Database
 
         var changedCount = 0;
 
-        var fwRows = new List<(int Id, string DiskPath, string IoMapPath, string InstructionsPath)>();
-        using (var r = ExecuteReader("SELECT id, disk_path, io_map_path, instructions_path FROM fw_versions"))
+        var fwRows = new List<(int Id, string DiskPath, string IoMapPath, string InstructionsPath, string HmiPath, string ModbusMapPath)>();
+        using (var r = ExecuteReader("SELECT id, disk_path, io_map_path, instructions_path, hmi_path, modbus_map_path FROM fw_versions"))
             while (r.Read())
-                fwRows.Add((r.GetInt32(0), GetString(r, "disk_path"), GetString(r, "io_map_path"), GetString(r, "instructions_path")));
+                fwRows.Add((r.GetInt32(0), GetString(r, "disk_path"), GetString(r, "io_map_path"), GetString(r, "instructions_path"),
+                    GetString(r, "hmi_path"), GetString(r, "modbus_map_path")));
 
         foreach (var row in fwRows)
         {
             var (disk, c1) = Remap(row.DiskPath);
             var (io, c2) = Remap(row.IoMapPath);
             var (instr, c3) = Remap(row.InstructionsPath);
-            if (!c1 && !c2 && !c3) continue;
-            ExecuteNonQuery("UPDATE fw_versions SET disk_path=@d, io_map_path=@io, instructions_path=@instr WHERE id=@id", cmd =>
+            var (hmi, c4) = Remap(row.HmiPath);
+            var (modbus, c5) = Remap(row.ModbusMapPath);
+            if (!c1 && !c2 && !c3 && !c4 && !c5) continue;
+            ExecuteNonQuery("""
+                UPDATE fw_versions SET disk_path=@d, io_map_path=@io, instructions_path=@instr,
+                    hmi_path=@hmi, modbus_map_path=@mb WHERE id=@id
+                """, cmd =>
             {
                 cmd.Parameters.AddWithValue("@d", disk);
                 cmd.Parameters.AddWithValue("@io", io);
                 cmd.Parameters.AddWithValue("@instr", instr);
+                cmd.Parameters.AddWithValue("@hmi", hmi);
+                cmd.Parameters.AddWithValue("@mb", modbus);
                 cmd.Parameters.AddWithValue("@id", row.Id);
             });
             changedCount++;

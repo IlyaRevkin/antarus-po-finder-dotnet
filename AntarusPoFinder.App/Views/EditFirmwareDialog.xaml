@@ -19,6 +19,12 @@
         <TextBlock Text="Тип пуска:" Margin="0,0,0,4"/>
         <StackPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
 
+        <StackPanel x:Name="HmiExecutablePanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="Исполняемый файл HMI-проекта:" Margin="0,0,0,4"
+                       ToolTip="Какой файл в папке HMI-проекта открывать по кнопке «HMI-проект»."/>
+            <ComboBox x:Name="HmiExecutableCombo" Height="34"/>
+        </StackPanel>
+
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
             <Button Content="Сохранить" Width="90" Click="Save_Click" IsDefault="True"/>

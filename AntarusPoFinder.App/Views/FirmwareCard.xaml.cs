@@ -19,6 +19,7 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? OpenHmiRequested;
     public event EventHandler? DownloadRequested;
     public event EventHandler? MapRequested;
+    public event EventHandler? ModbusMapRequested;
     public event EventHandler? ParamsRequested;
     public event EventHandler? InstructionsRequested;
     /// <summary>Separately-uploaded HMI project (see UploadView "Добавить HMI-проект") — not to be
@@ -96,6 +97,9 @@ public partial class FirmwareCard : UserControl
 
         if (!string.IsNullOrEmpty(result.IoMapPath) || hasMap)
             ActionsPanel.Children.Add(MakeActionButton("Карта in/out", (_, _) => MapRequested?.Invoke(this, EventArgs.Empty)));
+
+        if (!string.IsNullOrEmpty(result.ModbusMapPath))
+            ActionsPanel.Children.Add(MakeActionButton("Карта modbus", (_, _) => ModbusMapRequested?.Invoke(this, EventArgs.Empty)));
 
         if (hasParams)
             ActionsPanel.Children.Add(MakeActionButton("Параметры", (_, _) => ParamsRequested?.Invoke(this, EventArgs.Empty)));

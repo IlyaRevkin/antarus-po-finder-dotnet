@@ -27,11 +27,16 @@ public static class FirmwareSync
             var instrSrc = Path.Combine(ctrlDir, "Инструкция");
             if (Directory.Exists(instrSrc))
                 FileSystemHelpers.CopyFileOrFolderShallow(instrSrc, Path.Combine(ConfigService.LocalTemplates, "Инструкция", localDir));
+            var modbusSrc = Path.Combine(ctrlDir, "Карта Modbus");
+            if (Directory.Exists(modbusSrc))
+                FileSystemHelpers.CopyFileOrFolderShallow(modbusSrc, Path.Combine(ConfigService.LocalTemplates, "Карта Modbus", localDir));
         }
         if (!string.IsNullOrEmpty(result.IoMapPath) && (File.Exists(result.IoMapPath) || Directory.Exists(result.IoMapPath)))
             FileSystemHelpers.CopyFileOrFolderShallow(result.IoMapPath, Path.Combine(ConfigService.LocalTemplates, "Карта ВВ", localDir));
         if (!string.IsNullOrEmpty(result.InstructionsPath) && (File.Exists(result.InstructionsPath) || Directory.Exists(result.InstructionsPath)))
             FileSystemHelpers.CopyFileOrFolderShallow(result.InstructionsPath, Path.Combine(ConfigService.LocalTemplates, "Инструкция", localDir));
+        if (!string.IsNullOrEmpty(result.ModbusMapPath) && (File.Exists(result.ModbusMapPath) || Directory.Exists(result.ModbusMapPath)))
+            FileSystemHelpers.CopyFileOrFolderShallow(result.ModbusMapPath, Path.Combine(ConfigService.LocalTemplates, "Карта Modbus", localDir));
 
         return dst;
     }

@@ -19,6 +19,7 @@ public class HierarchyResult
     public string WorkType { get; init; } = "";
     public string IoMapPath { get; init; } = "";
     public string InstructionsPath { get; init; } = "";
+    public string ModbusMapPath { get; init; } = "";
     public string HmiPath { get; init; } = "";
     public string ExecutableHint { get; init; } = "";
     public string HmiExecutableHint { get; init; } = "";
@@ -150,6 +151,7 @@ public static class SearchService
             WorkType = string.Join(", ", row.LaunchTypes),
             IoMapPath = row.IoMapPath,
             InstructionsPath = row.InstructionsPath,
+            ModbusMapPath = row.ModbusMapPath,
             HmiPath = row.HmiPath,
             ExecutableHint = row.ExecutableHint,
             HmiExecutableHint = row.HmiExecutableHint,

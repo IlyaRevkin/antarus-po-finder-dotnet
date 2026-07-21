@@ -150,6 +150,7 @@ public partial class SearchView : UserControl
             card.OpenHmiRequested += (s, _) => OpenFiltered(((FirmwareCard)s!).Result, KincoHmiExts, "HMI");
             card.DownloadRequested += (s, _) => DownloadFirmware(((FirmwareCard)s!).Result);
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
+            card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
             card.InstructionsRequested += (s, _) => OpenInstructions(((FirmwareCard)s!).Result);
             card.HmiProjectRequested += (s, _) => OpenHmiProject(((FirmwareCard)s!).Result);
@@ -370,7 +371,7 @@ public partial class SearchView : UserControl
         var dlg = new EditFirmwareDialog(_services.Db, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes);
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes, dlg.ResultHmiExecutableHint);
         _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }
@@ -528,6 +529,20 @@ public partial class SearchView : UserControl
         if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
         {
             AppMessageBox.Show($"Файл карты не найден.\nПуть: {result.IoMapPath}", "Карта in/out", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        TryOpen(path);
+    }
+
+    private void OpenModbusMap(HierarchyResult result)
+    {
+        var path = result.ModbusMapPath;
+        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+            path = FindSiblingFolder(result, "Карта Modbus") ?? path;
+
+        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+        {
+            AppMessageBox.Show($"Файл карты Modbus не найден.\nПуть: {result.ModbusMapPath}", "Карта modbus", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         TryOpen(path);

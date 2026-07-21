@@ -24,6 +24,7 @@ public partial class UploadView : UserControl
     private string? _srcPath;
     private int? _autoDetectedModId;
     private string? _executableHint;
+    private string? _hmiPath;
     private string? _hmiExecutableHint;
 
     /// <summary>Recognized firmware-project extensions per field — used only to decide whether a
@@ -253,21 +254,22 @@ public partial class UploadView : UserControl
 
     private void OfferCarryOver()
     {
-        if (!string.IsNullOrEmpty(IoMapInput.Text) || !string.IsNullOrEmpty(InstructionsInput.Text)) return;
+        if (!string.IsNullOrEmpty(IoMapInput.Text) || !string.IsNullOrEmpty(InstructionsInput.Text) || !string.IsNullOrEmpty(ModbusMapInput.Text)) return;
         if (SubCombo.SelectedItem is not SubtypeOption subOption) return;
         if (CtrlCombo.SelectedItem is not ControllerModification mod) return;
 
         var prev = _services.Db.GetLastActiveFwVersion(subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
         if (prev is null) return;
-        if (string.IsNullOrEmpty(prev.IoMapPath) && string.IsNullOrEmpty(prev.InstructionsPath)) return;
+        if (string.IsNullOrEmpty(prev.IoMapPath) && string.IsNullOrEmpty(prev.InstructionsPath) && string.IsNullOrEmpty(prev.ModbusMapPath)) return;
 
         var result = AppMessageBox.Show(
-            $"Предыдущая версия: {prev.VersionRaw}\nПеренести Карту ВВ и Инструкцию из неё?",
+            $"Предыдущая версия: {prev.VersionRaw}\nПеренести Карту in/out, Карту modbus и Инструкцию из неё?",
             "Перенести файлы", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
         if (result == MessageBoxResult.Yes)
         {
             IoMapInput.Text = prev.IoMapPath;
             InstructionsInput.Text = prev.InstructionsPath;
+            ModbusMapInput.Text = prev.ModbusMapPath;
         }
     }
 
@@ -475,15 +477,45 @@ public partial class UploadView : UserControl
 
     private void InstructionsClear_Click(object sender, RoutedEventArgs e) => InstructionsInput.Text = "";
 
+    private void ModbusMapBrowseFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog();
+        if (dlg.ShowDialog() == true) ModbusMapInput.Text = dlg.FileName;
+    }
+
+    private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog();
+        if (dlg.ShowDialog() == true) ModbusMapInput.Text = dlg.FolderName;
+    }
+
+    private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => ModbusMapInput.Text = "";
+
     private void HmiCheck_Toggled(object sender, RoutedEventArgs e)
     {
         bool isChecked = HmiCheck.IsChecked == true;
-        HmiRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        HmiDropZone.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        HmiButtonsRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
         if (!isChecked)
         {
-            HmiInput.Text = "";
+            _hmiPath = null;
             _hmiExecutableHint = null;
+            HmiDropZoneLabel.Text = "Перетащите файл или папку HMI-проекта сюда\n\nили нажмите для выбора";
         }
+    }
+
+    private void HmiDropZone_Click(object sender, MouseButtonEventArgs e) => HmiBrowseFile_Click(sender, e);
+
+    private void HmiDropZone_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void HmiDropZone_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            OnHmiPathPicked(paths[0]);
     }
 
     private void HmiBrowseFile_Click(object sender, RoutedEventArgs e)
@@ -494,22 +526,21 @@ public partial class UploadView : UserControl
             Filter = "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
         };
         if (dlg.ShowDialog() != true) return;
-        HmiInput.Text = dlg.FileName;
-        _hmiExecutableHint = null;
+        OnHmiPathPicked(dlg.FileName);
     }
 
     private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Выбрать папку HMI-проекта" };
         if (dlg.ShowDialog() != true) return;
-        HmiInput.Text = dlg.FolderName;
-        _hmiExecutableHint = PromptExecutableHint(dlg.FolderName, HmiExecutableExts, "HMI-проекта");
+        OnHmiPathPicked(dlg.FolderName);
     }
 
-    private void HmiClear_Click(object sender, RoutedEventArgs e)
+    private void OnHmiPathPicked(string path)
     {
-        HmiInput.Text = "";
-        _hmiExecutableHint = null;
+        _hmiPath = path;
+        _hmiExecutableHint = Directory.Exists(path) ? PromptExecutableHint(path, HmiExecutableExts, "HMI-проекта") : null;
+        HmiDropZoneLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
     }
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
@@ -640,24 +671,39 @@ public partial class UploadView : UserControl
             try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(InstructionsInput.Text, _services.Hierarchy.InstrPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
+        string modbusStored = "";
+        if (!string.IsNullOrEmpty(ModbusMapInput.Text))
+        {
+            try { modbusStored = FileSystemHelpers.CopyFileOrFolderShallow(ModbusMapInput.Text, _services.Hierarchy.ModbusMapPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
+            catch (Exception ex) { warnings.Add($"Карта modbus: {ex.Message}"); }
+        }
         string hmiStored = "";
-        if (HmiCheck.IsChecked == true && !string.IsNullOrEmpty(HmiInput.Text))
+        if (HmiCheck.IsChecked == true && !string.IsNullOrEmpty(_hmiPath))
         {
             try
             {
-                var hmiDstFolder = _services.Hierarchy.HmiPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName);
-                Directory.CreateDirectory(hmiDstFolder);
-                // Deep copy (not the shallow IoMap/Instructions helper) — the operator explicitly
-                // flagged that an HMI project folder can carry drivers/resources in subfolders
-                // alongside the .fsprj itself, all of which need to travel with it.
-                if (Directory.Exists(HmiInput.Text))
+                var hmiRootFolder = _services.Hierarchy.HmiPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName);
+                Directory.CreateDirectory(hmiRootFolder);
+                // Named after the PLC version + "_hmi" (not just copied under the shared "HMI" folder
+                // with its original name) — the HMI folder used to be flat/unversioned, so every
+                // upload for this controller silently overwrote whatever HMI project was there before
+                // (CopyDirectoryContents doesn't delete files removed from the new source, so a stale
+                // file from an older HMI could even survive alongside the new ones). Giving each
+                // upload its own version-named entry makes every version's HMI project a distinct,
+                // non-destructive slot, same as how "ПО" version folders already work per firmware.
+                if (Directory.Exists(_hmiPath))
                 {
-                    CopyDirectoryContents(HmiInput.Text, hmiDstFolder);
+                    var hmiDstFolder = Path.Combine(hmiRootFolder, $"{fwv.Raw}_hmi");
+                    Directory.CreateDirectory(hmiDstFolder);
+                    CopyDirectoryContents(_hmiPath, hmiDstFolder);
                     hmiStored = hmiDstFolder;
                 }
                 else
                 {
-                    hmiStored = FileSystemHelpers.CopyFileOrFolderShallow(HmiInput.Text, hmiDstFolder);
+                    var hmiExt = Path.GetExtension(_hmiPath);
+                    var hmiDstName = $"{fwv.Raw}_hmi{hmiExt}";
+                    File.Copy(_hmiPath, Path.Combine(hmiRootFolder, hmiDstName), overwrite: true);
+                    hmiStored = Path.Combine(hmiRootFolder, hmiDstName);
                 }
             }
             catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
@@ -690,6 +736,7 @@ public partial class UploadView : UserControl
             LaunchTypes = launchTypes,
             IoMapPath = ioMapStored,
             InstructionsPath = instrStored,
+            ModbusMapPath = modbusStored,
             HmiPath = hmiStored,
             ExecutableHint = _executableHint ?? "",
             HmiExecutableHint = HmiCheck.IsChecked == true ? _hmiExecutableHint ?? "" : "",
@@ -766,9 +813,13 @@ public partial class UploadView : UserControl
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
         IoMapInput.Text = "";
         InstructionsInput.Text = "";
+        ModbusMapInput.Text = "";
         HmiCheck.IsChecked = false;
-        HmiRow.Visibility = Visibility.Collapsed;
-        HmiInput.Text = "";
+        HmiDropZone.Visibility = Visibility.Collapsed;
+        HmiButtonsRow.Visibility = Visibility.Collapsed;
+        _hmiPath = null;
+        _hmiExecutableHint = null;
+        HmiDropZoneLabel.Text = "Перетащите файл или папку HMI-проекта сюда\n\nили нажмите для выбора";
         StatusLabel.Text = "";
         RefreshReservationPicker();
         UpdatePreview();
