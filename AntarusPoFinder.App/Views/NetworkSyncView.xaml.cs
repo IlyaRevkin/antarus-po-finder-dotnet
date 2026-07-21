@@ -43,6 +43,27 @@ public partial class NetworkSyncView : UserControl
 
         var lastPush = _services.Cfg.ConfigLastPushedAt();
         LastPushText.Text = string.IsNullOrEmpty(lastPush) ? "" : $"Последняя отправка: {lastPush}";
+
+        var conflictCount = _services.Db.PendingHierarchyConflictCount();
+        ConflictStatusPanel.Visibility = conflictCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (conflictCount > 0)
+            ConflictStatusText.Text = $"Конфликты синхронизации, требуют решения: {conflictCount}";
+    }
+
+    private void ShowConflicts_Click(object sender, RoutedEventArgs e)
+    {
+        var pending = _services.Db.GetPendingHierarchyConflicts();
+        if (pending.Count == 0)
+        {
+            RefreshIfActive();
+            return;
+        }
+
+        var dlg = new ConflictResolutionDialog(_services, pending) { Owner = Application.Current.MainWindow };
+        dlg.ShowDialog();
+        if (dlg.ResolvedCount > 0)
+            _host.ShowStatus($"Разрешено конфликтов синхронизации: {dlg.ResolvedCount}", category: NotificationCategory.Sync);
+        RefreshIfActive();
     }
 
     private void Load()
@@ -132,12 +153,27 @@ public partial class NetworkSyncView : UserControl
         var result = ConfigSyncService.Apply(_services, info.ConfigPath, root);
         _host.ReloadSidebarApps();
         LastSyncText.Text = $"Последняя синхронизация: {result.ExportedAt} (от {result.ExportedBy})";
+
+        var conflictNote = result.Counts.ConflictsFound > 0 ? $"\nКонфликтов, требующих решения: {result.Counts.ConflictsFound}" : "";
         AppMessageBox.Show(
             $"Экспорт от: {result.ExportedAt} ({result.ExportedBy})\n\n" +
             $"Настроек применено: {result.SettingsApplied}\n" +
-            $"Изменений в справочнике: {result.Counts.TotalChanges}",
+            $"Изменений в справочнике: {result.Counts.TotalChanges}" + conflictNote,
             "Синхронизация завершена", MessageBoxButton.OK, MessageBoxImage.Information);
         _host.ShowStatus($"Конфиг обновлён: настроек {result.SettingsApplied}, изменений {result.Counts.TotalChanges}", category: NotificationCategory.Sync);
+
+        // A manual sync is already a deliberate, blocking action — open the resolution dialog right
+        // here instead of just raising the passive banner the periodic auto-pull uses (see
+        // MainWindowViewModel.CheckForHierarchyConflicts), so the operator resolves it immediately
+        // while they're already looking at this page.
+        var pending = _services.Db.GetPendingHierarchyConflicts();
+        if (pending.Count > 0)
+        {
+            var dlg = new ConflictResolutionDialog(_services, pending) { Owner = Application.Current.MainWindow };
+            dlg.ShowDialog();
+            if (dlg.ResolvedCount > 0)
+                _host.ShowStatus($"Разрешено конфликтов синхронизации: {dlg.ResolvedCount}", category: NotificationCategory.Sync);
+        }
     }
 
     private void AutoPushCheck_Changed(object sender, RoutedEventArgs e)

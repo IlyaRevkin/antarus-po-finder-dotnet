@@ -1,0 +1,80 @@
+<Window x:Class="AntarusPoFinder.App.Views.ConflictResolutionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Конфликты синхронизации" Width="820" Height="600" MinWidth="700" MinHeight="420"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Эти записи справочника были изменены одновременно и у вас, и на диске. Выберите для каждой, какую версию оставить целиком (по всей записи, не по отдельным полям) — вторая версия будет отброшена."
+                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <Grid Grid.Row="1" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="1" Text="У меня (эта машина)" FontWeight="SemiBold" FontSize="11"/>
+            <TextBlock Grid.Column="2" Text="На диске (конфиг)" FontWeight="SemiBold" FontSize="11"/>
+        </Grid>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="ConflictsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" CornerRadius="4"
+                                Padding="12" Margin="0,0,0,12" Background="{DynamicResource BgSidebarBrush}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding DisplayLabel}" FontWeight="Bold"
+                                           Foreground="{DynamicResource DangerBrush}" Margin="0,0,0,8"/>
+
+                                <ItemsControl ItemsSource="{Binding Fields}" Margin="0,0,0,8">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="140"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding FieldLabel}" Style="{StaticResource MutedText}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding LocalValue}" TextWrapping="Wrap"
+                                                           Foreground="{DynamicResource TextBrush}"/>
+                                                <TextBlock Grid.Column="2" Text="{Binding IncomingValue}" TextWrapping="Wrap"
+                                                           Foreground="{DynamicResource TextBrush}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <RadioButton Grid.Column="1" Content="Оставить мою (эта машина)" IsChecked="{Binding KeepLocal, Mode=TwoWay}"/>
+                                    <RadioButton Grid.Column="2" Content="Оставить с диска" IsChecked="{Binding KeepIncoming, Mode=TwoWay}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Решить позже" Style="{StaticResource SecondaryButton}" Width="130" Margin="0,0,8,0" Click="Later_Click"/>
+            <Button Content="Применить выбор" Width="150" Click="Apply_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -51,6 +51,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private string _fwUpdateBannerText = "";
     [ObservableProperty] private bool _unknownItemsBannerVisible;
     [ObservableProperty] private string _unknownItemsBannerText = "";
+    [ObservableProperty] private bool _hierarchyConflictBannerVisible;
+    [ObservableProperty] private string _hierarchyConflictBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
     /// <summary>Быстрый доступ display mode — see ConfigService.QuickAppsDisplayMode. Two separate
     /// Visibility-driving flags (rather than one enum bound with a converter) because MainWindow.xaml
@@ -613,7 +615,54 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         ConfigSyncService.Apply(_services, info.ConfigPath, root);
         ReloadSidebarApps();
         RefreshSearchIfActive();
+        CheckForHierarchyConflicts();
     }
+
+    /// <summary>Surfaces held-back hierarchy conflicts (see Database.ClassifyHierarchyChange) the same
+    /// way the unknown-items/firmware-update banners work: a passive banner with a "Показать" button,
+    /// not a forced modal popup that interrupts whatever the operator is doing mid-tick. Called after
+    /// every silent auto-pull (CheckForConfigUpdate) — NetworkSyncView's manual "Синхронизировать
+    /// сейчас" instead opens the resolution dialog directly, since that's already a deliberate,
+    /// blocking action.</summary>
+    private void CheckForHierarchyConflicts()
+    {
+        var count = _services.Db.PendingHierarchyConflictCount();
+        if (count == 0)
+        {
+            HierarchyConflictBannerVisible = false;
+            return;
+        }
+        if (!_services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.Sync)) return;
+
+        HierarchyConflictBannerText = $"Конфликты синхронизации, требуют решения: {count}";
+        HierarchyConflictBannerVisible = true;
+        AddNotification(HierarchyConflictBannerText, NotificationCategory.Sync, reopen: () => HierarchyConflictBannerVisible = true);
+    }
+
+    [RelayCommand]
+    private void ShowHierarchyConflictsDetails()
+    {
+        var pending = _services.Db.GetPendingHierarchyConflicts();
+        if (pending.Count == 0)
+        {
+            HierarchyConflictBannerVisible = false;
+            return;
+        }
+
+        var dlg = new ConflictResolutionDialog(_services, pending) { Owner = Application.Current.MainWindow };
+        dlg.ShowDialog();
+
+        if (dlg.ResolvedCount > 0)
+        {
+            ShowStatus($"Разрешено конфликтов синхронизации: {dlg.ResolvedCount}", 6000, NotificationCategory.Sync);
+            ReloadSidebarApps();
+            RefreshSearchIfActive();
+        }
+        CheckForHierarchyConflicts();
+    }
+
+    [RelayCommand]
+    private void DismissHierarchyConflictsBanner() => HierarchyConflictBannerVisible = false;
 
     private void RunSync()
     {

@@ -9,6 +9,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -72,7 +73,25 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3">
+        <!-- Hierarchy sync conflicts banner (Задача 1 — see Database.ClassifyHierarchyChange) -->
+        <Border Grid.Row="3" Background="{DynamicResource AccentBrush}"
+                Visibility="{Binding HierarchyConflictBannerVisible, Converter={StaticResource BoolToVis}}">
+            <Grid Margin="16,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding HierarchyConflictBannerText}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Показать и решить" Margin="12,0,8,0"
+                        Command="{Binding ShowHierarchyConflictsDetailsCommand}"/>
+                <Button Grid.Column="2" Content="Скрыть" Style="{StaticResource SecondaryButton}"
+                        Command="{Binding DismissHierarchyConflictsBannerCommand}"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="215"/>
                 <ColumnDefinition Width="*"/>
@@ -350,7 +369,7 @@
         </Grid>
 
         <!-- Status bar -->
-        <Border Grid.Row="4" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="5" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid Margin="10,4">
                 <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" HorizontalAlignment="Left"/>
                 <TextBlock Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}" HorizontalAlignment="Right"/>
@@ -358,6 +377,6 @@
         </Border>
 
         <!-- Onboarding tour overlay — sits on top of everything, only populated while the tour runs -->
-        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="5" Focusable="False"/>
+        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="6" Focusable="False"/>
     </Grid>
 </Window>
