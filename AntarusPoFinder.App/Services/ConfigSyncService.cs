@@ -42,7 +42,7 @@ public static class ConfigSyncService
         "current_role", "theme", "keep_archives", "image_server_port", "ad_domain",
         "ad_group_administrator", "ad_group_programmer", "ad_group_naladchik", "ad_auth_mode", "ad_http_url",
         "sync_interval_min", "quick_apps",
-        "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at",
+        "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at", "config_last_checked_at",
         "scan_resolution_dpi", "config_auto_push", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
@@ -68,6 +68,7 @@ public static class ConfigSyncService
             if (!File.Exists(path)) return null;
 
             var (rootNode, hierarchyData) = Parse(path);
+            services.Cfg.SetConfigLastCheckedAt(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"));
             var exportedAt = rootNode["exported_at"]?.GetValue<string>() ?? "";
             if (string.IsNullOrEmpty(exportedAt) || string.CompareOrdinal(exportedAt, services.Cfg.ConfigLastSyncedAt()) <= 0)
                 return null;

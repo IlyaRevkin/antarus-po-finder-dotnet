@@ -111,6 +111,17 @@ public class ConfigService
     public string ConfigLastSyncedAt() => Get("config_last_synced_at");
     public void SetConfigLastSyncedAt(string exportedAt) => Set("config_last_synced_at", exportedAt);
 
+    /// <summary>When this machine last successfully READ the shared config file — set on every
+    /// check (background tick or manual button), whether or not it found anything new to apply.
+    /// Deliberately separate from ConfigLastSyncedAt (which only moves on an actual Apply): if this
+    /// timestamp isn't advancing, the pull side isn't running at all (dead timer, unreachable share);
+    /// if it IS advancing but ConfigLastSyncedAt stays put, checks are running and genuinely finding
+    /// nothing to apply. Surfaced on Настройки → Сетевые диски so a "sync isn't arriving" report can
+    /// actually be narrowed down instead of guessed at. Per-machine only — never synced (see
+    /// ConfigSyncService.SkipSettingsKeys).</summary>
+    public string ConfigLastCheckedAt() => Get("config_last_checked_at");
+    public void SetConfigLastCheckedAt(string at) => Set("config_last_checked_at", at);
+
     /// <summary>exported_at value this machine last wrote to the share (manual "Отправить сейчас" or
     /// the administrator's auto-push timer) — surfaced passively on NetworkSyncView instead of a
     /// status-bar toast on every auto-push tick.</summary>

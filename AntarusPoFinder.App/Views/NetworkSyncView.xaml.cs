@@ -38,6 +38,9 @@ public partial class NetworkSyncView : UserControl
         var lastSync = _services.Cfg.ConfigLastSyncedAt();
         LastSyncText.Text = string.IsNullOrEmpty(lastSync) ? "" : $"Последняя синхронизация: {lastSync}";
 
+        var lastCheck = _services.Cfg.ConfigLastCheckedAt();
+        LastCheckText.Text = string.IsNullOrEmpty(lastCheck) ? "" : $"Последняя проверка диска: {lastCheck}";
+
         var lastPush = _services.Cfg.ConfigLastPushedAt();
         LastPushText.Text = string.IsNullOrEmpty(lastPush) ? "" : $"Последняя отправка: {lastPush}";
     }

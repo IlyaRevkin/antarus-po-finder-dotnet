@@ -33,6 +33,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private int? _lastModerationCount;
     private List<FirmwareUpdateInfo> _pendingFwUpdates = new();
     private List<UnknownEntry> _pendingUnknownItems = new();
+    private bool _configPushLastFailed;
 
     private bool _suppressThemeToggleHandler;
 
@@ -746,10 +747,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _configPushTimer.Start();
     }
 
-    /// <summary>Runs silently — no status-bar toast — same reasoning as CheckForConfigUpdate: this
-    /// fires every config_push_interval_min minutes, and a repeated toast for routine background
-    /// activity reads as spam. ConfigSyncService.Export already persists config_last_pushed_at, which
-    /// NetworkSyncView.RefreshIfActive surfaces passively whenever the user opens that page.</summary>
+    /// <summary>Runs silently on SUCCESS — no status-bar toast — same reasoning as
+    /// CheckForConfigUpdate: this fires every config_push_interval_min minutes, and a repeated toast
+    /// for routine background activity reads as spam. ConfigSyncService.Export already persists
+    /// config_last_pushed_at, which NetworkSyncView.RefreshIfActive surfaces passively whenever the
+    /// user opens that page. A FAILURE is different: previously swallowed completely silently forever
+    /// (a share that goes unreachable/read-only for hours meant the administrator's "every 1 minute"
+    /// setting just quietly did nothing, with zero trace anywhere — colleagues only noticed their
+    /// changes weren't reaching other machines, no evidence pointed at the push side at all). Only
+    /// notifies on the state TRANSITION (first failure after a success, and recovery after failures)
+    /// so a share that's down for an extended stretch doesn't spam one toast per tick.</summary>
     private void PushConfigNow()
     {
         var root = _services.Cfg.RootPath();
@@ -757,12 +764,19 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             var exportedBy = $"{Environment.UserName} ({RoleLabel})";
             ConfigSyncService.Export(_services, root, exportedBy);
+            if (_configPushLastFailed)
+            {
+                _configPushLastFailed = false;
+                ShowStatus("Автоотправка конфига на диск восстановлена", 8000, NotificationCategory.Sync);
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort background tick — share may be temporarily unreachable. The manual
-            // "Отправить сейчас" button surfaces the same exception via a message box if the user
-            // wants an explicit answer; a silent background failure just tries again next interval.
+            if (!_configPushLastFailed)
+            {
+                _configPushLastFailed = true;
+                AddNotification($"Автоотправка конфига на диск не удалась: {ex.Message}", NotificationCategory.Sync);
+            }
         }
     }
 }

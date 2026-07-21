@@ -65,6 +65,8 @@
                         <Button Content="Синхронизировать сейчас" Click="SyncNow_Click" Margin="0,0,12,0"/>
                         <TextBlock x:Name="LastSyncText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
                     </StackPanel>
+                    <TextBlock x:Name="LastCheckText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,4,0,0"
+                               ToolTip="Обновляется на каждой фоновой проверке, даже если изменений на диске не нашлось — если эта отметка не сдвигается, фоновая проверка не запускается вовсе; если сдвигается, а «Последняя синхронизация» выше — нет, изменений на диске просто не найдено."/>
                 </StackPanel>
             </Border>
 
