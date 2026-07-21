@@ -408,20 +408,30 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
     }
 
+    // Same class of bug as the config-push one fixed earlier: when AppAutoUpdate is on but the
+    // AppUpdates notification category is off, CheckForAppUpdatesAsync below never turns
+    // UpdateBannerVisible on before calling this — so a failure here (download dropped mid-stream,
+    // staged .exe briefly locked by AV, network share denied) used to update only UpdateBannerText,
+    // which nothing was displaying, and never touched the notification history either. Always
+    // forcing the banner visible and always logging to history here means an install failure is
+    // never quieter than the "new version available" notice was, regardless of that toggle.
     [RelayCommand]
     private async Task InstallUpdate()
     {
         if (_pendingUpdate is null) return;
         UpdateActionEnabled = false;
         UpdateBannerText = $"Установка версии {_pendingUpdate.Version}…";
+        UpdateBannerVisible = true;
         try
         {
             await AppUpdateService.InstallAndRestartAsync(_pendingUpdate);
         }
         catch (Exception ex)
         {
-            UpdateBannerText = $"Не удалось установить обновление: {ex.Message}";
+            UpdateBannerText = $"Не удалось установить обновление: {AppUpdateService.DescribeError(ex)}";
+            UpdateBannerVisible = true;
             UpdateActionEnabled = true;
+            AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
         }
     }
 
