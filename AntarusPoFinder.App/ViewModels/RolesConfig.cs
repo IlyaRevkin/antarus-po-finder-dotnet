@@ -20,11 +20,14 @@ public static class RolesConfig
     /// был единственным, кто мог их настроить через полноценные Настройки. "tickets" (баг-репорты/
     /// предложения) точно так же доступна всем ролям — что именно каждая роль видит/может там
     /// делать решается внутри TicketsView (CreatedBy-фильтр для наладчика/программиста, полный
-    /// доступ и смена статуса для администратора), не через видимость самого пункта меню.</summary>
+    /// доступ и смена статуса для администратора), не через видимость самого пункта меню.
+    /// "settings" тоже теперь доступна наладчику/программисту — что именно из неё видно каждой роли
+    /// решается внутри SettingsView (ApplyRoleVisibility: урезанный набор вкладок + урезанное
+    /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
-        ["naladchik"] = ["search", "inspection", "newversions", "params", "network", "tickets"],
-        ["programmer"] = ["search", "upload", "params", "network", "tickets"],
+        ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
+        ["programmer"] = ["search", "upload", "params", "settings", "network", "tickets"],
         ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets"],
     };
 

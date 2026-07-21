@@ -50,74 +50,89 @@
                      страницу "Сетевые диски", доступную всем ролям (см. NetworkSyncView) — здесь
                      остаётся только то, что реально требует прав администратора. -->
                 <StackPanel x:Name="GeneralTab">
-                    <TextBlock Text="СМЕНИТЬ РОЛЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <Grid Margin="0,0,0,16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="160"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <ComboBox Grid.Column="0" x:Name="RoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                        <PasswordBox Grid.Column="1" x:Name="RolePasswordInput" Height="34" Margin="0,0,8,0"/>
-                        <Button Grid.Column="2" Content="Сменить" Click="SwitchRole_Click"/>
-                    </Grid>
+                    <!-- Смена роли / пароли доступа / полная настройка AD (домен, группы, способ
+                         проверки, URL) — орг-политика уровня приложения, а не что-то, что имеет смысл
+                         дать наладчику/программисту крутить у себя: скрыто для них целиком (см.
+                         SettingsView.ApplyRoleVisibility), виден только TTL повторного входа ниже. -->
+                    <StackPanel x:Name="AdminRoleAndPasswordsSection">
+                        <TextBlock Text="СМЕНИТЬ РОЛЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" x:Name="RoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
+                            <PasswordBox Grid.Column="1" x:Name="RolePasswordInput" Height="34" Margin="0,0,8,0"/>
+                            <Button Grid.Column="2" Content="Сменить" Click="SwitchRole_Click"/>
+                        </Grid>
 
-                    <TextBlock Text="ПАРОЛИ ДОСТУПА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="160"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"/>
-                    </Grid>
-                    <Button Content="Сохранить пароли" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SavePasswords_Click"/>
+                        <TextBlock Text="ПАРОЛИ ДОСТУПА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"/>
+                        </Grid>
+                        <Button Content="Сохранить пароли" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SavePasswords_Click"/>
 
-                    <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = для этой роли группа не используется — такой вход попадает в собственный список пользователей приложения (см. вкладку «Пользователи»), а не блокируется."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="160"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="напр. AntarusAdmins"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"/>
-                    </Grid>
+                        <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = для этой роли группа не используется — такой вход попадает в собственный список пользователей приложения (см. вкладку «Пользователи»), а не блокируется."
+                                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="напр. AntarusAdmins"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                            <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"/>
+                        </Grid>
 
-                    <TextBlock Text="Способ проверки пароля AD:" Margin="0,0,0,4"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"/>
-                        <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"/>
-                        <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"/>
+                        <TextBlock Text="Способ проверки пароля AD:" Margin="0,0,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"/>
+                            <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"/>
+                            <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"/>
+                        </StackPanel>
+                        <TextBlock Text="URL веб-сервера для проверки пароля (способ HTTP):" Margin="0,0,0,4"/>
+                        <TextBox x:Name="AdHttpUrlInput" Height="34" Margin="0,0,0,4"
+                                 ToolTip="Например: https://disk.antarus.su/ — точный адрес и формат подтверждает IT компании."/>
+                        <TextBlock Text="Пусто = способ HTTP не сможет сработать, даже если выбран выше. Логин/пароль передаются в веб-сервер как введено (без разбиения на домен), через Negotiate/NTLM."
+                                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                        <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход по AD при запуске приложения" Margin="0,4,0,4"/>
+                        <TextBlock Text="Пока не включено — приложение запускается как обычно, без запроса входа. Включив, при каждом запуске (если нет ещё действующего запомненного входа на этом компьютере) появится окно входа по AD; пароль администратора остаётся аварийным входом, чтобы не оказаться заблокированным при проблеме с доменом или на самой первой настройке системы."
+                                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <Button Content="Сохранить группы и способ" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
                     </StackPanel>
-                    <TextBlock Text="URL веб-сервера для проверки пароля (способ HTTP):" Margin="0,0,0,4"/>
-                    <TextBox x:Name="AdHttpUrlInput" Height="34" Margin="0,0,0,4"
-                             ToolTip="Например: https://disk.antarus.su/ — точный адрес и формат подтверждает IT компании."/>
-                    <TextBlock Text="Пусто = способ HTTP не сможет сработать, даже если выбран выше. Логин/пароль передаются в веб-сервер как введено (без разбиения на домен), через Negotiate/NTLM."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-                    <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход по AD при запуске приложения" Margin="0,4,0,4"/>
-                    <TextBlock Text="Пока не включено — приложение запускается как обычно, без запроса входа. Включив, при каждом запуске (если нет ещё действующего запомненного входа на этом компьютере) появится окно входа по AD; пароль администратора остаётся аварийным входом, чтобы не оказаться заблокированным при проблеме с доменом или на самой первой настройке системы."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <!-- Единственная часть AD-блока, видимая наладчику/программисту тоже — их
+                         персональный срок "не переспрашивать" (per-machine, никогда не синхронизируется
+                         по сети, см. ConfigSyncService.SkipSettingsKeys — то же верно для всего AD-блока
+                         выше, так что "прилетает от администратора по сети" НЕ работает, донастраивать
+                         обязана каждая машина у себя). Отдельная кнопка сохранения — "Сохранить группы и
+                         способ" выше делает то же самое заодно, но она скрыта для этих ролей. -->
+                    <TextBlock Text="СРОК ПОВТОРНОГО ВХОДА ПО AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -127,7 +142,7 @@
                         <TextBox Grid.Column="1" x:Name="AdRequireLoginDaysInput" Height="34"
                                  ToolTip="Значение для тех, кто в окне входа оставит «как задано администратором» — каждый может там же выбрать другой срок или «всегда» лично для себя."/>
                     </Grid>
-                    <Button Content="Сохранить группы и способ" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdGroups_Click"/>
+                    <Button x:Name="SaveAdDaysOnlyBtn" Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveAdRequireLoginDays_Click"/>
 
                     <TextBlock Text="ПРОЧЕЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>

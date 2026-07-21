@@ -188,6 +188,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (!allowed.Contains(CurrentPageId))
             Navigate(FirstAllowedPageId(role));
 
+        // Settings' own tab/field visibility (see SettingsView.ApplyRoleVisibility) is role-dependent
+        // TOO, on top of the whole page being allowed/not — and unlike other pages that just get
+        // re-rendered wholesale on next Navigate, this one can still be the CURRENT page across a role
+        // switch (both administrator and naladchik/programmer can reach "settings" now), so it needs
+        // an explicit refresh here rather than relying on Navigate to have re-created it.
+        if (_pageCache.TryGetValue("settings", out var settingsPage) && settingsPage is SettingsView settingsView)
+            settingsView.ApplyRoleVisibility();
+
         RefreshConfigSync();
     }
 

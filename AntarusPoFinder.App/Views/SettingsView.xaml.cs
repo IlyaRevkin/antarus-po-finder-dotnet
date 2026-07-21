@@ -153,6 +153,7 @@ public partial class SettingsView : UserControl
             LoadHierarchy();
             LoadFirmwareTab();
             LoadQuickApps();
+            ApplyRoleVisibility();
             _reservationCountdownTimer.Start();
         };
         Unloaded += (_, _) => _reservationCountdownTimer.Stop();
@@ -188,6 +189,35 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
+    }
+
+    /// <summary>Naladchik/programmer now have access to Настройки at all (previously administrator-
+    /// only), but with a narrowed set of tabs and, within "Общие", a narrowed set of fields — see the
+    /// XAML comment next to AdminRoleAndPasswordsSection (role switch/passwords/full AD config) for
+    /// exactly what's admin-only and why. Administrator keeps seeing everything, unchanged. Called once from Loaded (this
+    /// view is created fresh the first time its role can already see it) AND from
+    /// MainWindowViewModel.ApplyRole every time the role changes while this page instance is already
+    /// alive in the page cache — switching e.g. administrator -> naladchik mid-session must hide
+    /// Иерархия/Прошивки/Пользователи immediately, not just on the next fresh navigation.</summary>
+    public void ApplyRoleVisibility()
+    {
+        var role = _services.Cfg.CurrentRole();
+        var isAdmin = role == "administrator";
+
+        AdminRoleAndPasswordsSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+
+        TabBtnHierarchy.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnUsers.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnTags.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
+        // TabBtnGeneral/TabBtnQuickApps: no role restriction — everyone who can reach Настройки at all sees them.
+
+        var allTabs = new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps, TabBtnUsers };
+        var activeTab = allTabs.FirstOrDefault(b => (string?)b.Tag == "Active");
+        if (activeTab is null || activeTab.Visibility != Visibility.Visible)
+            Tab_Click(allTabs.First(b => b.Visibility == Visibility.Visible), new RoutedEventArgs());
     }
 
     // ── Nested-scroll bubbling ───────────────────────────────────────────────
@@ -634,6 +664,22 @@ public partial class SettingsView : UserControl
             _services.Cfg.SetAdRequireLoginDefaultDays(days);
 
         _host.ShowStatus("Группы и способ проверки пароля AD сохранены");
+    }
+
+    /// <summary>The one AD-related field naladchik/programmer can see (see ApplyRoleVisibility) —
+    /// saves only the "TTL days" value, without touching domain/groups/mode/URL/the require-login
+    /// switch itself, since those controls aren't even in the visual tree for those two roles.
+    /// Administrator has this same button too (redundant with "Сохранить группы и способ" above,
+    /// which also writes this field) — harmless, just an extra way to save the one value.</summary>
+    private void SaveAdRequireLoginDays_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(AdRequireLoginDaysInput.Text.Trim(), out var days) || days <= 0)
+        {
+            AppMessageBox.Show("Введите целое число дней больше нуля.", "Срок повторного входа по AD", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _services.Cfg.SetAdRequireLoginDefaultDays(days);
+        _host.ShowStatus($"Срок повторного входа по AD: {days} дн.");
     }
 
     // ── Пользователи (собственный AD-ростер, Часть 2/3) ────────────────────────
