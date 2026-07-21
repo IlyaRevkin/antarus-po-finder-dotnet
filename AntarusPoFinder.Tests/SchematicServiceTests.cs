@@ -28,6 +28,9 @@ public class SchematicServiceTests : IDisposable
         // Should never match a "ПЧ" query — exact-word mode exists precisely for this.
         Directory.CreateDirectory(Path.Combine(_root, "Территория 1", "КПЧ-12"));
         File.WriteAllText(Path.Combine(_root, "Территория 1", "КПЧ-12", "схема.pdf"), "x");
+
+        Directory.CreateDirectory(Path.Combine(_root, "НАСОС-5"));
+        File.WriteAllText(Path.Combine(_root, "НАСОС-5", "схема.pdf"), "x");
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
@@ -70,6 +73,18 @@ public class SchematicServiceTests : IDisposable
         var hits = new SchematicService().Matches(_root, "ПЧ", exactWord: true);
         Assert.DoesNotContain(hits, h => h.CabinetName == "КПЧ-12");
         Assert.DoesNotContain(hits, h => h.CabinetName == "КПЧ-9");
+    }
+
+    [Fact]
+    public void Matches_QueryTypedOnWrongKeyboardLayout_StillFindsCabinet()
+    {
+        // "yfcjc-5" is what a EN-US-layout keyboard produces if the operator forgot to switch
+        // layout while meaning to type "насос-5" (ЙЦУКЕН) — same physical keys, wrong active
+        // layout. The as-typed query finds nothing, so the layout-fallback in
+        // SearchService.SearchWithLayoutFallback must kick in.
+        var hits = new SchematicService().Matches(_root, "yfcjc-5");
+        Assert.Single(hits);
+        Assert.Equal("НАСОС-5", hits[0].CabinetName);
     }
 
     [Fact]

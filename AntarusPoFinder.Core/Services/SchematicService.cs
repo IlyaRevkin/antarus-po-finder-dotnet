@@ -44,7 +44,10 @@ public class SchematicService
     /// <summary>Schematic files whose cabinet name (folder and/or file name) matches every word of
     /// the query — partial substring by default, whole-word only when <paramref name="exactWord"/>
     /// is set.</summary>
-    public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false)
+    public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false) =>
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex));
+
+    private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord)
     {
         var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) return new();

@@ -160,8 +160,11 @@ public partial class SearchView : UserControl
     private void PerformParamsSearch(string query)
     {
         var exact = ExactWordCheck.IsChecked == true;
-        var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var files = _services.Db.SearchParamFilesByTokens(tokens, exact);
+        var files = SearchService.SearchWithLayoutFallback(query, exact, (q, ex) =>
+        {
+            var tokens = SearchService.Normalize(q).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return _services.Db.SearchParamFilesByTokens(tokens, ex);
+        });
         if (files.Count == 0)
         {
             StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
