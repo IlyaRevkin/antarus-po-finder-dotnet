@@ -6,6 +6,7 @@ using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
+using AntarusPoFinder.Tests.TestHelpers;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -21,223 +22,194 @@ namespace AntarusPoFinder.Tests;
 /// delete propagation, concurrent-edit "conflict" behavior, and param_files staying stable across
 /// repeated rounds.
 ///
-/// Uses the AppServices(Database, ConfigService, HierarchyService) test-only constructor — plain
-/// `new AppServices()` can't represent two machines in one process because ConfigService.AppData/
-/// DbPath are `static readonly`, resolved once per process.</summary>
+/// Uses the TestHelpers.TwoMachines fixture (own Database/ConfigService/HierarchyService/AppServices
+/// per simulated machine, via AppServices' test-only (Database, ConfigService, HierarchyService)
+/// constructor — plain `new AppServices()` can't represent two machines in one process because
+/// ConfigService.AppData/DbPath are `static readonly`, resolved once per process).</summary>
 public class EndToEndSyncTests
 {
-    private static string NewTempDb() => Path.Combine(Path.GetTempPath(), $"antarus_e2e_{Guid.NewGuid():N}.db");
-    private static string NewTempRoot() => Path.Combine(Path.GetTempPath(), $"antarus_e2e_root_{Guid.NewGuid():N}");
-
-    private static void Cleanup(string pathA, string pathB, string root)
-    {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        foreach (var db in new[] { pathA, pathB })
-            foreach (var f in new[] { db, db + "-wal", db + "-shm" })
-                if (File.Exists(f)) File.Delete(f);
-        if (Directory.Exists(root))
-        {
-            // ConfigSyncService.Export protects the config file from external edits (read-only +
-            // possibly ACL'd) — clear that before recursive delete, or cleanup itself throws.
-            foreach (var f in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-                File.SetAttributes(f, FileAttributes.Normal);
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
     [Fact]
     public void FullTwoMachineRoundTrip_HierarchyFirmwareHmiModbusTicketReservation_DeleteAndParamFileStability()
     {
-        var pathA = NewTempDb();
-        var pathB = NewTempDb();
-        var root = NewTempRoot();
-        Directory.CreateDirectory(root);
-        try
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        var dbA = m.DbA; var dbB = m.DbB;
+        var hierA = m.HierA;
+        var svcA = m.SvcA; var svcB = m.SvcB;
+
+        // ── Step 2: build up profile A ───────────────────────────────────────
+        var groupA = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var newSubtypeId = dbA.UpsertEquipmentSubtype(new EquipmentSubType
         {
-            using var dbA = new Database(pathA);
-            using var dbB = new Database(pathB);
-            var cfgA = new ConfigService(dbA);
-            var cfgB = new ConfigService(dbB);
-            var hierA = new HierarchyService(dbA);
-            var hierB = new HierarchyService(dbB);
-            var svcA = new AppServices(dbA, cfgA, hierA) { CurrentAdLogin = "profileA" };
-            var svcB = new AppServices(dbB, cfgB, hierB) { CurrentAdLogin = "profileB" };
-            cfgA.SetRootPath(root);
-            cfgB.SetRootPath(root);
+            GroupId = groupA.Id!.Value, Name = "Е2Е-ТЕСТ", Prefix = 77, FolderName = "Е2Е-ТЕСТ", SortOrder = 99,
+        });
+        var deletableSubtypeId = dbA.UpsertEquipmentSubtype(new EquipmentSubType
+        {
+            GroupId = groupA.Id!.Value, Name = "Е2Е-НА-УДАЛЕНИЕ", Prefix = 78, FolderName = "Е2Е-НА-УДАЛЕНИЕ", SortOrder = 100,
+        });
+        var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
+        dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-E2E", 5, "новая тестовая модификация для e2e-синка");
+        var newMod = dbA.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-E2E");
 
-            // ── Step 2: build up profile A ───────────────────────────────────────
-            var groupA = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var newSubtypeId = dbA.UpsertEquipmentSubtype(new EquipmentSubType
-            {
-                GroupId = groupA.Id!.Value, Name = "Е2Е-ТЕСТ", Prefix = 77, FolderName = "Е2Е-ТЕСТ", SortOrder = 99,
-            });
-            var deletableSubtypeId = dbA.UpsertEquipmentSubtype(new EquipmentSubType
-            {
-                GroupId = groupA.Id!.Value, Name = "Е2Е-НА-УДАЛЕНИЕ", Prefix = 78, FolderName = "Е2Е-НА-УДАЛЕНИЕ", SortOrder = 100,
-            });
-            var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
-            dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-E2E", 5, "новая тестовая модификация для e2e-синка");
-            var newMod = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-E2E");
+        // Upload firmware WITH an HMI project and a modbus map — real files on the shared
+        // "disk", not just DB rows, same as UploadView.Upload_Click actually does.
+        var fwDstFolder = hierA.FwPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName, "77.99.5.1.20260721_1000");
+        Directory.CreateDirectory(fwDstFolder);
+        File.WriteAllText(Path.Combine(fwDstFolder, "firmware.psl"), "fake plc firmware");
 
-            // Upload firmware WITH an HMI project and a modbus map — real files on the shared
-            // "disk", not just DB rows, same as UploadView.Upload_Click actually does.
-            var fwDstFolder = hierA.FwPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName, "77.99.5.1.20260721_1000");
-            Directory.CreateDirectory(fwDstFolder);
-            File.WriteAllText(Path.Combine(fwDstFolder, "firmware.psl"), "fake plc firmware");
+        var hmiRoot = hierA.HmiPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName);
+        var hmiDstFolder = Path.Combine(hmiRoot, "77.99.5.1.20260721_1000_hmi");
+        Directory.CreateDirectory(hmiDstFolder);
+        File.WriteAllText(Path.Combine(hmiDstFolder, "screen1.fsprj"), "fake hmi project");
+        File.WriteAllText(Path.Combine(hmiDstFolder, "driver.dll"), "fake driver");
 
-            var hmiRoot = hierA.HmiPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName);
-            var hmiDstFolder = Path.Combine(hmiRoot, "77.99.5.1.20260721_1000_hmi");
-            Directory.CreateDirectory(hmiDstFolder);
-            File.WriteAllText(Path.Combine(hmiDstFolder, "screen1.fsprj"), "fake hmi project");
-            File.WriteAllText(Path.Combine(hmiDstFolder, "driver.dll"), "fake driver");
+        var modbusDstFolder = hierA.ModbusMapPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName);
+        Directory.CreateDirectory(modbusDstFolder);
+        File.WriteAllText(Path.Combine(modbusDstFolder, "modbus_map.xlsx"), "fake modbus map");
 
-            var modbusDstFolder = hierA.ModbusMapPath(root, groupA.Name, "Е2Е-ТЕСТ", newMod.ControllerName);
-            Directory.CreateDirectory(modbusDstFolder);
-            File.WriteAllText(Path.Combine(modbusDstFolder, "modbus_map.xlsx"), "fake modbus map");
+        var userA = dbA.GetOrCreateUser("profileA", "profileA");
+        var newFwId = dbA.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = newSubtypeId, ControllerId = newMod.ControllerId,
+            EqPrefix = groupA.Prefix, SubPrefix = 77, HwVersion = newMod.HwVersion, SwVersion = 1,
+            DtStr = "20260721_1000", VersionRaw = "77.99.5.1.20260721_1000",
+            Filename = "firmware.psl", DiskPath = fwDstFolder,
+            Description = "e2e sync test upload", Changelog = "e2e sync test upload",
+            HmiPath = hmiDstFolder, HmiExecutableHint = "screen1.fsprj",
+            ModbusMapPath = Path.Combine(modbusDstFolder, "modbus_map.xlsx"),
+            AuthorId = userA.Id, Status = "active",
+        });
+        Assert.True(newFwId > 0);
 
-            var userA = dbA.GetOrCreateUser("profileA", "profileA");
-            var newFwId = dbA.AddFwVersion(new FwVersionRecord
-            {
-                SubtypeId = newSubtypeId, ControllerId = newMod.ControllerId,
-                EqPrefix = groupA.Prefix, SubPrefix = 77, HwVersion = newMod.HwVersion, SwVersion = 1,
-                DtStr = "20260721_1000", VersionRaw = "77.99.5.1.20260721_1000",
-                Filename = "firmware.psl", DiskPath = fwDstFolder,
-                Description = "e2e sync test upload", Changelog = "e2e sync test upload",
-                HmiPath = hmiDstFolder, HmiExecutableHint = "screen1.fsprj",
-                ModbusMapPath = Path.Combine(modbusDstFolder, "modbus_map.xlsx"),
-                AuthorId = userA.Id, Status = "active",
-            });
-            Assert.True(newFwId > 0);
+        // A ticket, created the same way TicketsView does: insert locally + enqueue outbox event.
+        var ticket = new Ticket
+        {
+            Id = Guid.NewGuid().ToString(), Type = TicketType.Bug, Text = "e2e sync test ticket",
+            Status = TicketStatus.Open, CreatedBy = "profileA", CreatedByRole = "programmer",
+            CreatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"), UpdatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
+        };
+        dbA.InsertTicketIfMissing(ticket);
+        var (evFile, evPayload) = TicketSyncService.BuildCreateEvent(ticket);
+        dbA.EnqueueTicketOutbox(evFile, evPayload);
 
-            // A ticket, created the same way TicketsView does: insert locally + enqueue outbox event.
-            var ticket = new Ticket
-            {
-                Id = Guid.NewGuid().ToString(), Type = TicketType.Bug, Text = "e2e sync test ticket",
-                Status = TicketStatus.Open, CreatedBy = "profileA", CreatedByRole = "programmer",
-                CreatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"), UpdatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
-            };
-            dbA.InsertTicketIfMissing(ticket);
-            var (evFile, evPayload) = TicketSyncService.BuildCreateEvent(ticket);
-            dbA.EnqueueTicketOutbox(evFile, evPayload);
+        // A reserved version number for the new subtype/controller.
+        var reservation = dbA.ReserveNextVersion(newSubtypeId, newMod.ControllerId, newMod.HwVersion,
+            groupA.Prefix, 77, "profileA", includeDate: true, ttlHours: 72);
+        Assert.Equal("reserved", reservation.Status);
 
-            // A reserved version number for the new subtype/controller.
-            var reservation = dbA.ReserveNextVersion(newSubtypeId, newMod.ControllerId, newMod.HwVersion,
-                groupA.Prefix, 77, "profileA", includeDate: true, ttlHours: 72);
-            Assert.Equal("reserved", reservation.Status);
+        // ── Step 3: A pushes to the shared disk, B pulls and applies ────────────
+        var exportResult = ConfigSyncService.Export(svcA, root, "profileA");
+        Assert.True(File.Exists(ConfigSyncService.ConfigPathFor(root)));
+        var ticketsSent = TicketSyncService.FlushOutbox(svcA, root);
+        Assert.Equal(1, ticketsSent);
 
-            // ── Step 3: A pushes to the shared disk, B pulls and applies ────────────
-            var exportResult = ConfigSyncService.Export(svcA, root, "profileA");
-            Assert.True(File.Exists(ConfigSyncService.ConfigPathFor(root)));
-            var ticketsSent = TicketSyncService.FlushOutbox(svcA, root);
-            Assert.Equal(1, ticketsSent);
+        var update = ConfigSyncService.CheckForUpdate(svcB, out var checkErr);
+        Assert.Null(checkErr);
+        Assert.NotNull(update);
+        Assert.True(update!.Diff.TotalChanges > 0);
 
-            var update = ConfigSyncService.CheckForUpdate(svcB, out var checkErr);
-            Assert.Null(checkErr);
-            Assert.NotNull(update);
-            Assert.True(update!.Diff.TotalChanges > 0);
+        var applyResult = ConfigSyncService.Apply(svcB, update.ConfigPath, root);
+        Assert.Equal(exportResult.ExportedAt, applyResult.ExportedAt);
+        var ticketsApplied = TicketSyncService.PullNewEvents(svcB, root);
+        Assert.Equal(1, ticketsApplied);
 
-            var applyResult = ConfigSyncService.Apply(svcB, update.ConfigPath, root);
-            Assert.Equal(exportResult.ExportedAt, applyResult.ExportedAt);
-            var ticketsApplied = TicketSyncService.PullNewEvents(svcB, root);
-            Assert.Equal(1, ticketsApplied);
+        // Hierarchy landed on B.
+        var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtypeB = dbB.GetSubtypesForGroup(groupB.Id!.Value).FirstOrDefault(s => s.Name == "Е2Е-ТЕСТ");
+        Assert.NotNull(subtypeB);
+        Assert.NotNull(dbB.GetSubtypesForGroup(groupB.Id!.Value).FirstOrDefault(s => s.Name == "Е2Е-НА-УДАЛЕНИЕ"));
+        Assert.Contains(dbB.GetAllModifications(), m2 => m2.DisplayName == "PIXEL2-E2E");
 
-            // Hierarchy landed on B.
-            var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtypeB = dbB.GetSubtypesForGroup(groupB.Id!.Value).FirstOrDefault(s => s.Name == "Е2Е-ТЕСТ");
-            Assert.NotNull(subtypeB);
-            Assert.NotNull(dbB.GetSubtypesForGroup(groupB.Id!.Value).FirstOrDefault(s => s.Name == "Е2Е-НА-УДАЛЕНИЕ"));
-            Assert.Contains(dbB.GetAllModifications(), m => m.DisplayName == "PIXEL2-E2E");
+        // Firmware + HMI + modbus fields landed on B, fully populated (not blank).
+        var fwB = dbB.GetAllFwVersionsWithNames(includeArchived: true).FirstOrDefault(f => f.VersionRaw == "77.99.5.1.20260721_1000");
+        Assert.NotNull(fwB);
+        Assert.Equal(hmiDstFolder, fwB!.HmiPath);
+        Assert.Equal("screen1.fsprj", fwB.HmiExecutableHint);
+        Assert.Equal(Path.Combine(modbusDstFolder, "modbus_map.xlsx"), fwB.ModbusMapPath);
 
-            // Firmware + HMI + modbus fields landed on B, fully populated (not blank).
-            var fwB = dbB.GetAllFwVersionsWithNames(includeArchived: true).FirstOrDefault(f => f.VersionRaw == "77.99.5.1.20260721_1000");
-            Assert.NotNull(fwB);
-            Assert.Equal(hmiDstFolder, fwB!.HmiPath);
-            Assert.Equal("screen1.fsprj", fwB.HmiExecutableHint);
-            Assert.Equal(Path.Combine(modbusDstFolder, "modbus_map.xlsx"), fwB.ModbusMapPath);
+        // Ticket landed on B.
+        Assert.Contains(dbB.GetTickets(), t => t.Id == ticket.Id && t.Text == "e2e sync test ticket");
 
-            // Ticket landed on B.
-            Assert.Contains(dbB.GetTickets(), t => t.Id == ticket.Id && t.Text == "e2e sync test ticket");
+        // Reservation landed on B (natural-key matched, still "reserved").
+        var resB = dbB.GetActiveReservations(subtypeB!.Id!.Value, newMod.ControllerId, newMod.HwVersion);
+        Assert.Contains(resB, r => r.VersionRaw == reservation.VersionRaw && r.Status == "reserved");
 
-            // Reservation landed on B (natural-key matched, still "reserved").
-            var resB = dbB.GetActiveReservations(subtypeB!.Id!.Value, newMod.ControllerId, newMod.HwVersion);
-            Assert.Contains(resB, r => r.VersionRaw == reservation.VersionRaw && r.Status == "reserved");
+        // ── Step 4: B deletes the empty test subtype, A must see the deletion, not a resurrection ──
+        var subtypeToDeleteB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
+        dbB.DeleteEquipmentSubtype(subtypeToDeleteB.Id!.Value);
+        Assert.DoesNotContain(dbB.GetSubtypesForGroup(groupB.Id!.Value), s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
 
-            // ── Step 4: B deletes the empty test subtype, A must see the deletion, not a resurrection ──
-            var subtypeToDeleteB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
-            dbB.DeleteEquipmentSubtype(subtypeToDeleteB.Id!.Value);
-            Assert.DoesNotContain(dbB.GetSubtypesForGroup(groupB.Id!.Value), s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
+        // exported_at has second resolution (see ConfigSyncService.Export) — two exports inside
+        // the same wall-clock second are indistinguishable to CheckForUpdate's ordinal compare,
+        // which would make the second one silently invisible. A real gap between two machines'
+        // manual pushes is normally seconds/minutes, not milliseconds, so this sleep just
+        // reflects realistic timing rather than working around a bug in what's under test.
+        System.Threading.Thread.Sleep(1100);
+        var exportB = ConfigSyncService.Export(svcB, root, "profileB");
+        var updateForA = ConfigSyncService.CheckForUpdate(svcA, out var checkErrA);
+        Assert.Null(checkErrA);
+        Assert.NotNull(updateForA);
+        ConfigSyncService.Apply(svcA, updateForA!.ConfigPath, root);
 
-            // exported_at has second resolution (see ConfigSyncService.Export) — two exports inside
-            // the same wall-clock second are indistinguishable to CheckForUpdate's ordinal compare,
-            // which would make the second one silently invisible. A real gap between two machines'
-            // manual pushes is normally seconds/minutes, not milliseconds, so this sleep just
-            // reflects realistic timing rather than working around a bug in what's under test.
-            System.Threading.Thread.Sleep(1100);
-            var exportB = ConfigSyncService.Export(svcB, root, "profileB");
-            var updateForA = ConfigSyncService.CheckForUpdate(svcA, out var checkErrA);
-            Assert.Null(checkErrA);
-            Assert.NotNull(updateForA);
-            ConfigSyncService.Apply(svcA, updateForA!.ConfigPath, root);
+        Assert.DoesNotContain(dbA.GetSubtypesForGroup(groupA.Id!.Value), s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
+        // The OTHER new subtype (which has firmware attached) must have survived on A untouched —
+        // deletion propagation must be scoped to what was actually deleted, not a blanket wipe.
+        Assert.Contains(dbA.GetSubtypesForGroup(groupA.Id!.Value), s => s.Name == "Е2Е-ТЕСТ");
+        Assert.Contains(dbA.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == "77.99.5.1.20260721_1000");
 
-            Assert.DoesNotContain(dbA.GetSubtypesForGroup(groupA.Id!.Value), s => s.Name == "Е2Е-НА-УДАЛЕНИЕ");
-            // The OTHER new subtype (which has firmware attached) must have survived on A untouched —
-            // deletion propagation must be scoped to what was actually deleted, not a blanket wipe.
-            Assert.Contains(dbA.GetSubtypesForGroup(groupA.Id!.Value), s => s.Name == "Е2Е-ТЕСТ");
-            Assert.Contains(dbA.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == "77.99.5.1.20260721_1000");
+        // ── Step 5: concurrent edit of the SAME field on both machines ──────────
+        // Documents actual behavior, since there is NO conflict-resolution screen anywhere in
+        // this codebase (grepped: no "конфликт" outside .resources.dll, no updated_at/version
+        // column on equipment_groups/equipment_subtypes/controller_modifications — only
+        // fw_versions.status/released and tickets.updated_at get an "only advances" merge rule).
+        // Both machines already have PIXEL2-E2E from step 3. Change its description independently
+        // on both sides, then push A -> B: this is a plain last-exporter-wins full-field UPDATE
+        // (Database.ConfigExchange, the "controller modifications" block), so B's own untransmitted
+        // edit is silently overwritten with no warning and no merge UI — verified here exactly as
+        // it happens today, not as it "should" happen.
+        var modIdA = dbA.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-E2E").Id!.Value;
+        var modIdB = dbB.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-E2E").Id!.Value;
+        UpdateModificationDescription(m.PathA, modIdA, "изменено на машине A");
+        UpdateModificationDescription(m.PathB, modIdB, "изменено на машине B");
 
-            // ── Step 5: concurrent edit of the SAME field on both machines ──────────
-            // Documents actual behavior, since there is NO conflict-resolution screen anywhere in
-            // this codebase (grepped: no "конфликт" outside .resources.dll, no updated_at/version
-            // column on equipment_groups/equipment_subtypes/controller_modifications — only
-            // fw_versions.status/released and tickets.updated_at get an "only advances" merge rule).
-            // Both machines already have PIXEL2-E2E from step 3. Change its description independently
-            // on both sides, then push A -> B: this is a plain last-exporter-wins full-field UPDATE
-            // (Database.ConfigExchange, the "controller modifications" block), so B's own untransmitted
-            // edit is silently overwritten with no warning and no merge UI — verified here exactly as
-            // it happens today, not as it "should" happen.
-            var modIdA = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-E2E").Id!.Value;
-            var modIdB = dbB.GetAllModifications().First(m => m.DisplayName == "PIXEL2-E2E").Id!.Value;
-            UpdateModificationDescription(pathA, modIdA, "изменено на машине A");
-            UpdateModificationDescription(pathB, modIdB, "изменено на машине B");
+        System.Threading.Thread.Sleep(1100);
+        ConfigSyncService.Export(svcA, root, "profileA");
+        var updateForB2 = ConfigSyncService.CheckForUpdate(svcB, out _);
+        Assert.NotNull(updateForB2);
+        ConfigSyncService.Apply(svcB, updateForB2!.ConfigPath, root);
 
+        var modAfter = dbB.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-E2E");
+        Assert.Equal("изменено на машине A", modAfter.Description); // B's own edit was silently lost — no conflict prompt exists to catch this
+
+        // ── Step 6: param_files must not grow across repeated sync rounds ───────
+        var subtypeAforParams = dbA.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+        var subForParams = dbA.GetSubtypesForGroup(subtypeAforParams.Id!.Value).First(s => s.Name == "ХП");
+        dbA.AddParamFile(new ParamFile
+        {
+            SubtypeId = subForParams.Id!.Value, Manufacturer = "Danfoss", Filename = "e2e_params.dcfx",
+            DiskPath = Path.Combine(root, "Параметры", "ПЖ", "ХП", "Danfoss", "e2e_params.dcfx"),
+            Description = "e2e param file", UploadDate = "2026-07-21 10:00:00",
+        });
+
+        for (int round = 0; round < 3; round++)
+        {
             System.Threading.Thread.Sleep(1100);
             ConfigSyncService.Export(svcA, root, "profileA");
-            var updateForB2 = ConfigSyncService.CheckForUpdate(svcB, out _);
-            Assert.NotNull(updateForB2);
-            ConfigSyncService.Apply(svcB, updateForB2!.ConfigPath, root);
-
-            var modAfter = dbB.GetAllModifications().First(m => m.DisplayName == "PIXEL2-E2E");
-            Assert.Equal("изменено на машине A", modAfter.Description); // B's own edit was silently lost — no conflict prompt exists to catch this
-
-            // ── Step 6: param_files must not grow across repeated sync rounds ───────
-            var subtypeAforParams = dbA.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
-            var subForParams = dbA.GetSubtypesForGroup(subtypeAforParams.Id!.Value).First(s => s.Name == "ХП");
-            dbA.AddParamFile(new ParamFile
-            {
-                SubtypeId = subForParams.Id!.Value, Manufacturer = "Danfoss", Filename = "e2e_params.dcfx",
-                DiskPath = Path.Combine(root, "Параметры", "ПЖ", "ХП", "Danfoss", "e2e_params.dcfx"),
-                Description = "e2e param file", UploadDate = "2026-07-21 10:00:00",
-            });
-
-            for (int round = 0; round < 3; round++)
-            {
-                System.Threading.Thread.Sleep(1100);
-                ConfigSyncService.Export(svcA, root, "profileA");
-                var upd = ConfigSyncService.CheckForUpdate(svcB, out _);
-                if (upd is not null) ConfigSyncService.Apply(svcB, upd.ConfigPath, root);
-            }
-
-            var paramFilesB = dbB.GetParamFiles().Where(f => f.Filename == "e2e_params.dcfx").ToList();
-            Assert.Single(paramFilesB); // must stay exactly one row after 3 repeated sync rounds, not grow
+            var upd = ConfigSyncService.CheckForUpdate(svcB, out _);
+            if (upd is not null) ConfigSyncService.Apply(svcB, upd.ConfigPath, root);
         }
-        finally
-        {
-            Cleanup(pathA, pathB, root);
-        }
+
+        var paramFilesB = dbB.GetParamFiles().Where(f => f.Filename == "e2e_params.dcfx").ToList();
+        Assert.Single(paramFilesB); // must stay exactly one row after 3 repeated sync rounds, not grow
     }
 
     private static void UpdateModificationDescription(string dbPath, int modificationId, string description)
     {
+        // There's no in-app rename UI for this yet — opens a second raw connection to the same
+        // already-open Database's underlying file (WAL mode allows concurrent readers/writers), same
+        // trick ConfigSyncTests uses, so this exercises the sync layer's handling without needing
+        // the feature to exist yet.
         using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
         conn.Open();
         using var cmd = conn.CreateCommand();
@@ -261,56 +233,44 @@ public class EndToEndSyncTests
     [Fact]
     public void Apply_DifferentMachineRoot_RemapsFwVersionDiskPath()
     {
-        var pathA = NewTempDb();
-        var pathB = NewTempDb();
-        var sharedRoot = NewTempRoot(); // stands in for the physical network drive both machines reach
-        Directory.CreateDirectory(sharedRoot);
-        try
+        using var m = new TwoMachines();
+        var sharedRoot = m.Root.Path; // stands in for the physical network drive both machines reach
+        var dbA = m.DbA; var dbB = m.DbB;
+        var hierA = m.HierA;
+        var svcA = m.SvcA; var svcB = m.SvcB;
+        m.CfgA.SetRootPath(sharedRoot); // A's own local notation, e.g. \\ant-srv\Software\Antarus Finder
+
+        var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
+        var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
+        dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-REMAP-TEST", 9, "remap test modification");
+        var mod = dbA.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-REMAP-TEST");
+
+        var fwFolder = hierA.FwPath(sharedRoot, group.Name, subtype.Name, mod.ControllerName, "1.99.9.1.20260722_1000");
+        Directory.CreateDirectory(fwFolder);
+        File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
+        var userA = dbA.GetOrCreateUser("profileA", "profileA");
+        dbA.AddFwVersion(new FwVersionRecord
         {
-            using var dbA = new Database(pathA);
-            using var dbB = new Database(pathB);
-            var cfgA = new ConfigService(dbA);
-            var hierA = new HierarchyService(dbA);
-            var svcA = new AppServices(dbA, cfgA, hierA) { CurrentAdLogin = "profileA" };
-            var svcB = new AppServices(dbB, new ConfigService(dbB), new HierarchyService(dbB)) { CurrentAdLogin = "profileB" };
-            cfgA.SetRootPath(sharedRoot); // A's own local notation, e.g. \\ant-srv\Software\Antarus Finder
+            SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
+            DtStr = "20260722_1000", VersionRaw = "1.99.9.1.20260722_1000",
+            Filename = "firmware.psl", DiskPath = fwFolder,
+            Description = "remap test upload", Changelog = "remap test upload",
+            AuthorId = userA.Id, Status = "active",
+        });
 
-            var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
-            var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
-            dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-REMAP-TEST", 9, "remap test modification");
-            var mod = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-REMAP-TEST");
+        ConfigSyncService.Export(svcA, sharedRoot, "profileA");
 
-            var fwFolder = hierA.FwPath(sharedRoot, group.Name, subtype.Name, mod.ControllerName, "1.99.9.1.20260722_1000");
-            Directory.CreateDirectory(fwFolder);
-            File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
-            var userA = dbA.GetOrCreateUser("profileA", "profileA");
-            dbA.AddFwVersion(new FwVersionRecord
-            {
-                SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
-                EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
-                DtStr = "20260722_1000", VersionRaw = "1.99.9.1.20260722_1000",
-                Filename = "firmware.psl", DiskPath = fwFolder,
-                Description = "remap test upload", Changelog = "remap test upload",
-                AuthorId = userA.Id, Status = "active",
-            });
+        // B reaches the very same "Конфиг" folder (sharedRoot, standing in for the real network
+        // share) but under a completely different local root notation of its own.
+        var configPath = ConfigSyncService.ConfigPathFor(sharedRoot);
+        const string machineBRoot = @"Z:\Software\Antarus Finder";
+        ConfigSyncService.Apply(svcB, configPath, machineBRoot);
 
-            ConfigSyncService.Export(svcA, sharedRoot, "profileA");
-
-            // B reaches the very same "Конфиг" folder (sharedRoot, standing in for the real network
-            // share) but under a completely different local root notation of its own.
-            var configPath = ConfigSyncService.ConfigPathFor(sharedRoot);
-            const string machineBRoot = @"Z:\Software\Antarus Finder";
-            ConfigSyncService.Apply(svcB, configPath, machineBRoot);
-
-            var fwOnB = dbB.GetAllFwVersionsWithNames(includeArchived: true).Single(f => f.VersionRaw == "1.99.9.1.20260722_1000");
-            Assert.StartsWith(machineBRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(sharedRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            Cleanup(pathA, pathB, sharedRoot);
-        }
+        var fwOnB = dbB.GetAllFwVersionsWithNames(includeArchived: true).Single(f => f.VersionRaw == "1.99.9.1.20260722_1000");
+        Assert.StartsWith(machineBRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sharedRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Задача 3 — regression test for the exact scenario reported: "A удаляет прошивку → B
@@ -326,86 +286,71 @@ public class EndToEndSyncTests
     [Fact]
     public void FwVersionTombstone_DeletePropagatesToOtherMachineAndNeverResurrects()
     {
-        var pathA = NewTempDb();
-        var pathB = NewTempDb();
-        var root = NewTempRoot();
-        Directory.CreateDirectory(root);
-        try
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        var dbA = m.DbA; var dbB = m.DbB;
+        var hierA = m.HierA;
+        var svcA = m.SvcA; var svcB = m.SvcB;
+
+        var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
+        var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
+        dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-TOMBSTONE-TEST", 3, "tombstone test modification");
+        var mod = dbA.GetAllModifications().First(m2 => m2.DisplayName == "PIXEL2-TOMBSTONE-TEST");
+        const string versionRaw = "1.99.3.1.20260722_1100";
+
+        var fwFolder = hierA.FwPath(root, group.Name, subtype.Name, mod.ControllerName, versionRaw);
+        Directory.CreateDirectory(fwFolder);
+        File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
+        var userA = dbA.GetOrCreateUser("profileA", "profileA");
+        var fwId = dbA.AddFwVersion(new FwVersionRecord
         {
-            using var dbA = new Database(pathA);
-            using var dbB = new Database(pathB);
-            var cfgA = new ConfigService(dbA);
-            var cfgB = new ConfigService(dbB);
-            var hierA = new HierarchyService(dbA);
-            var hierB = new HierarchyService(dbB);
-            var svcA = new AppServices(dbA, cfgA, hierA) { CurrentAdLogin = "profileA" };
-            var svcB = new AppServices(dbB, cfgB, hierB) { CurrentAdLogin = "profileB" };
-            cfgA.SetRootPath(root);
-            cfgB.SetRootPath(root);
+            SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
+            DtStr = "20260722_1100", VersionRaw = versionRaw,
+            Filename = "firmware.psl", DiskPath = fwFolder,
+            Description = "tombstone test upload", Changelog = "tombstone test upload",
+            AuthorId = userA.Id, Status = "active",
+        });
+        Assert.True(fwId > 0);
 
-            var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
-            var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
-            var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
-            dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-TOMBSTONE-TEST", 3, "tombstone test modification");
-            var mod = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-TOMBSTONE-TEST");
-            const string versionRaw = "1.99.3.1.20260722_1100";
+        // B syncs while the firmware is still active — B genuinely had this row before A ever
+        // deleted it, exactly the "B ещё не синхронизировался" starting point from the report.
+        ConfigSyncService.Export(svcA, root, "profileA");
+        var firstUpdate = ConfigSyncService.CheckForUpdate(svcB, out var firstErr);
+        Assert.Null(firstErr);
+        Assert.NotNull(firstUpdate);
+        ConfigSyncService.Apply(svcB, firstUpdate!.ConfigPath, root);
+        Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
 
-            var fwFolder = hierA.FwPath(root, group.Name, subtype.Name, mod.ControllerName, versionRaw);
-            Directory.CreateDirectory(fwFolder);
-            File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
-            var userA = dbA.GetOrCreateUser("profileA", "profileA");
-            var fwId = dbA.AddFwVersion(new FwVersionRecord
-            {
-                SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
-                EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
-                DtStr = "20260722_1100", VersionRaw = versionRaw,
-                Filename = "firmware.psl", DiskPath = fwFolder,
-                Description = "tombstone test upload", Changelog = "tombstone test upload",
-                AuthorId = userA.Id, Status = "active",
-            });
-            Assert.True(fwId > 0);
+        // A stale, pre-delete snapshot of A's whole hierarchy — stands in for a THIRD machine that
+        // syncs later with an old copy still claiming this version is active, to prove a tombstone
+        // can't be resurrected by a late-arriving "active" copy of the same row (see below).
+        var staleSnapshot = dbA.ExportHierarchyData();
 
-            // B syncs while the firmware is still active — B genuinely had this row before A ever
-            // deleted it, exactly the "B ещё не синхронизировался" starting point from the report.
-            ConfigSyncService.Export(svcA, root, "profileA");
-            var firstUpdate = ConfigSyncService.CheckForUpdate(svcB, out var firstErr);
-            Assert.Null(firstErr);
-            Assert.NotNull(firstUpdate);
-            ConfigSyncService.Apply(svcB, firstUpdate!.ConfigPath, root);
-            Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+        // ── A deletes it, same as SettingsView.DeleteFirmware_Click: disk folder gone + tombstoned ──
+        Assert.True(Directory.Exists(fwFolder));
+        Directory.Delete(fwFolder, recursive: true);
+        dbA.TombstoneFwVersion(fwId);
+        Assert.DoesNotContain(dbA.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
 
-            // A stale, pre-delete snapshot of A's whole hierarchy — stands in for a THIRD machine that
-            // syncs later with an old copy still claiming this version is active, to prove a tombstone
-            // can't be resurrected by a late-arriving "active" copy of the same row (see below).
-            var staleSnapshot = dbA.ExportHierarchyData();
+        // ── B, which never touched the deletion, syncs and must mirror it ──
+        System.Threading.Thread.Sleep(1100); // exported_at second-resolution, see the other tests above
+        ConfigSyncService.Export(svcA, root, "profileA");
+        var update2 = ConfigSyncService.CheckForUpdate(svcB, out var err2);
+        Assert.Null(err2);
+        Assert.NotNull(update2);
+        var applyResult2 = ConfigSyncService.Apply(svcB, update2!.ConfigPath, root);
+        Assert.True(applyResult2.Counts.FwVersionsRemoved >= 1);
 
-            // ── A deletes it, same as SettingsView.DeleteFirmware_Click: disk folder gone + tombstoned ──
-            Assert.True(Directory.Exists(fwFolder));
-            Directory.Delete(fwFolder, recursive: true);
-            dbA.TombstoneFwVersion(fwId);
-            Assert.DoesNotContain(dbA.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+        Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+        Assert.DoesNotContain(dbB.GetFwVersions(subtype.Id!.Value, mod.ControllerId, includeArchived: true, includeRolledBack: true),
+            f => f.VersionRaw == versionRaw);
 
-            // ── B, which never touched the deletion, syncs and must mirror it ──
-            System.Threading.Thread.Sleep(1100); // exported_at second-resolution, see the other tests above
-            ConfigSyncService.Export(svcA, root, "profileA");
-            var update2 = ConfigSyncService.CheckForUpdate(svcB, out var err2);
-            Assert.Null(err2);
-            Assert.NotNull(update2);
-            var applyResult2 = ConfigSyncService.Apply(svcB, update2!.ConfigPath, root);
-            Assert.True(applyResult2.Counts.FwVersionsRemoved >= 1);
-
-            Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
-            Assert.DoesNotContain(dbB.GetFwVersions(subtype.Id!.Value, mod.ControllerId, includeArchived: true, includeRolledBack: true),
-                f => f.VersionRaw == versionRaw);
-
-            // ── Resurrection check: importing the stale, pre-delete "still active" snapshot must NOT
-            //    bring it back on B — the tombstone B already applied wins permanently. ──
-            dbB.ImportHierarchyData(staleSnapshot);
-            Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
-        }
-        finally
-        {
-            Cleanup(pathA, pathB, root);
-        }
+        // ── Resurrection check: importing the stale, pre-delete "still active" snapshot must NOT
+        //    bring it back on B — the tombstone B already applied wins permanently. ──
+        dbB.ImportHierarchyData(staleSnapshot);
+        Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
     }
 }

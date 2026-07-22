@@ -22,6 +22,13 @@ public sealed class TwoMachines : IDisposable
 
     public TempRoot Root { get; } = new();
 
+    /// <summary>Raw file paths, for tests that need a second raw ADO.NET connection to the same
+    /// SQLite file to simulate an in-app edit path that doesn't exist yet (WAL mode allows concurrent
+    /// readers/writers) — see EndToEndSyncTests/ConfigSyncTests' UpdateModificationDescription-style
+    /// helpers.</summary>
+    public string PathA => _dbFileA.Path;
+    public string PathB => _dbFileB.Path;
+
     public Database DbA { get; }
     public Database DbB { get; }
     public ConfigService CfgA { get; }

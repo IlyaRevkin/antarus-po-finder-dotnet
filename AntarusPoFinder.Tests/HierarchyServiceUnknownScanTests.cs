@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Services;
+using AntarusPoFinder.Tests.TestHelpers;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -15,17 +16,15 @@ namespace AntarusPoFinder.Tests;
 /// app.</summary>
 public class HierarchyServiceUnknownScanTests : IDisposable
 {
-    private readonly string _dbPath;
-    private readonly string _root;
+    private readonly TempDb _dbFile = new();
+    private readonly TempRoot _tempRoot = new();
     private readonly Database _db;
     private readonly HierarchyService _hierarchy;
+    private string _root => _tempRoot.Path;
 
     public HierarchyServiceUnknownScanTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"antarus_unknown_scan_{Guid.NewGuid():N}.db");
-        _root = Path.Combine(Path.GetTempPath(), $"antarus_unknown_scan_root_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_root);
-        _db = new Database(_dbPath);
+        _db = new Database(_dbFile.Path);
         _hierarchy = new HierarchyService(_db);
         _hierarchy.EnsureStructure(_root);
     }
@@ -33,10 +32,8 @@ public class HierarchyServiceUnknownScanTests : IDisposable
     public void Dispose()
     {
         _db.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        foreach (var f in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
-            if (File.Exists(f)) File.Delete(f);
-        try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
+        _dbFile.Dispose();
+        _tempRoot.Dispose();
     }
 
     [Fact]
