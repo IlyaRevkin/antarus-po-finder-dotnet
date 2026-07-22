@@ -23,6 +23,19 @@ public partial class SearchView : UserControl
     private readonly IAppHost _host;
     private Dictionary<int, EquipmentSubType> _subtypesById = new();
 
+    /// <summary>Exact query text (+ mode/exact-word) the layout-fallback question was already
+    /// resolved for during this page instance's lifetime — see ConfirmLayoutFallback. Without this,
+    /// every silent re-run of the SAME unchanged query (RefreshIfActive on tab switch, background
+    /// config-sync ticks via MainWindowViewModel.RefreshSearchIfActive, closing an edit-tags dialog
+    /// which calls PerformSearch() again) re-asked "это точно оно?" from scratch AND recorded a
+    /// fresh yes/no vote each time — burning through LayoutFallbackDecisionThreshold's vote margin
+    /// on repeated re-searches of text the operator never touched again, not genuinely new searches.
+    /// Real bug report: answered "да" once, then just switching tabs asked again for the same typed
+    /// text. Cleared whenever the actual query text changes (a new/different query is always asked
+    /// fresh, exactly as before) — see PerformSearch.</summary>
+    private string? _lastLayoutFallbackResolvedKey;
+    private bool _lastLayoutFallbackResolvedYes;
+
     private static readonly string[] KincoPlcExts = { ".kpr", ".kpj", ".kpro", ".cpj", ".prj" };
     private static readonly string[] KincoHmiExts = { ".dpj", ".emt", ".emtp", ".emsln" };
 
@@ -282,13 +295,20 @@ public partial class SearchView : UserControl
         var key = LayoutFallbackKey(originalQuery);
         if (_services.Db.GetLayoutFallbackDecision(key) == LayoutFallbackDecision.Always) return true;
 
+        // Already asked (and answered) this exact question earlier in this page instance's life —
+        // a silent re-search of the SAME unchanged text (tab switch, background sync tick, closing
+        // an edit dialog) reuses that answer instead of prompting again and recording a second vote.
+        if (_lastLayoutFallbackResolvedKey == key) return _lastLayoutFallbackResolvedYes;
+
         var reply = AppMessageBox.Show(
             $"По запросу «{originalQuery}» ничего не найдено. Похоже, была включена не та раскладка " +
             $"клавиатуры — показаны результаты по «{convertedQuery}».\n\nЭто то, что вы искали?",
             "Проверка раскладки клавиатуры", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
 
         _services.Db.RecordLayoutFallbackFeedback(key, reply == MessageBoxResult.Yes, _services.Cfg.LayoutFallbackThreshold());
-        return reply == MessageBoxResult.Yes;
+        _lastLayoutFallbackResolvedKey = key;
+        _lastLayoutFallbackResolvedYes = reply == MessageBoxResult.Yes;
+        return _lastLayoutFallbackResolvedYes;
     }
 
     private void ShowNoResults(string query, string hint)
