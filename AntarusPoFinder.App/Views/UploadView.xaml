@@ -163,17 +163,27 @@
                              это именно необязательные ПЕРЕКЛЮЧАТЕЛИ поведения, а не поля для заполнения.
                              Общий заголовок + все три чекбокса в одной строке (Round 43). -->
                         <TextBlock Grid.Row="2" Grid.Column="1" Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,4,0,6"/>
-                        <StackPanel x:Name="VersionOptionsPanel" Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
-                            <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,0"
+                        <!-- WrapPanel, not a horizontal StackPanel — at the app's own MinWidth this row's
+                             three checkboxes are wider than the available column (the right column of
+                             UploadView's two-column page, further narrowed by the ScrollViewer's own
+                             vertical scrollbar), and a horizontal StackPanel doesn't clip gracefully: it
+                             just gets cut off by the ScrollViewer (HorizontalScrollBarVisibility is
+                             Disabled here, no horizontal scroll to reach the rest), rendering "ОПЦ SN" as
+                             an unreadable/unclickable sliver ("O") at min window width (verified live).
+                             WrapPanel wraps the third checkbox onto its own line only when space is
+                             actually short — identical single-line look at every width this was already
+                             tested at. -->
+                        <WrapPanel x:Name="VersionOptionsPanel" Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                            <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
                                       Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
                                       ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
-                            <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,0"
+                            <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
                                       Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
                                       ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
-                            <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN"
+                            <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
                                       Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
                                       ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
-                        </StackPanel>
+                        </WrapPanel>
 
                         <TextBlock Grid.Row="4" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
                         <TextBox Grid.Row="4" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
