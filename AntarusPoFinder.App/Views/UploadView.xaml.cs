@@ -2,12 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using AntarusPoFinder.Core.Domain;
-using AntarusPoFinder.Core.Infrastructure;
 using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
@@ -34,6 +32,11 @@ public partial class UploadView : UserControl
     private static readonly string[] HmiExecutableExts = { ".fsprj" };
     private readonly Dictionary<string, CheckBox> _launchChecks = new();
 
+    private readonly FilePickerRow _ioMapPicker;
+    private readonly FilePickerRow _instrPicker;
+    private readonly FilePickerRow _modbusPicker;
+    private readonly FilePickerRow _hmiPicker;
+
     private record SubtypeOption(string Label, EquipmentSubType Subtype);
     private record ReservationOption(string Label, FwVersionReservation? Reservation);
 
@@ -58,6 +61,17 @@ public partial class UploadView : UserControl
             _launchChecks[lt] = cb;
             LaunchTypesPanel.Children.Add(cb);
         }
+
+        _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "",
+            folderDialogTitle: "Выбрать папку");
+        _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "",
+            folderDialogTitle: "Выбрать папку");
+        _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "",
+            folderDialogTitle: "Выбрать папку");
+        _hmiPicker = new FilePickerRow(OnHmiPathPicked, ClearHmi,
+            fileDialogTitle: "Выбрать файл HMI-проекта",
+            fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
+            folderDialogTitle: "Выбрать папку HMI-проекта");
 
         Loaded += (_, _) => ReloadCombos();
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
@@ -301,8 +315,8 @@ public partial class UploadView : UserControl
         var subDisplay = subOption.Subtype.Name == "—" ? "" : subOption.Subtype.Name;
         var pathStr = string.Join(" / ", new[] { "ПО", group.Name, subDisplay, ctrlFolder, fwv.Raw }.Where(p => !string.IsNullOrEmpty(p)));
 
-        string reqNum = OpcReqNumCheck.IsChecked == true ? Format5Digits(ReqNumInput.Text) : "";
-        string cabinetSn = OpcSnCheck.IsChecked == true ? Format5Digits(CabinetSnInput.Text) : "";
+        string reqNum = OpcReqNumCheck.IsChecked == true ? FirmwareUploadService.Format5Digits(ReqNumInput.Text) : "";
+        string cabinetSn = OpcSnCheck.IsChecked == true ? FirmwareUploadService.Format5Digits(CabinetSnInput.Text) : "";
         string filename = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
 
         PreviewLabel.Text = $"{pathStr}\n{filename}";
@@ -357,7 +371,7 @@ public partial class UploadView : UserControl
             var ext = Path.GetExtension(path);
             if (string.Equals(ext, ".psl", StringComparison.OrdinalIgnoreCase))
                 TryPslAutodetect(path);
-            else if (KincoProjectExtensions.Contains(ext))
+            else if (FirmwareUploadService.KincoProjectExtensions.Contains(ext))
                 TryKincoAutodetect();
         }
         else
@@ -395,9 +409,8 @@ public partial class UploadView : UserControl
     }
 
     // ── PSL / KINCO auto-detection ────────────────────────────────────────────
-
-    private static readonly HashSet<string> KincoProjectExtensions =
-        new(StringComparer.OrdinalIgnoreCase) { ".dpj", ".kpr", ".kpj" };
+    // Actual detection logic lives in FirmwareUploadService (Core, testable) — see
+    // AutodetectFromPsl/AutodetectKinco/FindModificationByPslKey there.
 
     /// <summary>Unlike PSL (which has an inspectable internal format — see PslInspector), .dpj/
     /// .kpr/.kpj don't have a documented structure to parse a model out of, and KINCO has exactly
@@ -405,28 +418,23 @@ public partial class UploadView : UserControl
     /// extension is already an unambiguous match, no file content needs reading.</summary>
     private void TryKincoAutodetect()
     {
-        var match = _mods.FirstOrDefault(m => string.Equals(m.ControllerName, "KINCO", StringComparison.OrdinalIgnoreCase));
+        var match = FirmwareUploadService.AutodetectKinco(_mods);
         if (match is null) return;
         ApplyAutoDetectedModification(match);
     }
 
     private void TryPslAutodetect(string path)
     {
-        PslInfo info;
-        try { info = PslInspector.Inspect(path); }
-        catch { return; }
+        var result = FirmwareUploadService.AutodetectFromPsl(path, _mods);
+        if (result is null || string.IsNullOrEmpty(result.DeviceKey)) return;
 
-        var deviceKey = info.Plc.DeviceKey;
-        if (string.IsNullOrEmpty(deviceKey)) return;
-
-        var match = FindModificationByPslKey(info.Plc.Model, info.Plc.Modification);
-        if (match is null)
+        if (result.Modification is null)
         {
-            _host.ShowStatus($"Обнаружен контроллер «{deviceKey}» — такой модификации нет в справочнике. Выберите вручную или добавьте её в Настройки → Иерархия.", category: NotificationCategory.Hierarchy);
+            _host.ShowStatus($"Обнаружен контроллер «{result.DeviceKey}» — такой модификации нет в справочнике. Выберите вручную или добавьте её в Настройки → Иерархия.", category: NotificationCategory.Hierarchy);
             return;
         }
 
-        ApplyAutoDetectedModification(match);
+        ApplyAutoDetectedModification(result.Modification);
     }
 
     private void ApplyAutoDetectedModification(ControllerModification match)
@@ -438,58 +446,22 @@ public partial class UploadView : UserControl
         else CtrlCombo.SelectedIndex = idx;
     }
 
-    private ControllerModification? FindModificationByPslKey(string model, string modification)
-    {
-        if (string.IsNullOrEmpty(model)) return null;
-        var expected = string.IsNullOrEmpty(modification) ? model : $"{model}-{modification}";
-        return _mods.FirstOrDefault(m =>
-            string.Equals(m.ControllerName, model, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(m.DisplayName, expected, StringComparison.OrdinalIgnoreCase));
-    }
-
     // ── Attachment fields ─────────────────────────────────────────────────────
+    // Файл.../Папка.../Очистить for all three below are wired through FilePickerRow (see
+    // _ioMapPicker/_instrPicker/_modbusPicker, constructed once in the constructor) instead of
+    // three near-identical dialog-boilerplate blocks (Спринт 2, Задача 2).
 
-    private void IoMapBrowseFile_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog();
-        if (dlg.ShowDialog() == true) IoMapInput.Text = dlg.FileName;
-    }
+    private void IoMapBrowseFile_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFile();
+    private void IoMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFolder();
+    private void IoMapClear_Click(object sender, RoutedEventArgs e) => _ioMapPicker.Clear();
 
-    private void IoMapBrowseFolder_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog();
-        if (dlg.ShowDialog() == true) IoMapInput.Text = dlg.FolderName;
-    }
+    private void InstructionsBrowseFile_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFile();
+    private void InstructionsBrowseFolder_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFolder();
+    private void InstructionsClear_Click(object sender, RoutedEventArgs e) => _instrPicker.Clear();
 
-    private void IoMapClear_Click(object sender, RoutedEventArgs e) => IoMapInput.Text = "";
-
-    private void InstructionsBrowseFile_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog();
-        if (dlg.ShowDialog() == true) InstructionsInput.Text = dlg.FileName;
-    }
-
-    private void InstructionsBrowseFolder_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog();
-        if (dlg.ShowDialog() == true) InstructionsInput.Text = dlg.FolderName;
-    }
-
-    private void InstructionsClear_Click(object sender, RoutedEventArgs e) => InstructionsInput.Text = "";
-
-    private void ModbusMapBrowseFile_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog();
-        if (dlg.ShowDialog() == true) ModbusMapInput.Text = dlg.FileName;
-    }
-
-    private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog();
-        if (dlg.ShowDialog() == true) ModbusMapInput.Text = dlg.FolderName;
-    }
-
-    private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => ModbusMapInput.Text = "";
+    private void ModbusMapBrowseFile_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFile();
+    private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFolder();
+    private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => _modbusPicker.Clear();
 
     private const string HmiPathPlaceholder = "Перетащите файл или папку HMI-проекта сюда\nили нажмите для выбора";
 
@@ -497,60 +469,33 @@ public partial class UploadView : UserControl
     {
         bool isChecked = HmiCheck.IsChecked == true;
         HmiSection.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
-        if (!isChecked)
-        {
-            _hmiPath = null;
-            _hmiExecutableHint = null;
-            HmiPathLabel.Text = HmiPathPlaceholder;
-        }
+        if (!isChecked) ClearHmi();
     }
 
     /// <summary>Clicking the drop zone itself (outside a drag&amp;drop) is a shortcut for "Файл..." —
     /// same click-to-browse behavior as the main firmware DropZone above.</summary>
-    private void HmiDropZone_Click(object sender, MouseButtonEventArgs e) => HmiBrowseFile_Click(sender, e);
+    private void HmiDropZone_Click(object sender, MouseButtonEventArgs e) => _hmiPicker.BrowseFile();
 
-    private void HmiDropZone_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
-        e.Handled = true;
-    }
+    private void HmiDropZone_DragOver(object sender, DragEventArgs e) => FilePickerRow.HandleDragOver(e);
 
-    private void HmiDropZone_Drop(object sender, DragEventArgs e)
-    {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
-            OnHmiPathPicked(paths[0]);
-    }
+    private void HmiDropZone_Drop(object sender, DragEventArgs e) => _hmiPicker.HandleDrop(e);
 
-    private void HmiBrowseFile_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "Выбрать файл HMI-проекта",
-            Filter = "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
-        };
-        if (dlg.ShowDialog() != true) return;
-        OnHmiPathPicked(dlg.FileName);
-    }
-
-    private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Выбрать папку HMI-проекта" };
-        if (dlg.ShowDialog() != true) return;
-        OnHmiPathPicked(dlg.FolderName);
-    }
-
-    private void HmiClear_Click(object sender, RoutedEventArgs e)
-    {
-        _hmiPath = null;
-        _hmiExecutableHint = null;
-        HmiPathLabel.Text = HmiPathPlaceholder;
-    }
+    private void HmiBrowseFile_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFile();
+    private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFolder();
+    private void HmiClear_Click(object sender, RoutedEventArgs e) => _hmiPicker.Clear();
 
     private void OnHmiPathPicked(string path)
     {
         _hmiPath = path;
         _hmiExecutableHint = Directory.Exists(path) ? PromptExecutableHint(path, HmiExecutableExts, "HMI-проекта") : null;
         HmiPathLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+    }
+
+    private void ClearHmi()
+    {
+        _hmiPath = null;
+        _hmiExecutableHint = null;
+        HmiPathLabel.Text = HmiPathPlaceholder;
     }
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
@@ -575,245 +520,87 @@ public partial class UploadView : UserControl
             AppMessageBox.Show(noFwMsg, "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (GroupCombo.SelectedItem is not EquipmentGroup group ||
-            SubCombo.SelectedItem is not SubtypeOption subOption ||
-            CtrlCombo.SelectedItem is not ControllerModification mod)
+        var request = BuildUploadRequest();
+        var result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request);
+
+        // Two checks used to pop a Yes/No MessageBox mid-transaction and either continue in place or
+        // abort — the service can't show UI, so it hands back NeedsConfirmation instead and expects
+        // the SAME request re-submitted with the matching Confirm* flag once the user agrees (see
+        // FirmwareUploadService's doc comment). Looping here reproduces the exact original sequence:
+        // unknown-extension prompt first (if any), then the destination-exists prompt (if any).
+        while (result.Outcome == FirmwareUploadOutcome.NeedsConfirmation)
         {
-            AppMessageBox.Show("Укажите тип шкафа, подтип и контроллер.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            var title = result.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension
+                ? "Неизвестное расширение" : "Версия существует";
+            var reply = AppMessageBox.Show(result.ConfirmationMessage ?? "", title,
+                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (reply != MessageBoxResult.Yes) return;
+
+            if (result.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension)
+                request.ConfirmUnknownExtension = true;
+            else
+                request.ConfirmOverwriteExisting = true;
+
+            result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request);
         }
 
+        switch (result.Outcome)
+        {
+            case FirmwareUploadOutcome.ValidationFailed:
+                var error = result.Errors.FirstOrDefault() ?? "Не удалось загрузить прошивку.";
+                AppMessageBox.Show(error, "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (error == "Укажите описание изменений в этой версии.") DescInput.Focus();
+                return;
+
+            case FirmwareUploadOutcome.IoError:
+                AppMessageBox.Show(result.IoErrorMessage ?? "", "Ошибка файла", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+
+            case FirmwareUploadOutcome.Success:
+                _host.ShowStatus($"Загружено: {result.Record!.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+
+                var msg = $"Прошивка загружена:\n{result.DestinationFolder}";
+                if (result.Warnings.Count > 0)
+                    msg += "\n\nПредупреждения:\n" + string.Join("\n", result.Warnings);
+                AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                ResetForm();
+                return;
+        }
+    }
+
+    private FirmwareUploadRequest BuildUploadRequest()
+    {
+        var group = GroupCombo.SelectedItem as EquipmentGroup;
+        var subOption = SubCombo.SelectedItem as SubtypeOption;
+        var mod = CtrlCombo.SelectedItem as ControllerModification;
         var launchTypes = _launchChecks.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList();
-        if (launchTypes.Count == 0)
-        {
-            AppMessageBox.Show("Выберите хотя бы один тип пуска.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
 
-        var desc = DescInput.Text.Trim();
-        if (string.IsNullOrEmpty(desc))
+        return new FirmwareUploadRequest
         {
-            AppMessageBox.Show("Укажите описание изменений в этой версии.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            DescInput.Focus();
-            return;
-        }
-
-        var root = _services.Cfg.RootPath();
-        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
-        {
-            AppMessageBox.Show("Сетевой диск недоступен. Проверьте настройки.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        bool isDir = Directory.Exists(_srcPath);
-        if (!isDir)
-        {
-            var ext = Path.GetExtension(_srcPath).TrimStart('.').ToLowerInvariant();
-            var allowed = new HashSet<string>(_services.Db.GetAllowedExtensions().Select(x => x.ToLowerInvariant()));
-            if (allowed.Count > 0 && !allowed.Contains(ext))
-            {
-                var reply = AppMessageBox.Show(
-                    $"Расширение «.{ext}» не входит в список разрешённых (Настройки → Иерархия → Разрешённые расширения).\nТочно загрузить этот файл?",
-                    "Неизвестное расширение", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-                if (reply != MessageBoxResult.Yes) return;
-            }
-        }
-
-        bool isOpc = IsOpc;
-        var reqNumRaw = OpcReqNumCheck.IsChecked == true ? ReqNumInput.Text.Trim() : "";
-        var cabinetSnRaw = OpcSnCheck.IsChecked == true ? CabinetSnInput.Text.Trim() : "";
-        var reqNum = Format5Digits(reqNumRaw);
-        var cabinetSn = Format5Digits(cabinetSnRaw);
-        int hwInt = mod.HwVersion;
-
-        // If a reservation is picked, consume its EXACT locked-in number (Parse, never recompute) —
-        // that's the whole point: the number inside the compiled firmware must match what gets saved.
-        var reservation = GetSelectedReservation();
-        FwVersionNumber fwv;
-        int swInt;
-        if (reservation is not null)
-        {
-            fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
-            swInt = fwv.SwVersion;
-        }
-        else
-        {
-            swInt = _services.Db.GetNextSwVersion(subOption.Subtype.Id!.Value, mod.ControllerId, hwInt);
-            fwv = FwVersionNumber.Build(group.Prefix, subOption.Subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
-        }
-
-        var dstFolder = _services.Hierarchy.FwPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName, fwv.Raw, isOpc);
-
-        if (Directory.Exists(dstFolder))
-        {
-            var overwrite = AppMessageBox.Show(
-                $"Папка {fwv.Raw} уже существует.\nПерезаписать?",
-                "Версия существует", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-            if (overwrite != MessageBoxResult.Yes) return;
-        }
-
-        string dstName;
-        try
-        {
-            Directory.CreateDirectory(dstFolder);
-            if (isDir)
-            {
-                CopyDirectoryContents(_srcPath, dstFolder);
-                dstName = Path.GetFileName(_srcPath.TrimEnd(Path.DirectorySeparatorChar));
-            }
-            else
-            {
-                var ext = Path.GetExtension(_srcPath);
-                dstName = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
-                File.Copy(_srcPath, Path.Combine(dstFolder, dstName), overwrite: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            AppMessageBox.Show(ex.Message, "Ошибка файла", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
-
-        var user = _services.Db.GetOrCreateUser(_services.CurrentUserName, _services.CurrentUserName);
-
-        var warnings = new List<string>();
-        try { WriteChangelog(dstFolder, fwv, launchTypes, desc); }
-        catch (Exception ex) { warnings.Add($"CHANGELOG.md: {ex.Message}"); }
-
-        string ioMapStored = "";
-        if (!string.IsNullOrEmpty(IoMapInput.Text))
-        {
-            try { ioMapStored = FileSystemHelpers.CopyFileOrFolderShallow(IoMapInput.Text, _services.Hierarchy.IoMapPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
-            catch (Exception ex) { warnings.Add($"Карта ВВ: {ex.Message}"); }
-        }
-        string instrStored = "";
-        if (!string.IsNullOrEmpty(InstructionsInput.Text))
-        {
-            try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(InstructionsInput.Text, _services.Hierarchy.InstrPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
-            catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
-        }
-        string modbusStored = "";
-        if (!string.IsNullOrEmpty(ModbusMapInput.Text))
-        {
-            try { modbusStored = FileSystemHelpers.CopyFileOrFolderShallow(ModbusMapInput.Text, _services.Hierarchy.ModbusMapPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName)); }
-            catch (Exception ex) { warnings.Add($"Карта modbus: {ex.Message}"); }
-        }
-        string hmiStored = "";
-        if (HmiCheck.IsChecked == true && !string.IsNullOrEmpty(_hmiPath))
-        {
-            try
-            {
-                var hmiRootFolder = _services.Hierarchy.HmiPath(root, group.Name, subOption.Subtype.Name, mod.ControllerName);
-                Directory.CreateDirectory(hmiRootFolder);
-                // Named after the PLC version + "_hmi" (not just copied under the shared "HMI" folder
-                // with its original name) — the HMI folder used to be flat/unversioned, so every
-                // upload for this controller silently overwrote whatever HMI project was there before
-                // (CopyDirectoryContents doesn't delete files removed from the new source, so a stale
-                // file from an older HMI could even survive alongside the new ones). Giving each
-                // upload its own version-named entry makes every version's HMI project a distinct,
-                // non-destructive slot, same as how "ПО" version folders already work per firmware.
-                if (Directory.Exists(_hmiPath))
-                {
-                    var hmiDstFolder = Path.Combine(hmiRootFolder, $"{fwv.Raw}_hmi");
-                    Directory.CreateDirectory(hmiDstFolder);
-                    CopyDirectoryContents(_hmiPath, hmiDstFolder);
-                    hmiStored = hmiDstFolder;
-                }
-                else
-                {
-                    var hmiExt = Path.GetExtension(_hmiPath);
-                    var hmiDstName = $"{fwv.Raw}_hmi{hmiExt}";
-                    File.Copy(_hmiPath, Path.Combine(hmiRootFolder, hmiDstName), overwrite: true);
-                    hmiStored = Path.Combine(hmiRootFolder, hmiDstName);
-                }
-            }
-            catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
-        }
-
-        // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
-        // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
-        // "SMH5" still finds the file by the same words it used to carry in its name. "—" is the
-        // "no real subtype" placeholder (see HierarchyDefaults), not a real word to tag with.
-        var tags = TagsEditor.Tags.ToList();
-        foreach (var autoTag in new[] { group.Name, subOption.Subtype.Name == "—" ? null : subOption.Subtype.Name, mod.ControllerName })
-            if (!string.IsNullOrWhiteSpace(autoTag) && !tags.Contains(autoTag, StringComparer.OrdinalIgnoreCase))
-                tags.Add(autoTag);
-        foreach (var tag in tags) _services.Db.AddTag(tag);
-
-        var newFwId = _services.Db.AddFwVersion(new FwVersionRecord
-        {
-            SubtypeId = subOption.Subtype.Id!.Value,
-            ControllerId = mod.ControllerId,
-            EqPrefix = group.Prefix,
-            SubPrefix = subOption.Subtype.Prefix,
-            HwVersion = hwInt,
-            SwVersion = swInt,
-            DtStr = fwv.DtStr,
-            VersionRaw = fwv.Raw,
-            Filename = dstName,
-            DiskPath = dstFolder,
-            Description = desc,
-            Changelog = desc,
+            SourcePath = _srcPath ?? "",
+            Group = group,
+            Subtype = subOption?.Subtype,
+            Modification = mod,
             LaunchTypes = launchTypes,
-            IoMapPath = ioMapStored,
-            InstructionsPath = instrStored,
-            ModbusMapPath = modbusStored,
-            HmiPath = hmiStored,
+            Description = DescInput.Text.Trim(),
+            IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
+            OpcRequestEnabled = OpcReqNumCheck.IsChecked == true,
+            RequestNumRaw = ReqNumInput.Text,
+            OpcSnEnabled = OpcSnCheck.IsChecked == true,
+            CabinetSnRaw = CabinetSnInput.Text,
+            Reservation = GetSelectedReservation(),
+            RootPath = _services.Cfg.RootPath(),
+            IoMapSourcePath = IoMapInput.Text,
+            InstructionsSourcePath = InstructionsInput.Text,
+            ModbusMapSourcePath = ModbusMapInput.Text,
+            HmiEnabled = HmiCheck.IsChecked == true,
+            HmiSourcePath = _hmiPath ?? "",
             ExecutableHint = _executableHint ?? "",
-            HmiExecutableHint = HmiCheck.IsChecked == true ? _hmiExecutableHint ?? "" : "",
-            IsOpc = isOpc,
-            RequestNum = reqNum,
-            CabinetSn = cabinetSn,
-            AuthorId = user.Id,
-            Status = "active",
-            Tags = string.Join(' ', tags),
-        });
-
-        if (reservation is not null && newFwId > 0)
-            _services.Db.FulfillReservation(reservation.Id!.Value, newFwId);
-
-        _host.ShowStatus($"Загружено: {fwv.Raw}", category: NotificationCategory.FirmwareAndParams);
-
-        var msg = $"Прошивка загружена:\n{dstFolder}";
-        if (warnings.Count > 0)
-            msg += "\n\nПредупреждения:\n" + string.Join("\n", warnings);
-        AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
-
-        ResetForm();
-    }
-
-    private static void CopyDirectoryContents(string srcDir, string dstDir)
-    {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(srcDir))
-        {
-            var name = Path.GetFileName(entry);
-            var dest = Path.Combine(dstDir, name);
-            if (Directory.Exists(entry))
-            {
-                Directory.CreateDirectory(dest);
-                CopyDirectoryContents(entry, dest);
-            }
-            else
-            {
-                File.Copy(entry, dest, overwrite: true);
-            }
-        }
-    }
-
-    private static void WriteChangelog(string folder, FwVersionNumber fwv, List<string> launchTypes, string desc)
-    {
-        var lines = new List<string>
-        {
-            $"# {fwv.Raw}",
-            $"Дата: {fwv.DtStr}",
-            $"Тип пуска: {string.Join(", ", launchTypes)}",
+            HmiExecutableHint = _hmiExecutableHint ?? "",
+            Tags = TagsEditor.Tags.ToList(),
+            AuthorUserName = _services.CurrentUserName,
         };
-        if (!string.IsNullOrEmpty(desc))
-        {
-            lines.Add("");
-            lines.Add(desc);
-        }
-        File.WriteAllText(Path.Combine(folder, "CHANGELOG.md"), string.Join("\n", lines), new UTF8Encoding(false));
     }
 
     private void ResetForm()
