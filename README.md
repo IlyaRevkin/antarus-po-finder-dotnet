@@ -1,5 +1,7 @@
 # Antarus ПО Finder (.NET / WPF)
 
+[![CI](https://github.com/IlyaRevkin/antarus-po-finder-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/IlyaRevkin/antarus-po-finder-dotnet/actions/workflows/ci.yml)
+
 Десктопное приложение для управления базой прошивок и параметров промышленных контроллеров
 (ПЛК/УПП/ПЧ) — поиск нужной прошивки по названию шкафа, загрузка новых версий с автоматическим
 определением контроллера, хранение параметров ПЧ/УПП, административная панель для настройки
@@ -18,7 +20,7 @@
 |---|---|
 | `AntarusPoFinder.Core` | Вся бизнес-логика и данные: SQLite (`Database`), доменные модели, иерархия оборудования (`HierarchyService`), поиск (`SearchService`), автоопределение контроллера по PSL-файлу (`PslInspector`), файловые операции (`FileSystemHelpers`, `ArchiveExtractor`). Никакого UI — можно было бы переиспользовать под другой интерфейс. |
 | `AntarusPoFinder.App` | WPF UI: страницы (Поиск / Осмотр / Модерация тегов / Загрузка / Параметры / Сетевые диски / Тикеты / Настройки), диалоги, темизация. |
-| `AntarusPoFinder.Tests` | xUnit-тесты: смоук/юнит-тесты слоя `Core` (`Database`, иерархия, парсинг версий, конфликты синка) плюс полные двухмашинные end-to-end прогоны через реальный `ConfigSyncService`/`TicketSyncService` из `App`. |
+| `AntarusPoFinder.Tests` | xUnit-тесты: смоук/юнит-тесты слоя `Core` (`Database`, иерархия, парсинг версий, конфликты синка) плюс полные двухмашинные end-to-end прогоны через реальный `ConfigSyncService`/`TicketSyncService` из `App`. Все фикстуры — временные БД/папки, создаваемые и засеваемые каждым тестом самостоятельно (`TestHelpers/TempDb`, `TempRoot`, `TwoMachines`), никакой тест не зависит от файлов на конкретной машине разработчика. Прогоняются в CI на каждый push/PR в `master` (`.github/workflows/ci.yml`). |
 
 Страницы реализованы как обычные `UserControl` с code-behind (без ViewModel на страницу) —
 конструктор принимает `AppServices` (доступ к `Database`/`ConfigService`/`HierarchyService`) и
@@ -391,7 +393,12 @@ AntarusPoFinder.App/
 
 AntarusPoFinder.Tests/  — xUnit, ~15-20 файлов по областям (Database*, ConfigSync*,
   EndToEndSyncTests — полный двухмашинный прогон через реальный ConfigSyncService/
-  TicketSyncService, ConflictResolutionTests, AppUserAuthServiceTests, ...)
+  TicketSyncService, ConflictResolutionTests, AppUserAuthServiceTests, PslInspectorTests, ...)
+  TestHelpers/     — переиспользуемые IDisposable-фикстуры (TempDb, TempRoot, TwoMachines)
+  TestData/        — синтетические тестовые ресурсы (например sample_smh4.psl для PslInspectorTests)
+
+.github/workflows/ci.yml — restore + build + test на windows-latest (push/PR в master;
+  WPF-проекты не собираются на Linux-раннерах)
 
 installer/
   Package.wxs      — WiX-манифест MSI-инсталлятора (per-user, %LocalAppData%)

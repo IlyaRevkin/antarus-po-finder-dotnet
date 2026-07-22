@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    # AntarusPoFinder.App is WPF (net8.0-windows) and AntarusPoFinder.Tests targets
+    # net8.0-windows7.0 (it references App — see EndToEndSyncTests' header comment), so this needs a
+    # Windows runner; a plain ubuntu-latest can't build either project.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        run: dotnet test -c Release --no-build --logger "console;verbosity=normal"
