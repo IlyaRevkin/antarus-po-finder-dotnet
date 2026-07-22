@@ -213,6 +213,9 @@ public class ConfigService
 
     public List<QuickApp> QuickApps()
     {
+        // Self-healing best-effort: a corrupted/pre-migration value here just means the quick-apps
+        // row starts back at empty (visibly so — the operator sees an empty list and re-adds them)
+        // rather than the app failing to start over one bad setting value.
         try { return JsonSerializer.Deserialize<List<QuickApp>>(Get("quick_apps")) ?? new(); }
         catch { return new(); }
     }
@@ -225,6 +228,9 @@ public class ConfigService
     /// into silent auto-update for — everything else just surfaces in the "Обновить" banner/window.</summary>
     public HashSet<string> FwAutoUpdateDirs()
     {
+        // Same self-healing reasoning as QuickApps above: a corrupted value falls back to "nothing
+        // opted into auto-update" (the safe default — everything just surfaces via the manual
+        // banner/window instead), not a startup failure.
         try { return new HashSet<string>(JsonSerializer.Deserialize<List<string>>(Get("fw_auto_update_dirs")) ?? new(), StringComparer.OrdinalIgnoreCase); }
         catch { return new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
     }
@@ -252,6 +258,8 @@ public class ConfigService
                 .Where(c => c.HasValue)
                 .Select(c => c!.Value));
         }
+        // Corrupted value falls back to "nothing disabled" — the safe default per the doc above
+        // (every category enabled), not a startup failure over one bad setting.
         catch { return new HashSet<NotificationCategory>(); }
     }
 
@@ -281,6 +289,8 @@ public class ConfigService
                 .Where(c => c.HasValue)
                 .Select(c => c!.Value));
         }
+        // Same self-healing fallback as DisabledNotificationCategories above: corrupted value ->
+        // "nothing muted" (every category still counts toward the badge, the safe default).
         catch { return new HashSet<NotificationCategory>(); }
     }
 

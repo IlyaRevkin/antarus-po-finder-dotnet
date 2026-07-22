@@ -49,6 +49,10 @@ public partial class EditFirmwareDialog : Window
         if (!string.IsNullOrEmpty(v.HmiPath) && Directory.Exists(v.HmiPath))
         {
             List<string> files;
+            // Share went unreachable between the dialog opening and this listing, or a permissions
+            // hiccup on the HMI folder — falls back to "no picker shown", same as the existing
+            // "HmiPath doesn't exist" branch just below the outer if. The dialog's other fields (tags,
+            // status) are unaffected either way.
             try { files = Directory.EnumerateFiles(v.HmiPath).Select(Path.GetFileName).ToList()!; }
             catch { files = new(); }
             if (files.Count > 0)

@@ -41,6 +41,9 @@ public static class NetworkPathHelper
         }
         catch
         {
+            // No network, drive not actually mapped, WNetGetConnection unsupported for this drive
+            // type, etc. — all fold into the same "don't know" null per the doc above; this helper
+            // only feeds an optional instructions dialog, nothing depends on distinguishing why.
             return null;
         }
     }

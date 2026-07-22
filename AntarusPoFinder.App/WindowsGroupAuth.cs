@@ -76,6 +76,10 @@ public static class WindowsGroupAuth
             }
             return null;
         }
+        // The AD bind/user lookup itself failed here (domain became unreachable moments after
+        // ValidateAdCredentials already succeeded, or lookup denied by AD permissions) — same "return
+        // null" contract as "no group matched"/"none configured": the caller (App/RoleSwitchDialog)
+        // falls back to the app's own roster either way, so there's nothing extra to distinguish here.
         catch
         {
             return null;

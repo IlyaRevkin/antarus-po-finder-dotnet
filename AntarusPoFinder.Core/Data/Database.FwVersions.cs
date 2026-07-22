@@ -431,6 +431,9 @@ public partial class Database
     {
         var launchTypesJson = GetString(r, "launch_types", "[]");
         List<string> launchTypes;
+        // Corrupted/pre-migration value in this column falls back to "no launch types recorded" — a
+        // display-only field (which icons show next to a version), not something the row's identity
+        // or moderation status depends on.
         try { launchTypes = JsonSerializer.Deserialize<List<string>>(launchTypesJson) ?? new(); }
         catch { launchTypes = new(); }
 

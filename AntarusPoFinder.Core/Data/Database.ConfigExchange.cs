@@ -734,6 +734,10 @@ public partial class Database
                             else if (File.Exists(localHmi)) File.Delete(localHmi);
                         }
                     }
+                    // Same reasoning as the disk_path cleanup above: TombstoneFwVersion(id) right
+                    // below is the actual source of truth for "this version is deleted" (it's what
+                    // keeps propagating the tombstone to every other machine) — a leftover HMI folder
+                    // that failed to delete is a disk-space nit, not a correctness problem.
                     catch { /* best-effort */ }
 
                     TombstoneFwVersion(id);

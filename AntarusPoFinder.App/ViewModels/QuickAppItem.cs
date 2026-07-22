@@ -32,6 +32,9 @@ public class QuickAppItem
             bmp.Freeze();
             return bmp;
         }
+        // Missing/broken shortcut target, or a file type Icon.ExtractAssociatedIcon can't handle —
+        // the button still renders (just without an icon), same as a shortcut with no icon in
+        // Explorer; not worth interrupting the sidebar render over one cosmetic glyph.
         catch { return null; }
     }
 

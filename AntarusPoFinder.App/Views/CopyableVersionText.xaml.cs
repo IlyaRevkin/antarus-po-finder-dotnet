@@ -30,6 +30,10 @@ public partial class CopyableVersionText : UserControl
     {
         e.Handled = true; // don't let the click bubble into the DataGrid row (selection/double-click)
         if (string.IsNullOrEmpty(Text)) return;
+        // Clipboard.SetText can throw if another process is holding the clipboard open right at this
+        // instant (COMException, notoriously flaky on Windows) — skipping the success-color flash
+        // below is itself the feedback that nothing was copied; a message box for a one-click copy
+        // gesture the operator can just retry would be disproportionate.
         try { Clipboard.SetText(Text); }
         catch { return; }
 

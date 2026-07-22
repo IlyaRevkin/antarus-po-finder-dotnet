@@ -51,6 +51,8 @@ public sealed class PhotoUploadServer : IDisposable
         while (_running)
         {
             TcpClient client;
+            // Dispose() above stops the listener, which makes a pending/next AcceptTcpClient throw —
+            // that's the intended way to unblock and exit this loop, not an error to report.
             try { client = _listener.AcceptTcpClient(); }
             catch { return; }
             ThreadPool.QueueUserWorkItem(_ => HandleClient(client));
@@ -221,6 +223,9 @@ public sealed class PhotoUploadServer : IDisposable
             socket.Connect("8.8.8.8", 65530);
             return (socket.LocalEndPoint as IPEndPoint)?.Address.ToString() ?? "127.0.0.1";
         }
+        // No network/route to the outside — falls back to loopback, same as the address failing to
+        // resolve above; the QR code just won't be reachable from a phone, which is self-evident
+        // from the URL shown rather than needing a separate error.
         catch { return "127.0.0.1"; }
     }
 }
