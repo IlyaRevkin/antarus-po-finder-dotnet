@@ -5,9 +5,9 @@
 
 .EXAMPLE
     powershell -File installer/build.ps1 -Version 1.8.0
+    powershell -File installer/build.ps1   # reads <Version> from AntarusPoFinder.App.csproj
 #>
 param(
-    [Parameter(Mandatory = $true)]
     [string]$Version
 )
 
@@ -16,6 +16,21 @@ $root = Split-Path -Parent $PSScriptRoot
 $installerDir = Join-Path $root "installer"
 $publishDir = Join-Path $installerDir "publish"
 $appProject = Join-Path $root "AntarusPoFinder.App\AntarusPoFinder.App.csproj"
+
+# -Version used to be mandatory and entirely unrelated to <Version> in AntarusPoFinder.App.csproj —
+# easy to rebuild with a version that doesn't match what the exe itself reports (About/update-check
+# both read the csproj's AssemblyVersion), which is the suspected cause of one reported "installer
+# doesn't see the old version" case. Falls back to reading the csproj directly so the two can't drift
+# apart just because nobody remembered to pass a matching -Version by hand; still overridable for a
+# deliberate one-off (e.g. building an installer for a version not yet committed to the csproj).
+if (-not $Version) {
+    $csprojContent = Get-Content $appProject -Raw
+    if ($csprojContent -notmatch '<Version>([^<]+)</Version>') {
+        throw "Could not find <Version> in $appProject - pass -Version explicitly."
+    }
+    $Version = $Matches[1]
+    Write-Host "No -Version passed - using $Version from AntarusPoFinder.App.csproj."
+}
 
 Write-Host "Publishing AntarusPoFinder.App $Version (self-contained win-x64, single file)..."
 dotnet publish $appProject -c Release -r win-x64 --self-contained true `

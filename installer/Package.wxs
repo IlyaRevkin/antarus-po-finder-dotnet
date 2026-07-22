@@ -13,7 +13,14 @@
            Scope="perUser"
            Language="1049">
 
-    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия Antarus ПО Finder. Удалите её перед установкой этой версии." />
+    <!-- AllowSameVersionUpgrades: without it, re-running the MSI for the CURRENT already-installed
+         version (e.g. re-installing after the app self-updated to a version whose number the operator
+         then re-downloaded as an MSI, or simply re-running the same installer to repair a broken
+         install) is silently a no-op instead of actually reinstalling/repairing — WiX only treats a
+         strictly HIGHER ProductVersion as an upgrade otherwise. Suspected contributor to a reported
+         "installer doesn't see the old version" case. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Установлена более новая версия Antarus ПО Finder. Удалите её перед установкой этой версии." />
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="LocalAppDataFolder">
