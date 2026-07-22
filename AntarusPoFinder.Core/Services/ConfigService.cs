@@ -57,6 +57,7 @@ public class ConfigService
         ["reservation_ttl_hours"] = "72",
         ["onboarding_shown"] = "false",
         ["notification_categories_disabled"] = "[]",
+        ["notification_categories_muted_unread"] = "[]",
         ["close_action"] = "close",
         ["inspection_auto_cleanup_days"] = "0",
         ["inspection_auto_cleanup_minutes"] = "",
@@ -262,6 +263,35 @@ public class ConfigService
         var set = DisabledNotificationCategories();
         if (enabled) set.Remove(category); else set.Add(category);
         Set("notification_categories_disabled", JsonSerializer.Serialize(set.Select(c => c.ToString()).ToList()));
+    }
+
+    /// <summary>Separate from DisabledNotificationCategories above — a category can stay fully
+    /// enabled (still shows in the status bar / still lands in history) while being excluded from the
+    /// unread badge count on the "Уведомления" sidebar button, for chatty-but-low-priority categories
+    /// the operator doesn't want bumping the badge every time (e.g. Sync's routine "Путь сохранён"
+    /// toasts). Per-machine, same as notification_categories_disabled — see ConfigSyncService.
+    /// SkipSettingsKeys. All categories count toward the badge by default.</summary>
+    public HashSet<NotificationCategory> MutedFromUnreadNotificationCategories()
+    {
+        try
+        {
+            var names = JsonSerializer.Deserialize<List<string>>(Get("notification_categories_muted_unread")) ?? new();
+            return new HashSet<NotificationCategory>(names
+                .Select(n => Enum.TryParse<NotificationCategory>(n, out var c) ? (NotificationCategory?)c : null)
+                .Where(c => c.HasValue)
+                .Select(c => c!.Value));
+        }
+        catch { return new HashSet<NotificationCategory>(); }
+    }
+
+    public bool IsNotificationCategoryCountedUnread(NotificationCategory category) =>
+        !MutedFromUnreadNotificationCategories().Contains(category);
+
+    public void SetNotificationCategoryCountedUnread(NotificationCategory category, bool counted)
+    {
+        var set = MutedFromUnreadNotificationCategories();
+        if (counted) set.Remove(category); else set.Add(category);
+        Set("notification_categories_muted_unread", JsonSerializer.Serialize(set.Select(c => c.ToString()).ToList()));
     }
 
     /// <summary>"close" = закрытие окна завершает процесс как раньше (default — не менять поведение

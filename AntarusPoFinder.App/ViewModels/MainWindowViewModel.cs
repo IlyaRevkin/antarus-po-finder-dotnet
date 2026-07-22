@@ -268,10 +268,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             return;
         }
 
-        NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, reopen));
+        NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, category, reopen));
         while (NotificationHistory.Count > NotificationHistoryLimit)
             NotificationHistory.RemoveAt(NotificationHistory.Count - 1);
-        UnseenNotificationsCount++;
+        if (_services.Cfg.IsNotificationCategoryCountedUnread(category))
+            UnseenNotificationsCount++;
     }
 
     /// <summary>Interactive banners (update available, firmware update available) get 10 seconds

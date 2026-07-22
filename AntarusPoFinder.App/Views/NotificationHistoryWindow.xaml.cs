@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -25,33 +26,73 @@ public partial class NotificationHistoryWindow : Window
         LoadNotificationCategories();
     }
 
-    /// <summary>Built in code, not XAML-bound — one CheckBox per NotificationCategoryInfo.All entry,
-    /// pre-checked from ConfigService.IsNotificationCategoryEnabled. Deliberately silent on toggle
-    /// (see NotificationCategoryCheck_Changed): the point of muting a category is that it stops
-    /// making noise, so the mute action itself shouldn't pop a status message.</summary>
+    /// <summary>Built in code, not XAML-bound — one row per NotificationCategoryInfo.All entry, with
+    /// two independent checkboxes: "Показывать" (ConfigService.IsNotificationCategoryEnabled — fully
+    /// mutes the category everywhere) and "Считать непрочитанным" (IsNotificationCategoryCountedUnread
+    /// — category still shows/logs normally, just doesn't bump the badge). Deliberately silent on
+    /// toggle (see the *_Changed handlers): the point of muting/excluding a category is that it stops
+    /// making noise, so the action itself shouldn't pop a status message.</summary>
     private void LoadNotificationCategories()
     {
         NotificationCategoriesPanel.Children.Clear();
         foreach (var (category, label) in NotificationCategoryInfo.All)
         {
-            var cb = new CheckBox
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
+
+            var nameLabel = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Tag = category };
+            Grid.SetColumn(nameLabel, 0);
+            row.Children.Add(nameLabel);
+
+            var enabledCheck = new CheckBox
             {
-                Content = label,
                 Tag = category,
                 IsChecked = _cfg.IsNotificationCategoryEnabled(category),
-                Margin = new Thickness(0, 0, 0, 6),
+                HorizontalAlignment = HorizontalAlignment.Center,
             };
-            cb.Checked += NotificationCategoryCheck_Changed;
-            cb.Unchecked += NotificationCategoryCheck_Changed;
-            NotificationCategoriesPanel.Children.Add(cb);
+            enabledCheck.Checked += NotificationCategoryEnabledCheck_Changed;
+            enabledCheck.Unchecked += NotificationCategoryEnabledCheck_Changed;
+            Grid.SetColumn(enabledCheck, 1);
+            row.Children.Add(enabledCheck);
+
+            var unreadCheck = new CheckBox
+            {
+                Tag = category,
+                IsChecked = _cfg.IsNotificationCategoryCountedUnread(category),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            unreadCheck.Checked += NotificationCategoryUnreadCheck_Changed;
+            unreadCheck.Unchecked += NotificationCategoryUnreadCheck_Changed;
+            Grid.SetColumn(unreadCheck, 2);
+            row.Children.Add(unreadCheck);
+
+            NotificationCategoriesPanel.Children.Add(row);
         }
     }
 
-    private void NotificationCategoryCheck_Changed(object sender, RoutedEventArgs e)
+    private void NotificationCategoryEnabledCheck_Changed(object sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { Tag: NotificationCategory category } cb) return;
         _cfg.SetNotificationCategoryEnabled(category, cb.IsChecked == true);
     }
+
+    private void NotificationCategoryUnreadCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { Tag: NotificationCategory category } cb) return;
+        _cfg.SetNotificationCategoryCountedUnread(category, cb.IsChecked == true);
+    }
+
+    private void CategorySettingsToggle_Click(object sender, RoutedEventArgs e) =>
+        CategorySettingsPanel.Visibility = CategorySettingsPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>Clicking a notification row's category badge is the "directly from a notification"
+    /// path to that category's settings — opens the (possibly still collapsed) settings panel above
+    /// so the operator doesn't have to hunt for the gear button first.</summary>
+    private void CategoryBadge_Click(object sender, MouseButtonEventArgs e) =>
+        CategorySettingsPanel.Visibility = Visibility.Visible;
 
     private void Reopen_Click(object sender, RoutedEventArgs e)
     {
