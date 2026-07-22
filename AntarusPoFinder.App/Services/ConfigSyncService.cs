@@ -26,9 +26,9 @@ public static class ConfigSyncService
     /// via Database.ImportHierarchyData below, unconditionally.</summary>
     private static readonly HashSet<string> SkipKeys = new()
     {
-        "exported_at", "exported_by", "equipment_groups", "equipment_subtypes", "controller_models",
-        "controller_modifications", "param_manufacturers", "tags", "allowed_extensions",
-        "fw_version_reservations", "fw_versions", "param_files", "app_users",
+        "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
+        "controller_models", "controller_modifications", "param_manufacturers", "tags",
+        "allowed_extensions", "fw_version_reservations", "fw_versions", "param_files", "app_users",
     };
 
     /// <summary>Every plain setting key lives on either Настройки → Общие or Настройки → Быстрый
@@ -46,7 +46,7 @@ public static class ConfigSyncService
         "sync_interval_min", "quick_apps",
         "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at", "config_last_checked_at",
         "scan_resolution_dpi", "config_push_interval_min", "onboarding_shown",
-        "notification_categories_disabled", "close_action", "inspection_auto_cleanup_days",
+        "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
         "layout_fallback_enabled", "layout_fallback_threshold",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
@@ -97,7 +97,7 @@ public static class ConfigSyncService
     public static ConfigApplyResult Apply(AppServices services, string configPath, string currentRoot)
     {
         var (rootNode, hierarchyData) = Parse(configPath);
-        var oldRoot = rootNode["root_path"]?.GetValue<string>() ?? "";
+        var oldRoot = rootNode["source_root_path"]?.GetValue<string>() ?? "";
         var exportedAt = rootNode["exported_at"]?.GetValue<string>() ?? "?";
         var exportedBy = rootNode["exported_by"]?.GetValue<string>() ?? "?";
 
@@ -109,10 +109,18 @@ public static class ConfigSyncService
             settingsApplied++;
         }
 
+        var counts = services.Db.ImportHierarchyData(hierarchyData);
+
+        // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
+        // EXISTING fw_versions/param_files rows via a plain UPDATE. Running it first (as an earlier
+        // version of this fix did) is a no-op for any row this import is about to INSERT for the
+        // first time — so on a machine's very first sync, freshly-imported rows kept the exporting
+        // machine's raw disk path untouched, exactly the bug this whole mechanism exists to fix.
+        // Safe to always run after: rows already remapped in a previous Apply() no longer have the
+        // oldRoot prefix, so re-running this is a harmless no-op for them.
         if (!string.IsNullOrEmpty(oldRoot) && oldRoot != currentRoot)
             services.Db.RemapFwPaths(oldRoot, currentRoot);
 
-        var counts = services.Db.ImportHierarchyData(hierarchyData);
         services.Hierarchy.SyncFwFromDisk(currentRoot);
         services.Cfg.SetConfigLastSyncedAt(exportedAt);
 
@@ -136,6 +144,14 @@ public static class ConfigSyncService
         {
             ["exported_at"] = exportedAt,
             ["exported_by"] = exportedBy,
+            // Not a setting to apply on the importing machine (root_path stays per-machine, see
+            // SkipSettingsKeys) — this is metadata about what root THIS machine's fw_versions/
+            // param_files paths were written under, so Apply() can rewrite those absolute paths
+            // onto the importing machine's own root (RemapFwPaths). Different machines can reach
+            // the same physical share under different local paths (UNC vs. a mapped WebDAV drive
+            // letter) — without this, imported paths point at a root that only resolves on the
+            // exporting machine, and files "vanish" for everyone else.
+            ["source_root_path"] = root,
         };
         // SkipSettingsKeys is per-machine-only data (passwords, this machine's own disk paths,
         // AD-login-gate timers, inspection auto-cleanup schedule, etc. — see that field's doc).

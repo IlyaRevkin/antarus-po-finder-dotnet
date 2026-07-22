@@ -246,4 +246,70 @@ public class EndToEndSyncTests
         cmd.Parameters.AddWithValue("@id", modificationId);
         cmd.ExecuteNonQuery();
     }
+
+    /// <summary>Repro for the reported "у меня путь \\ant-srv, у коллег Z:\ — коллега видит прошивки,
+    /// которых по факту нет" bug: two machines reach the SAME physical shared drive under different
+    /// local path notations (admin's UNC path vs. a colleague's mapped WebDAV drive letter). A's
+    /// fw_versions.DiskPath is baked in under A's own root when uploaded — Apply() must rewrite that
+    /// prefix onto B's own root (RemapFwPaths), or the imported row points at a path that doesn't
+    /// resolve on B at all. This used to work via the (never-synced, by design) "root_path" settings
+    /// key doubling as remap source — Round 38's fix to stop leaking local-only settings into the
+    /// shared config (see ConfigSyncService.SkipSettingsKeys doc) silently broke it, since Export()
+    /// stopped writing "root_path" at all, so Apply() always saw an empty oldRoot and never remapped.
+    /// ConfigSyncService now carries the exporter's root separately as "source_root_path" metadata
+    /// specifically to keep this working without re-leaking root_path as an applied setting.</summary>
+    [Fact]
+    public void Apply_DifferentMachineRoot_RemapsFwVersionDiskPath()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        var sharedRoot = NewTempRoot(); // stands in for the physical network drive both machines reach
+        Directory.CreateDirectory(sharedRoot);
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+            var cfgA = new ConfigService(dbA);
+            var hierA = new HierarchyService(dbA);
+            var svcA = new AppServices(dbA, cfgA, hierA) { CurrentAdLogin = "profileA" };
+            var svcB = new AppServices(dbB, new ConfigService(dbB), new HierarchyService(dbB)) { CurrentAdLogin = "profileB" };
+            cfgA.SetRootPath(sharedRoot); // A's own local notation, e.g. \\ant-srv\Software\Antarus Finder
+
+            var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
+            var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
+            dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-REMAP-TEST", 9, "remap test modification");
+            var mod = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-REMAP-TEST");
+
+            var fwFolder = hierA.FwPath(sharedRoot, group.Name, subtype.Name, mod.ControllerName, "1.99.9.1.20260722_1000");
+            Directory.CreateDirectory(fwFolder);
+            File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
+            var userA = dbA.GetOrCreateUser("profileA", "profileA");
+            dbA.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
+                EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
+                DtStr = "20260722_1000", VersionRaw = "1.99.9.1.20260722_1000",
+                Filename = "firmware.psl", DiskPath = fwFolder,
+                Description = "remap test upload", Changelog = "remap test upload",
+                AuthorId = userA.Id, Status = "active",
+            });
+
+            ConfigSyncService.Export(svcA, sharedRoot, "profileA");
+
+            // B reaches the very same "Конфиг" folder (sharedRoot, standing in for the real network
+            // share) but under a completely different local root notation of its own.
+            var configPath = ConfigSyncService.ConfigPathFor(sharedRoot);
+            const string machineBRoot = @"Z:\Software\Antarus Finder";
+            ConfigSyncService.Apply(svcB, configPath, machineBRoot);
+
+            var fwOnB = dbB.GetAllFwVersionsWithNames(includeArchived: true).Single(f => f.VersionRaw == "1.99.9.1.20260722_1000");
+            Assert.StartsWith(machineBRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(sharedRoot, fwOnB.DiskPath, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB, sharedRoot);
+        }
+    }
 }
