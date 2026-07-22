@@ -34,6 +34,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private List<FirmwareUpdateInfo> _pendingFwUpdates = new();
     private List<UnknownEntry> _pendingUnknownItems = new();
     private bool _configPushLastFailed;
+    private bool _fwAutoUpdateLastFailed;
 
     private bool _suppressThemeToggleHandler;
 
@@ -469,7 +470,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         var autoOnes = updates.Where(u => _services.Cfg.IsFwAutoUpdate(u.LocalDir)).ToList();
         var manualOnes = updates.Except(autoOnes).ToList();
 
+        // A firmware marked for auto-update (Настройки → Прошивки → «Обновлять автоматически»)
+        // failing here used to vanish completely: it's not in manualOnes (so no banner either), the
+        // count below only reports successes, and this whole scan already runs silently on success
+        // by design — same shape as the app auto-update Round 35 bug (a background auto-действие
+        // failing with zero trace anywhere). Same "only notify on the transition" rule as
+        // PushConfigNow: a share that's briefly unreachable doesn't spam a toast on every tick, but a
+        // firmware that's been silently stuck out of date for hours/days is no longer invisible.
         var autoUpdated = 0;
+        var autoFailed = new List<string>();
         foreach (var u in autoOnes)
         {
             try
@@ -477,10 +486,22 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 FirmwareSync.CopyToLocal(SearchService.ToHierarchyResult(u.Latest));
                 autoUpdated++;
             }
-            catch { /* best effort — still surface the rest via the manual banner below */ }
+            catch (Exception ex) { autoFailed.Add($"{u.Name}: {ex.Message}"); }
         }
         if (autoUpdated > 0)
             ShowStatus($"Автоматически обновлено прошивок: {autoUpdated}", 6000, NotificationCategory.FirmwareAndParams);
+        if (autoFailed.Count > 0)
+        {
+            if (!_fwAutoUpdateLastFailed)
+            {
+                _fwAutoUpdateLastFailed = true;
+                AddNotification($"Автообновление прошивок не удалось ({autoFailed.Count}): {string.Join("; ", autoFailed.Take(3))}", NotificationCategory.FirmwareAndParams);
+            }
+        }
+        else if (_fwAutoUpdateLastFailed)
+        {
+            _fwAutoUpdateLastFailed = false;
+        }
 
         _pendingFwUpdates = manualOnes;
         if (manualOnes.Count == 0) return;
@@ -495,7 +516,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [RelayCommand]
     private void UpdateAllFw()
     {
+        // A manual, explicitly-clicked action — same per-item error surfacing as
+        // FirmwareUpdatesWindow.ApplyUpdate (the "Показать"/details path for the same banner), which
+        // already tells the operator exactly which firmware and why instead of just under-counting.
         var count = 0;
+        var stillPending = new List<FirmwareUpdateInfo>();
+        var failedMessages = new List<string>();
         foreach (var u in _pendingFwUpdates.ToList())
         {
             try
@@ -503,11 +529,18 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 FirmwareSync.CopyToLocal(SearchService.ToHierarchyResult(u.Latest));
                 count++;
             }
-            catch { /* best effort — leave it for the details window/next scan */ }
+            catch (Exception ex)
+            {
+                stillPending.Add(u);
+                failedMessages.Add($"{u.Name}: {ex.Message}");
+            }
         }
-        _pendingFwUpdates.Clear();
-        FwUpdateBannerVisible = false;
+        _pendingFwUpdates = stillPending;
+        FwUpdateBannerText = stillPending.Count > 0 ? $"Доступно обновление прошивок: {stillPending.Count}" : FwUpdateBannerText;
+        FwUpdateBannerVisible = stillPending.Count > 0;
         ShowStatus($"Обновлено прошивок: {count}", 6000, NotificationCategory.FirmwareAndParams);
+        if (failedMessages.Count > 0)
+            AddNotification($"Не удалось обновить ({failedMessages.Count}): {string.Join("; ", failedMessages.Take(3))}", NotificationCategory.FirmwareAndParams);
         RefreshSearchIfActive();
     }
 
