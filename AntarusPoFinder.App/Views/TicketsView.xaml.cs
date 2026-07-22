@@ -31,6 +31,14 @@ public partial class TicketsView : UserControl
     private readonly IAppHost _host;
     private readonly List<string> _pendingAttachmentPaths = new();
 
+    /// <summary>Tracks whether the LAST Activate() sync had a failure — same "only notify on the
+    /// transition" rule as MainWindowViewModel.PushConfigNow, so a share that stays unreachable for a
+    /// while doesn't produce a fresh toast literally every time the operator opens this page, but a
+    /// tickets/status change that's stuck NOT reaching other machines is no longer invisible forever
+    /// the way it used to be (root cause of the same "молча не синхронизируется" bug class as the
+    /// config auto-push and app auto-update had — see PushConfigNow/AppUpdateService.TakeLastUpdateError).</summary>
+    private bool _syncLastFailed;
+
     public TicketsView(AppServices services, IAppHost host)
     {
         InitializeComponent();
@@ -64,8 +72,23 @@ public partial class TicketsView : UserControl
         {
             try
             {
-                TicketSyncService.FlushOutbox(_services, root);
-                TicketSyncService.PullNewEvents(_services, root);
+                TicketSyncService.FlushOutbox(_services, root, out var flushFailed);
+                TicketSyncService.PullNewEvents(_services, root, out var pullFailed);
+                var failedThisPass = flushFailed + pullFailed;
+                if (failedThisPass > 0)
+                {
+                    if (!_syncLastFailed)
+                    {
+                        _syncLastFailed = true;
+                        _host.ShowStatus($"Синхронизация тикетов: не удалось обработать файлов: {failedThisPass} — повторится при следующем открытии страницы",
+                            8000, NotificationCategory.Sync);
+                    }
+                }
+                else if (_syncLastFailed)
+                {
+                    _syncLastFailed = false;
+                    _host.ShowStatus("Синхронизация тикетов восстановлена", 6000, NotificationCategory.Sync);
+                }
             }
             catch { /* best effort — local tickets still show, sync retried next time the page opens */ }
         }

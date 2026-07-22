@@ -60,8 +60,18 @@ public static class TicketSyncService
     /// shared drive. Best-effort per file: a file that fails to write (share unreachable, momentary
     /// lock) is left in the outbox and retried on the next call — see TicketsView.Activate, called
     /// every time the page is opened, not only right after the triggering action.</summary>
-    public static int FlushOutbox(AppServices services, string root)
+    public static int FlushOutbox(AppServices services, string root) => FlushOutbox(services, root, out _);
+
+    /// <summary>Same as <see cref="FlushOutbox(AppServices,string)"/>, plus <paramref name="failedCount"/>
+    /// — how many queued events failed to write this pass. A single failure is unremarkable (share
+    /// hiccup, retried next call), but same as the config auto-push bug (see MainWindowViewModel.
+    /// PushConfigNow): if the share stays unreachable for hours, tickets/status changes would
+    /// otherwise sit in the outbox forever with zero trace anywhere. Callers that run this
+    /// periodically/on page-open should surface a non-zero count to the operator instead of staying
+    /// silent forever.</summary>
+    public static int FlushOutbox(AppServices services, string root, out int failedCount)
     {
+        failedCount = 0;
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return 0;
 
         var dir = TicketsDir(root);
@@ -85,7 +95,7 @@ public static class TicketSyncService
                 services.Db.RemoveTicketOutbox(filename);
                 sent++;
             }
-            catch { /* share unreachable/locked right now — stays queued, retried next flush */ }
+            catch { failedCount++; /* share unreachable/locked right now — stays queued, retried next flush; caller decides whether to surface failedCount */ }
         }
         return sent;
     }
@@ -96,8 +106,16 @@ public static class TicketSyncService
     /// "before" it alphabetically. A status event for a ticket whose "create" isn't known locally yet
     /// (still queued elsewhere, or briefly out of order across two separate pulls) is left unmarked —
     /// it's retried on the next pull instead of being silently dropped.</summary>
-    public static int PullNewEvents(AppServices services, string root)
+    public static int PullNewEvents(AppServices services, string root) => PullNewEvents(services, root, out _);
+
+    /// <summary>Same as <see cref="PullNewEvents(AppServices,string)"/>, plus <paramref name="failedCount"/>
+    /// — how many event files failed to read this pass (usually another machine's write still in
+    /// flight, which resolves itself on the next pull). If a file is instead permanently corrupt
+    /// (truncated write that never gets fixed by anyone), it would otherwise fail every single pull
+    /// forever with no trace — same class of bug as FlushOutbox's failedCount, see there.</summary>
+    public static int PullNewEvents(AppServices services, string root, out int failedCount)
     {
+        failedCount = 0;
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return 0;
 
         var dir = TicketsDir(root);
@@ -113,7 +131,7 @@ public static class TicketSyncService
                 var ev = JsonSerializer.Deserialize<TicketEvent>(File.ReadAllText(file));
                 if (ev is not null) pending.Add((name, ev));
             }
-            catch { /* still being written by another machine right now — picked up next pull */ }
+            catch { failedCount++; /* still being written by another machine right now — picked up next pull */ }
         }
 
         var applied = 0;
