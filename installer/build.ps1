@@ -38,6 +38,16 @@ dotnet publish $appProject -c Release -r win-x64 --self-contained true `
     -p:Version=$Version -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
+# Copy the portable exe out to installer/ under its release-facing name BEFORE the MSI step's
+# `finally` wipes $publishDir — previously nothing did this at all, so a build.ps1 run only ever
+# produced the MSI; the portable exe silently never made it out of the temporary publish folder,
+# and both release artifacts were only present in past releases because someone copied the exe out
+# by hand after the fact. AppUpdateService/the update banner specifically expect the exe under this
+# exact "AntarusPoFinder-{version}.exe" name, not the plain "AntarusPoFinder.App.exe" publish uses.
+$exeName = "AntarusPoFinder-$Version.exe"
+$exePath = Join-Path $installerDir $exeName
+Copy-Item (Join-Path $publishDir "AntarusPoFinder.App.exe") $exePath -Force
+
 $msiName = "AntarusPoFinder-$Version-setup.msi"
 $msiPath = Join-Path $installerDir $msiName
 
@@ -53,4 +63,5 @@ try {
     Pop-Location
 }
 
+Write-Host "Done: $exePath"
 Write-Host "Done: $msiPath"
