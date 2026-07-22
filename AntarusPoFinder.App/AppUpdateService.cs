@@ -36,7 +36,20 @@ public static class AppUpdateService
     private static readonly Regex ReleaseFileRegex =
         new(@"^AntarusPoFinder-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase);
 
-    private static readonly HttpClient Http = CreateHttpClient();
+    // Not `readonly` — see SetHttpClientForTests below, the seam AppUpdateServiceTests uses to
+    // substitute a fake HttpMessageHandler instead of making real network calls to GitHub.
+    private static HttpClient Http = CreateHttpClient();
+
+    /// <summary>Test-only seam (AntarusPoFinder.Tests has InternalsVisibleTo access — see
+    /// AntarusPoFinder.App/InternalsVisibleTo.cs): lets AppUpdateServiceTests point ListGitHubReleasesAsync/
+    /// DownloadReleaseAsync at a fake HttpMessageHandler instead of the real GitHub API, so the
+    /// release-listing/size-verification/network-error paths are covered deterministically and
+    /// without depending on internet access in CI. Production code never calls this.</summary>
+    internal static void SetHttpClientForTests(HttpClient client) => Http = client;
+
+    /// <summary>Restores the real GitHub-facing client — call from test cleanup so a later test (or a
+    /// later run in the same process) doesn't keep using a previous test's fake handler.</summary>
+    internal static void ResetHttpClientForTests() => Http = CreateHttpClient();
 
     /// <summary>Some of the plant PCs this runs on are old enough that .NET/Schannel still default
     /// to TLS 1.0/1.1, which GitHub's API has stopped accepting — that surfaced as an "SSL connection
@@ -125,8 +138,11 @@ public static class AppUpdateService
     /// the downloaded file matches it byte-for-byte before handing it off to be installed — a
     /// silently-truncated download (dropped connection, corporate proxy cutting the stream short)
     /// would otherwise only surface as "downloaded fine, then won't launch", which is much harder
-    /// for a naladchik to diagnose than a clear error right here.</summary>
-    private static async Task<string> DownloadReleaseAsync(UpdateRelease release)
+    /// for a naladchik to diagnose than a clear error right here. Internal (not private) so
+    /// AppUpdateServiceTests can exercise the size-verification logic directly against a fake
+    /// HttpMessageHandler, without going through InstallAndRestartAsync — which shuts the whole
+    /// process down and is not something a test can safely call.</summary>
+    internal static async Task<string> DownloadReleaseAsync(UpdateRelease release)
     {
         var tempPath = Path.Combine(Path.GetTempPath(), release.FileName);
         using (var response = await Http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -246,6 +262,9 @@ public static class AppUpdateService
             File.Delete(UpdateErrorLogPath);
             return string.IsNullOrEmpty(message) ? null : message;
         }
+        // Reading/deleting this one-shot log file itself failing (locked, permissions) just means
+        // this particular launch doesn't surface the previous update failure — not worth a second
+        // layer of error reporting on top of the very mechanism that reports errors.
         catch { return null; }
     }
 

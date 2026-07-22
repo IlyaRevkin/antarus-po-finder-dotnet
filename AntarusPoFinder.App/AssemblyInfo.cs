@@ -1,4 +1,9 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
+
+// Lets AntarusPoFinder.Tests reach a handful of internal test-only seams (currently
+// AppUpdateService.SetHttpClientForTests/ResetHttpClientForTests) without making them public API.
+[assembly: InternalsVisibleTo("AntarusPoFinder.Tests")]
 
 [assembly:ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
