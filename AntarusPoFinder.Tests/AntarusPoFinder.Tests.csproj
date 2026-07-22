@@ -30,4 +30,11 @@
     <ProjectReference Include="..\AntarusPoFinder.App\AntarusPoFinder.App.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Synthetic sample files used by tests (e.g. PslInspectorTests) instead of depending on a
+         real file on a specific developer machine's disk. Copied next to the test dll so tests can
+         find them via AppContext.BaseDirectory regardless of the working directory the runner uses. -->
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
