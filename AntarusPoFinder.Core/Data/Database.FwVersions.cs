@@ -78,6 +78,17 @@ public partial class Database
         });
     }
 
+    /// <summary>Administrator permanently removing a firmware version record from Настройки →
+    /// Прошивки (analogous to DeleteAppUser in Database.AppUsers.cs). Unlike RollbackFwVersion (which
+    /// only flips status and keeps everything for history), this actually deletes the row — the
+    /// caller is responsible for removing the matching files on disk (see SettingsView.
+    /// DeleteFirmware_Click), this method only touches the database. Local-only, same caveat as
+    /// DeleteAppUser: the hierarchy sync merge never mirrors deletions (see backlog item 9 — "удаления
+    /// не переносятся"), so this row can come back on THIS machine if another still-unsynced machine's
+    /// config still lists it.</summary>
+    public void DeleteFwVersion(int id) =>
+        ExecuteNonQuery("DELETE FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+
     public int DuplicateFwVersion(int versionId)
     {
         var row = GetFwVersionById(versionId);

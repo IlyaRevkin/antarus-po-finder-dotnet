@@ -85,6 +85,12 @@
                         <Button Content="Сохранить пароли" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SavePasswords_Click"/>
 
                         <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8">
+                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}">
+                                <Run Text="⚠ Весь блок AD ниже (домен, группы ролей, способ проверки, URL) — настройка ЭТОГО компьютера." FontWeight="SemiBold"/>
+                                <Run Text=" Она НЕ синхронизируется по сети с другими машинами (в отличие от иерархии/прошивок/параметров) — администратору нужно один раз задать её на каждом ПК отдельно, «прилетит по сети само» не сработает."/>
+                            </TextBlock>
+                        </Border>
                         <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = для этой роли группа не используется — такой вход попадает в собственный список пользователей приложения (см. вкладку «Пользователи»), а не блокируется."
                                    Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <Grid Margin="0,0,0,8">
@@ -341,8 +347,10 @@
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Редактировать" Margin="0,0,8,0" Click="EditFirmware_Click"/>
                         <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
-                        <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Click="RollbackFirmware_Click"
+                        <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RollbackFirmware_Click"
                                 ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                        <Button x:Name="DeleteFirmwareBtn" Content="Удалить прошивку" Style="{StaticResource SecondaryButton}" Click="DeleteFirmware_Click"
+                                ToolTip="Безвозвратно удалить запись и файлы на диске (папку версии). В отличие от «Откатить» — не оставляет истории."/>
                     </StackPanel>
                 </StackPanel>
 

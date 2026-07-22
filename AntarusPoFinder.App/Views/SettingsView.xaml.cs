@@ -13,6 +13,7 @@ using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Infrastructure;
 using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
@@ -1476,6 +1477,59 @@ public partial class SettingsView : UserControl
 
         _services.Db.RollbackFwVersion(v.Id!.Value);
         _host.ShowStatus($"Откатано: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        LoadFirmwareTab();
+    }
+
+    /// <summary>Permanently removes a firmware version — both the database row and its files on disk
+    /// (Round 43, analogous to DeleteUser_Click above / Database.DeleteAppUser, Round 38). Unlike
+    /// "Откатить", which only flips status and keeps everything, this is destructive and cannot be
+    /// undone from within the app. Only the version's own folder (DiskPath) and, if it looks like it
+    /// belongs to this exact version (name contains VersionRaw), its versioned HMI subfolder are
+    /// removed — the shared Карта ВВ/Карта modbus/Инструкция attachment files are deliberately left
+    /// alone, since those live in a folder shared across ALL versions of the same subtype/controller
+    /// (see UploadView.OfferCarryOver — several versions can point at literally the same file) and
+    /// deleting them here would be collateral damage unrelated to this one version.</summary>
+    private void DeleteFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+
+        var confirm = AppMessageBox.Show(
+            $"Удалить прошивку «{title}» безвозвратно?\n\n" +
+            "Будут удалены запись в базе и файлы на диске (папка версии" +
+            (string.IsNullOrEmpty(v.HmiPath) ? "" : ", включая приложенный HMI-проект") + ").\n" +
+            "Это НЕЛЬЗЯ отменить из приложения (не «Откатить» — история не остаётся).\n\n" +
+            "⚠ Синхронизация конфига не переносит удаления между машинами: если хотя бы одна другая " +
+            "машина ещё не синхронизировалась после этого, при следующей синхронизации запись может " +
+            "снова появиться на этом ПК. Удаление затрагивает только этот компьютер — на других " +
+            "машинах прошивка останется, пока её не удалят там тоже.",
+            "Удаление прошивки", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        var warnings = new List<string>();
+        try
+        {
+            if (!string.IsNullOrEmpty(v.DiskPath) && Directory.Exists(v.DiskPath))
+                FileSystemHelpers.RmtreeSafe(v.DiskPath);
+        }
+        catch (Exception ex) { warnings.Add($"Папка версии: {ex.Message}"); }
+
+        try
+        {
+            if (!string.IsNullOrEmpty(v.HmiPath) && v.HmiPath.Contains(v.VersionRaw, StringComparison.OrdinalIgnoreCase))
+            {
+                if (Directory.Exists(v.HmiPath)) FileSystemHelpers.RmtreeSafe(v.HmiPath);
+                else if (File.Exists(v.HmiPath)) File.Delete(v.HmiPath);
+            }
+        }
+        catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
+
+        _services.Db.DeleteFwVersion(v.Id!.Value);
+        _host.ShowStatus($"Удалено: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        if (warnings.Count > 0)
+            AppMessageBox.Show("Запись удалена из базы, но не все файлы удалось убрать с диска:\n" + string.Join("\n", warnings),
+                "Удаление прошивки", MessageBoxButton.OK, MessageBoxImage.Warning);
         LoadFirmwareTab();
     }
 
