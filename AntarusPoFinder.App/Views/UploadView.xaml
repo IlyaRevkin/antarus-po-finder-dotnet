@@ -120,17 +120,26 @@
                              a row. Fixed-ish widths (150/130/170) instead of "*" give back that height
                              for the rest of the form, same nested-grid-in-a-row technique ДОП. ФАЙЛЫ
                              below already uses for Карта in/out + Карта modbus. -->
+                        <!-- Combo columns are proportional (star) with a Min/MaxWidth floor+ceiling, not a
+                             fixed pixel Width — this row lives in the narrower right column of a two-
+                             column page (left column is the 340px drop-zone/preview), so a fixed 150/130/
+                             170 (matching ParamsView's own copy of this row, which has the FULL page width
+                             to work with) doesn't fit here except when the window is maximized: CtrlCombo
+                             rendered up to ~250px past the window's right edge in windowed mode, incl. at
+                             the app's own MinWidth=1100 (verified live). Star sizing lets WPF shrink all
+                             three columns together instead of letting them overflow uncompressed the way
+                             fixed/Auto columns do; MaxWidth keeps them at the original 150/130/170 size
+                             whenever there's enough room (maximized, or ParamsView's wider layout). -->
                         <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="150*" MinWidth="70" MaxWidth="150"/>
                                 <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="130*" MinWidth="60" MaxWidth="130"/>
                                 <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="170"/>
-                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="170*" MinWidth="70" MaxWidth="170"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
