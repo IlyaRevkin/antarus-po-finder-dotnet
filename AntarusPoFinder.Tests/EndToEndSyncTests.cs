@@ -312,4 +312,100 @@ public class EndToEndSyncTests
             Cleanup(pathA, pathB, sharedRoot);
         }
     }
+
+    /// <summary>Задача 3 — regression test for the exact scenario reported: "A удаляет прошивку → B
+    /// ещё не синхронизировался → B синхронизируется → запись на B тоже удаляется, не воскресает".
+    /// Before Database.TombstoneFwVersion existed, Настройки → Прошивки → «Удалить прошивку» did a
+    /// bare DELETE — local-only, never left the deleting machine, so any OTHER machine that still had
+    /// the row would resurrect it on its very next export (this app's own fw_versions import is
+    /// additive-only otherwise, see ImportHierarchyDataCore's class doc). This proves both halves of
+    /// the fix: the deletion itself reaches B on a normal sync (including the on-disk folder), AND a
+    /// late-arriving "still active" copy of the same version (a stale snapshot taken before A deleted
+    /// it, standing in for a third machine that hasn't caught up yet) can never revive it once B has
+    /// mirrored the tombstone — same permanence guarantee real hierarchy rows already had.</summary>
+    [Fact]
+    public void FwVersionTombstone_DeletePropagatesToOtherMachineAndNeverResurrects()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        var root = NewTempRoot();
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+            var cfgA = new ConfigService(dbA);
+            var cfgB = new ConfigService(dbB);
+            var hierA = new HierarchyService(dbA);
+            var hierB = new HierarchyService(dbB);
+            var svcA = new AppServices(dbA, cfgA, hierA) { CurrentAdLogin = "profileA" };
+            var svcB = new AppServices(dbB, cfgB, hierB) { CurrentAdLogin = "profileB" };
+            cfgA.SetRootPath(root);
+            cfgB.SetRootPath(root);
+
+            var group = dbA.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var subtype = dbA.GetSubtypesForGroup(group.Id!.Value).First();
+            var pixel2 = dbA.GetAllControllerModels().First(c => c.Name == "PIXEL2");
+            dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-TOMBSTONE-TEST", 3, "tombstone test modification");
+            var mod = dbA.GetAllModifications().First(m => m.DisplayName == "PIXEL2-TOMBSTONE-TEST");
+            const string versionRaw = "1.99.3.1.20260722_1100";
+
+            var fwFolder = hierA.FwPath(root, group.Name, subtype.Name, mod.ControllerName, versionRaw);
+            Directory.CreateDirectory(fwFolder);
+            File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
+            var userA = dbA.GetOrCreateUser("profileA", "profileA");
+            var fwId = dbA.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtype.Id!.Value, ControllerId = mod.ControllerId,
+                EqPrefix = group.Prefix, SubPrefix = subtype.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
+                DtStr = "20260722_1100", VersionRaw = versionRaw,
+                Filename = "firmware.psl", DiskPath = fwFolder,
+                Description = "tombstone test upload", Changelog = "tombstone test upload",
+                AuthorId = userA.Id, Status = "active",
+            });
+            Assert.True(fwId > 0);
+
+            // B syncs while the firmware is still active — B genuinely had this row before A ever
+            // deleted it, exactly the "B ещё не синхронизировался" starting point from the report.
+            ConfigSyncService.Export(svcA, root, "profileA");
+            var firstUpdate = ConfigSyncService.CheckForUpdate(svcB, out var firstErr);
+            Assert.Null(firstErr);
+            Assert.NotNull(firstUpdate);
+            ConfigSyncService.Apply(svcB, firstUpdate!.ConfigPath, root);
+            Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+
+            // A stale, pre-delete snapshot of A's whole hierarchy — stands in for a THIRD machine that
+            // syncs later with an old copy still claiming this version is active, to prove a tombstone
+            // can't be resurrected by a late-arriving "active" copy of the same row (see below).
+            var staleSnapshot = dbA.ExportHierarchyData();
+
+            // ── A deletes it, same as SettingsView.DeleteFirmware_Click: disk folder gone + tombstoned ──
+            Assert.True(Directory.Exists(fwFolder));
+            Directory.Delete(fwFolder, recursive: true);
+            dbA.TombstoneFwVersion(fwId);
+            Assert.DoesNotContain(dbA.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+
+            // ── B, which never touched the deletion, syncs and must mirror it ──
+            System.Threading.Thread.Sleep(1100); // exported_at second-resolution, see the other tests above
+            ConfigSyncService.Export(svcA, root, "profileA");
+            var update2 = ConfigSyncService.CheckForUpdate(svcB, out var err2);
+            Assert.Null(err2);
+            Assert.NotNull(update2);
+            var applyResult2 = ConfigSyncService.Apply(svcB, update2!.ConfigPath, root);
+            Assert.True(applyResult2.Counts.FwVersionsRemoved >= 1);
+
+            Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+            Assert.DoesNotContain(dbB.GetFwVersions(subtype.Id!.Value, mod.ControllerId, includeArchived: true, includeRolledBack: true),
+                f => f.VersionRaw == versionRaw);
+
+            // ── Resurrection check: importing the stale, pre-delete "still active" snapshot must NOT
+            //    bring it back on B — the tombstone B already applied wins permanently. ──
+            dbB.ImportHierarchyData(staleSnapshot);
+            Assert.DoesNotContain(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB, root);
+        }
+    }
 }

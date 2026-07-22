@@ -27,7 +27,7 @@ public partial class Database
     public List<FwVersionRecord> SearchFwVersionsByTokens(IReadOnlyList<string> tokens, bool exactWord = false)
     {
         var rows = new List<FwVersionRecord>();
-        using (var reader = ExecuteReader("""
+        using (var reader = ExecuteReader($"""
             SELECT fv.*,
                    eg.name AS group_name,
                    es.name AS subtype_name,
@@ -37,7 +37,7 @@ public partial class Database
             JOIN equipment_subtypes es ON fv.subtype_id  = es.id
             JOIN equipment_groups   eg ON es.group_id    = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active')
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND {NotDeleted("fv")}
             ORDER BY fv.id DESC
             """))
         {

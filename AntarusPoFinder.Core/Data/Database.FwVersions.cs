@@ -78,16 +78,32 @@ public partial class Database
         });
     }
 
-    /// <summary>Administrator permanently removing a firmware version record from Настройки →
-    /// Прошивки (analogous to DeleteAppUser in Database.AppUsers.cs). Unlike RollbackFwVersion (which
-    /// only flips status and keeps everything for history), this actually deletes the row — the
-    /// caller is responsible for removing the matching files on disk (see SettingsView.
-    /// DeleteFirmware_Click), this method only touches the database. Local-only, same caveat as
-    /// DeleteAppUser: the hierarchy sync merge never mirrors deletions (see backlog item 9 — "удаления
-    /// не переносятся"), so this row can come back on THIS machine if another still-unsynced machine's
-    /// config still lists it.</summary>
+    /// <summary>Hard-removes a firmware version row outright — no tombstone, no sync propagation.
+    /// Kept for completeness/tests; Настройки → Прошивки → «Удалить прошивку» uses
+    /// <see cref="TombstoneFwVersion"/> instead (see there for why a bare DELETE isn't enough for
+    /// that button anymore).</summary>
     public void DeleteFwVersion(int id) =>
         ExecuteNonQuery("DELETE FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+
+    /// <summary>Administrator/programmer removing a firmware version from Настройки → Прошивки (Round
+    /// 43 originally used a bare DELETE here — see DeleteFwVersion above — which meant the deletion
+    /// itself never left this machine: any other machine that hadn't synced since would happily
+    /// re-insert the "missing" row on its NEXT export, resurrecting it right back (reported live,
+    /// Задача 3). This instead marks the row with a deletion tombstone (deleted_at) and leaves it in
+    /// place: every read query in this file/Database.Search.cs filters deleted_at out, so it
+    /// disappears from every listing/search on THIS machine immediately, exactly like a real delete —
+    /// but the row itself keeps flowing through ExportHierarchyData/ImportHierarchyDataCore as a
+    /// tombstone, so every other machine that syncs afterwards mirrors the deletion (including a
+    /// best-effort removal of its own copy of the on-disk folder) instead of resurrecting the row.
+    /// Same "caller removes the local files, this only touches the database" split as before — see
+    /// SettingsView.DeleteFirmware_Click for the local disk cleanup, and the fw_versions block in
+    /// ImportHierarchyDataCore for the mirrored one.</summary>
+    public void TombstoneFwVersion(int id) =>
+        ExecuteNonQuery("UPDATE fw_versions SET deleted_at=@d WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", NowIso());
+            cmd.Parameters.AddWithValue("@id", id);
+        });
 
     public int DuplicateFwVersion(int versionId)
     {
@@ -146,16 +162,26 @@ public partial class Database
         return reader.Read() ? ReadFwVersion(reader) : null;
     }
 
+    /// <summary>fw_versions rows with a deletion tombstone (see TombstoneFwVersion) are excluded from
+    /// every read below, unconditionally — deleted means gone from this machine's view, the same as a
+    /// hard delete used to look, regardless of any includeArchived-style toggle. Takes an optional
+    /// table alias ("fv" for the queries that JOIN and alias fw_versions, unqualified for the ones
+    /// that query it bare) since "alias.(...)" isn't valid SQL — a bare "{NotDeleted()}" interpolation
+    /// with the alias baked into the condition text does not work for both cases at once.</summary>
+    private static string NotDeleted(string alias = "") =>
+        $"({(alias.Length > 0 ? alias + "." : "")}deleted_at IS NULL OR {(alias.Length > 0 ? alias + "." : "")}deleted_at = '')";
+
     public List<FwVersionRecord> GetAllFwVersionsWithNames(bool includeArchived = false)
     {
-        var sql = """
+        var sql = $"""
             SELECT fv.*, eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
             FROM fw_versions fv
             JOIN equipment_subtypes es ON fv.subtype_id   = es.id
             JOIN equipment_groups   eg ON es.group_id     = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE {NotDeleted("fv")}
             """;
-        if (!includeArchived) sql += " WHERE fv.archived = 0";
+        if (!includeArchived) sql += " AND fv.archived = 0";
         sql += " ORDER BY eg.name, es.name, cm.name, fv.hw_version DESC, fv.sw_version DESC, fv.dt_str DESC";
 
         var result = new List<FwVersionRecord>();
@@ -177,13 +203,13 @@ public partial class Database
     /// (see MarkFwVersionReleased) — adding tags alone no longer moves it out on its own.</summary>
     public List<FwVersionRecord> GetUnreleasedFwVersionsWithNames()
     {
-        const string sql = """
+        var sql = $"""
             SELECT fv.*, eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
             FROM fw_versions fv
             JOIN equipment_subtypes es ON fv.subtype_id   = es.id
             JOIN equipment_groups   eg ON es.group_id     = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0 AND {NotDeleted("fv")}
             ORDER BY fv.upload_date DESC
             """;
 
@@ -202,9 +228,9 @@ public partial class Database
 
     public int GetUnreleasedFwVersionsCount()
     {
-        var result = ExecuteScalar("""
+        var result = ExecuteScalar($"""
             SELECT COUNT(*) FROM fw_versions
-            WHERE archived = 0 AND (status IS NULL OR status = 'active') AND released = 0
+            WHERE archived = 0 AND (status IS NULL OR status = 'active') AND released = 0 AND {NotDeleted()}
             """);
         return result is long l ? (int)l : 0;
     }
@@ -217,7 +243,7 @@ public partial class Database
     public List<FwVersionRecord> GetFwVersions(int? subtypeId = null, int? controllerId = null,
         bool includeArchived = false, bool includeRolledBack = false)
     {
-        var sql = "SELECT * FROM fw_versions WHERE 1=1";
+        var sql = $"SELECT * FROM fw_versions WHERE {NotDeleted()}";
         var binds = new List<(string, object)>();
         if (subtypeId is not null) { sql += " AND subtype_id=@s"; binds.Add(("@s", subtypeId.Value)); }
         if (controllerId is not null) { sql += " AND controller_id=@c"; binds.Add(("@c", controllerId.Value)); }
@@ -244,10 +270,10 @@ public partial class Database
     /// preview (before any reservation exists) never suggest a number someone else already locked in.</summary>
     public int GetNextSwVersion(int subtypeId, int controllerId, int hwVersion)
     {
-        var result = ExecuteScalar("""
+        var result = ExecuteScalar($"""
             SELECT MAX(sw_version) FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
-            AND (status IS NULL OR status='active')
+            AND (status IS NULL OR status='active') AND {NotDeleted()}
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", subtypeId);
@@ -316,10 +342,10 @@ public partial class Database
 
     public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion)
     {
-        using var reader = ExecuteReader("""
+        using var reader = ExecuteReader($"""
             SELECT * FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
-            AND (status IS NULL OR status='active') AND archived=0
+            AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
             ORDER BY sw_version DESC, dt_str DESC LIMIT 1
             """, cmd =>
         {
@@ -332,11 +358,11 @@ public partial class Database
 
     public List<FwVersionRecord> GetFwVersionsHistory(int subtypeId, int controllerId, bool includeArchived = false)
     {
-        var sql = """
+        var sql = $"""
             SELECT fv.*, cm.name AS ctrl_name
             FROM fw_versions fv
             JOIN controller_models cm ON fv.controller_id = cm.id
-            WHERE fv.subtype_id=@s AND fv.controller_id=@c
+            WHERE fv.subtype_id=@s AND fv.controller_id=@c AND {NotDeleted("fv")}
             """;
         if (!includeArchived) sql += " AND fv.archived=0";
         sql += " ORDER BY fv.dt_str DESC, fv.hw_version DESC, fv.sw_version DESC, fv.id DESC";
@@ -363,7 +389,7 @@ public partial class Database
     public List<FwVersionRecord> GetLatestActiveFwVersions()
     {
         var rows = new List<FwVersionRecord>();
-        using (var reader = ExecuteReader("""
+        using (var reader = ExecuteReader($"""
             SELECT fv.*,
                    eg.name AS group_name,
                    es.name AS subtype_name,
@@ -373,7 +399,7 @@ public partial class Database
             JOIN equipment_subtypes es ON fv.subtype_id  = es.id
             JOIN equipment_groups   eg ON es.group_id    = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active')
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND {NotDeleted("fv")}
             ORDER BY fv.id DESC
             """))
         {

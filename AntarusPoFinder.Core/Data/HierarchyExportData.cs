@@ -94,6 +94,11 @@ public class ExportedFwVersion
     [JsonPropertyName("tags")] public string Tags { get; set; } = "";
     [JsonPropertyName("status")] public string Status { get; set; } = "active";
     [JsonPropertyName("released")] public int Released { get; set; }
+    // Deletion tombstone (Задача 3) — '' means not deleted. Present on every export (never omitted
+    // like Tags/AllowedExtensions above) so an older exporting app version simply sends '' for every
+    // row, which ImportHierarchyDataCore correctly reads as "nothing deleted here" rather than
+    // wiping anything.
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
     [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
     [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
@@ -173,6 +178,11 @@ public class ImportCounts
     public int ReservationsAdded { get; set; }
     public int ReservationsUpdated { get; set; }
     public int FwVersions { get; set; }
+    /// <summary>fw_versions rows tombstone-deleted here because the incoming snapshot already had
+    /// them marked deleted_at (see TombstoneFwVersion/ImportHierarchyDataCore) — mirrors
+    /// SubtypesRemoved/ControllersRemoved above, just for a table that can't use plain absence to
+    /// mean "deleted" (fw_versions is additive-only otherwise).</summary>
+    public int FwVersionsRemoved { get; set; }
     public int ParamFiles { get; set; }
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
@@ -187,6 +197,6 @@ public class ImportCounts
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
         ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
-        ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + ParamFiles +
+        ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
         AppUsersAdded + AppUsersUpdated;
 }

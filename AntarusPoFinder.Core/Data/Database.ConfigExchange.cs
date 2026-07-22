@@ -81,7 +81,7 @@ public partial class Database
                    fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
-                   fv.modbus_map_path,
+                   fv.modbus_map_path, fv.deleted_at,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -102,6 +102,7 @@ public partial class Database
                     Tags = r.GetString(18), Status = GetString(r, "status"), Released = GetInt(r, "released"),
                     HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
                     HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
+                    DeletedAt = GetString(r, "deleted_at"),
                     GroupName = GetString(r, "group_name"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -155,7 +156,10 @@ public partial class Database
     /// into fw_versions.tags/param_files.tags as plain text) so those are safe to fully mirror —
     /// anything missing locally is added, anything absent from the incoming set is removed.
     /// fw_versions/param_files themselves stay additive-only, as before — each install may have
-    /// uploads the exporting machine never saw.</summary>
+    /// uploads the exporting machine never saw. fw_versions is the one exception within that: an
+    /// explicit deletion (Database.TombstoneFwVersion) DOES mirror, via a deleted_at tombstone kept on
+    /// the row instead of a bare DELETE — see the dedicated block below for why absence alone can't
+    /// mean "delete it" here the way it does for subtypes/controllers above.</summary>
     public ImportCounts ImportHierarchyData(HierarchyExportData data) => ImportHierarchyDataCore(data, apply: true);
 
     private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply)
@@ -668,6 +672,18 @@ public partial class Database
         //    moderated (tags added + released) on one machine before its FIRST export would insert
         //    fine there, but land back in every OTHER machine's moderation queue forever, since the
         //    natural-key match would just skip it as "already exists" without ever updating it.
+        //
+        //    Deletion (Задача 3) is the one thing that ISN'T additive-only: TombstoneFwVersion marks
+        //    a row with deleted_at instead of removing it, specifically so it keeps flowing through
+        //    here as a positive "this was deleted" signal (the additive/absence-based reasoning above
+        //    can't express deletion — a row missing from an incoming snapshot might just be an upload
+        //    that machine hasn't made yet). Two rules, both below: (1) a LOCAL tombstone always wins
+        //    and is permanent — an incoming row for the same natural key that's still "active" (from a
+        //    machine that hasn't caught up on the deletion yet) must never resurrect it; (2) an
+        //    INCOMING tombstone not yet applied locally gets mirrored — including a best-effort
+        //    on-disk cleanup, the same as SettingsView.DeleteFirmware_Click does for a direct local
+        //    delete — so the deletion actually reaches every other machine, not just the one it
+        //    started on.
         foreach (var fv in data.FwVersions)
         {
             var subId = ResolveId("equipment_subtypes", fv.SubtypeSyncId, subtypeSyncToId, "name", fv.SubtypeName, fv.GroupName);
@@ -677,7 +693,7 @@ public partial class Database
             var existing = ExecuteReader(
                 """
                 SELECT id, status, released, io_map_path, instructions_path, hmi_path,
-                       executable_hint, hmi_executable_hint, modbus_map_path
+                       executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path
                 FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
                 """, cmd =>
                 {
@@ -686,16 +702,44 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@v", fv.VersionRaw);
                 });
             (int Id, string Status, int Released, string IoMapPath, string InstructionsPath, string HmiPath,
-                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath)? existingRow = null;
+                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath)? existingRow = null;
             using (existing)
                 if (existing.Read())
                     existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"),
                         GetString(existing, "io_map_path"), GetString(existing, "instructions_path"), GetString(existing, "hmi_path"),
-                        GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"));
+                        GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"),
+                        GetString(existing, "deleted_at"), GetString(existing, "disk_path"));
 
             if (existingRow is not null)
             {
-                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus) = existingRow.Value;
+                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath) = existingRow.Value;
+
+                // Rule 1 — already deleted here: permanent, never revived by an incoming row that
+                // just hasn't caught up yet (see class doc above).
+                if (!string.IsNullOrEmpty(localDeletedAt)) continue;
+
+                // Rule 2 — incoming tombstone not yet applied locally: mirror it.
+                if (!string.IsNullOrEmpty(fv.DeletedAt))
+                {
+                    counts.FwVersionsRemoved++;
+                    if (!apply) continue;
+
+                    try { if (!string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath)) Infrastructure.FileSystemHelpers.RmtreeSafe(localDiskPath); }
+                    catch { /* best-effort, same as SettingsView.DeleteFirmware_Click */ }
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(localHmi) && localHmi.Contains(fv.VersionRaw, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (Directory.Exists(localHmi)) Infrastructure.FileSystemHelpers.RmtreeSafe(localHmi);
+                            else if (File.Exists(localHmi)) File.Delete(localHmi);
+                        }
+                    }
+                    catch { /* best-effort */ }
+
+                    TombstoneFwVersion(id);
+                    continue;
+                }
+
                 var incomingStatus = string.IsNullOrEmpty(fv.Status) ? "active" : fv.Status;
 
                 // A version can be uploaded on one machine, exported/synced BEFORE its HMI project
@@ -739,6 +783,12 @@ public partial class Database
                 });
                 continue;
             }
+
+            // No local row at all — if the source had already deleted it, there's nothing to
+            // materialize: inserting it just to immediately hide it behind deleted_at would be
+            // pointless (and would leave a phantom row with no matching on-disk folder on THIS
+            // machine to ever clean up).
+            if (!string.IsNullOrEmpty(fv.DeletedAt)) continue;
 
             counts.FwVersions++;
             if (!apply) continue;

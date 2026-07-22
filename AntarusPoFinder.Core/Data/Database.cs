@@ -295,6 +295,15 @@ public partial class Database : IDisposable
         AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("controller_models", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("controller_modifications", ("hw_version", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("description", "TEXT NOT NULL DEFAULT ''"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        // deleted_at: fw_versions' own tombstone marker (Задача 3) — '' means "not deleted". Unlike
+        // equipment_subtypes/controller_models above, fw_versions can't mirror deletion by mere
+        // absence from an incoming sync snapshot (it's additive-only: each machine may have uploads
+        // no other machine has ever seen, see ImportHierarchyDataCore's class doc), so deletion needs
+        // an explicit, positively-propagated marker instead — set by Database.TombstoneFwVersion,
+        // read by every fw_versions SELECT below (kept out of every normal listing/search) and by
+        // ExportHierarchyData/ImportHierarchyDataCore (kept IN the sync payload so the deletion itself
+        // reaches every other machine, not just this one).
+        AddColumnsIfMissing("fw_versions", ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
 
         // Backfilling `released` from existing tags is only correct the ONE TIME this column is
         // introduced on an old database — after that, release status must come solely from the

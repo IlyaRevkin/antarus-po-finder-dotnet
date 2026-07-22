@@ -1480,15 +1480,21 @@ public partial class SettingsView : UserControl
         LoadFirmwareTab();
     }
 
-    /// <summary>Permanently removes a firmware version — both the database row and its files on disk
-    /// (Round 43, analogous to DeleteUser_Click above / Database.DeleteAppUser, Round 38). Unlike
-    /// "Откатить", which only flips status and keeps everything, this is destructive and cannot be
-    /// undone from within the app. Only the version's own folder (DiskPath) and, if it looks like it
-    /// belongs to this exact version (name contains VersionRaw), its versioned HMI subfolder are
-    /// removed — the shared Карта ВВ/Карта modbus/Инструкция attachment files are deliberately left
-    /// alone, since those live in a folder shared across ALL versions of the same subtype/controller
-    /// (see UploadView.OfferCarryOver — several versions can point at literally the same file) and
-    /// deleting them here would be collateral damage unrelated to this one version.</summary>
+    /// <summary>Permanently removes a firmware version from view — both this machine's database row
+    /// (via a deletion tombstone, see Database.TombstoneFwVersion) and its files on disk (Round 43,
+    /// analogous to DeleteUser_Click above / Database.DeleteAppUser, Round 38). Unlike "Откатить",
+    /// which only flips status and keeps everything, this is destructive and cannot be undone from
+    /// within the app. Only the version's own folder (DiskPath) and, if it looks like it belongs to
+    /// this exact version (name contains VersionRaw), its versioned HMI subfolder are removed — the
+    /// shared Карта ВВ/Карта modbus/Инструкция attachment files are deliberately left alone, since
+    /// those live in a folder shared across ALL versions of the same subtype/controller (see
+    /// UploadView.OfferCarryOver — several versions can point at literally the same file) and deleting
+    /// them here would be collateral damage unrelated to this one version.
+    /// Задача 3: this used to be a bare DB DELETE, which meant the deletion never left this machine —
+    /// any other machine that hadn't synced since would resurrect the "missing" row on its next
+    /// export. TombstoneFwVersion instead marks the row deleted and keeps it flowing through hierarchy
+    /// config sync as a tombstone, so every other machine that syncs afterwards mirrors the deletion
+    /// (see the fw_versions block in ImportHierarchyDataCore) instead of bringing it back.</summary>
     private void DeleteFirmware_Click(object sender, RoutedEventArgs e)
     {
         var v = GetSelectedFwVersion();
@@ -1500,10 +1506,9 @@ public partial class SettingsView : UserControl
             "Будут удалены запись в базе и файлы на диске (папка версии" +
             (string.IsNullOrEmpty(v.HmiPath) ? "" : ", включая приложенный HMI-проект") + ").\n" +
             "Это НЕЛЬЗЯ отменить из приложения (не «Откатить» — история не остаётся).\n\n" +
-            "⚠ Синхронизация конфига не переносит удаления между машинами: если хотя бы одна другая " +
-            "машина ещё не синхронизировалась после этого, при следующей синхронизации запись может " +
-            "снова появиться на этом ПК. Удаление затрагивает только этот компьютер — на других " +
-            "машинах прошивка останется, пока её не удалят там тоже.",
+            "Удаление перенесётся на другие машины при следующей синхронизации конфига (Настройки → " +
+            "Сетевые диски) — включая попытку убрать файлы и там. До тех пор, пока хотя бы одна другая " +
+            "машина не синхронизируется, прошивка на ней ещё будет видна.",
             "Удаление прошивки", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (confirm != MessageBoxResult.Yes) return;
 
@@ -1525,7 +1530,7 @@ public partial class SettingsView : UserControl
         }
         catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
 
-        _services.Db.DeleteFwVersion(v.Id!.Value);
+        _services.Db.TombstoneFwVersion(v.Id!.Value);
         _host.ShowStatus($"Удалено: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         if (warnings.Count > 0)
             AppMessageBox.Show("Запись удалена из базы, но не все файлы удалось убрать с диска:\n" + string.Join("\n", warnings),
