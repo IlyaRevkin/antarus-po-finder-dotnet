@@ -41,7 +41,7 @@ public partial class UploadView : UserControl
     public FrameworkElement? OnboardingTarget(string key) => key switch
     {
         "dropzone" => DropZone,
-        "opc" => OpcPanel,
+        "opc" => VersionOptionsPanel,
         "reserve" => ReserveVersionBtn,
         _ => null,
     };
@@ -491,23 +491,35 @@ public partial class UploadView : UserControl
 
     private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => ModbusMapInput.Text = "";
 
-    private const string HmiPathPlaceholder = "Не выбран";
+    private const string HmiPathPlaceholder = "Перетащите файл или папку HMI-проекта сюда\nили нажмите для выбора";
 
     private void HmiCheck_Toggled(object sender, RoutedEventArgs e)
     {
         bool isChecked = HmiCheck.IsChecked == true;
-        HmiPathRow.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        HmiSection.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
         if (!isChecked)
         {
             _hmiPath = null;
             _hmiExecutableHint = null;
-            HmiPathInput.Text = HmiPathPlaceholder;
+            HmiPathLabel.Text = HmiPathPlaceholder;
         }
     }
 
-    /// <summary>Clicking the (read-only) path textbox itself is a shortcut for "Файл..." — same as
-    /// clicking used to open the file picker on the old drop-zone box.</summary>
+    /// <summary>Clicking the drop zone itself (outside a drag&amp;drop) is a shortcut for "Файл..." —
+    /// same click-to-browse behavior as the main firmware DropZone above.</summary>
     private void HmiDropZone_Click(object sender, MouseButtonEventArgs e) => HmiBrowseFile_Click(sender, e);
+
+    private void HmiDropZone_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void HmiDropZone_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            OnHmiPathPicked(paths[0]);
+    }
 
     private void HmiBrowseFile_Click(object sender, RoutedEventArgs e)
     {
@@ -531,14 +543,14 @@ public partial class UploadView : UserControl
     {
         _hmiPath = null;
         _hmiExecutableHint = null;
-        HmiPathInput.Text = HmiPathPlaceholder;
+        HmiPathLabel.Text = HmiPathPlaceholder;
     }
 
     private void OnHmiPathPicked(string path)
     {
         _hmiPath = path;
         _hmiExecutableHint = Directory.Exists(path) ? PromptExecutableHint(path, HmiExecutableExts, "HMI-проекта") : null;
-        HmiPathInput.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+        HmiPathLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
     }
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
@@ -824,10 +836,10 @@ public partial class UploadView : UserControl
         InstructionsInput.Text = "";
         ModbusMapInput.Text = "";
         HmiCheck.IsChecked = false;
-        HmiPathRow.Visibility = Visibility.Collapsed;
+        HmiSection.Visibility = Visibility.Collapsed;
         _hmiPath = null;
         _hmiExecutableHint = null;
-        HmiPathInput.Text = HmiPathPlaceholder;
+        HmiPathLabel.Text = HmiPathPlaceholder;
         StatusLabel.Text = "";
         RefreshReservationPicker();
         UpdatePreview();
