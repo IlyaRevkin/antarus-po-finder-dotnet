@@ -35,17 +35,21 @@
                          values (2-3 words at most), so stretching each across the whole card on its
                          own row (as Тип+Подтип already were, with Производитель a full row further
                          down) wasted height for what they hold. Same "*" trailing column reasoning as
-                         UploadView's combo row. -->
+                         UploadView's combo row. Widths (150/130/170) match UploadView's own Тип/
+                         Подтип/Контроллер row exactly — this is conceptually the same row (Round 43:
+                         these were 180/180/180 here, visibly wider/chunkier than every other combo
+                         row in the app for values that are just as short — "oversized relative to the
+                         rest of the UI" per the user's report). -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="180"/>
-                            <ColumnDefinition Width="20"/>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="180"/>
-                            <ColumnDefinition Width="20"/>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="180"/>
+                            <ColumnDefinition Width="170"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Тип шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
