@@ -55,40 +55,53 @@
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Border Padding="0,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="{Binding WhenLabel}" Style="{StaticResource MutedText}"
+                        <!-- DockPanel вместо Grid с колонками Auto/Auto/*/Auto — реальная причина
+                             наезда текста на кнопку была не в отсутствии обрезки (ClipToBounds
+                             это не лечит), а в самой раскладке: внутри виртуализированного ListBox
+                             звёздная колонка Grid с TextWrapping-содержимым может получить неверно
+                             посчитанную ширину (известная особенность двухпроходного алгоритма
+                             звёздных колонок Grid — TextBlock меряется по одной ширине, а
+                             отрисовывается по другой), и тогда его граница на самом деле заезжает
+                             в соседнюю Auto-колонку с кнопкой. ClipToBounds обрезает элемент по
+                             ЕГО ЖЕ (уже неверно широким) границам — то есть ничего не спасает,
+                             если сама граница колонки посчитана неправильно, что и наблюдалось
+                             живьём. DockPanel считает ширины иначе: сначала «пристыкованные»
+                             элементы (время, бейдж — слева; кнопка — Dock="Right", т.е. её
+                             фиксированная по содержимому ширина «вычитается» из доступного места
+                             первой), и только потом весь остаток ширины отдаётся заполняющему
+                             (последнему, без Dock) элементу — тексту. Это один детерминированный
+                             проход без пересчётов, поэтому кнопка гарантированно получает свою
+                             ширину, а тексту физически не может достаться больше места, чем
+                             осталось — переносится он ДО кнопки, а не под неё. -->
+                        <DockPanel LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding WhenLabel}" Style="{StaticResource MutedText}"
                                        Margin="0,0,10,0" VerticalAlignment="Center"/>
                             <!-- Category badge — clickable, opens the per-category settings panel above
                                  (item 9: "no way to configure per-category behavior directly from a
                                  notification"). Not just decorative text: this is the reachable path
                                  from a notification row to its category's on/off and unread-count
                                  switches. -->
-                            <Border Grid.Column="1" Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="6,2" Margin="0,0,10,0"
+                            <Border DockPanel.Dock="Left" Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="6,2" Margin="0,0,10,0"
                                     VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="CategoryBadge_Click"
                                     ToolTip="Настроить эту категорию уведомлений">
                                 <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="11"/>
                             </Border>
-                            <!-- ClipToBounds — WPF Grid does NOT clip a child to its own cell when the
-                                 child's desired width exceeds it: this text column is a Star column,
-                                 fine for wrapping normal sentences, but a single unbroken long token
-                                 (a firmware filename, a version string, a path — exactly what shows up
-                                 in a lot of this app's status messages) can't be wrapped at all and was
-                                 rendering past this column's right edge, straight over the "Показать"
-                                 button in Column="3" next to it. Clipping to this element's own arranged
-                                 bounds keeps that overflow inside its own column instead of on top of
-                                 the button — the rare long token gets hard-cut rather than overlapping,
-                                 which is the safe outcome here. -->
-                            <TextBlock Grid.Column="2" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center"
-                                       ClipToBounds="True" Foreground="{DynamicResource TextBrush}"/>
-                            <Button Grid.Column="3" Content="Показать" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"
+                            <!-- Кнопка пристыкована справа (DockPanel.Dock="Right") — своя,
+                                 фиксированная по содержимому ширина, всегда у правого края строки;
+                                 её место вычитается из доступной ширины ДО того, как текст ниже
+                                 получает свой остаток, так что она физически не может оказаться
+                                 под текстом или наоборот. -->
+                            <Button DockPanel.Dock="Right" Content="Показать" Style="{StaticResource SecondaryButton}"
+                                    VerticalAlignment="Center"
                                     Visibility="{Binding CanReopen, Converter={StaticResource BoolToVis}}" Click="Reopen_Click"/>
-                        </Grid>
+                            <!-- Заполняющий элемент (последний, без Dock) — вся оставшаяся ширина
+                                 строки. Правый отступ — небольшой зазор перед кнопкой, чтобы перенос
+                                 срабатывал чуть раньше её левого края, а не впритык. ClipToBounds
+                                 оставлен как страховка на редкий экстремальный случай (сама
+                                 раскладка теперь корректна и без неё), но в норме уже не требуется. -->
+                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,0,10,0" VerticalAlignment="Center"
+                                       ClipToBounds="True" Foreground="{DynamicResource TextBrush}"/>
+                        </DockPanel>
                     </Border>
                 </DataTemplate>
             </ListBox.ItemTemplate>

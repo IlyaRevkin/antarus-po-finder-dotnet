@@ -5,6 +5,46 @@
         Title="Сменить роль" Width="360" SizeToContent="Height"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <!-- Локальный стиль кнопки-иконки «i» — только для этого окна (Styles.xaml не трогаем, его
+         правит другой агент параллельно). Раньше подробное объяснение способа входа по AD
+         (какой способ выигрывает — AD-группа или ростер приложения, что происходит с новым
+         логином и т.п.) сплошным абзацем висело прямо в окне постоянно — окно выглядело
+         перегруженным текстом. Теперь на виду только то, что нужно для самого действия: выбор
+         роли/пароль слева и поля AD-входа справа, а подробности — по клику на «i». -->
+    <Window.Resources>
+        <Style x:Key="InfoIconButton" TargetType="ToggleButton">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+            <Setter Property="ToolTip" Value="Подробнее о входе по AD"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="9">
+                            <TextBlock Text="i" FontStyle="Italic" FontWeight="Bold" FontSize="11"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <StackPanel Margin="16">
         <TextBlock Text="Роль:" Margin="0,0,0,4"/>
         <ComboBox x:Name="RoleCombo" Margin="0,0,0,12" DisplayMemberPath="Label" SelectedValuePath="RoleId"/>
@@ -18,9 +58,28 @@
         </StackPanel>
 
         <Separator Margin="0,0,0,12"/>
-        <TextBlock Text="ИЛИ ВОЙТИ ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
-        <TextBlock Text="Проверяет логин/пароль в домене. Если логин входит в AD-группу, настроенную для роли (Настройки → Общие) — назначает эту роль. Иначе роль берётся из собственного списка пользователей приложения: уже известный логин получает сохранённую роль, новый — автоматически становится «Наладчиком» (администратор может сменить роль в Настройки → Пользователи)."
-                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+        <!-- Заголовок + кнопка-«i»: сам текст заголовка короткий и всегда виден, подробное
+             объяснение логики AD-входа (способ 1 — AD-группа, способ 2 — ростер приложения) — во
+             всплывающем Popup, StaysOpen="False" закрывает его кликом мимо. IsOpen привязан
+             двусторонне (TwoWay) к IsChecked тумблера: Popup сам сбрасывает IsOpen через
+             SetCurrentValue при клике мимо, и только TwoWay-биндинг возвращает это состояние
+             обратно в IsChecked тумблера — иначе после автозакрытия тумблер оставался «нажатым»
+             и повторный клик по нему требовался дважды, чтобы снова открыть подсказку. -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="ИЛИ ВОЙТИ ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}"
+                       FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <ToggleButton x:Name="AdInfoToggle" Style="{StaticResource InfoIconButton}" Margin="6,0,0,0"/>
+        </StackPanel>
+        <Popup x:Name="AdInfoPopup" PlacementTarget="{Binding ElementName=AdInfoToggle}" Placement="Bottom"
+               IsOpen="{Binding IsChecked, ElementName=AdInfoToggle, Mode=TwoWay}" StaysOpen="False" AllowsTransparency="True">
+            <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                    CornerRadius="6" Padding="10" MaxWidth="300" Margin="0,4,0,0">
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Text="Проверяет логин/пароль в домене. Если логин входит в AD-группу, настроенную для роли (Настройки → Общие) — назначает эту роль. Иначе роль берётся из собственного списка пользователей приложения: уже известный логин получает сохранённую роль, новый — автоматически становится «Наладчиком» (администратор может сменить роль в Настройки → Пользователи)."/>
+            </Border>
+        </Popup>
+
         <TextBlock Text="Домен:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
