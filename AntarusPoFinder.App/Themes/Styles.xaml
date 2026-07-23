@@ -122,6 +122,20 @@
         </Setter>
     </Style>
 
+    <!-- Компактный вариант того же вида — для рядов кнопок под drag&amp;drop-зонами и под таблицами,
+         где полная высота выглядит громоздко.
+
+         Зачем отдельный стиль, а не Height="30" на самой кнопке: у SecondaryButton вертикальный
+         Padding 8+8 плюс рамка 1+1, т.е. содержимому нужно ~35px. Жёстко заданная меньшая Height
+         (30 у кнопок под HMI-зоной, 32 у кнопок «Параметров») не уменьшала padding, а обрезала
+         ContentPresenter — ровно та самая жалоба «кнопки под drag&amp;drop-зоной обрезаны». Здесь
+         padding уменьшен вместе с высотой, и это MinHeight, а не Height, — текст не может быть
+         обрезан снова, даже если шрифт/тема станут крупнее. -->
+    <Style x:Key="CompactSecondaryButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <Setter Property="Padding" Value="12,4"/>
+        <Setter Property="MinHeight" Value="30"/>
+    </Style>
+
     <!-- Danger button (delete actions) -->
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>

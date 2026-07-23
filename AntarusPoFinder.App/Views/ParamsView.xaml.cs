@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
 
@@ -89,7 +90,51 @@ public partial class ParamsView : UserControl
         if (options.Count > 0) SubCombo.SelectedIndex = 0;
     }
 
-    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
+    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Подтипы принадлежат группе — при смене типа шкафа ранее выбранные дополнительные подтипы
+        // относятся уже к другой группе и молча уехали бы не туда.
+        _extraSubtypes.Clear();
+        UpdateExtraSubtypesLabel();
+        PopulateSubtypes();
+    }
+
+    // ── Дополнительные подтипы ────────────────────────────────────────────────
+
+    /// <summary>Подтипы, которым подходит этот же файл параметров (кроме основного). Файл под них не
+    /// дублируется — см. ParamFileLinkService.</summary>
+    private System.Collections.Generic.List<EquipmentSubType> _extraSubtypes = new();
+
+    private void PickExtraSubtypes_Click(object sender, RoutedEventArgs e)
+    {
+        if (GroupCombo.SelectedItem is not EquipmentGroup group)
+        {
+            AppMessageBox.Show("Сначала выберите тип шкафа.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var mainId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
+        var candidates = _services.Db.GetSubtypesForGroup(group.Id!.Value)
+            .Where(s => s.Id is not null && s.Id != mainId)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            AppMessageBox.Show("У этого типа шкафа больше нет других подтипов.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var picked = PickSubtypesDialog.Pick(Window.GetWindow(this),
+            "Каким ещё подтипам подходит этот файл параметров?\nФайл не дублируется: в папку каждого выбранного подтипа ляжет ярлык на него.",
+            candidates, _extraSubtypes.Where(s => s.Id is not null).Select(s => s.Id!.Value));
+        if (picked is null) return;
+
+        _extraSubtypes = picked;
+        UpdateExtraSubtypesLabel();
+    }
+
+    private void UpdateExtraSubtypesLabel() =>
+        ExtraSubtypesLabel.Text = _extraSubtypes.Count == 0
+            ? "не выбраны"
+            : string.Join(", ", _extraSubtypes.Select(s => s.Name == "—" ? s.FolderName : s.Name));
 
     private void BrowseFile_Click(object sender, RoutedEventArgs e)
     {
@@ -154,7 +199,7 @@ public partial class ParamsView : UserControl
             return;
         }
 
-        _services.Db.AddParamFile(new ParamFile
+        var record = new ParamFile
         {
             SubtypeId = subOption.Subtype.Id,
             Manufacturer = manuf,
@@ -162,12 +207,27 @@ public partial class ParamsView : UserControl
             DiskPath = dstFolder,
             Description = DescInput.Text.Trim(),
             UploadDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-        });
+        };
+        _services.Db.AddParamFile(record);
+
+        var link = ParamFileLinkService.LinkToExtraSubtypes(_services.Db, _services.Hierarchy, root,
+            group, subOption.Subtype, record, _extraSubtypes, new Services.ShortcutCreator());
 
         _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}", category: NotificationCategory.FirmwareAndParams);
+        if (link.CreatedIds.Count > 0 || link.Warnings.Count > 0)
+        {
+            var msg = link.CreatedIds.Count > 0
+                ? $"Тот же файл добавлен ещё для {link.CreatedIds.Count} подтип(ов) — ярлыком, без копирования."
+                : "";
+            if (link.Warnings.Count > 0)
+                msg += (msg.Length > 0 ? "\n\nПредупреждения:\n" : "Предупреждения:\n") + string.Join("\n", link.Warnings);
+            AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
         DescInput.Text = "";
         _srcPath = null;
+        _extraSubtypes.Clear();
+        UpdateExtraSubtypesLabel();
         DropZoneLabel.Text = "Перетащите файл сюда, или нажмите «Выбрать файл…»";
 
         ReloadTable();

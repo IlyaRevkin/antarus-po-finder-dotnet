@@ -122,7 +122,51 @@ public partial class UploadView : UserControl
         UpdatePreview();
     }
 
-    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
+    // ── Дополнительные подтипы ────────────────────────────────────────────────
+
+    /// <summary>Подтипы, которым подходит эта же прошивка (кроме основного). Файлы под них не
+    /// дублируются — см. FirmwareUploadRequest.ExtraSubtypes.</summary>
+    private List<EquipmentSubType> _extraSubtypes = new();
+
+    private void PickExtraSubtypes_Click(object sender, RoutedEventArgs e)
+    {
+        if (GroupCombo.SelectedItem is not EquipmentGroup group)
+        {
+            AppMessageBox.Show("Сначала выберите тип шкафа.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var mainId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
+        var candidates = _services.Db.GetSubtypesForGroup(group.Id!.Value)
+            .Where(s => s.Id is not null && s.Id != mainId)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            AppMessageBox.Show("У этого типа шкафа больше нет других подтипов.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var picked = PickSubtypesDialog.Pick(Window.GetWindow(this),
+            "Каким ещё подтипам подходит эта прошивка?\nФайлы не дублируются: в папку каждого выбранного подтипа ляжет ярлык на ту же версию.",
+            candidates, _extraSubtypes.Where(s => s.Id is not null).Select(s => s.Id!.Value));
+        if (picked is null) return;
+
+        _extraSubtypes = picked;
+        UpdateExtraSubtypesLabel();
+    }
+
+    private void UpdateExtraSubtypesLabel() =>
+        ExtraSubtypesLabel.Text = _extraSubtypes.Count == 0
+            ? "не выбраны"
+            : string.Join(", ", _extraSubtypes.Select(s => s.Name == "—" ? s.FolderName : s.Name));
+
+    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Подтипы принадлежат группе — при смене типа шкафа ранее выбранные дополнительные подтипы
+        // относятся уже к другой группе и молча уехали бы не туда.
+        _extraSubtypes.Clear();
+        UpdateExtraSubtypesLabel();
+        PopulateSubtypes();
+    }
     private void SubCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { RefreshReservationPicker(); UpdatePreview(); }
     private void CtrlCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => OnCtrlChanged();
 
@@ -516,7 +560,8 @@ public partial class UploadView : UserControl
             return;
         }
         var request = BuildUploadRequest();
-        var result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request);
+        var shortcuts = new Services.ShortcutCreator();
+        var result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request, shortcuts);
 
         // Two checks used to pop a Yes/No MessageBox mid-transaction and either continue in place or
         // abort — the service can't show UI, so it hands back NeedsConfirmation instead and expects
@@ -536,7 +581,7 @@ public partial class UploadView : UserControl
             else
                 request.ConfirmOverwriteExisting = true;
 
-            result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request);
+            result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request, shortcuts);
         }
 
         switch (result.Outcome)
@@ -558,6 +603,10 @@ public partial class UploadView : UserControl
                 _host.RefreshDiskStatus();
 
                 var msg = $"Прошивка загружена:\n{result.DestinationFolder}";
+                // Дополнительные подтипы легко потерять из виду: файлов у них на диске нет (только
+                // ярлык), поэтому явно говорим, сколько записей завелось помимо основной.
+                if (result.ExtraFwVersionIds.Count > 0)
+                    msg += $"\n\nТа же версия добавлена ещё для {result.ExtraFwVersionIds.Count} подтип(ов) — ярлыком, без копирования файлов.";
                 if (result.Warnings.Count > 0)
                     msg += "\n\nПредупреждения:\n" + string.Join("\n", result.Warnings);
                 AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -579,6 +628,7 @@ public partial class UploadView : UserControl
             SourcePath = _srcPath ?? "",
             Group = group,
             Subtype = subOption?.Subtype,
+            ExtraSubtypes = _extraSubtypes.ToList(),
             Modification = mod,
             LaunchTypes = launchTypes,
             Description = DescInput.Text.Trim(),
@@ -608,6 +658,8 @@ public partial class UploadView : UserControl
         _executableHint = null;
         _hmiExecutableHint = null;
         DropZoneLabel.Text = "Перетащите файл или папку сюда\n\nили нажмите для выбора";
+        _extraSubtypes.Clear();
+        UpdateExtraSubtypesLabel();
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
         OpcReqNumCheck.IsChecked = false;
