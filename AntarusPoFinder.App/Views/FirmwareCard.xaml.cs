@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -77,7 +77,7 @@ public partial class FirmwareCard : UserControl
     public FirmwareCard()
     {
         InitializeComponent();
-        MorePopup.Closed += MorePopup_Closed;
+        MorePopup.Opened += MorePopup_Opened;
     }
 
     public void Configure(HierarchyResult result, FirmwareCardFlags flags)
@@ -194,6 +194,12 @@ public partial class FirmwareCard : UserControl
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
         moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, теги";
+        // Состояние меню запоминается на НАЖАТИИ — см. ToggleMore.
+        moreBtn.PreviewMouseLeftButtonDown += (_, _) =>
+        {
+            _moreWasOpenAtPress = MorePopup.IsOpen;
+            _morePressSeen = true;
+        };
         ActionsPanel.Children.Add(moreBtn);
         MorePopup.PlacementTarget = moreBtn;
 
@@ -328,18 +334,27 @@ public partial class FirmwareCard : UserControl
     }
 
     /// <summary>Popup со StaysOpen="False" закрывается сам по клику мимо — и клик по самой кнопке
-    /// «Ещё ▾» тоже считается «мимо». Обработчик Click приходит уже ПОСЛЕ этого закрытия, видит
-    /// IsOpen=false и открывает меню заново: меню невозможно было закрыть той же кнопкой, которой
-    /// открыл (жалоба «нажимаю — ничего, тыкаю несколько раз»). Поэтому клик, пришедший сразу после
-    /// автозакрытия, считается закрывающим.</summary>
-    private DateTime _morePopupClosedAt = DateTime.MinValue;
+    /// «Ещё ▾» тоже считается «мимо». К моменту Click меню уже закрыто, обработчик видит IsOpen=false
+    /// и открывает его заново: закрыть меню той же кнопкой, которой открыл, было невозможно (жалоба
+    /// «нажимаю — ничего, тыкаю несколько раз»).
+    ///
+    /// Поэтому решает состояние на момент НАЖАТИЯ (PreviewMouseLeftButtonDown приходит до
+    /// автозакрытия), а не на момент Click. Замер по времени тут не годится: порядок Closed и Click
+    /// не гарантирован, живьём проверено — окно всё равно открывалось заново.
+    /// _morePressSeen — про клавиатуру (Enter/пробел на кнопке): там мышиного нажатия не было,
+    /// и актуально обычное IsOpen.</summary>
+    private bool _moreWasOpenAtPress;
+    private bool _morePressSeen;
 
-    private void MorePopup_Closed(object? sender, EventArgs e) => _morePopupClosedAt = DateTime.Now;
+    /// <summary>Меню открылось — нажатие, которое к этому привело, отработано. Сбрасывать флаг в
+    /// Closed НЕЛЬЗЯ: закрытие как раз и происходит между нажатием и Click.</summary>
+    private void MorePopup_Opened(object? sender, EventArgs e) => _morePressSeen = false;
 
     private void ToggleMore()
     {
-        if (!MorePopup.IsOpen && (DateTime.Now - _morePopupClosedAt).TotalMilliseconds < 250) return;
-        MorePopup.IsOpen = !MorePopup.IsOpen;
+        var wasOpen = _morePressSeen ? _moreWasOpenAtPress : MorePopup.IsOpen;
+        _morePressSeen = false;
+        MorePopup.IsOpen = !wasOpen;
     }
 
     private void Copy_Click(object sender, RoutedEventArgs e)

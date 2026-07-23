@@ -17,8 +17,10 @@ namespace AntarusPoFinder.Core.Services;
 /// актуально ему, и не считает свою строку устаревшей.</summary>
 public static class FwHistoryStatus
 {
+    // Те же слова, что во вкладке «Модерация тегов» (NewVersionsView.StatusLabel) — одно и то же
+    // состояние версии не должно называться на двух экранах по-разному.
     public const string RolledBack = "Откатана";
-    public const string Current = "Актуальная";
+    public const string Current = "Текущая";
     public const string Superseded = "Заменена";
 
     public static string CurrentForHw(int hwVersion) => $"{Current} (HW {hwVersion})";

@@ -213,11 +213,12 @@ public partial class SearchView : UserControl
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
-    /// нашлось.</summary>
+    /// нашлось. Только папки САМОЙ версии (VersionFolders): признак «есть LFS» должен относиться к
+    /// той версии, на карточке которой он написан.</summary>
     private static DiskScan ScanVersionFolder(HierarchyResult result)
     {
         bool lfs = false, psl = false, hmiFile = false;
-        foreach (var dir in CandidateFolders(result))
+        foreach (var dir in VersionFolders(result))
         {
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
             try
@@ -609,6 +610,20 @@ public partial class SearchView : UserControl
         if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
     }
 
+    /// <summary>Папки ИМЕННО этой версии — без соседних версий из локального кэша, в отличие от
+    /// CandidateFolders.
+    ///
+    /// Для «чем открыть» подмена соседней версией — приемлемый фоллбэк (лучше открыть хоть что-то,
+    /// чем сказать «не найдено»), а для .lfs/.psl — нет: карточка тогда пишет «LFS ✓» у версии, где
+    /// его не выкладывали, кнопка «Загрузить в ПЛК» подставляет .lfs ЧУЖОЙ версии, и в контроллер
+    /// уезжает не та прошивка. Поймано живьём: версия с одним .psl показывала «LFS ✓», потому что
+    /// рядом в кэше лежала более свежая версия с собранным файлом.</summary>
+    private static IEnumerable<string> VersionFolders(HierarchyResult result)
+    {
+        yield return Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw);
+        if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
+    }
+
     /// <summary>Файл, на который указывает подсказка исполняемого файла, в первой же папке, где он
     /// реально есть. Null — если подсказки нет или файл не найден нигде.</summary>
     private static string? ResolveHintedFile(HierarchyResult result, string? hint)
@@ -645,7 +660,7 @@ public partial class SearchView : UserControl
         // заливки). Открывать надо именно .psl — .lfs не открывается ничем, кроме лоадера, а общая
         // эвристика «первый непонятный файл в папке» вполне могла взять его и молча открыть блокнот
         // (карточка теперь и называет эту кнопку «Открыть проект PSL», когда исходник найден).
-        if (LoaderFiles.FindIn(CandidateFolders(result), LoaderFiles.PslExtension) is { } psl)
+        if (LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.PslExtension) is { } psl)
         {
             TryOpen(psl);
             return;
@@ -716,7 +731,7 @@ public partial class SearchView : UserControl
 
     private void OpenLoaderFile(HierarchyResult result, string extension, string label)
     {
-        var path = LoaderFiles.FindIn(CandidateFolders(result), extension);
+        var path = LoaderFiles.FindIn(VersionFolders(result), extension);
         if (path is null)
         {
             AppMessageBox.Show($"Файл {label} не найден ни в локальной копии, ни в папке версии на диске.",
@@ -731,7 +746,7 @@ public partial class SearchView : UserControl
     /// всё равно пока нет — см. LoaderDialog).</summary>
     private void OpenLoader(HierarchyResult result)
     {
-        var source = LoaderFiles.FindIn(CandidateFolders(result), LoaderFiles.LfsExtension) ?? "";
+        var source = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension) ?? "";
         LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg,
             $"{result.Name} {result.VersionRaw}".Trim(), source);
     }
