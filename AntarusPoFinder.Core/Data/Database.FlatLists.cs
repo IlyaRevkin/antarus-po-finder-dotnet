@@ -32,6 +32,9 @@ public partial class Database
     public const string FlatKindManufacturer = "manufacturer";
     public const string FlatKindTag = "tag";
     public const string FlatKindExtension = "extension";
+    /// <summary>Разрешённые расширения HMI-проектов — независимый список от FlatKindExtension (ПЛК),
+    /// своя строка kind в flat_list_state, чтобы удаление/возврат в одном списке не задевало другой.</summary>
+    public const string FlatKindExtensionHmi = "extension_hmi";
 
     /// <summary>Секундной точности обычного NowIso здесь не хватает: «удалил и тут же вернул» (или
     /// два разных элемента списка подряд) укладывается в одну секунду, и события со строково равными

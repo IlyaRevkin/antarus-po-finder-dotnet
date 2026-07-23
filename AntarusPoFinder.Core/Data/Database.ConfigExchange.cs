@@ -66,6 +66,7 @@ public partial class Database
 
         data.Tags = GetAllTags();
         data.AllowedExtensions = GetAllowedExtensions();
+        data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
         data.FlatListState = GetFlatListState()
             .Select(s => new ExportedFlatListState { Kind = s.Kind, Name = s.Name, DeletedAt = s.DeletedAt, RevivedAt = s.RevivedAt })
             .ToList();
@@ -677,6 +678,11 @@ public partial class Database
             data.AllowedExtensions ?? new(),
             data.FlatListState, apply, GetAllowedExtensions, AddAllowedExtension, RemoveAllowedExtension,
             () => counts.ExtensionsAdded++, () => counts.ExtensionsRemoved++);
+
+        ImportFlatList(Database.FlatKindExtensionHmi,
+            data.AllowedExtensionsHmi ?? new(),
+            data.FlatListState, apply, GetAllowedExtensionsHmi, AddAllowedExtensionHmi, RemoveAllowedExtensionHmi,
+            () => counts.ExtensionsHmiAdded++, () => counts.ExtensionsHmiRemoved++);
 
         // ── Reservations (natural key = subtype+controller+hw_version+version_raw; status only
         //    ever advances reserved → fulfilled/cancelled, never the other way, so a local reservation

@@ -834,6 +834,10 @@ public partial class SettingsView : UserControl
         ExtList.Items.Clear();
         foreach (var ext in _services.Db.GetAllowedExtensions())
             ExtList.Items.Add(new ListBoxItem { Content = $".{ext}", Tag = ext });
+
+        ExtHmiList.Items.Clear();
+        foreach (var ext in _services.Db.GetAllowedExtensionsHmi())
+            ExtHmiList.Items.Add(new ListBoxItem { Content = $".{ext}", Tag = ext });
     }
 
     /// <summary>A cabinet type can never exist without a subtype (see Database.EnsureEveryGroupHasSubtype),
@@ -1257,6 +1261,32 @@ public partial class SettingsView : UserControl
         _services.Db.RemoveAllowedExtension(ext);
         LoadHierarchy();
         _host.PushCatalogChange($"Расширение «.{ext}» удалено");
+    }
+
+    private void AddExtensionHmi_Click(object sender, RoutedEventArgs e)
+    {
+        var ext = ExtHmiInput.Text.Trim();
+        if (string.IsNullOrEmpty(ext)) return;
+        _services.Db.AddAllowedExtensionHmi(ext);
+        ExtHmiInput.Text = "";
+        LoadHierarchy();
+        _host.PushCatalogChange($"Расширение HMI добавлено: .{ext.ToLowerInvariant().TrimStart('.')}");
+    }
+
+    private void DeleteExtensionHmi_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExtHmiList.SelectedItem is not ListBoxItem item || item.Tag is not string ext)
+        {
+            AppMessageBox.Show("Выберите расширение.", "Расширение HMI", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var reply = AppMessageBox.Show($"Удалить расширение HMI «.{ext}» из списка?", "Удалить расширение HMI",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.RemoveAllowedExtensionHmi(ext);
+        LoadHierarchy();
+        _host.PushCatalogChange($"Расширение HMI «.{ext}» удалено");
     }
 
     private async void RebuildHierarchy_Click(object sender, RoutedEventArgs e)

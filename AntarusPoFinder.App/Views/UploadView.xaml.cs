@@ -624,14 +624,20 @@ public partial class UploadView : UserControl
         // unknown-extension prompt first (if any), then the destination-exists prompt (if any).
         while (plan is null && failure!.Outcome == FirmwareUploadOutcome.NeedsConfirmation)
         {
-            var title = failure.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension
-                ? "Неизвестное расширение" : "Версия существует";
+            var title = failure.ConfirmationKind switch
+            {
+                FirmwareConfirmationKind.UnknownExtension => "Неизвестное расширение",
+                FirmwareConfirmationKind.UnknownHmiExtension => "Неизвестное расширение HMI",
+                _ => "Версия существует",
+            };
             var reply = AppMessageBox.Show(failure.ConfirmationMessage ?? "", title,
                 MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
             if (reply != MessageBoxResult.Yes) return;
 
             if (failure.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension)
                 request.ConfirmUnknownExtension = true;
+            else if (failure.ConfirmationKind == FirmwareConfirmationKind.UnknownHmiExtension)
+                request.ConfirmUnknownHmiExtension = true;
             else
                 request.ConfirmOverwriteExisting = true;
 

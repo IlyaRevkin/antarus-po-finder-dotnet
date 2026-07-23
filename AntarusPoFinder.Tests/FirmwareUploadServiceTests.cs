@@ -307,6 +307,33 @@ public class FirmwareUploadServiceTests : IDisposable
         finally { File.Delete(src); }
     }
 
+    /// <summary>Полный аналог Upload_UnknownExtension_NeedsConfirmationThenSucceedsWhenConfirmed выше,
+    /// но для HMI-вложения и отдельного списка allowed_extensions_hmi (fsprj/emt/emtp/emsln по
+    /// умолчанию) — проверяет, что расширение основной прошивки (.psl, разрешено) не мешает отдельной
+    /// проверке HMI-файла с неразрешённым расширением.</summary>
+    [Fact]
+    public void Upload_UnknownHmiExtension_NeedsConfirmationThenSucceedsWhenConfirmed()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        var hmiSrc = WriteTempFile(".xyz", "hmi data"); // not in the default HMI allowed-extensions seed
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.HmiEnabled = true;
+            request.HmiSourcePath = hmiSrc;
+
+            var first = FirmwareUploadService.Upload(_db, _hierarchy, request);
+            Assert.Equal(FirmwareUploadOutcome.NeedsConfirmation, first.Outcome);
+            Assert.Equal(FirmwareConfirmationKind.UnknownHmiExtension, first.ConfirmationKind);
+
+            request.ConfirmUnknownHmiExtension = true;
+            var second = FirmwareUploadService.Upload(_db, _hierarchy, request);
+            Assert.Equal(FirmwareUploadOutcome.Success, second.Outcome);
+        }
+        finally { File.Delete(src); File.Delete(hmiSrc); }
+    }
+
     [Fact]
     public void Upload_DestinationFolderAlreadyExists_NeedsConfirmationThenOverwrites()
     {

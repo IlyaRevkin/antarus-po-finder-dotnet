@@ -142,6 +142,9 @@ public class HierarchyExportData
     [JsonPropertyName("param_manufacturers")] public List<ExportedManufacturer>? ParamManufacturers { get; set; }
     [JsonPropertyName("tags")] public List<string>? Tags { get; set; }
     [JsonPropertyName("allowed_extensions")] public List<string>? AllowedExtensions { get; set; }
+    // Независимый список расширений HMI-проектов — та же логика nullable-без-дефолта, что и у
+    // AllowedExtensions выше (старый экспорт ключа просто не содержит).
+    [JsonPropertyName("allowed_extensions_hmi")] public List<string>? AllowedExtensionsHmi { get; set; }
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
     [JsonPropertyName("fw_versions")] public List<ExportedFwVersion> FwVersions { get; set; } = new();
     [JsonPropertyName("param_files")] public List<ExportedParamFile> ParamFiles { get; set; } = new();
@@ -195,6 +198,10 @@ public class ImportCounts
     public int TagsRemoved { get; set; }
     public int ExtensionsAdded { get; set; }
     public int ExtensionsRemoved { get; set; }
+    /// <summary>Тот же счётчик, что ExtensionsAdded/Removed выше, но для независимого списка
+    /// расширений HMI-проектов (allowed_extensions_hmi).</summary>
+    public int ExtensionsHmiAdded { get; set; }
+    public int ExtensionsHmiRemoved { get; set; }
     public int ReservationsAdded { get; set; }
     public int ReservationsUpdated { get; set; }
     public int FwVersions { get; set; }
@@ -217,6 +224,7 @@ public class ImportCounts
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + GroupsRemoved + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
         ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
-        ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
+        ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
+        ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
         AppUsersAdded + AppUsersUpdated;
 }

@@ -132,6 +132,13 @@ public partial class Database : IDisposable
                  ext TEXT PRIMARY KEY
              );
 
+             -- Отдельный, независимый список разрешённых расширений для HMI-проектов (.fsprj и т.п.) —
+             -- полный аналог allowed_extensions выше, но проверяется при загрузке HMI-вложения, а не
+             -- основной прошивки ПЛК (см. FirmwareUploadService.Prepare).
+             CREATE TABLE IF NOT EXISTS allowed_extensions_hmi (
+                 ext TEXT PRIMARY KEY
+             );
+
              CREATE TABLE IF NOT EXISTS settings (
                  key   TEXT PRIMARY KEY,
                  value TEXT NOT NULL DEFAULT ''
@@ -270,6 +277,7 @@ public partial class Database : IDisposable
         EnsureColumnsExist();
         SeedHierarchyDefaults();
         SeedAllowedExtensionsDefaults();
+        SeedAllowedExtensionsHmiDefaults();
         SeedTagsFromExistingFwVersions();
         RunDataMigrations();
         EnsureDefaultEquipmentGroups();

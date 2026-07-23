@@ -125,4 +125,33 @@ public partial class Database
         ExecuteNonQuery("DELETE FROM allowed_extensions WHERE ext=@e", cmd => cmd.Parameters.AddWithValue("@e", ext));
         MarkFlatListDeleted(FlatKindExtension, ext);
     }
+
+    // ── Allowed HMI Upload Extensions ───────────────────────────────────────────
+    // Полный аналог блока выше, но для отдельного справочника расширений HMI-проектов
+    // (allowed_extensions_hmi) — независимая таблица, свой FlatKind, своя проверка при загрузке
+    // HMI-вложения (см. FirmwareUploadService.Prepare).
+
+    public List<string> GetAllowedExtensionsHmi()
+    {
+        var result = new List<string>();
+        using var reader = ExecuteReader("SELECT ext FROM allowed_extensions_hmi ORDER BY ext");
+        while (reader.Read())
+            result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public void AddAllowedExtensionHmi(string ext)
+    {
+        ext = ext.Trim().ToLowerInvariant().TrimStart('.');
+        if (string.IsNullOrEmpty(ext)) return;
+        ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions_hmi(ext) VALUES(@e)", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListAlive(FlatKindExtensionHmi, ext);
+    }
+
+    public void RemoveAllowedExtensionHmi(string ext)
+    {
+        ext = ext.Trim().ToLowerInvariant().TrimStart('.');
+        ExecuteNonQuery("DELETE FROM allowed_extensions_hmi WHERE ext=@e", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListDeleted(FlatKindExtensionHmi, ext);
+    }
 }

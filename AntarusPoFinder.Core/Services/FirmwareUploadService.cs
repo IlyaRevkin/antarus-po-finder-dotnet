@@ -74,6 +74,10 @@ public class FirmwareUploadRequest
     /// расширением?" — see FirmwareUploadOutcome.NeedsConfirmation.</summary>
     public bool ConfirmUnknownExtension { get; set; }
 
+    /// <summary>Тот же флаг подтверждения, что ConfirmUnknownExtension выше, но для HMI-вложения —
+    /// сверяется с отдельным списком allowed_extensions_hmi, а не общим ПЛК-списком.</summary>
+    public bool ConfirmUnknownHmiExtension { get; set; }
+
     /// <summary>Set to true and re-submit after the user confirms "папка версии уже существует,
     /// перезаписать?" — see FirmwareUploadOutcome.NeedsConfirmation.</summary>
     public bool ConfirmOverwriteExisting { get; set; }
@@ -99,6 +103,9 @@ public enum FirmwareConfirmationKind
 {
     /// <summary>The source file's extension isn't in the configured allow-list.</summary>
     UnknownExtension,
+    /// <summary>Тот же случай, что UnknownExtension выше, но для HMI-вложения и отдельного списка
+    /// allowed_extensions_hmi.</summary>
+    UnknownHmiExtension,
     /// <summary>The destination version folder already exists on disk.</summary>
     OverwriteExisting,
 }
@@ -279,6 +286,21 @@ public static class FirmwareUploadService
             {
                 return (null, FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.UnknownExtension,
                     $"Расширение «.{ext}» не входит в список разрешённых (Настройки → Иерархия → Разрешённые расширения).\nТочно загрузить этот файл?"));
+            }
+        }
+
+        // Та же проверка, что выше для основной прошивки, но для HMI-вложения и отдельного списка
+        // allowed_extensions_hmi — только когда это одиночный файл (папка, как и у основного
+        // источника, не проверяется: расширение конкретного исполняемого файла внутри не выбирается
+        // здесь однозначно).
+        if (request.HmiEnabled && !string.IsNullOrEmpty(request.HmiSourcePath) && !Directory.Exists(request.HmiSourcePath))
+        {
+            var hmiExt = Path.GetExtension(request.HmiSourcePath).TrimStart('.').ToLowerInvariant();
+            var allowedHmi = new HashSet<string>(db.GetAllowedExtensionsHmi().Select(x => x.ToLowerInvariant()));
+            if (allowedHmi.Count > 0 && !allowedHmi.Contains(hmiExt) && !request.ConfirmUnknownHmiExtension)
+            {
+                return (null, FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.UnknownHmiExtension,
+                    $"Расширение HMI-проекта «.{hmiExt}» не входит в список разрешённых (Настройки → Иерархия → Разрешённые расширения HMI).\nТочно загрузить этот файл?"));
             }
         }
 

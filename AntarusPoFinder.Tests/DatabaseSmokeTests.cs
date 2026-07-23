@@ -35,6 +35,9 @@ public class DatabaseSmokeTests
         var exts = db.GetAllowedExtensions();
         Assert.Contains("psl", exts);
 
+        var hmiExts = db.GetAllowedExtensionsHmi();
+        Assert.Contains("fsprj", hmiExts);
+
         // Seed exactly the "already uploaded firmware" data this test controls, then read it back
         // through the normal query path — proves fw_versions survives a round trip through
         // RunDataMigrations/Migrate the same way real uploads do, without depending on any specific

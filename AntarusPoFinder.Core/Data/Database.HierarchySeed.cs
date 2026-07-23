@@ -80,6 +80,24 @@ public partial class Database
         }
     }
 
+    /// <summary>Тот же одноразовый сид «только для пустой таблицы», что и у ПЛК-расширений выше, но
+    /// для отдельного списка HMI-проектов. fsprj — формат Segnetics (см. UploadView.HmiExecutableExts);
+    /// emt/emtp/emsln — форматы редактора KINCO HMI (см. SearchView.KincoHmiExts). Расширение .dpj
+    /// сюда намеренно не добавлено: оно уже входит в дефолтный allowed_extensions (ПЛК) как формат
+    /// проекта KINCO PLC — таблицы независимы и коллизии технически не будет, но смешивать одно и то
+    /// же расширение в оба списка по умолчанию было бы вводящим в заблуждение.</summary>
+    private void SeedAllowedExtensionsHmiDefaults()
+    {
+        var count = (long)(ExecuteScalar("SELECT COUNT(*) FROM allowed_extensions_hmi") ?? 0L);
+        if (count > 0) return;
+        foreach (var ext in new[] { "fsprj", "emt", "emtp", "emsln" })
+        {
+            var e = ext;
+            ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions_hmi(ext) VALUES(@e)",
+                cmd => cmd.Parameters.AddWithValue("@e", e));
+        }
+    }
+
     /// <summary>Idempotent: add any DefaultEquipmentGroup missing (by name) from equipment_groups.
     /// Runs on every startup (unlike SeedHierarchyDefaults, which only seeds a fresh/empty DB) so a
     /// group added to the reference catalogue later (e.g. ШУЗ) reaches already-existing installs

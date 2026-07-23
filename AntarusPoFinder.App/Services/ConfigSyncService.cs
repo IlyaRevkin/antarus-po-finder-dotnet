@@ -47,7 +47,7 @@ public static class ConfigSyncService
     {
         "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
-        "allowed_extensions", "fw_version_reservations", "fw_versions", "param_files", "app_users",
+        "allowed_extensions", "allowed_extensions_hmi", "fw_version_reservations", "fw_versions", "param_files", "app_users",
         "flat_list_state", "schema_version",
     };
 

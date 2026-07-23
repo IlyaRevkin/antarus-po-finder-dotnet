@@ -300,6 +300,21 @@
                         <Button Grid.Column="2" Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteExtension_Click"/>
                     </Grid>
 
+                    <TextBlock Text="РАЗРЕШЁННЫЕ РАСШИРЕНИЯ HMI-ПРОЕКТОВ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Отдельный список — для HMI-вложения (панель оператора), не для основной прошивки ПЛК выше."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <ListBox x:Name="ExtHmiList" Height="100" Margin="0,0,0,6" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="ExtHmiInput" Height="34" Margin="0,0,8,0" ToolTip="напр. fsprj"/>
+                        <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddExtensionHmi_Click"/>
+                        <Button Grid.Column="2" Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteExtensionHmi_Click"/>
+                    </Grid>
+
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Пересоздать структуру диска" Margin="0,0,8,0" Click="RebuildHierarchy_Click"/>
                         <Button Content="Синхронизировать прошивки с диска" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SyncFwFromDisk_Click"/>

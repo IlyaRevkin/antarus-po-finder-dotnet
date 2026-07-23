@@ -68,12 +68,14 @@ public class ConfigSyncTests
             dbA.AddControllerModification(pixel2.Id!.Value, "PIXEL2-9999", 99, "синтетическая тестовая модификация");
             dbA.AddTag("synctest");
             dbA.AddAllowedExtension("synctest");
+            dbA.AddAllowedExtensionHmi("synctest_hmi");
 
             var exported = dbA.ExportHierarchyData();
             Assert.Contains(exported.EquipmentSubtypes, s => s.Name == "ХП-ТЕСТ");
             Assert.Contains(exported.ControllerModifications, m => m.DisplayName == "PIXEL2-9999");
             Assert.Contains(exported.Tags!, t => t == "synctest");
             Assert.Contains(exported.AllowedExtensions!, e => e == "synctest");
+            Assert.Contains(exported.AllowedExtensionsHmi!, e => e == "synctest_hmi");
 
             // Machine B, BEFORE import: still has the original name, plus its OWN local upload
             // under that exact subtype — this must survive the rename untouched.
@@ -98,6 +100,7 @@ public class ConfigSyncTests
             Assert.DoesNotContain(dbB.GetAllModifications(), m => m.DisplayName == "PIXEL2-9999");
             Assert.DoesNotContain(dbB.GetAllTags(), t => t == "synctest");
             Assert.DoesNotContain(dbB.GetAllowedExtensions(), e => e == "synctest");
+            Assert.DoesNotContain(dbB.GetAllowedExtensionsHmi(), e => e == "synctest_hmi");
 
             // Dry-run preview must report the same counts as the real apply, and change nothing.
             var preview = dbB.PreviewImportHierarchyData(exported);
@@ -105,6 +108,7 @@ public class ConfigSyncTests
             Assert.Equal(1, preview.ModificationsAdded);
             Assert.Equal(1, preview.TagsAdded);
             Assert.Equal(1, preview.ExtensionsAdded);
+            Assert.Equal(1, preview.ExtensionsHmiAdded);
             var subtypeBStillOldName = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Id == subtypeB.Id);
             Assert.Equal("ХП", subtypeBStillOldName.Name); // preview must not have written anything
 
@@ -115,6 +119,7 @@ public class ConfigSyncTests
             Assert.Equal(1, counts.ModificationsAdded);
             Assert.Equal(1, counts.TagsAdded);
             Assert.Equal(1, counts.ExtensionsAdded);
+            Assert.Equal(1, counts.ExtensionsHmiAdded);
 
             // The rename propagated onto the SAME row (same id) — not a delete+reinsert.
             var allSubtypesB = dbB.GetSubtypesForGroup(groupB.Id!.Value);
@@ -130,6 +135,7 @@ public class ConfigSyncTests
             Assert.Contains(dbB.GetAllModifications(), m => m.DisplayName == "PIXEL2-9999");
             Assert.Contains(dbB.GetAllTags(), t => t == "synctest");
             Assert.Contains(dbB.GetAllowedExtensions(), e => e == "synctest");
+            Assert.Contains(dbB.GetAllowedExtensionsHmi(), e => e == "synctest_hmi");
 
             // Re-importing the same export must be a no-op (idempotent) — proves sync_id matching
             // works on the second pass too, not just "first contact".
