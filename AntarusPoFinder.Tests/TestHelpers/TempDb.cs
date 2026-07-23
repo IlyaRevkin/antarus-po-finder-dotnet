@@ -27,10 +27,35 @@ public sealed class TempDb : IDisposable
     public string Path { get; } =
         System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"antarus_test_{Guid.NewGuid():N}.db");
 
+    /// <summary>Удаление — best-effort, ровно как в TempRoot, и по той же причине: единственный
+    /// оставшийся в %TEMP% файл не должен ронять зелёный прогон.
+    ///
+    /// ClearAllPools() закрывает пулы, но нативный SQLite отдаёт файловый хэндл ОС не мгновенно —
+    /// под нагрузкой (xUnit гоняет классы тестов параллельно, и чем их больше, тем плотнее) первый
+    /// File.Delete успевал прийти раньше и падал с «file is being used by another process» уже ПОСЛЕ
+    /// того, как все проверки теста прошли. Ловилось как «падает EndToEndSyncTests», хотя тест сам
+    /// по себе проходил — падала уборка за ним. Отсюда короткий ретрай и глушение в конце.</summary>
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         foreach (var f in new[] { Path, Path + "-wal", Path + "-shm" })
-            if (File.Exists(f)) File.Delete(f);
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(f)) File.Delete(f);
+                    break;
+                }
+                catch (IOException)
+                {
+                    System.Threading.Thread.Sleep(50);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    System.Threading.Thread.Sleep(50);
+                }
+            }
+        }
     }
 }
