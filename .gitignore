@@ -21,6 +21,10 @@ installer/*.log
 
 ## Test/automation scratch (screenshots, throwaway scripts — never app code)
 AntarusPoFinder.Tests/scratch/
+## Собранная копия для живого прогона GUI и её вывод — не исходники
+.livetest/
+.testout/
+.buildcheck/
 
 ## IDE
 .vs/

@@ -78,6 +78,7 @@ public partial class FirmwareCard : UserControl
     {
         InitializeComponent();
         MorePopup.Opened += MorePopup_Opened;
+        MorePopup.Closed += MorePopup_Closed;
     }
 
     public void Configure(HierarchyResult result, FirmwareCardFlags flags)
@@ -194,12 +195,6 @@ public partial class FirmwareCard : UserControl
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
         moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, теги";
-        // Состояние меню запоминается на НАЖАТИИ — см. ToggleMore.
-        moreBtn.PreviewMouseLeftButtonDown += (_, _) =>
-        {
-            _moreWasOpenAtPress = MorePopup.IsOpen;
-            _morePressSeen = true;
-        };
         ActionsPanel.Children.Add(moreBtn);
         MorePopup.PlacementTarget = moreBtn;
 
@@ -333,28 +328,43 @@ public partial class FirmwareCard : UserControl
         MorePanel.Children.Add(btn);
     }
 
-    /// <summary>Popup со StaysOpen="False" закрывается сам по клику мимо — и клик по самой кнопке
-    /// «Ещё ▾» тоже считается «мимо». К моменту Click меню уже закрыто, обработчик видит IsOpen=false
-    /// и открывает его заново: закрыть меню той же кнопкой, которой открыл, было невозможно (жалоба
-    /// «нажимаю — ничего, тыкаю несколько раз»).
+    /// <summary>Открытый Popup со StaysOpen="False" держит захват мыши и закрывается сам по нажатию
+    /// мимо — а нажатие по самой кнопке «Ещё ▾» для него тоже «мимо». Порядок, снятый живьём:
+    /// popup съедает нажатие и закрывается МОЛЧА (событие Closed при этом не приходит вообще, и
+    /// PreviewMouseLeftButtonDown до кнопки тоже не доезжает), а через ~4 мс кнопке приходит Click —
+    /// который видит IsOpen=false и открывает меню заново. Отсюда жалоба «нажимаю — ничего, тыкаю
+    /// несколько раз»: закрыть меню той же кнопкой, которой открыл, было невозможно.
     ///
-    /// Поэтому решает состояние на момент НАЖАТИЯ (PreviewMouseLeftButtonDown приходит до
-    /// автозакрытия), а не на момент Click. Замер по времени тут не годится: порядок Closed и Click
-    /// не гарантирован, живьём проверено — окно всё равно открывалось заново.
-    /// _morePressSeen — про клавиатуру (Enter/пробел на кнопке): там мышиного нажатия не было,
-    /// и актуально обычное IsOpen.</summary>
-    private bool _moreWasOpenAtPress;
-    private bool _morePressSeen;
+    /// Поэтому опорная точка — PreviewMouseDownOutsideCapturedElement: единственное событие, которое
+    /// про это нажатие вообще приходит, и приходит гарантированно ДО Click (одно и то же нажатие).
+    /// Click сразу после него — тот самый закрывающий клик, открывать по нему нечего.</summary>
+    private DateTime _moreDismissedAt = DateTime.MinValue;
 
-    /// <summary>Меню открылось — нажатие, которое к этому привело, отработано. Сбрасывать флаг в
-    /// Closed НЕЛЬЗЯ: закрытие как раз и происходит между нажатием и Click.</summary>
-    private void MorePopup_Opened(object? sender, EventArgs e) => _morePressSeen = false;
+    private void MorePopup_Opened(object? sender, EventArgs e)
+    {
+        // Снять перед добавлением: авто-закрытие Closed не поднимает, так что штатной точки для
+        // отписки нет, и без этого обработчик копился бы с каждым открытием.
+        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(MorePopup, MoreDismissedByClickOutside);
+        System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(MorePopup, MoreDismissedByClickOutside);
+    }
+
+    private void MorePopup_Closed(object? sender, EventArgs e) =>
+        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(MorePopup, MoreDismissedByClickOutside);
+
+    private void MoreDismissedByClickOutside(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        _moreDismissedAt = DateTime.Now;
+        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(MorePopup, MoreDismissedByClickOutside);
+    }
 
     private void ToggleMore()
     {
-        var wasOpen = _morePressSeen ? _moreWasOpenAtPress : MorePopup.IsOpen;
-        _morePressSeen = false;
-        MorePopup.IsOpen = !wasOpen;
+        // Порог заведомо больше зазора между закрытием и Click (единицы мс) и заведомо меньше
+        // осмысленного «закрыл и сразу передумал».
+        var dismissedByThisClick = !MorePopup.IsOpen
+            && (DateTime.Now - _moreDismissedAt).TotalMilliseconds < 250;
+        if (dismissedByThisClick) return;
+        MorePopup.IsOpen = !MorePopup.IsOpen;
     }
 
     private void Copy_Click(object sender, RoutedEventArgs e)
