@@ -80,6 +80,47 @@ public partial class Database
         });
     }
 
+    /// <summary>Пути доп. файлов (Карта ВВ / Инструкция / Карта modbus / HMI) — отдельным методом от
+    /// UpdateFwVersion, т.к. меняются другим сценарием: «доложить файлы к уже загруженной прошивке»
+    /// (см. FirmwareAttachmentsService), а не правкой описания/тегов. null — «не трогать поле»,
+    /// пустая строка — «убрать ссылку» (файлы на диске остаются).</summary>
+    public void UpdateFwVersionAttachments(int versionId, string? ioMapPath = null, string? instructionsPath = null,
+        string? modbusMapPath = null, string? hmiPath = null)
+    {
+        var sets = new List<string>();
+        var values = new List<(string, object)>();
+        if (ioMapPath is not null) { sets.Add("io_map_path=@io"); values.Add(("@io", ioMapPath)); }
+        if (instructionsPath is not null) { sets.Add("instructions_path=@instr"); values.Add(("@instr", instructionsPath)); }
+        if (modbusMapPath is not null) { sets.Add("modbus_map_path=@modbus"); values.Add(("@modbus", modbusMapPath)); }
+        if (hmiPath is not null) { sets.Add("hmi_path=@hmi"); values.Add(("@hmi", hmiPath)); }
+        if (sets.Count == 0) return;
+
+        ExecuteNonQuery($"UPDATE fw_versions SET {string.Join(", ", sets)} WHERE id=@id", cmd =>
+        {
+            foreach (var (name, value) in values)
+                cmd.Parameters.AddWithValue(name, value);
+            cmd.Parameters.AddWithValue("@id", versionId);
+        });
+    }
+
+    /// <summary>Названия группы/подтипа/контроллера для версии — нужны, чтобы построить пути общих
+    /// папок контроллера (Карта ВВ, Инструкция, HMI…) там, где на руках только сама запись версии
+    /// (например EditFirmwareDialog, открытый из поиска, где join'а с именами не было).</summary>
+    public (string GroupName, string SubtypeName, string ControllerName)? GetFwVersionNames(int versionId)
+    {
+        using var reader = ExecuteReader("""
+            SELECT eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.id=@id
+            """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
+        return reader.Read()
+            ? (GetString(reader, "group_name"), GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"))
+            : null;
+    }
+
     /// <summary>Hard-removes a firmware version row outright — no tombstone, no sync propagation.
     /// Kept for completeness/tests; Настройки → Прошивки → «Удалить прошивку» uses
     /// <see cref="TombstoneFwVersion"/> instead (see there for why a bare DELETE isn't enough for

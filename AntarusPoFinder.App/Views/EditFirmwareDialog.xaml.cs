@@ -12,13 +12,20 @@ public partial class EditFirmwareDialog : Window
 {
     private const string NoExecutableText = "— первый подходящий файл в папке —";
 
+    private readonly AppServices _services;
     private readonly Database _db;
+    private readonly FwVersionRecord _record;
     private readonly LaunchTypeChecks _checks;
 
     private readonly string? _plcFolder;
     private readonly string? _hmiFolder;
     private string _plcHint = "";
     private string _hmiHint = "";
+
+    private readonly FilePickerRow _ioMapPicker;
+    private readonly FilePickerRow _instrPicker;
+    private readonly FilePickerRow _modbusPicker;
+    private readonly FilePickerRow _hmiPicker;
 
     public string ResultDescription { get; private set; } = "";
     public string ResultTags { get; private set; } = "";
@@ -31,10 +38,18 @@ public partial class EditFirmwareDialog : Window
     /// его раньше вообще нельзя было переназначить после загрузки.</summary>
     public string? ResultExecutableHint { get; private set; }
 
-    public EditFirmwareDialog(Database db, FwVersionRecord v, string title)
+    /// <summary>Результат догрузки доп. файлов — применяется сразу в Save_Click (в отличие от
+    /// описания/тегов, которые вызывающий код пишет сам через UpdateFwVersion): копирование файлов
+    /// на диск не влезает в контракт «диалог только собирает значения». Вызывающему остаётся только
+    /// показать это пользователю.</summary>
+    public FirmwareAttachmentsResult? AttachmentsResult { get; private set; }
+
+    public EditFirmwareDialog(AppServices services, FwVersionRecord v, string title)
     {
         InitializeComponent();
-        _db = db;
+        _services = services;
+        _db = services.Db;
+        _record = v;
         TitleLabel.Text = $"Прошивка: {title}";
         DescriptionInput.Text = v.Description;
         TagsEditor.Configure(v.Tags.Split(' ', System.StringSplitOptions.RemoveEmptyEntries), () => _db.GetAllTags());
@@ -60,6 +75,66 @@ public partial class EditFirmwareDialog : Window
             ExecutablesPanel.Visibility = Visibility.Visible;
         }
         RefreshExecutableTexts();
+
+        _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "", folderDialogTitle: "Выбрать папку");
+        _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "", folderDialogTitle: "Выбрать папку");
+        _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "", folderDialogTitle: "Выбрать папку");
+        _hmiPicker = new FilePickerRow(p => HmiInput.Text = p, () => HmiInput.Text = "",
+            fileDialogTitle: "Выбрать файл HMI-проекта",
+            fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
+            folderDialogTitle: "Выбрать папку HMI-проекта");
+
+        // Блок доп. файлов имеет смысл только когда известно, куда их класть: нужны имена группы/
+        // подтипа/контроллера (в записи из поиска их нет — доносим из БД) и доступный сетевой диск.
+        if (v.Id is not null)
+        {
+            var names = _db.GetFwVersionNames(v.Id.Value);
+            if (names is not null && !string.IsNullOrEmpty(_services.Cfg.RootPath()))
+            {
+                _names = names.Value;
+                IoMapInput.Text = v.IoMapPath;
+                ModbusMapInput.Text = v.ModbusMapPath;
+                InstructionsInput.Text = v.InstructionsPath;
+                HmiInput.Text = v.HmiPath;
+                AttachmentsPanel.Visibility = Visibility.Visible;
+            }
+        }
+    }
+
+    private (string GroupName, string SubtypeName, string ControllerName)? _names;
+
+    private void IoMapBrowseFile_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFile();
+    private void IoMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFolder();
+    private void IoMapClear_Click(object sender, RoutedEventArgs e) => _ioMapPicker.Clear();
+
+    private void ModbusMapBrowseFile_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFile();
+    private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFolder();
+    private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => _modbusPicker.Clear();
+
+    private void InstructionsBrowseFile_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFile();
+    private void InstructionsBrowseFolder_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFolder();
+    private void InstructionsClear_Click(object sender, RoutedEventArgs e) => _instrPicker.Clear();
+
+    private void HmiBrowseFile_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFile();
+    private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFolder();
+    private void HmiClear_Click(object sender, RoutedEventArgs e) => _hmiPicker.Clear();
+
+    private void ApplyAttachments()
+    {
+        if (_names is null || _record.Id is null) return;
+        var request = new FirmwareAttachmentsRequest
+        {
+            RootPath = _services.Cfg.RootPath(),
+            GroupName = _names.Value.GroupName,
+            SubtypeName = _names.Value.SubtypeName,
+            ControllerName = _names.Value.ControllerName,
+            IoMapSourcePath = IoMapInput.Text.Trim(),
+            ModbusMapSourcePath = ModbusMapInput.Text.Trim(),
+            InstructionsSourcePath = InstructionsInput.Text.Trim(),
+            HmiSourcePath = HmiInput.Text.Trim(),
+        };
+        var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request);
+        if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;
     }
 
     private void RefreshExecutableTexts()
@@ -99,8 +174,23 @@ public partial class EditFirmwareDialog : Window
         ResultLaunchTypes = _checks.Selected;
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
+        ApplyAttachments();
         DialogResult = true;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    /// <summary>Общая для всех четырёх мест, откуда открывается этот диалог, реакция на догрузку
+    /// доп. файлов: что реально доложено — в статус, что не получилось — отдельным окном (иначе
+    /// проблема с одним файлом молча растворилась бы в тосте про теги).</summary>
+    public static void ReportAttachments(FirmwareAttachmentsResult? result, IAppHost host)
+    {
+        if (result is null) return;
+        if (result.Applied.Count > 0)
+            host.ShowStatus("Доп. файлы обновлены: " + string.Join(", ", result.Applied),
+                category: NotificationCategory.FirmwareAndParams);
+        if (result.Warnings.Count > 0)
+            AppMessageBox.Show("Не удалось приложить:\n" + string.Join("\n", result.Warnings),
+                "Доп. файлы", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
 }

@@ -1356,11 +1356,12 @@ public partial class SettingsView : UserControl
         }
         var v = row.Record;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
@@ -1426,7 +1427,7 @@ public partial class SettingsView : UserControl
         var v = GetSelectedFwVersion();
         if (v is null) return;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         // "Прошивка обновлена" is misleading when the only thing that changed is tags (no new
@@ -1439,6 +1440,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
         _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
             : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
             : $"Без изменений: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);

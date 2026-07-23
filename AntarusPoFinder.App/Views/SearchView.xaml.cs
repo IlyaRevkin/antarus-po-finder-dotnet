@@ -388,11 +388,12 @@ public partial class SearchView : UserControl
             AppMessageBox.Show("Версия не найдена в базе.", "Теги", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var dlg = new EditFirmwareDialog(_services.Db, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
         _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }

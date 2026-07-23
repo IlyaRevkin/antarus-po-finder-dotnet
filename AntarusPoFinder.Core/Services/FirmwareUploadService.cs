@@ -269,24 +269,12 @@ public static class FirmwareUploadService
         {
             try
             {
-                var hmiRootFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName);
-                Directory.CreateDirectory(hmiRootFolder);
                 // Named after the PLC version + "_hmi" — see UploadView's original comment (round 43ish)
-                // on why the HMI folder is versioned per-upload instead of flat/overwritten.
-                if (Directory.Exists(request.HmiSourcePath))
-                {
-                    var hmiDstFolder = Path.Combine(hmiRootFolder, $"{fwv.Raw}_hmi");
-                    Directory.CreateDirectory(hmiDstFolder);
-                    CopyDirectoryContents(request.HmiSourcePath, hmiDstFolder);
-                    hmiStored = hmiDstFolder;
-                }
-                else
-                {
-                    var hmiExt = Path.GetExtension(request.HmiSourcePath);
-                    var hmiDstName = $"{fwv.Raw}_hmi{hmiExt}";
-                    File.Copy(request.HmiSourcePath, Path.Combine(hmiRootFolder, hmiDstName), overwrite: true);
-                    hmiStored = Path.Combine(hmiRootFolder, hmiDstName);
-                }
+                // on why the HMI folder is versioned per-upload instead of flat/overwritten. Сам
+                // копир вынесен в FirmwareAttachmentsService, чтобы «доложить HMI к уже загруженной
+                // версии» клало проект ровно туда же и так же, что и загрузка новой версии.
+                var hmiRootFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName);
+                hmiStored = FirmwareAttachmentsService.CopyHmiProject(hmiRootFolder, fwv.Raw, request.HmiSourcePath);
             }
             catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
         }

@@ -3,9 +3,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:AntarusPoFinder.App.Views"
         Icon="/Assets/icon.ico"
-        Width="520" SizeToContent="Height"
+        Width="560" SizeToContent="Height" MaxHeight="860"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <!-- ScrollViewer + MaxHeight: с появлением блоков «Доп. файлы» и «Исполняемые файлы» окно
+         на невысоком экране/ноутбуке перестало помещаться, а SizeToContent сам по себе просто
+         вырастил бы его за пределы экрана вместе с кнопками «Сохранить»/«Отмена». -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Margin="16">
         <TextBlock x:Name="TitleLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,12" TextWrapping="Wrap"/>
 
@@ -21,6 +25,78 @@
              ConfigService.LaunchTypes) не помещается в 520px ширины окна одной строкой и у
              StackPanel просто обрезался бы без возможности до него добраться. -->
         <WrapPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
+
+        <!-- Доп. файлы можно было приложить только в момент загрузки версии: если карту/инструкцию
+             прислали позже, оставалось только перезаливать прошивку заново. Поля предзаполнены тем,
+             что уже записано у версии; пустое поле = убрать ссылку (файлы на диске не удаляются —
+             папки «Карта ВВ»/«Инструкция»/«Карта Modbus» общие для всех версий контроллера). -->
+        <StackPanel x:Name="AttachmentsPanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <TextBox Grid.Row="0" Grid.Column="1" x:Name="IoMapInput" Height="30" Margin="0,0,4,4"/>
+                <Button Grid.Row="0" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
+                    <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="0" Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                    <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="0" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="IoMapClear_Click" ToolTip="Очистить">
+                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <TextBox Grid.Row="1" Grid.Column="1" x:Name="ModbusMapInput" Height="30" Margin="0,0,4,4"/>
+                <Button Grid.Row="1" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
+                    <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="1" Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                    <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="1" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="ModbusMapClear_Click" ToolTip="Очистить">
+                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Инструкция:" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <TextBox Grid.Row="2" Grid.Column="1" x:Name="InstructionsInput" Height="30" Margin="0,0,4,4"/>
+                <Button Grid.Row="2" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="InstructionsBrowseFile_Click" ToolTip="Выбрать файл">
+                    <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="2" Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="InstructionsBrowseFolder_Click" ToolTip="Выбрать папку">
+                    <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="2" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="InstructionsClear_Click" ToolTip="Очистить">
+                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="HMI-проект:" VerticalAlignment="Center" TextWrapping="Wrap"
+                           ToolTip="Файл или папка проекта HMI — ляжет в папку HMI контроллера как «{версия}_hmi»."/>
+                <TextBox Grid.Row="3" Grid.Column="1" x:Name="HmiInput" Height="30" Margin="0,0,4,0"/>
+                <Button Grid.Row="3" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFile_Click" ToolTip="Выбрать файл">
+                    <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="3" Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiBrowseFolder_Click" ToolTip="Выбрать папку">
+                    <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Row="3" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="HmiClear_Click" ToolTip="Очистить">
+                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+            </Grid>
+        </StackPanel>
 
         <!-- Модерация исполняемых файлов: и для ПЛК, и для HMI (раньше можно было переназначить
              только HMI, и только среди файлов КОРНЯ папки — если нужный файл лежал во вложенной
@@ -58,4 +134,5 @@
             <Button Content="Сохранить" Width="90" Click="Save_Click" IsDefault="True"/>
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </Window>

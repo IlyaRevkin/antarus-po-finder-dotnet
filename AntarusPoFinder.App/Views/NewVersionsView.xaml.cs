@@ -61,11 +61,12 @@ public partial class NewVersionsView : UserControl
     {
         var v = row.Record;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
