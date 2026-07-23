@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>Special folder names, always created alongside controller folders.</summary>
@@ -122,5 +124,21 @@ public static class FirmwareNaming
         if (!string.IsNullOrEmpty(ext) && !ext.StartsWith('.'))
             ext = "." + ext;
         return (name + ext).ToUpperInvariant();
+    }
+
+    /// <summary>Обратная операция к BuildFirmwareFilename для двух ОПЦ-меток: «_(01312)» → номер
+    /// заявки, «_SN00042» → заводской SN. Нужна досмотру диска (HierarchyService.ImportFwCandidates):
+    /// версию, загруженную на другой машине, он видит только как папку с файлом, а заявки и SN нет
+    /// ни в имени папки, ни в CHANGELOG.md — единственное место, где они записаны, это имя файла.
+    /// Чего в имени нет — возвращается пустой строкой, гадать не надо.</summary>
+    public static (string RequestNum, string CabinetSn) ParseOpcMarkers(string filename)
+    {
+        if (string.IsNullOrEmpty(filename)) return ("", "");
+
+        var name = Path.GetFileNameWithoutExtension(filename);
+        var request = Regex.Match(name, @"_\((\d+)\)");
+        var sn = Regex.Match(name, @"_SN(\d+)", RegexOptions.IgnoreCase);
+        return (request.Success ? request.Groups[1].Value : "",
+                sn.Success ? sn.Groups[1].Value : "");
     }
 }

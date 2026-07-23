@@ -50,7 +50,7 @@ public record FwSyncPlan(List<FwSyncTarget> Targets, List<FwOpcSyncTarget>? OpcT
 /// <summary>Найденная на диске папка версии, которой ещё нет в БД, со всем, что удалось вычитать
 /// рядом (имя файла прошивки, CHANGELOG.md). Ничего не записывает — запись делает ImportFwCandidates.</summary>
 public record FwDiskCandidate(FwSyncTarget Target, FwVersionNumber Version, string VersionDir,
-    string Filename, ChangelogContent? Changelog)
+    string Filename, ChangelogContent? Changelog, bool IsOpc = false)
 {
     public string Label => SubtypeName == "—"
         ? $"{Target.GroupName}/{Target.ControllerName}/{Version.Raw}"
@@ -568,7 +568,7 @@ public class HierarchyService
                 var target = new FwSyncTarget(opc.SubtypeId, ctrl.ControllerId, opc.GroupName, opc.SubtypeName,
                     ctrl.ControllerName, opc.OpcPath, opc.KnownVersions);
                 candidates.Add(new FwDiskCandidate(target, parsed, versionDir,
-                    ReadFirmwareFilename(versionDir, errors), ChangelogFile.TryRead(versionDir)));
+                    ReadFirmwareFilename(versionDir, errors), ChangelogFile.TryRead(versionDir), IsOpc: true));
                 // Две ОПЦ-папки одного подтипа с одним номером версии — теоретически возможны только
                 // при ручной правке диска; помечаем номер как известный, чтобы во второй раз он не
                 // завёлся ещё одной записью в этом же проходе.
@@ -606,8 +606,18 @@ public class HierarchyService
         {
             try
             {
+                // Номер заявки и заводской SN нигде, кроме имени файла, на диске не записаны
+                // (CHANGELOG.md их не хранит) — вытаскиваем оттуда, иначе нестандартная версия
+                // коллеги приехала бы сюда как обычная, без заявки и SN.
+                var (requestNum, cabinetSn) = c.IsOpc
+                    ? FirmwareNaming.ParseOpcMarkers(c.Filename)
+                    : ("", "");
+
                 _db.AddFwVersion(new Domain.FwVersionRecord
                 {
+                    IsOpc = c.IsOpc,
+                    RequestNum = requestNum,
+                    CabinetSn = cabinetSn,
                     SubtypeId = c.Target.SubtypeId,
                     ControllerId = c.Target.ControllerId,
                     EqPrefix = c.Version.EqPrefix,
