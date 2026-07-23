@@ -95,6 +95,11 @@ public class ConfigService
         ["loader_format_default"] = "false",
         ["loader_update_kernel_default"] = "false",
         ["loader_last_target"] = "",
+        // Бета-опция UploadView: одна общая drag&drop-зона для файла/папки ПЛК и HMI-проекта вместо
+        // двух раздельных зон. Выключено по умолчанию — раздельные зоны остаются поведением по
+        // умолчанию для всех существующих и новых установок, пока программист явно не включит эту
+        // опцию себе в Настройках (см. UnifiedPlcHmiZoneEnabled ниже).
+        ["unified_plc_hmi_zone"] = "false",
     };
 
     private readonly Database _db;
@@ -480,4 +485,19 @@ public class ConfigService
     /// dialog), never on the administrator escape hatch (that one is deliberately never cached).</summary>
     public string AdLastLogin() => Get("ad_last_login");
     public void SetAdLastLogin(string normalizedLogin) => Set("ad_last_login", normalizedLogin);
+
+    /// <summary>Бета-опция: на странице «Загрузка прошивки» вместо двух раздельных drag&amp;drop-зон
+    /// (прошивка ПЛК сверху + отдельная HMI-зона под галочкой «Добавить HMI») показывается ОДНА общая
+    /// зона — файл/папку ПЛК и HMI-проект можно кинуть в неё вместе или по очереди, а приложение само
+    /// определяет, что есть что, по расширению файла (см. UploadView.ClassifyAndAssignOne); если
+    /// определить однозначно не удалось — переспрашивает диалогом. Выключено по умолчанию: раздельные
+    /// зоны — проверенное поведение, единая зона — новая экспериментальная функция, которая может
+    /// ошибиться в распознавании файлов на нестандартной структуре проекта. Задумана как per-machine
+    /// настройка, как и остальные поля вкладки «Общие» (переключатель решает, как выглядит форма
+    /// загрузки НА ЭТОМ компьютере, а не орг-политика) — НО в этой волне правок сознательно НЕ
+    /// добавлена в ConfigSyncService.SkipSettingsKeys (синхронизация настроек вне рамок задачи), так
+    /// что пока что значение может утечь в общий конфиг и подтянуться на другую машину при экспорте/
+    /// импорте — если это станет проблемой, добавить "unified_plc_hmi_zone" в SkipSettingsKeys.</summary>
+    public bool UnifiedPlcHmiZoneEnabled() => Get("unified_plc_hmi_zone").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetUnifiedPlcHmiZoneEnabled(bool value) => Set("unified_plc_hmi_zone", value ? "true" : "false");
 }

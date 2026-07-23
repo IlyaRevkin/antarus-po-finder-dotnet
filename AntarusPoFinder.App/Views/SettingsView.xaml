@@ -249,6 +249,22 @@
                                 <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseLoaderExe_Click"/>
                                 <Button Grid.Column="2" Content="Сохранить" Click="SaveLoaderExePath_Click"/>
                             </Grid>
+
+                            <!-- Единая drag&drop-зона ПЛК+HMI на странице «Загрузка прошивки» — бета,
+                                 видна только программисту/администратору (см. ApplyRoleVisibility),
+                                 наладчику не показывается, чтобы случайно не поменял поведение формы
+                                 себе, не разобравшись, что это экспериментальная функция. -->
+                            <StackPanel x:Name="UnifiedZoneSection" Margin="0,16,0,0">
+                                <TextBlock Text="ЗАГРУЗКА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <CheckBox x:Name="UnifiedPlcHmiZoneCheck" Content="Единая зона для ПЛК и HMI (бета)" Margin="0,0,0,8"
+                                          Checked="UnifiedPlcHmiZone_Changed" Unchecked="UnifiedPlcHmiZone_Changed"
+                                          ToolTip="Вместо двух отдельных зон (прошивка ПЛК сверху + отдельная HMI-зона под галочкой «Добавить HMI») — одна общая: файл/папку прошивки ПЛК и HMI-проект можно кинуть в неё вместе или по очереди, приложение попробует определить, что есть что, по расширению файла, а если не сможет — спросит."/>
+                                <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}">
+                                    <Run Text="Экспериментальная функция — может ошибиться в распознавании ПЛК/HMI на нестандартной структуре проекта."/>
+                                    <Run Text=" Действует только на странице «Загрузка прошивки», применяется при следующем её открытии."/>
+                                    <Run Text=" Если распознавание сработало неверно — очистите поле в единой зоне и укажите файл заново (приложение переспросит, если не уверено), либо выключите галочку здесь, чтобы вернуться к раздельным зонам."/>
+                                </TextBlock>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 

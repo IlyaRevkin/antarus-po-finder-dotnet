@@ -211,6 +211,9 @@ public partial class SettingsView : UserControl
         var isAdmin = role == "administrator";
 
         AdminRoleAndPasswordsSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // Единая зона ПЛК+HMI — бета-функция, программист/администратор осознанно включают её себе;
+        // наладчику не показываем, чтобы не столкнулся с экспериментальным поведением, не понимая, что это опция.
+        UnifiedZoneSection.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
 
         TabBtnHierarchy.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
@@ -461,6 +464,7 @@ public partial class SettingsView : UserControl
 
         SearchAutoSyncCheck.IsChecked = _services.Cfg.SearchAutoSync();
         LoaderExePathInput.Text = _services.Cfg.LoaderExePath();
+        UnifiedPlcHmiZoneCheck.IsChecked = _services.Cfg.UnifiedPlcHmiZoneEnabled();
 
         LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
         LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
@@ -487,6 +491,14 @@ public partial class SettingsView : UserControl
         _services.Cfg.SetLoaderExePath(LoaderExePathInput.Text.Trim());
         _host.ShowStatus("Путь к лоадеру сохранён");
     }
+
+    /// <summary>Как SearchAutoSync_Changed выше — сохраняется сразу по щелчку, без отдельной кнопки
+    /// «Сохранить». UploadView перечитывает значение через ConfigService.UnifiedPlcHmiZoneEnabled()
+    /// при каждом переходе на страницу «Загрузка прошивки» (см. UploadView.ReloadCombos), так что
+    /// уже открытая где-то в фоне вкладка Загрузки подхватит новое значение не мгновенно, а при
+    /// следующем возврате на неё — см. комментарий у самой галочки в XAML.</summary>
+    private void UnifiedPlcHmiZone_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetUnifiedPlcHmiZoneEnabled(UnifiedPlcHmiZoneCheck.IsChecked == true);
 
     // ── Раскладка клавиатуры (обучение подсказки поиска) ────────────────────
 

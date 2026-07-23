@@ -26,6 +26,12 @@ public partial class UploadView : UserControl
     private string? _hmiPath;
     private string? _hmiExecutableHint;
 
+    /// <summary>Бета: единая drag&amp;drop-зона ПЛК+HMI вместо двух раздельных (см. ConfigService.
+    /// UnifiedPlcHmiZoneEnabled, Настройки → Общие → ЗАГРУЗКА). Перечитывается в ReloadCombos при
+    /// каждом открытии этой страницы — переключение настройки применяется не мгновенно, а при
+    /// следующем возврате на «Загрузка прошивки» (см. ApplyUnifiedZoneMode).</summary>
+    private bool _unifiedZoneMode;
+
     /// <summary>Recognized firmware-project extensions per field — used only to decide whether a
     /// picked FOLDER needs the operator to disambiguate which file inside is the executable (see
     /// PromptExecutableHint). Single-file picks never need this: the file itself is unambiguous.</summary>
@@ -115,6 +121,227 @@ public partial class UploadView : UserControl
 
         PopulateSubtypes();
         OnCtrlChanged();
+        ApplyUnifiedZoneMode();
+    }
+
+    // ── Единая зона ПЛК+HMI (бета) ───────────────────────────────────────────
+
+    /// <summary>Переключает видимость раздельных зон (ClassicZonesPanel) и единой зоны
+    /// (UnifiedZonePanel) по текущему значению настройки. Вызывается из ReloadCombos — то есть при
+    /// каждом заходе на страницу «Загрузка прошивки» (см. MainWindowViewModel.Navigate →
+    /// UploadView.RefreshIfActive), а не только один раз при создании страницы — иначе переключение
+    /// галочки в Настройках не подхватилось бы без перезапуска приложения.</summary>
+    private void ApplyUnifiedZoneMode()
+    {
+        _unifiedZoneMode = _services.Cfg.UnifiedPlcHmiZoneEnabled();
+        ClassicZonesPanel.Visibility = _unifiedZoneMode ? Visibility.Collapsed : Visibility.Visible;
+        UnifiedZonePanel.Visibility = _unifiedZoneMode ? Visibility.Visible : Visibility.Collapsed;
+        UpdateUnifiedPreview();
+    }
+
+    /// <summary>Кого дальше пойдёт HmiSourcePath — эффективный признак «HMI включён», единый для
+    /// обоих режимов. В раздельном режиме источник истины — галочка HmiCheck (как и раньше); в
+    /// единой зоне отдельной галочки нет вовсе, HMI считается включённым, если единая зона что-то
+    /// распознала как HMI-проект (_hmiPath не пуст). Используется и в BuildUploadRequest, и в
+    /// Upload_Click (сообщение «HMI не грузится отдельно»), чтобы оба места не разъезжались.</summary>
+    private bool HmiEnabledEffective => _unifiedZoneMode ? !string.IsNullOrEmpty(_hmiPath) : HmiCheck.IsChecked == true;
+
+    /// <summary>Что показано в двух строках-превью единой зоны (распознано как ПЛК / распознано как
+    /// HMI) — вызывается после каждого распределения файла и при переключении режима/сбросе формы.
+    /// Не путать с UpdatePreview() выше — тот считает путь на сетевом диске для итоговой прошивки,
+    /// этот — просто отражает текущее содержимое _srcPath/_hmiPath в самой единой зоне.</summary>
+    private void UpdateUnifiedPreview()
+    {
+        bool hasPlc = !string.IsNullOrEmpty(_srcPath);
+        UnifiedPlcPreviewText.Text = hasPlc
+            ? $"ПЛК: {Path.GetFileName(_srcPath!.TrimEnd(Path.DirectorySeparatorChar))}"
+            : "ПЛК: не выбрано";
+        UnifiedPlcClearBtn.IsEnabled = hasPlc;
+
+        bool hasHmi = !string.IsNullOrEmpty(_hmiPath);
+        UnifiedHmiPreviewText.Text = hasHmi
+            ? $"HMI: {Path.GetFileName(_hmiPath!.TrimEnd(Path.DirectorySeparatorChar))}"
+            : "HMI: не выбрано (опционально)";
+        UnifiedHmiClearBtn.IsEnabled = hasHmi;
+    }
+
+    private void UnifiedDropZone_Click(object sender, MouseButtonEventArgs e) => UnifiedBrowseFiles_Click(sender, e);
+
+    private void UnifiedDropZone_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void UnifiedDropZone_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            ClassifyAndAssign(paths);
+    }
+
+    private void UnifiedBrowseFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл(ы) прошивки ПЛК и/или HMI-проекта",
+            Filter = "Прошивка ПЛК/HMI (*.psl;*.lfs;*.kpr;*.kpj;*.dpj;*.fsprj)|*.psl;*.lfs;*.kpr;*.kpj;*.dpj;*.fsprj|Все файлы (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog() == true) ClassifyAndAssign(dlg.FileNames);
+    }
+
+    private void UnifiedBrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Выбрать папку прошивки ПЛК или HMI-проекта" };
+        if (dlg.ShowDialog() == true) ClassifyAndAssign(new[] { dlg.FolderName });
+    }
+
+    private void UnifiedClearAll_Click(object sender, RoutedEventArgs e)
+    {
+        ClearUnifiedPlc();
+        ClearHmi();
+        UpdateUnifiedPreview();
+    }
+
+    private void UnifiedPlcClear_Click(object sender, RoutedEventArgs e) => ClearUnifiedPlc();
+
+    private void UnifiedHmiClear_Click(object sender, RoutedEventArgs e)
+    {
+        ClearHmi();
+        UpdateUnifiedPreview();
+    }
+
+    /// <summary>Очищает только ПЛК-часть единой зоны — узкий аналог ClearHmi() (та уже существовала
+    /// для раздельного режима), нужен здесь отдельно потому что раздельный режим сбрасывает ПЛК-путь
+    /// только целиком через ResetForm/ClearData_Click, а единая зона позволяет очистить ПЛК и HMI
+    /// по отдельности, не трогая второе.</summary>
+    private void ClearUnifiedPlc()
+    {
+        _srcPath = null;
+        _autoDetectedModId = null;
+        _executableHint = null;
+        DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
+        StatusLabel.Text = "";
+        UpdatePreview();
+        UpdateUnifiedPreview();
+    }
+
+    /// <summary>Каждый элемент, брошенный/выбранный в единой зоне (файл ИЛИ папка — из drag&amp;drop
+    /// может прийти сразу несколько верхнеуровневых путей, напр. .psl-файл + папка HMI, выбранные
+    /// вместе в проводнике), распределяется НЕЗАВИСИМО от остальных: единая зона не пытается
+    /// склеивать несколько отдельных файлов в один общий проект (в отличие от классической зоны +
+    /// DropStagingService, см. FilePickerRow/StageMultiple) — если ПЛК-проект состоит из нескольких
+    /// файлов без общей папки, его нужно либо сложить в папку заранее, либо воспользоваться
+    /// раздельными зонами (там staging всё ещё работает). Компромисс сознательный: бета не пытается
+    /// быть умнее эвристики "одно расширение — один тип", лучше спросить оператора, чем угадать
+    /// неверно.</summary>
+    private void ClassifyAndAssign(IReadOnlyList<string> paths)
+    {
+        foreach (var path in paths)
+            ClassifyAndAssignOne(path);
+        UpdateUnifiedPreview();
+    }
+
+    private void ClassifyAndAssignOne(string path)
+    {
+        var displayName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+
+        if (Directory.Exists(path))
+        {
+            // Однозначно определяем по содержимому папки (см. ExecutableHintResolver.AutoDetect —
+            // "ровно один файл с известным расширением во всём дереве"): если внутри есть ровно один
+            // ПЛК-кандидат и ни одного HMI-кандидата (или наоборот) — папка явно того типа. Если
+            // совпало и то, и другое (смешанная папка) или не совпало ни одно — не гадаем, спрашиваем.
+            var plcHint = ExecutableHintResolver.AutoDetect(path, MainExecutableExts);
+            var hmiHint = ExecutableHintResolver.AutoDetect(path, HmiExecutableExts);
+            if (plcHint is not null && hmiHint is null) { AssignAsPlc(path); return; }
+            if (hmiHint is not null && plcHint is null) { AssignAsHmi(path); return; }
+
+            switch (AskPlcOrHmi(displayName))
+            {
+                case PlcHmiChoice.Plc: AssignAsPlc(path); break;
+                case PlcHmiChoice.Hmi: AssignAsHmi(path); break;
+                // Skip — оператор пропустил этот элемент, ничего не меняем.
+            }
+            return;
+        }
+
+        if (!File.Exists(path)) return; // путь исчез между drop и обработкой (сеть/флешка) — молча пропускаем
+
+        var ext = Path.GetExtension(path);
+        if (string.Equals(ext, ".fsprj", StringComparison.OrdinalIgnoreCase)) { AssignAsHmi(path); return; }
+        if (MainExecutableExts.Contains(ext, StringComparer.OrdinalIgnoreCase)) { AssignAsPlc(path); return; }
+
+        switch (AskPlcOrHmi(displayName))
+        {
+            case PlcHmiChoice.Plc: AssignAsPlc(path); break;
+            case PlcHmiChoice.Hmi: AssignAsHmi(path); break;
+        }
+    }
+
+    /// <summary>Переиспользует существующую логику основной зоны как есть (автоопределение PSL/
+    /// KINCO, сброс Карты in/out и т.п.) — единая зона не дублирует эту логику, а просто решает,
+    /// КУДА какой путь отправить.</summary>
+    private void AssignAsPlc(string path) => OnFileDropped(path);
+
+    /// <summary>Аналогично — переиспользует существующую HMI-логику (подсказка исполняемого файла
+    /// для папки и т.п.), см. OnHmiPathPicked.</summary>
+    private void AssignAsHmi(string path) => OnHmiPathPicked(path);
+
+    private enum PlcHmiChoice { Plc, Hmi, Skip }
+
+    /// <summary>Небольшое модальное окно "это ПЛК или HMI?" — собрано в коде тем же приёмом, что и
+    /// AppMessageBox (AntarusPoFinder.App/AppMessageBox.cs), а не через YesNo/OKCancel: у AppMessageBox
+    /// только два готовых набора кнопок, ни один не даёт трёх смысловых вариантов с понятными
+    /// подписями ("ПЛК"/"HMI"/"Пропустить") — Да/Нет здесь читались бы неоднозначно. Возвращает Skip
+    /// при закрытии крестиком/Escape — как и остальные диалоги подтверждения в этом файле, закрытие
+    /// без явного выбора не должно тайно засчитаться как один из вариантов.</summary>
+    private PlcHmiChoice AskPlcOrHmi(string itemName)
+    {
+        var owner = Window.GetWindow(this);
+        var result = PlcHmiChoice.Skip;
+
+        var win = new Window
+        {
+            Title = "Единая зона (бета) — что это?",
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = 360,
+            MaxWidth = 520,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+        };
+        if (owner is not null && owner != win) win.Owner = owner;
+        win.SetResourceReference(Window.BackgroundProperty, "BgBrush");
+        win.SetResourceReference(Window.ForegroundProperty, "TextBrush");
+
+        var root = new StackPanel { Margin = new Thickness(20) };
+        var text = new TextBlock
+        {
+            Text = $"«{itemName}» — это прошивка ПЛК или HMI-проект?\n\nЕдиная зона не смогла определить это по расширению/содержимому автоматически. Укажите вручную.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 16),
+        };
+        text.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        root.Children.Add(text);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        void AddBtn(string content, PlcHmiChoice choice, bool primary)
+        {
+            var btn = new Button { Content = content, Height = 34, MinWidth = 90, Margin = new Thickness(8, 0, 0, 0) };
+            if (!primary) btn.SetResourceReference(Button.StyleProperty, "SecondaryButton");
+            btn.Click += (_, _) => { result = choice; win.Close(); };
+            buttons.Children.Add(btn);
+        }
+        AddBtn("Пропустить", PlcHmiChoice.Skip, false);
+        AddBtn("HMI", PlcHmiChoice.Hmi, false);
+        AddBtn("ПЛК", PlcHmiChoice.Plc, true);
+        root.Children.Add(buttons);
+
+        win.Content = root;
+        win.KeyDown += (_, e) => { if (e.Key == Key.Escape) win.Close(); };
+        win.ShowDialog();
+        return result;
     }
 
     /// <summary>Наполняет единый чек-комбобокс подтипов (SubtypesSelect) под текущую группу —
@@ -586,7 +813,7 @@ public partial class UploadView : UserControl
             // rides along with a PLC firmware version rather than replacing it. Filed after a real
             // report of "загрузил папку с HMI, а он просит .psl" — the operator had only used the HMI
             // zone and had no idea the main drop zone was still mandatory.
-            var noFwMsg = HmiCheck.IsChecked == true && !string.IsNullOrEmpty(_hmiPath)
+            var noFwMsg = HmiEnabledEffective && !string.IsNullOrEmpty(_hmiPath)
                 ? "HMI-проект не загружается отдельно — он прикладывается к версии прошивки ПЛК.\n\n" +
                   "Выберите файл или папку прошивки ПЛК в верхней области (даже если в этой версии изменился только HMI) — HMI-проект уйдёт вместе с ней."
                 : "Выберите файл прошивки.";
@@ -708,7 +935,7 @@ public partial class UploadView : UserControl
             IoMapSourcePath = IoMapInput.Text,
             InstructionsSourcePath = InstructionsInput.Text,
             ModbusMapSourcePath = ModbusMapInput.Text,
-            HmiEnabled = HmiCheck.IsChecked == true,
+            HmiEnabled = HmiEnabledEffective,
             HmiSourcePath = _hmiPath ?? "",
             ExecutableHint = _executableHint ?? "",
             HmiExecutableHint = _hmiExecutableHint ?? "",
@@ -748,6 +975,7 @@ public partial class UploadView : UserControl
         StatusLabel.Text = "";
         RefreshReservationPicker();
         UpdatePreview();
+        UpdateUnifiedPreview();
     }
 
     // ── Rollback ──────────────────────────────────────────────────────────────

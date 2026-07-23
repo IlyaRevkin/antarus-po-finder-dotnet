@@ -119,7 +119,7 @@ public static class ConfigSyncService
         "layout_fallback_enabled", "layout_fallback_threshold",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
-        "loader_last_target",
+        "loader_last_target", "unified_plc_hmi_zone",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");

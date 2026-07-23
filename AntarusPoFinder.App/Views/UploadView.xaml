@@ -29,55 +29,124 @@
                               ToolTip="Если для этого шкафа/подтипа/контроллера есть открытый резерв номера — выберите его, чтобы загрузка использовала ровно тот номер, который уже вписан в прошивку."/>
                 </StackPanel>
 
-                <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="130" Cursor="Hand"
-                        AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
-                    <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл, папку или несколько файлов сюда&#x0a;&#x0a;или нажмите для выбора"
-                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <Grid Margin="0,6,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="8"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="BrowseFile_Click"/>
-                    <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
-                </Grid>
-
-                <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,12,0,0"
-                          Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
-                          ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки.&#x0a;HMI прикладывается к версии прошивки — файл/папка прошивки ПЛК всё равно нужно выбрать выше."/>
-                <!-- Same drag&drop-zone-plus-buttons shape as the main firmware DropZone above (see
-                     round 43 — a plain label+textbox row here, matching the ДОП. ФАЙЛЫ attachments
-                     instead, silently lost drag&drop entirely: dropping an HMI folder anywhere near
-                     this area landed on the MAIN drop zone above instead, which then tried to find a
-                     firmware-recognized file in it — the real cause behind reports of "загрузил
-                     HMI-папку, а он спрашивает про psl" — now fixed by giving HMI its own drop zone
-                     plus an HMI-specific executable-picker message, see OnHmiPathPicked/
-                     PromptExecutableHint in UploadView.xaml.cs). Shorter
-                     (70 vs 130) since it's a secondary/optional field, not the primary upload target.
-                     HmiSection (not just HmiPathRow) toggles with the checkbox now that the drop zone
-                     itself is also part of the collapsible block. -->
-                <StackPanel x:Name="HmiSection" Margin="0,6,0,0" Visibility="Collapsed">
-                    <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="70" Cursor="Hand"
-                            AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
-                        <TextBlock x:Name="HmiPathLabel" Text="Перетащите файл, папку или несколько файлов HMI-проекта сюда&#x0a;или нажмите для выбора"
+                <!-- Раздельные зоны ПЛК/HMI — поведение по умолчанию, без изменений. Свёрнуты в
+                     отдельную панель, а не удалены/переписаны, специально: чтобы включение единой
+                     зоны (см. UnifiedZonePanel ниже) не могло случайно затронуть этот блок — это
+                     ровно тот же XAML/код, что был здесь до бета-функции. Какая из двух панелей
+                     видна, решает UploadView.ApplyUnifiedZoneMode (читает Cfg.UnifiedPlcHmiZoneEnabled,
+                     перечитывается при каждом открытии страницы — см. ReloadCombos). -->
+                <StackPanel x:Name="ClassicZonesPanel">
+                    <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="130" Cursor="Hand"
+                            AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
+                        <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл, папку или несколько файлов сюда&#x0a;&#x0a;или нажмите для выбора"
                                    Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <Grid Margin="0,4,0,0">
+                    <Grid Margin="0,6,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="4"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="4"/>
+                            <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="Файл..." Style="{StaticResource CompactSecondaryButton}" Click="HmiBrowseFile_Click"/>
-                        <Button Grid.Column="2" Content="Папка..." Style="{StaticResource CompactSecondaryButton}" Click="HmiBrowseFolder_Click"/>
-                        <Button Grid.Column="4" Content="Очистить" Style="{StaticResource CompactSecondaryButton}" Click="HmiClear_Click"/>
+                        <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="BrowseFile_Click"/>
+                        <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
                     </Grid>
+
+                    <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,12,0,0"
+                              Checked="HmiCheck_Toggled" Unchecked="HmiCheck_Toggled"
+                              ToolTip="Для контроллеров, где HMI — отдельный проект со своими файлами (напр. Segnetics), а не часть основного файла прошивки.&#x0a;HMI прикладывается к версии прошивки — файл/папка прошивки ПЛК всё равно нужно выбрать выше."/>
+                    <!-- Same drag&drop-zone-plus-buttons shape as the main firmware DropZone above (see
+                         round 43 — a plain label+textbox row here, matching the ДОП. ФАЙЛЫ attachments
+                         instead, silently lost drag&drop entirely: dropping an HMI folder anywhere near
+                         this area landed on the MAIN drop zone above instead, which then tried to find a
+                         firmware-recognized file in it — the real cause behind reports of "загрузил
+                         HMI-папку, а он спрашивает про psl" — now fixed by giving HMI its own drop zone
+                         plus an HMI-specific executable-picker message, see OnHmiPathPicked/
+                         PromptExecutableHint in UploadView.xaml.cs). Shorter
+                         (70 vs 130) since it's a secondary/optional field, not the primary upload target.
+                         HmiSection (not just HmiPathRow) toggles with the checkbox now that the drop zone
+                         itself is also part of the collapsible block. -->
+                    <StackPanel x:Name="HmiSection" Margin="0,6,0,0" Visibility="Collapsed">
+                        <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="70" Cursor="Hand"
+                                AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
+                            <TextBlock x:Name="HmiPathLabel" Text="Перетащите файл, папку или несколько файлов HMI-проекта сюда&#x0a;или нажмите для выбора"
+                                       Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Файл..." Style="{StaticResource CompactSecondaryButton}" Click="HmiBrowseFile_Click"/>
+                            <Button Grid.Column="2" Content="Папка..." Style="{StaticResource CompactSecondaryButton}" Click="HmiBrowseFolder_Click"/>
+                            <Button Grid.Column="4" Content="Очистить" Style="{StaticResource CompactSecondaryButton}" Click="HmiClear_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Единая зона ПЛК+HMI (бета) — включается галочкой в Настройки → Общие →
+                     ЗАГРУЗКА (программист/администратор). Одна drag&drop-зона принимает и файл/папку
+                     ПЛК, и HMI-проект — по расширению файла UploadView.xaml.cs сам решает, куда что
+                     положить (_srcPath/_hmiPath), а если не может решить однозначно — переспрашивает
+                     диалогом (см. ClassifyAndAssignOne/AskPlcOrHmi). Дальше всё как обычно: _srcPath →
+                     SourcePath, _hmiPath → HmiSourcePath, FirmwareUploadService не меняется. -->
+                <StackPanel x:Name="UnifiedZonePanel" Visibility="Collapsed">
+                    <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8">
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}">
+                            <Run Text="⚠ БЕТА: единая зона ПЛК+HMI." FontWeight="SemiBold"/>
+                            <Run Text=" Кидайте файл/папку прошивки ПЛК и (опционально) HMI-проект сюда — вместе или по очереди. Приложение попробует определить, что есть что, по расширению файла; если не сможет — переспросит. Если распознавание ошиблось — очистите нужную строку ниже кнопкой «✕» и укажите файл заново."/>
+                        </TextBlock>
+                    </Border>
+                    <Border x:Name="UnifiedDropZone" Style="{StaticResource DropZoneBorder}" Height="130" Cursor="Hand"
+                            AllowDrop="True" Drop="UnifiedDropZone_Drop" DragOver="UnifiedDropZone_DragOver" MouseLeftButtonUp="UnifiedDropZone_Click">
+                        <TextBlock Text="Перетащите файл(ы)/папку прошивки ПЛК и HMI-проекта сюда&#x0a;&#x0a;или нажмите для выбора  —  БЕТА"
+                                   Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="Файлы..." Style="{StaticResource SecondaryButton}" Click="UnifiedBrowseFiles_Click"/>
+                        <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="UnifiedBrowseFolder_Click"/>
+                        <Button Grid.Column="4" Content="Очистить всё" Style="{StaticResource SecondaryButton}" Click="UnifiedClearAll_Click"/>
+                    </Grid>
+
+                    <!-- Что распознано — две строки-превью с индивидуальной очисткой/переназначением
+                         (переназначить = просто кинуть новый файл поверх, он заменит текущий, как и в
+                         раздельных зонах выше; «✕» — очистить конкретно эту строку). -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="UnifiedPlcPreviewText" Text="ПЛК: не выбрано" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" x:Name="UnifiedPlcClearBtn" Style="{StaticResource IconButton}" IsEnabled="False" Margin="6,0,0,0" Click="UnifiedPlcClear_Click" ToolTip="Очистить ПЛК">
+                                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                                </Button>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="UnifiedHmiPreviewText" Text="HMI: не выбрано (опционально)" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" x:Name="UnifiedHmiClearBtn" Style="{StaticResource IconButton}" IsEnabled="False" Margin="6,0,0,0" Click="UnifiedHmiClear_Click" ToolTip="Очистить HMI">
+                                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="12" Height="12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <TextBlock Text="ПУТЬ НА ДИСКЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,12,0,6"/>
