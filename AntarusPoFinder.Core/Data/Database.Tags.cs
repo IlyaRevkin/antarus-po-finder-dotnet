@@ -20,7 +20,10 @@ public partial class Database
     /// with a brand-new tag word, so the tag becomes available for autocomplete elsewhere.</summary>
     public void AddTag(string name)
     {
-        name = name.Trim();
+        // Схлопывание внутренних пробелов ровно то же, что при записи в fw_versions.tags —
+        // иначе «шкаф  управления» в справочнике и «шкаф управления» на прошивке считались бы
+        // разными тегами (см. TagList).
+        name = Services.TagString.Decode(Services.TagString.Encode(name ?? ""));
         if (name.Length == 0) return;
         ExecuteNonQuery("INSERT OR IGNORE INTO tags (name) VALUES (@n)", cmd => cmd.Parameters.AddWithValue("@n", name));
         MarkFlatListAlive(FlatKindTag, name);
@@ -64,13 +67,15 @@ public partial class Database
             while (reader.Read())
             {
                 var id = reader.GetInt32(0);
-                var words = reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // По целым тегам, а не по словам строки: тег «шкаф управления пожарными насосами»
+                // — это ОДИН тег, и переименование/удаление обязано трогать его целиком (см. TagList).
+                var words = Services.TagString.Parse(reader.GetString(1));
                 if (!words.Any(w => w.Equals(oldName, StringComparison.OrdinalIgnoreCase))) continue;
 
                 var newWords = newName is null
                     ? words.Where(w => !w.Equals(oldName, StringComparison.OrdinalIgnoreCase))
                     : words.Select(w => w.Equals(oldName, StringComparison.OrdinalIgnoreCase) ? newName : w);
-                updates.Add((id, string.Join(' ', newWords)));
+                updates.Add((id, Services.TagString.Join(newWords)));
             }
         }
 

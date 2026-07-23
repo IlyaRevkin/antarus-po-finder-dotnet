@@ -52,7 +52,7 @@ public partial class EditFirmwareDialog : Window
         _record = v;
         TitleLabel.Text = $"Прошивка: {title}";
         DescriptionInput.Text = v.Description;
-        TagsEditor.Configure(v.Tags.Split(' ', System.StringSplitOptions.RemoveEmptyEntries), () => _db.GetAllTags());
+        TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
 
         _checks = new LaunchTypeChecks(LaunchTypesPanel, v.LaunchTypes);
 
@@ -184,7 +184,7 @@ public partial class EditFirmwareDialog : Window
         ResultDescription = DescriptionInput.Text.Trim();
         var tags = TagsEditor.Tags;
         foreach (var tag in tags) _db.AddTag(tag);
-        ResultTags = string.Join(' ', tags);
+        ResultTags = AntarusPoFinder.Core.Services.TagString.Join(tags);
         ResultLaunchTypes = _checks.Selected;
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;

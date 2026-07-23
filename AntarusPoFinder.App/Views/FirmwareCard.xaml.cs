@@ -51,6 +51,10 @@ public sealed record FirmwareCardFlags
 /// загрузка в контроллер), а остальное убрано в меню «Ещё» — см. Configure.</summary>
 public partial class FirmwareCard : UserControl
 {
+    /// <summary>Что открывает основная кнопка карточки: скомпилированный .lfs (приоритет), исходный
+    /// .psl, либо — если ни того, ни другого рядом нет — старый общий детект «чем открыть».</summary>
+    private enum PrimaryFile { None, Lfs, Psl }
+
     public HierarchyResult Result { get; private set; } = null!;
 
     public event EventHandler? OpenFolderRequested;
@@ -96,14 +100,20 @@ public partial class FirmwareCard : UserControl
         if (!string.IsNullOrEmpty(result.EquipmentType)) metaParts.Add(result.EquipmentType);
         if (!string.IsNullOrEmpty(result.WorkType)) metaParts.Add(result.WorkType);
         if (result.UploadDate is not null) metaParts.Add(result.UploadDate.Value.ToString("dd.MM.yyyy"));
+        // «По такому же запросу эту версию уже ставили N раз» — то, из-за чего она стоит выше
+        // остальных (см. Database.FwUsage.cs). Без этой строки подъём выглядел бы необъяснимым.
+        if (result.UsageCount > 0)
+            metaParts.Add(result.UsageCount == 1
+                ? "по этому запросу выбирали 1 раз"
+                : $"по этому запросу выбирали {result.UsageCount} раз");
         MetaLabel.Text = string.Join("  ·  ", metaParts);
 
         // Read-only display here — editing tags (and description/launch types together) happens
         // through the single "Теги" button below, not inline, to avoid two competing tag editors
         // on the same card.
-        var tags = result.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tags = TagString.Parse(result.Tags);
         TagsView.Configure(tags, null, readOnly: true);
-        TagsView.Visibility = tags.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TagsView.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
 
@@ -117,24 +127,51 @@ public partial class FirmwareCard : UserControl
         // сопутствующее (панель, параметры), последней — заливка в контроллер. Всё остальное —
         // в меню «Ещё», сгруппированное по смыслу.
         //
-        // Название первой кнопки зависит от того, что реально лежит рядом: у Segnetics-проектов
-        // открывается исходник .psl (залитый .lfs текстовым редактором открывать бессмысленно), и
-        // кнопка так и называется — раньше она называлась «Открыть прошивку ПЛК» независимо от
-        // того, что откроется, и оператор не понимал, PSL это или нет.
-        var plcLabel = flags.HasPsl && string.IsNullOrEmpty(result.ExecutableHint)
-            ? "Открыть проект PSL"
-            : "Открыть прошивку ПЛК";
-        var plcBtn = MakeActionButton(plcLabel, (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
-        plcBtn.ToolTip = !string.IsNullOrEmpty(result.ExecutableHint)
-            ? $"Исполняемый файл: {result.ExecutableHint}"
-            : flags.HasPsl ? "Исходный проект SMLogix (.psl)" : null;
+        // ── Какой файл открывает первая кнопка ────────────────────────────
+        // Расширение теперь всегда написано в скобках прямо на кнопке, а второй файл (если он есть)
+        // лежит в «Ещё» — раньше по кнопке «Открыть прошивку ПЛК» было не понять, что откроется, и
+        // есть ли вообще LFS/PSL у этой версии. Приоритет у LFS: это файл, который заливают в
+        // контроллер; PSL — исходник, его открывают, когда нужно править. Если файла всего один,
+        // основной кнопкой идёт он, а в «Ещё» второй остаётся неактивным пунктом с причиной
+        // (пустое место в меню неотличимо от «я не туда посмотрел»).
+        var primary = flags.HasLfs ? PrimaryFile.Lfs : flags.HasPsl ? PrimaryFile.Psl : PrimaryFile.None;
+
+        var plcLabel = primary switch
+        {
+            PrimaryFile.Lfs => "Открыть прошивку (LFS)",
+            PrimaryFile.Psl => "Открыть проект (PSL)",
+            _ => "Открыть прошивку ПЛК",
+        };
+        var plcBtn = MakeActionButton(plcLabel, (_, _) =>
+        {
+            switch (primary)
+            {
+                case PrimaryFile.Lfs: OpenLfsRequested?.Invoke(this, EventArgs.Empty); break;
+                case PrimaryFile.Psl: OpenPslRequested?.Invoke(this, EventArgs.Empty); break;
+                default: OpenPlcRequested?.Invoke(this, EventArgs.Empty); break;
+            }
+        });
+        plcBtn.ToolTip = primary switch
+        {
+            PrimaryFile.Lfs => "Скомпилированный файл .lfs — тот, что заливается в контроллер" +
+                               (flags.HasPsl ? ". Исходник .psl — в «Ещё»" : ""),
+            PrimaryFile.Psl => "Исходный проект SMLogix (.psl) — скомпилированного .lfs рядом нет",
+            _ => !string.IsNullOrEmpty(result.ExecutableHint) ? $"Исполняемый файл: {result.ExecutableHint}" : null,
+        };
         ActionsPanel.Children.Add(plcBtn);
 
         if (flags.HasHmi)
         {
-            var hmiBtn = MakeActionButton("Открыть HMI проект", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty));
-            if (!string.IsNullOrEmpty(result.HmiExecutableHint))
-                hmiBtn.ToolTip = $"Исполняемый файл: {result.HmiExecutableHint}";
+            // Панель может быть унаследована от прошлой версии программы ПЛК (её обновляли, HMI —
+            // нет, см. FirmwareUploadService). Тогда честнее сразу сказать, от какой именно версии
+            // проект, а не делать вид, что он собран вместе с этой.
+            var hmiFrom = HmiSourceVersion(result);
+            var hmiBtn = MakeActionButton(hmiFrom is null ? "Открыть HMI проект" : $"Открыть HMI проект (от {hmiFrom})",
+                (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty));
+            var hmiTips = new List<string>();
+            if (hmiFrom is not null) hmiTips.Add($"HMI-проект от версии {hmiFrom} — в этой версии панель не обновляли");
+            if (!string.IsNullOrEmpty(result.HmiExecutableHint)) hmiTips.Add($"Исполняемый файл: {result.HmiExecutableHint}");
+            if (hmiTips.Count > 0) hmiBtn.ToolTip = string.Join("\n", hmiTips);
             ActionsPanel.Children.Add(hmiBtn);
         }
 
@@ -151,21 +188,23 @@ public partial class FirmwareCard : UserControl
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
-        // У Segnetics-проекта пункты LFS/PSL показываются всегда — неактивный пункт с причиной
-        // честнее, чем исчезнувшая строка. У остальных (KINCO и т.п.) их не бывает в принципе, и
-        // строка про них — просто мусор в меню.
+        // В меню — ВТОРОЙ файл пары, тот, что не попал на основную кнопку. У Segnetics-проекта он
+        // показывается всегда: нет — значит неактивный пункт с причиной. У остальных (KINCO и т.п.)
+        // .lfs/.psl не бывает в принципе, и строки про них — просто мусор в меню.
         if (flags.IsSegnetics)
         {
-            AddMenuItem("Открыть файл LFS", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
-                flags.HasLfs
-                    ? "Скомпилированный файл, который заливается в контроллер"
-                    : "Рядом с версией нет .lfs — версия загружена без скомпилированного файла",
-                enabled: flags.HasLfs);
-            AddMenuItem("Открыть файл PSL", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
-                flags.HasPsl
-                    ? "Исходный проект SMLogix"
-                    : "Рядом с версией нет .psl — либо это не проект SMLogix, либо исходник не выкладывали",
-                enabled: flags.HasPsl);
+            if (primary != PrimaryFile.Psl)
+                AddMenuItem("Открыть проект (PSL)", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
+                    flags.HasPsl
+                        ? "Исходный проект SMLogix — открывают, когда нужно править"
+                        : "Рядом с версией нет .psl — либо это не проект SMLogix, либо исходник не выкладывали",
+                    enabled: flags.HasPsl);
+            if (primary != PrimaryFile.Lfs)
+                AddMenuItem("Открыть прошивку (LFS)", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
+                    flags.HasLfs
+                        ? "Скомпилированный файл, который заливается в контроллер"
+                        : "Рядом с версией нет .lfs — версия загружена без скомпилированного файла",
+                    enabled: flags.HasLfs);
         }
         AddMenuItem("Обновить локальную копию с диска", () => DownloadRequested?.Invoke(this, EventArgs.Empty),
             "Скопировать версию с сетевого диска заново — если автосинхронизация выключена или не удалась");
@@ -203,6 +242,24 @@ public partial class FirmwareCard : UserControl
 
     private bool _syncStatusShown;
 
+    /// <summary>Номер версии, к которой был приложен HMI-проект, если это НЕ текущая версия. Папка
+    /// проекта называется «{номер версии}_hmi» (см. FirmwareAttachmentsService.CopyHmiProject) —
+    /// отдельного поля «от какой версии панель» в базе нет и не нужно, имя папки это и есть.
+    /// null — панель от этой же версии либо путь непонятного вида.</summary>
+    private static string? HmiSourceVersion(HierarchyResult result)
+    {
+        if (string.IsNullOrEmpty(result.HmiPath)) return null;
+        var folder = System.IO.Path.GetFileName(result.HmiPath.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+        if (string.IsNullOrEmpty(folder)) return null;
+
+        const string suffix = "_hmi";
+        if (!folder.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return null;
+        var version = folder[..^suffix.Length];
+        return string.Equals(version, result.VersionRaw, StringComparison.OrdinalIgnoreCase) || version.Length == 0
+            ? null
+            : version;
+    }
+
     /// <summary>Строка «что лежит рядом с версией». У Segnetics LFS/PSL показываются с явным «нет» —
     /// именно про них был вопрос «есть он или нет»; остальное перечисляется, только когда есть.</summary>
     private void ShowFilesLine(HierarchyResult result, FirmwareCardFlags flags)
@@ -227,7 +284,7 @@ public partial class FirmwareCard : UserControl
             parts.Add(flags.HasLfs ? "LFS ✓" : "LFS —");
             parts.Add(flags.HasPsl ? "PSL ✓" : "PSL —");
         }
-        if (flags.HasHmi) parts.Add("HMI ✓");
+        if (flags.HasHmi) parts.Add(HmiSourceVersion(result) is { } from ? $"HMI ✓ (от {from})" : "HMI ✓");
         if (flags.HasParams) parts.Add("параметры ✓");
         if (!string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap) parts.Add("карта ВВ ✓");
         if (!string.IsNullOrEmpty(result.ModbusMapPath)) parts.Add("карта modbus ✓");

@@ -18,14 +18,14 @@ public partial class EditParamTagsDialog : Window
         InitializeComponent();
         _db = db;
         TitleLabel.Text = $"Параметры: {title}";
-        TagsEditor.Configure(file.Tags.Split(' ', System.StringSplitOptions.RemoveEmptyEntries), () => _db.GetAllTags());
+        TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(file.Tags), () => _db.GetAllTags());
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var tags = TagsEditor.Tags;
         foreach (var tag in tags) _db.AddTag(tag);
-        ResultTags = string.Join(' ', tags);
+        ResultTags = AntarusPoFinder.Core.Services.TagString.Join(tags);
         DialogResult = true;
     }
 

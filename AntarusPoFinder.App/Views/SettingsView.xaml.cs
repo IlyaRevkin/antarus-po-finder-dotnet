@@ -1392,8 +1392,7 @@ public partial class SettingsView : UserControl
         Fill(FwSubtypeFilterCombo, "Подтип: все", _fwVersionsData.Select(v => v.SubtypeName));
         Fill(FwControllerFilterCombo, "Контроллер: все", _fwVersionsData.Select(v => v.CtrlName));
         Fill(FwStatusFilterCombo, "Статус: все", new[] { "Активна", "Откатана" });
-        Fill(FwTagFilterCombo, "Тег: все",
-            _fwVersionsData.SelectMany(v => v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
+        Fill(FwTagFilterCombo, "Тег: все", _fwVersionsData.SelectMany(v => TagString.Parse(v.Tags)));
     }
 
     private void FwFilterCombo_Changed(object sender, SelectionChangedEventArgs e) => ApplyFwFilter();
@@ -1468,8 +1467,7 @@ public partial class SettingsView : UserControl
         if (FwStatusFilterCombo.SelectedIndex > 0 && FwStatusFilterCombo.SelectedItem is string status)
             rows = rows.Where(v => (status == "Откатана") == (v.Status == "rolled_back"));
         if (FwTagFilterCombo.SelectedIndex > 0 && FwTagFilterCombo.SelectedItem is string tag)
-            rows = rows.Where(v => v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Contains(tag, StringComparer.OrdinalIgnoreCase));
+            rows = rows.Where(v => TagString.Contains(v.Tags, tag));
 
         var filter = FwFilterInput.Text.Trim().ToUpperInvariant();
         if (!string.IsNullOrEmpty(filter))
@@ -1507,8 +1505,8 @@ public partial class SettingsView : UserControl
         // "Прошивка обновлена" is misleading when the only thing that changed is tags (no new
         // firmware version, nothing re-uploaded) — same distinction ModerateFirmware_Click already
         // makes below. Compare tags as an unordered set (space-joined, order isn't meaningful).
-        bool tagsChanged = !new HashSet<string>(v.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase)
-            .SetEquals(dlg.ResultTags.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        bool tagsChanged = !new HashSet<string>(TagString.Parse(v.Tags), StringComparer.OrdinalIgnoreCase)
+            .SetEquals(TagString.Parse(dlg.ResultTags));
         bool otherChanged = v.Description != dlg.ResultDescription ||
             !new HashSet<string>(v.LaunchTypes, StringComparer.OrdinalIgnoreCase).SetEquals(dlg.ResultLaunchTypes);
 

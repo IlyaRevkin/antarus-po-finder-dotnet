@@ -125,8 +125,13 @@ public partial class Database
     /// Kept for completeness/tests; Настройки → Прошивки → «Удалить прошивку» uses
     /// <see cref="TombstoneFwVersion"/> instead (see there for why a bare DELETE isn't enough for
     /// that button anymore).</summary>
-    public void DeleteFwVersion(int id) =>
+    public void DeleteFwVersion(int id)
+    {
+        // Статистику выбора уносим вместе с записью: SQLite переиспользует rowid, и счётчик
+        // «эту ставили 10 раз» иначе достался бы следующей загруженной версии (см. Database.FwUsage.cs).
+        ForgetFwUsage(id);
         ExecuteNonQuery("DELETE FROM fw_versions WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+    }
 
     /// <summary>Administrator/programmer removing a firmware version from Настройки → Прошивки (Round
     /// 43 originally used a bare DELETE here — see DeleteFwVersion above — which meant the deletion
@@ -397,6 +402,34 @@ public partial class Database
             cmd.Parameters.AddWithValue("@h", hwVersion);
         });
         return reader.Read() ? ReadFwVersion(reader) : null;
+    }
+
+    /// <summary>Последний известный HMI-проект этого шкафа: путь, подсказка исполняемого файла и
+    /// номер версии, к которой он был приложен.
+    ///
+    /// ПЛК и панель обновляются независимо — правку в программе ПЛК выкладывают, панель при этом не
+    /// трогают и в загрузке не указывают. До этого такая версия оставалась вообще без HMI: кнопка
+    /// «Открыть HMI проект» на карточке пропадала, хотя панель у шкафа никуда не делась и лежит
+    /// рядом с предыдущей версией (жалоба «загрузил ПЛК без HMI — старая HMI не подтянулась»).
+    /// Ищется по паре подтип/контроллер без привязки к hw_version: панель принадлежит шкафу, а не
+    /// конкретному номеру версии программы. Откатанные и удалённые версии не в счёт — их файлы на
+    /// диске переименованы (см. RollbackFwVersion) либо удалены.</summary>
+    public (string HmiPath, string HmiExecutableHint, string VersionRaw)? GetLatestHmiForFirmware(int subtypeId, int controllerId)
+    {
+        using var reader = ExecuteReader($"""
+            SELECT hmi_path, hmi_executable_hint, version_raw FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c
+              AND hmi_path IS NOT NULL AND hmi_path != ''
+              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
+            ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+        });
+        return reader.Read()
+            ? (GetString(reader, "hmi_path"), GetString(reader, "hmi_executable_hint"), GetString(reader, "version_raw"))
+            : null;
     }
 
     public List<FwVersionRecord> GetFwVersionsHistory(int subtypeId, int controllerId, bool includeArchived = false)

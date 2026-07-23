@@ -66,6 +66,135 @@ public partial class SearchView : UserControl
         if (e.Key == Key.Enter) PerformSearch();
     }
 
+    // ── Фильтры ───────────────────────────────────────────────────────────
+    // Отдельной кнопкой и свёрнуты по умолчанию: в строке поиска и так три кнопки, а фильтры нужны
+    // не каждый раз. Списки наполняются при первом раскрытии и при каждом последующем — справочники
+    // и теги меняются (загрузили прошивку, приехала синхронизация), и показывать вчерашний набор
+    // значений хуже, чем лишний раз спросить БД: это локальные быстрые запросы, не поход на диск.
+
+    private sealed record FilterOption(string Label, int? Id = null, string? Text = null);
+
+    private bool FiltersVisible => FiltersPanel.Visibility == Visibility.Visible;
+
+    private void ToggleFilters_Click(object sender, RoutedEventArgs e)
+    {
+        if (FiltersVisible)
+        {
+            FiltersPanel.Visibility = Visibility.Collapsed;
+            FiltersToggle.Content = ActiveFilters().IsEmpty ? "Фильтры ▾" : "Фильтры ▾ ●";
+            return;
+        }
+
+        ReloadFilterOptions();
+        FiltersPanel.Visibility = Visibility.Visible;
+        FiltersToggle.Content = "Фильтры ▴";
+    }
+
+    private void ReloadFilterOptions()
+    {
+        var groups = _services.Db.GetAllEquipmentGroups();
+        var subtypes = _services.Db.GetAllEquipmentSubtypes();
+        var controllers = _services.Db.GetAllControllerModels();
+
+        FillFilter(FilterGroupCombo, "Тип шкафа: любой",
+            groups.Where(g => g.Id is not null).Select(g => new FilterOption(g.Name, g.Id)));
+        FillFilter(FilterSubtypeCombo, "Подтип: любой",
+            subtypes.Where(s => s.Id is not null && s.Name != "—").Select(s => new FilterOption(s.Name, s.Id)));
+        FillFilter(FilterControllerCombo, "Контроллер: любой",
+            controllers.Where(c => c.Id is not null).Select(c => new FilterOption(c.Name, c.Id)));
+        FillFilter(FilterLaunchCombo, "Тип пуска: любой",
+            ConfigService.LaunchTypes.Select(lt => new FilterOption(lt, null, lt)));
+        // Теги — только те, что реально стоят на версиях: справочник целиком (GetAllTags) содержит и
+        // те, которые никому ещё не проставили, и выбирать их в фильтре бессмысленно — пустая выдача.
+        _allTagOptions = _services.Db.GetTagsInUse().Select(t => new FilterOption(t, null, t)).ToList();
+        FillFilter(FilterTagCombo, TagFilterAnyLabel, _allTagOptions);
+    }
+
+    private const string TagFilterAnyLabel = "Тег: любой";
+    private List<FilterOption> _allTagOptions = new();
+
+    private static void FillFilter(ComboBox combo, string anyLabel, IEnumerable<FilterOption> options)
+    {
+        var previous = (combo.SelectedItem as FilterOption)?.Label;
+        var items = new List<FilterOption> { new(anyLabel) };
+        items.AddRange(options
+            .Where(o => !string.IsNullOrWhiteSpace(o.Label))
+            .GroupBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase).Select(g => g.First())
+            .OrderBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase));
+        combo.ItemsSource = items;
+        var restored = previous is null ? 0 : items.FindIndex(o => o.Label == previous);
+        combo.SelectedIndex = restored < 0 ? 0 : restored;
+    }
+
+    /// <summary>Набранное в поле тега сужает список — это и есть «поиск тегов»: список у наладчика
+    /// длинный, и пролистывать его до нужного названия шкафа руками бессмысленно. Пока оператор
+    /// печатает, выбор не сбрасываем и поиск не перезапускаем — только когда он выберет тег из
+    /// списка (SelectionChanged) или очистит поле.</summary>
+    private void FilterTagText_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (_reloadingTagOptions || FilterTagCombo.ItemsSource is null) return;
+
+        var text = FilterTagCombo.Text?.Trim() ?? "";
+        var matching = text.Length == 0
+            ? _allTagOptions
+            : _allTagOptions.Where(o => o.Label.Contains(text, StringComparison.CurrentCultureIgnoreCase)).ToList();
+
+        _reloadingTagOptions = true;
+        var items = new List<FilterOption> { new(TagFilterAnyLabel) };
+        items.AddRange(matching);
+        FilterTagCombo.ItemsSource = items;
+        FilterTagCombo.Text = text;
+        FilterTagCombo.IsDropDownOpen = text.Length > 0 && matching.Count > 0;
+        _reloadingTagOptions = false;
+    }
+
+    private bool _reloadingTagOptions;
+
+    private void Filter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_reloadingTagOptions) return;
+        PerformSearch();
+    }
+
+    private void ResetFilters_Click(object sender, RoutedEventArgs e)
+    {
+        ResetFilterCombos();
+        UpdateFiltersButton();
+        PerformSearch();
+    }
+
+    private void ResetFilterCombos()
+    {
+        _reloadingTagOptions = true;
+        foreach (var combo in new[] { FilterGroupCombo, FilterSubtypeCombo, FilterControllerCombo, FilterLaunchCombo })
+            if (combo.Items.Count > 0) combo.SelectedIndex = 0;
+        FilterTagCombo.ItemsSource = new List<FilterOption> { new(TagFilterAnyLabel) }.Concat(_allTagOptions).ToList();
+        FilterTagCombo.SelectedIndex = 0;
+        _reloadingTagOptions = false;
+    }
+
+    /// <summary>Что выбрано в панели фильтров прямо сейчас. Свёрнутая панель фильтры НЕ отменяет —
+    /// они продолжают действовать, поэтому на кнопке «Фильтры» и стоит точка, когда что-то выбрано.</summary>
+    private FirmwareSearchFilters ActiveFilters()
+    {
+        if (FilterGroupCombo is null) return FirmwareSearchFilters.None; // до InitializeComponent
+        return new FirmwareSearchFilters
+        {
+            GroupId = (FilterGroupCombo.SelectedItem as FilterOption)?.Id,
+            SubtypeId = (FilterSubtypeCombo.SelectedItem as FilterOption)?.Id,
+            ControllerId = (FilterControllerCombo.SelectedItem as FilterOption)?.Id,
+            LaunchType = (FilterLaunchCombo.SelectedItem as FilterOption)?.Text,
+            Tag = (FilterTagCombo.SelectedItem as FilterOption)?.Text,
+        };
+    }
+
+    private void UpdateFiltersButton()
+    {
+        if (FiltersToggle is null) return;
+        var active = !ActiveFilters().IsEmpty;
+        FiltersToggle.Content = FiltersVisible ? "Фильтры ▴" : active ? "Фильтры ▾ ●" : "Фильтры ▾";
+    }
+
     private void Search_Click(object sender, RoutedEventArgs e) => PerformSearch();
 
     /// <summary>Re-runs the last query so results (rollback status, tags, etc.) don't go stale —
@@ -73,13 +202,18 @@ public partial class SearchView : UserControl
     /// keep showing whatever was on screen before other tabs changed the data.</summary>
     public void RefreshIfActive()
     {
-        if (!string.IsNullOrWhiteSpace(SearchInput.Text))
+        // Выдача бывает и без запроса — одними фильтрами; её тоже нужно освежать.
+        if (!string.IsNullOrWhiteSpace(SearchInput.Text) || !ActiveFilters().IsEmpty)
             PerformSearch();
     }
 
     private void ResetSearch_Click(object sender, RoutedEventArgs e)
     {
         SearchInput.Text = "";
+        // Фильтры сбрасываются вместе с запросом: иначе «сбросил поиск, а всё равно ничего не
+        // находит» — забытый фильтр в свёрнутой панели не виден.
+        ResetFilterCombos();
+        UpdateFiltersButton();
         ResultsPanel.Children.Clear();
         StatusLabel.Text = "";
         EmptyLabel.Text = "Введите запрос и нажмите «Найти»";
@@ -117,7 +251,12 @@ public partial class SearchView : UserControl
     private void PerformSearch()
     {
         var query = SearchInput.Text.Trim();
-        if (string.IsNullOrEmpty(query)) return;
+        UpdateFiltersButton();
+        // Пустой запрос сам по себе ничего не ищет, но с заданными фильтрами — это осмысленное
+        // «покажи всё такое» (все прошивки НГР на SMH5, все с типом пуска ПЧ и т.п.). Только для
+        // прошивок: у параметров и схем фильтров нет.
+        var filtersOnly = string.IsNullOrEmpty(query) && FwModeRadio.IsChecked == true && !ActiveFilters().IsEmpty;
+        if (string.IsNullOrEmpty(query) && !filtersOnly) return;
 
         // Новая выдача — карточки прошлой сейчас будут выброшены, значит незавершённая
         // автосинхронизация по ним больше не актуальна (см. AutoSyncMissingAsync).
@@ -135,19 +274,40 @@ public partial class SearchView : UserControl
     }
 
     private const string NoResultsHint = "Ничего не найдено — попробуйте другой запрос или снимите «Точное совпадение слова»";
+    private const string NoResultsFilteredHint = "Ничего не найдено — возможно, слишком узкие фильтры: «Фильтры» → «Сбросить фильтры»";
+
+    /// <summary>Нормализованный запрос последней выдачи — под ним и записывается выбор версии
+    /// (Database.RecordFwUsage). Пустой, если выдача получена без запроса, одними фильтрами:
+    /// «по такому запросу обычно ставят вот эту» без запроса не имеет смысла.</summary>
+    private string _lastUsageKey = "";
+
+    /// <summary>Оператор выбрал эту версию из выдачи — открыл проект/файл, залил в контроллер или
+    /// скачал. Это и есть тот факт, который потом поднимает её выше среди одинаково подходящих
+    /// (см. Database.FwUsage.cs). Просмотр карт/инструкций/истории сюда не считается: это чтение
+    /// сопутствующего, а не «взял эту прошивку».</summary>
+    private void RecordUsage(HierarchyResult result)
+    {
+        if (string.IsNullOrEmpty(_lastUsageKey) || result.FwVersionId <= 0) return;
+        try { _services.Db.RecordFwUsage(_lastUsageKey, result.FwVersionId); }
+        catch { /* статистика — вспомогательная вещь, ронять из-за неё действие оператора нельзя */ }
+    }
 
     private void PerformFirmwareSearch(string query)
     {
         var exact = ExactWordCheck.IsChecked == true;
+        var filters = ActiveFilters();
         var results = SearchService.Search(_services.Db, query, exact,
-            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters);
         if (results.Count == 0)
         {
-            ShowNoResults(query, NoResultsHint);
+            ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
             return;
         }
 
-        StatusLabel.Text = $"Найдено: {results.Count}";
+        // Что именно искали — нужно, чтобы записать выбор оператора по этому запросу
+        // (см. RecordUsage): выбор осмыслен только в паре с запросом, который его показал.
+        _lastUsageKey = SearchService.UsageKey(query);
+        StatusLabel.Text = filters.IsEmpty ? $"Найдено: {results.Count}" : $"Найдено: {results.Count} (с фильтрами)";
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
@@ -176,13 +336,23 @@ public partial class SearchView : UserControl
 
             var card = new FirmwareCard();
             card.Configure(result, flags);
+            // Выбор версии засчитывается на действиях «взял эту прошивку» — открыл проект/файл,
+            // залил в контроллер, скачал локально (см. RecordUsage).
             card.OpenFolderRequested += (s, _) => OpenFirmwareFolder(((FirmwareCard)s!).Result);
-            card.OpenPlcRequested += (s, _) => OpenPlc(((FirmwareCard)s!).Result);
-            card.OpenHmiRequested += (s, _) => OpenHmi(((FirmwareCard)s!).Result);
-            card.OpenLfsRequested += (s, _) => OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.LfsExtension, "LFS");
-            card.OpenPslRequested += (s, _) => OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.PslExtension, "PSL");
-            card.LoaderRequested += (s, _) => OpenLoader(((FirmwareCard)s!).Result);
-            card.DownloadRequested += (s, _) => DownloadFirmware(((FirmwareCard)s!).Result);
+            card.OpenPlcRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenPlc(((FirmwareCard)s!).Result); };
+            card.OpenHmiRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenHmi(((FirmwareCard)s!).Result); };
+            card.OpenLfsRequested += (s, _) =>
+            {
+                RecordUsage(((FirmwareCard)s!).Result);
+                OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.LfsExtension, "LFS");
+            };
+            card.OpenPslRequested += (s, _) =>
+            {
+                RecordUsage(((FirmwareCard)s!).Result);
+                OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.PslExtension, "PSL");
+            };
+            card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader(((FirmwareCard)s!).Result); };
+            card.DownloadRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); DownloadFirmware(((FirmwareCard)s!).Result); };
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
@@ -382,8 +552,8 @@ public partial class SearchView : UserControl
         if (!string.IsNullOrEmpty(file.Description))
             panel.Children.Add(new TextBlock { Text = file.Description, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
 
-        var tags = file.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tags.Length > 0)
+        var tags = TagString.Parse(file.Tags);
+        if (tags.Count > 0)
         {
             var tagsView = new TagBubbleEditor { Margin = new Thickness(0, 4, 0, 0) };
             tagsView.Configure(tags, null, readOnly: true);

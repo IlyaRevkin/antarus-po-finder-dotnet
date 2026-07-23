@@ -8,11 +8,17 @@ public partial class Database
 {
     private static string NowIso() => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
+    // Любая запись проходит через эти два метода — поэтому здесь же и поднимается ревизия данных,
+    // по которой поиск понимает, что его снимок устарел (см. Database.Search.cs). Сделано в одном
+    // месте намеренно: инвалидация, расставленная по методам записи руками, рано или поздно
+    // забывается в новом методе, и выдача начинает молча показывать вчерашнее.
+
     private void Exec(string sql)
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
+        BumpDataRevisionIfNeeded(sql);
     }
 
     private int ExecuteNonQuery(string sql, Action<SqliteCommand>? bind = null)
@@ -20,7 +26,9 @@ public partial class Database
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = sql;
         bind?.Invoke(cmd);
-        return cmd.ExecuteNonQuery();
+        var affected = cmd.ExecuteNonQuery();
+        BumpDataRevisionIfNeeded(sql);
+        return affected;
     }
 
     private object? ExecuteScalar(string sql, Action<SqliteCommand>? bind = null)
@@ -68,6 +76,7 @@ public partial class Database
         for (int i = 0; i < ids.Count; i++)
             cmd.Parameters.AddWithValue($"@p{i}", ids[i]);
         cmd.ExecuteNonQuery();
+        BumpDataRevisionIfNeeded(sql);
     }
 
     private static string? GetStringOrNull(SqliteDataReader r, string col)

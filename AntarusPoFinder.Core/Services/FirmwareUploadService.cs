@@ -125,6 +125,11 @@ public class FirmwareUploadResult
     public string? DestinationFolder { get; init; }
     public string? DestinationFilename { get; init; }
 
+    /// <summary>Непустая, если панель к версии не прикладывали и она унаследована от указанной
+    /// версии (см. FirmwareUploadService.Register). Не предупреждение — штатный случай, когда
+    /// обновляли только программу ПЛК; вызывающий просто сообщает об этом оператору.</summary>
+    public string InheritedHmiFromVersion { get; init; } = "";
+
     public bool IsSuccess => Outcome == FirmwareUploadOutcome.Success;
 
     private static FirmwareUploadResult Fail(string message) =>
@@ -161,6 +166,11 @@ public class FirmwareUploadPlan
     public string Description { get; init; } = "";
     public List<string> LaunchTypes { get; init; } = new();
 
+    /// <summary>Итоговые теги версии: что ввёл оператор плюс автотеги типа/подтипа/контроллера.
+    /// Считаются в первой фазе, потому что дисковая фаза пишет их в CHANGELOG.md — по нему теги
+    /// доезжают до коллег даже там, где общий конфиг не отправляется (см. ChangelogFile).</summary>
+    public List<string> Tags { get; init; } = new();
+
     /// <summary>Источник — папка (копируем содержимое) или один файл (копируем с новым именем).</summary>
     public bool SourceIsDirectory { get; init; }
 
@@ -171,6 +181,15 @@ public class FirmwareUploadPlan
     public string HmiFolder { get; init; } = "";
 
     public int? AuthorId { get; init; }
+
+    /// <summary>HMI-проект прошлой версии этого же шкафа — подставляется, когда новая версия
+    /// загружается без панели (ПЛК и HMI обновляются независимо, см.
+    /// Database.GetLatestHmiForFirmware). Пусто — панели у шкафа ещё не было вовсе.</summary>
+    public string InheritedHmiPath { get; init; } = "";
+    public string InheritedHmiExecutableHint { get; init; } = "";
+
+    /// <summary>Номер версии, от которой унаследована панель — только для сообщения оператору.</summary>
+    public string InheritedHmiFromVersion { get; init; } = "";
 }
 
 /// <summary>Что получилось у дисковой фазы: имя файла, куда легли вложения и какие мелочи не
@@ -298,6 +317,20 @@ public static class FirmwareUploadService
         // дисковой фазой, и после него CopyFiles можно спокойно уносить в фоновый поток.
         var user = db.GetOrCreateUser(request.AuthorUserName, request.AuthorUserName);
 
+        // Панель в этой загрузке не указана — берём последнюю известную у этого же шкафа. Спрашиваем
+        // БД здесь, в первой фазе: после неё начинается дисковая, которая в базу уже не ходит.
+        var inheritedHmi = request.HmiEnabled && !string.IsNullOrEmpty(request.HmiSourcePath)
+            ? null
+            : db.GetLatestHmiForFirmware(subOption.Id!.Value, mod.ControllerId);
+
+        // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
+        // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
+        // "SMH5" still finds the file by the same words it used to carry in its name.
+        var tags = (request.Tags ?? new List<string>()).Select(TagString.Decode).ToList();
+        foreach (var autoTag in new[] { group.Name, subOption.Name == "—" ? null : subOption.Name, mod.ControllerName })
+            if (!string.IsNullOrWhiteSpace(autoTag) && !tags.Contains(autoTag, StringComparer.OrdinalIgnoreCase))
+                tags.Add(autoTag);
+
         var plan = new FirmwareUploadPlan
         {
             Request = request,
@@ -310,6 +343,7 @@ public static class FirmwareUploadService
             CabinetSn = cabinetSn,
             Description = desc,
             LaunchTypes = launchTypes,
+            Tags = tags,
             SourceIsDirectory = isDir,
             DestinationFolder = dstFolder,
             IoMapFolder = hierarchy.IoMapPath(root, group.Name, subOption.Name, mod.ControllerName),
@@ -317,6 +351,9 @@ public static class FirmwareUploadService
             ModbusMapFolder = hierarchy.ModbusMapPath(root, group.Name, subOption.Name, mod.ControllerName),
             HmiFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName),
             AuthorId = user.Id,
+            InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
+            InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
+            InheritedHmiFromVersion = inheritedHmi?.VersionRaw ?? "",
         };
         return (plan, null);
     }
@@ -350,7 +387,7 @@ public static class FirmwareUploadService
             return new FirmwareUploadCopyResult { IoErrorMessage = ex.Message };
         }
 
-        try { ChangelogFile.Write(plan.DestinationFolder, plan.Version, plan.LaunchTypes, plan.Description); }
+        try { ChangelogFile.Write(plan.DestinationFolder, plan.Version, plan.LaunchTypes, plan.Description, plan.Tags); }
         catch (Exception ex) { warnings.Add($"CHANGELOG.md: {ex.Message}"); }
 
         string ioMapStored = "";
@@ -406,14 +443,11 @@ public static class FirmwareUploadService
         var subOption = request.Subtype!;
         var mod = request.Modification!;
         var warnings = new List<string>(copy.Warnings);
+        var inheritedHmiFrom = "";
 
-        // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
-        // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
-        // "SMH5" still finds the file by the same words it used to carry in its name.
-        var tags = (request.Tags ?? new List<string>()).ToList();
-        foreach (var autoTag in new[] { group.Name, subOption.Name == "—" ? null : subOption.Name, mod.ControllerName })
-            if (!string.IsNullOrWhiteSpace(autoTag) && !tags.Contains(autoTag, StringComparer.OrdinalIgnoreCase))
-                tags.Add(autoTag);
+        // Теги посчитаны в первой фазе (см. FirmwareUploadPlan.Tags) — их уже записала в
+        // CHANGELOG.md дисковая фаза, и запись в БД обязана совпадать с тем, что лежит на диске.
+        var tags = plan.Tags;
         foreach (var tag in tags) db.AddTag(tag);
 
         var record = new FwVersionRecord
@@ -442,8 +476,19 @@ public static class FirmwareUploadService
             CabinetSn = plan.CabinetSn,
             AuthorId = plan.AuthorId,
             Status = "active",
-            Tags = string.Join(' ', tags),
+            Tags = TagString.Join(tags),
         };
+
+        // Панель не приложена к этой загрузке, но у шкафа она есть от прошлой версии — подставляем
+        // её (см. FirmwareUploadPlan.InheritedHmiPath). Файлы при этом не копируются и не
+        // дублируются: путь указывает на ту же папку HMI-проекта, что и у предыдущей версии.
+        if (string.IsNullOrEmpty(record.HmiPath) && !string.IsNullOrEmpty(plan.InheritedHmiPath))
+        {
+            record.HmiPath = plan.InheritedHmiPath;
+            if (string.IsNullOrEmpty(record.HmiExecutableHint))
+                record.HmiExecutableHint = plan.InheritedHmiExecutableHint;
+            inheritedHmiFrom = plan.InheritedHmiFromVersion;
+        }
 
         var newFwId = db.AddFwVersion(record);
         record.Id = newFwId;
@@ -462,6 +507,7 @@ public static class FirmwareUploadService
             Record = record,
             DestinationFolder = plan.DestinationFolder,
             DestinationFilename = copy.DestinationFilename,
+            InheritedHmiFromVersion = inheritedHmiFrom,
         };
     }
 
@@ -490,7 +536,7 @@ public static class FirmwareUploadService
 
         foreach (var extra in extras)
         {
-            var tags = primary.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            var tags = TagString.Parse(primary.Tags);
             if (extra.Name != "—" && !tags.Contains(extra.Name, StringComparer.OrdinalIgnoreCase))
             {
                 tags.Add(extra.Name);
@@ -523,7 +569,7 @@ public static class FirmwareUploadService
                 CabinetSn = primary.CabinetSn,
                 AuthorId = primary.AuthorId,
                 Status = primary.Status,
-                Tags = string.Join(' ', tags),
+                Tags = TagString.Join(tags),
             };
             var id = db.AddFwVersion(copy);
             if (id > 0) created.Add(id);

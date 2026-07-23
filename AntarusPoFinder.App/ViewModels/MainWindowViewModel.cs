@@ -784,6 +784,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             }
             catch { /* best effort — next tick will retry */ }
 
+            await ScanDiskForNewFirmwareAsync();
             await CleanupInspectionFolderAsync();
             await CheckForUnknownItemsAsync();
         }
@@ -791,6 +792,45 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             _syncRunning = false;
         }
+    }
+
+    /// <summary>Досмотр сетевого диска на предмет версий, которых нет в локальной базе.
+    ///
+    /// Почему это здесь появилось: прошивки, загруженные коллегой, физически лежат на общем диске, но
+    /// в базу этой машины попадали ровно одним путём — через общий конфиг, который ОТПРАВЛЯЕТ только
+    /// администратор и по умолчанию не отправляет вовсе (config_push_interval_min = 0). Сам обход
+    /// диска (HierarchyService.SyncFwFromDisk) вызывался только внутри применения нового конфига —
+    /// то есть если конфиг никто не выкладывал, он не запускался НИКОГДА. Отсюда и жалоба: «позагружал
+    /// прошивки на компе коллеги, у себя не вижу» — файлы на диске были, показать их было некому.
+    /// Теперь диск досматривается сам, тем же периодическим тиком, что и остальная синхронизация, и
+    /// от чужих настроек отправки не зависит.
+    ///
+    /// Фазы те же, что везде: план по БД → обход диска в фоновом потоке → запись результата по БД
+    /// (см. блок про двухфазные операции в HierarchyService).</summary>
+    private async Task ScanDiskForNewFirmwareAsync()
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root)) return;
+
+        try
+        {
+            var plan = _services.Hierarchy.PlanFwSync(root);
+            FwDiskScan scan;
+            using (Busy.Begin("Поиск новых прошивок на диске…"))
+                scan = await Task.Run(() => HierarchyService.ScanFwDisk(plan));
+
+            if (scan.Candidates.Count == 0) return;
+
+            var result = _services.Hierarchy.ImportFwCandidates(scan);
+            if (result.Added <= 0) return;
+
+            var preview = string.Join(", ", result.AddedItems.Take(3));
+            var more = result.AddedItems.Count > 3 ? $" и ещё {result.AddedItems.Count - 3}" : "";
+            ShowStatus($"Найдено новых прошивок на диске: {result.Added} ({preview}{more})",
+                10000, NotificationCategory.FirmwareAndParams);
+            RefreshSearchIfActive();
+        }
+        catch { /* best effort — повторится на следующем тике, как и остальные шаги RunSync */ }
     }
 
     /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupMinutes() from the

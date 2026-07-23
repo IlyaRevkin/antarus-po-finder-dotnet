@@ -7,6 +7,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -18,19 +19,67 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBox Grid.Column="0" x:Name="SearchInput" Height="38" Margin="0,0,8,0"
                      VerticalContentAlignment="Center"
                      ToolTip="Введите название шкафа — напр. «НГР КПЧ SMH5» или «ПЖ KINCO»"
                      KeyDown="SearchInput_KeyDown"/>
             <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"/>
-            <Button Grid.Column="2" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
+            <Button Grid.Column="2" x:Name="FiltersToggle" Content="Фильтры ▾" Style="{StaticResource SecondaryButton}"
+                    Height="38" Margin="8,0,0,0" Click="ToggleFilters_Click"
+                    ToolTip="Сузить выдачу по типу шкафа, подтипу, контроллеру, типу пуска или тегу"/>
+            <Button Grid.Column="3" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
         </Grid>
+
+        <!-- Панель фильтров: свёрнута по умолчанию — кнопок в поиске и так хватает, а фильтры
+             нужны не каждый раз. Пустой запрос с заданными фильтрами — осмысленный «покажи всё
+             такое», см. SearchView.PerformFirmwareSearch. -->
+        <Border x:Name="FiltersPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,0,0,10"
+                Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                BorderThickness="1" CornerRadius="6" Padding="10">
+            <StackPanel>
+                <WrapPanel>
+                    <StackPanel Margin="0,0,12,6">
+                        <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}"/>
+                        <ComboBox x:Name="FilterGroupCombo" Width="170" Height="28" DisplayMemberPath="Label"
+                                  SelectionChanged="Filter_Changed"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,6">
+                        <TextBlock Text="Подтип" Style="{StaticResource MutedText}"/>
+                        <ComboBox x:Name="FilterSubtypeCombo" Width="170" Height="28" DisplayMemberPath="Label"
+                                  SelectionChanged="Filter_Changed"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,6">
+                        <TextBlock Text="Контроллер" Style="{StaticResource MutedText}"/>
+                        <ComboBox x:Name="FilterControllerCombo" Width="150" Height="28" DisplayMemberPath="Label"
+                                  SelectionChanged="Filter_Changed"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,6">
+                        <TextBlock Text="Тип пуска" Style="{StaticResource MutedText}"/>
+                        <ComboBox x:Name="FilterLaunchCombo" Width="130" Height="28" DisplayMemberPath="Label"
+                                  SelectionChanged="Filter_Changed"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,6">
+                        <TextBlock Text="Тег" Style="{StaticResource MutedText}"/>
+                        <ComboBox x:Name="FilterTagCombo" Width="230" Height="28" DisplayMemberPath="Label"
+                                  IsEditable="True" IsTextSearchEnabled="True" StaysOpenOnEdit="True"
+                                  TextBoxBase.TextChanged="FilterTagText_Changed"
+                                  SelectionChanged="Filter_Changed"
+                                  ToolTip="Поиск по тегам: начните набирать — список сузится. Тег из нескольких слов ищется целиком"/>
+                    </StackPanel>
+                    <Button Content="Сбросить фильтры" Style="{StaticResource SecondaryButton}" Height="28"
+                            VerticalAlignment="Bottom" Margin="0,0,0,6" Click="ResetFilters_Click"/>
+                </WrapPanel>
+                <TextBlock x:Name="FiltersHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Text="Фильтры действуют только для поиска по прошивкам. С пустым запросом покажет всё, что подходит под фильтры."/>
+            </StackPanel>
+        </Border>
 
         <!-- Search mode: firmware vs. parameter files vs. cabinet schematics (second disk) — one
              three-way sliding toggle (ModeThumb glides under the checked segment) instead of three
              separately-styled pill buttons. -->
-        <StackPanel x:Name="ModeSelectorPanel" Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+        <StackPanel x:Name="ModeSelectorPanel" Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,10">
             <Border CornerRadius="15" Padding="3" Margin="0,0,16,0"
                     Background="{DynamicResource BgInputBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
                 <Grid>
@@ -56,9 +105,9 @@
                       Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="3" x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>
+        <TextBlock Grid.Row="4" x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>
 
-        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto">
             <Grid>
                 <TextBlock x:Name="EmptyLabel" Text="Введите запрос и нажмите «Найти»" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0"/>

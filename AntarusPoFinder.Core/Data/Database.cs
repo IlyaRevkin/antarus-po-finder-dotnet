@@ -234,6 +234,16 @@ public partial class Database : IDisposable
              -- operator who closes the app before resolving still sees it next launch. One row per
              -- sync_id — a second detection of the same still-unresolved conflict just replaces it
              -- (INSERT OR REPLACE), it doesn't pile up duplicates.
+             -- «По такому запросу обычно ставят вот эту версию» — см. Database.FwUsage.cs.
+             -- Локальная таблица: в общий конфиг не выгружается и с других машин не приезжает.
+             CREATE TABLE IF NOT EXISTS fw_search_usage (
+                 query_key     TEXT    NOT NULL,
+                 fw_version_id INTEGER NOT NULL,
+                 uses          INTEGER NOT NULL DEFAULT 0,
+                 last_used_at  TEXT    NOT NULL DEFAULT '',
+                 PRIMARY KEY (query_key, fw_version_id)
+             );
+
              CREATE TABLE IF NOT EXISTS hierarchy_pending_conflicts (
                  sync_id       TEXT PRIMARY KEY,
                  entity_type   TEXT NOT NULL,
@@ -245,6 +255,7 @@ public partial class Database : IDisposable
              );
              """);
 
+        EnsureIndexes();
         EnsureColumnsExist();
         SeedHierarchyDefaults();
         SeedAllowedExtensionsDefaults();
@@ -264,6 +275,19 @@ public partial class Database : IDisposable
         // methods, which are the only places that stamp it going forward).
         BackfillHierarchyUpdatedAt();
     }
+
+    /// <summary>Индексы по колонкам, по которым реально ищут. Без них каждая проверка «какие версии
+    /// уже есть у этой пары подтип/контроллер» (а их на одну синхронизацию с диском — по числу
+    /// папок контроллеров) была полным перебором таблицы; на базе наладчика с сотнями версий это
+    /// та самая пауза, во время которой окно «висит». Отдельно от CREATE TABLE выше: базы у всех
+    /// давно созданы, IF NOT EXISTS в CREATE TABLE их бы не тронул.</summary>
+    private void EnsureIndexes() => Exec("""
+        CREATE INDEX IF NOT EXISTS idx_fw_versions_subtype_ctrl ON fw_versions(subtype_id, controller_id);
+        CREATE INDEX IF NOT EXISTS idx_fw_versions_version_raw  ON fw_versions(version_raw);
+        CREATE INDEX IF NOT EXISTS idx_param_files_subtype      ON param_files(subtype_id);
+        CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
+        CREATE INDEX IF NOT EXISTS idx_fw_search_usage_version  ON fw_search_usage(fw_version_id);
+        """);
 
     /// <summary>Gives every pre-existing hierarchy row (both genuinely old databases picking up the
     /// ALTER TABLE column for the first time, AND rows this very Migrate() call just seeded above) a
@@ -286,7 +310,7 @@ public partial class Database : IDisposable
         using (var reader = ExecuteReader("SELECT tags FROM fw_versions WHERE tags IS NOT NULL AND tags != ''"))
         {
             while (reader.Read())
-                foreach (var w in reader.GetString(0).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var w in Services.TagString.Parse(reader.GetString(0)))
                     words.Add(w);
         }
         foreach (var w in words)
@@ -449,9 +473,7 @@ public partial class Database : IDisposable
             if (list.Count < 2) continue;
 
             var keepId = list[0].Id;
-            var mergedTags = string.Join(' ', list
-                .SelectMany(x => x.Tags.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-                .Distinct(StringComparer.OrdinalIgnoreCase));
+            var mergedTags = Services.TagString.Join(list.SelectMany(x => Services.TagString.Parse(x.Tags)));
             ExecuteNonQuery("UPDATE param_files SET tags=@t WHERE id=@id", cmd =>
             {
                 cmd.Parameters.AddWithValue("@t", mergedTags);

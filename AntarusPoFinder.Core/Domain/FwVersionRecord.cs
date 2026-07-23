@@ -52,6 +52,9 @@ public class FwVersionRecord
     public bool Released { get; set; }
 
     // Populated by joins for display purposes (not stored on this table).
+    /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа
+    /// (Database.SearchFwVersionsByTokens): подтип у версии свой, а тип берётся через него.</summary>
+    public int GroupId { get; set; }
     public string GroupName { get; set; } = "";
     public string SubtypeName { get; set; } = "";
     public string SubtypeFolder { get; set; } = "";

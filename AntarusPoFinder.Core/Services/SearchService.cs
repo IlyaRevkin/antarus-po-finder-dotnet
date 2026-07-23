@@ -33,6 +33,10 @@ public class HierarchyResult
     public DateTime? UploadDate { get; init; }
     public int Score { get; init; }
     public int FwVersionId { get; init; }
+
+    /// <summary>Сколько раз ИМЕННО эту версию выбирали по такому же запросу (см.
+    /// Database.FwUsage.cs). 0 — ни разу либо запрос новый.</summary>
+    public int UsageCount { get; init; }
 }
 
 public static class SearchService
@@ -110,28 +114,37 @@ public static class SearchService
         return converted;
     }
 
-    public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex));
+    public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
+        FirmwareSearchFilters? filters = null) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
-        bool allowFallback, out bool usedFallback, out string convertedQuery) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex), allowFallback, out usedFallback, out convertedQuery);
+        bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters),
+            allowFallback, out usedFallback, out convertedQuery);
 
-    private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord)
+    /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
+    /// «НГР ПЧ», «нгр  пч» и «НГР, ПЧ» считались одним и тем же запросом.</summary>
+    public static string UsageKey(string query) => Normalize(query);
+
+    private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
+        FirmwareSearchFilters? filters)
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0) return new();
+        // Пустой запрос с заданными фильтрами — осмысленный «покажи всё такое», этот случай
+        // разбирает сам Database.SearchFwVersions; пустой запрос без фильтров ничего не ищет.
+        if (tokens.Length == 0 && (filters is null || filters.IsEmpty)) return new();
 
-        var rows = db.SearchFwVersionsByTokens(tokens, exactWord);
+        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query);
 
-        return rows.Select((row, idx) => ToHierarchyResult(row, rows.Count - idx)).ToList();
+        return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount)).ToList();
     }
 
     /// <summary>Maps a joined fw_versions row (group/subtype/controller names already populated by the
     /// caller's query) to a HierarchyResult — the same shape Search() returns, reused by the firmware-
     /// update scan so it can hand rows straight to FirmwareSync.CopyToLocal.</summary>
-    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0)
+    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0, int usageCount = 0)
     {
         var sub = !string.IsNullOrEmpty(row.SubtypeFolder) ? row.SubtypeFolder : row.SubtypeName;
         var name = $"{sub} {row.CtrlName}".Trim();
@@ -161,6 +174,7 @@ public static class SearchService
             Tags = row.Tags,
             UploadDate = uploadDate,
             Score = score,
+            UsageCount = usageCount,
         };
     }
 }

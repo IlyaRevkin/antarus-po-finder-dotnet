@@ -9,7 +9,12 @@ namespace AntarusPoFinder.Core.Services;
 
 /// <summary>Что удалось вычитать из CHANGELOG.md рядом с прошивкой. Пустые поля означают «в файле
 /// этого не было» — вызывающий сам решает, чем их заменить.</summary>
-public record ChangelogContent(string Description, List<string> LaunchTypes);
+public record ChangelogContent(string Description, List<string> LaunchTypes)
+{
+    /// <summary>Теги версии, если загрузившая машина их записала. Пустой список — файл старого
+    /// формата (строки «Теги:» в нём нет) либо тегов не было.</summary>
+    public List<string> Tags { get; init; } = new();
+}
 
 /// <summary>CHANGELOG.md, который кладётся в папку каждой версии при загрузке — единственный носитель
 /// описания и типов пуска, который живёт НА ДИСКЕ, а не только в локальной базе конкретной машины.
@@ -31,7 +36,8 @@ public static class ChangelogFile
     /// разрешить входящему настоящему описанию его перезаписать (см. ImportHierarchyDataCore).</summary>
     public const string DiskSyncPlaceholder = "(синхронизировано с диска)";
 
-    public static void Write(string versionFolder, FwVersionNumber fwv, IEnumerable<string> launchTypes, string description)
+    public static void Write(string versionFolder, FwVersionNumber fwv, IEnumerable<string> launchTypes, string description,
+        IEnumerable<string>? tags = null)
     {
         var lines = new List<string>
         {
@@ -39,6 +45,12 @@ public static class ChangelogFile
             $"Дата: {fwv.DtStr}",
             $"Тип пуска: {string.Join(", ", launchTypes)}",
         };
+        // Теги — тот же случай, что описание и тип пуска: без них версия, приехавшая к коллеге
+        // сканированием диска (а не через конфиг администратора), находилась бы только по названию
+        // папки. Разделитель «; », а не пробел: тег может быть из нескольких слов (см. TagList).
+        var tagList = (tags ?? Enumerable.Empty<string>()).Select(t => t.Trim()).Where(t => t.Length > 0).ToList();
+        if (tagList.Count > 0)
+            lines.Add($"Теги: {string.Join("; ", tagList)}");
         if (!string.IsNullOrEmpty(description))
         {
             lines.Add("");
@@ -58,6 +70,7 @@ public static class ChangelogFile
         catch { return null; }
 
         var launchTypes = new List<string>();
+        var tags = new List<string>();
         var descLines = new List<string>();
         bool inBody = false;
 
@@ -73,6 +86,12 @@ public static class ChangelogFile
                         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     continue;
                 }
+                if (line.StartsWith("Теги:", StringComparison.OrdinalIgnoreCase))
+                {
+                    tags.AddRange(line["Теги:".Length..]
+                        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    continue;
+                }
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 inBody = true;
             }
@@ -84,6 +103,6 @@ public static class ChangelogFile
         while (descLines.Count > 0 && string.IsNullOrWhiteSpace(descLines[^1]))
             descLines.RemoveAt(descLines.Count - 1);
 
-        return new ChangelogContent(string.Join("\n", descLines).Trim(), launchTypes);
+        return new ChangelogContent(string.Join("\n", descLines).Trim(), launchTypes) { Tags = tags };
     }
 }

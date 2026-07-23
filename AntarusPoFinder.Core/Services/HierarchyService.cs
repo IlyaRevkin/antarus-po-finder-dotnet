@@ -40,7 +40,12 @@ public record StructurePlan(string Root, List<string> Folders, HierarchyNames Na
 public record FwSyncTarget(int SubtypeId, int ControllerId, string GroupName, string SubtypeName,
     string ControllerName, string ControllerPath, HashSet<string> KnownVersions);
 
-public record FwSyncPlan(List<FwSyncTarget> Targets);
+/// <summary>Общая папка «ОПЦ» одного подтипа: у неё нет своего контроллера (она одна на все), поэтому
+/// вместо него — карта «hw-номер версии → контроллер», по которой найденная версия и раскладывается.</summary>
+public record FwOpcSyncTarget(int SubtypeId, string GroupName, string SubtypeName, string OpcPath,
+    Dictionary<int, (int ControllerId, string ControllerName)> ControllerByHw, HashSet<string> KnownVersions);
+
+public record FwSyncPlan(List<FwSyncTarget> Targets, List<FwOpcSyncTarget>? OpcTargets = null);
 
 /// <summary>Найденная на диске папка версии, которой ещё нет в БД, со всем, что удалось вычитать
 /// рядом (имя файла прошивки, CHANGELOG.md). Ничего не записывает — запись делает ImportFwCandidates.</summary>
@@ -447,6 +452,7 @@ public class HierarchyService
     public FwSyncPlan PlanFwSync(string root)
     {
         var targets = new List<FwSyncTarget>();
+        var opcTargets = new List<FwOpcSyncTarget>();
         var controllers = _db.GetAllControllerModels();
 
         foreach (var g in _db.GetAllEquipmentGroups())
@@ -465,10 +471,36 @@ public class HierarchyService
                     targets.Add(new FwSyncTarget(sub.Id!.Value, ctrl.Id!.Value, g.Name, sub.Name, ctrl.Name,
                         Path.Combine(groupSubPath, ctrl.Name), known));
                 }
+
+                // Нестандартные (ОПЦ) версии лежат не в папке контроллера, а в общей папке «ОПЦ»
+                // рядом с ней (см. PoCtrlFolder) — досмотр диска не открывал её вообще, и версия,
+                // загруженная с номером заявки/SN на другой машине, не появлялась здесь никогда,
+                // сколько ни синхронизируй. Контроллер по самой папке не определить (она общая на
+                // все контроллеры подтипа), поэтому он выводится из hw-номера версии — ровно того
+                // числа, которым модификация контроллера и опознаётся (controller_modifications.
+                // hw_version). Неоднозначный или незнакомый hw пропускается: завести версию не тому
+                // контроллеру хуже, чем не завести вовсе.
+                var byHw = new Dictionary<int, (int ControllerId, string ControllerName)>();
+                var ambiguousHw = new HashSet<int>();
+                foreach (var ctrl in controllers)
+                    foreach (var m in _db.GetModificationsForController(ctrl.Id!.Value))
+                    {
+                        if (byHw.TryGetValue(m.HwVersion, out var known2) && known2.ControllerId != ctrl.Id!.Value)
+                            ambiguousHw.Add(m.HwVersion);
+                        else
+                            byHw[m.HwVersion] = (ctrl.Id!.Value, ctrl.Name);
+                    }
+                foreach (var hw in ambiguousHw) byHw.Remove(hw);
+
+                var knownInSubtype = new HashSet<string>(
+                    _db.GetFwVersions(sub.Id, null, includeArchived: true, includeRolledBack: true).Select(v => v.VersionRaw),
+                    StringComparer.Ordinal);
+                opcTargets.Add(new FwOpcSyncTarget(sub.Id!.Value, g.Name, sub.Name,
+                    Path.Combine(groupSubPath, HierarchyFolders.Opc), byHw, knownInSubtype));
             }
         }
 
-        return new FwSyncPlan(targets);
+        return new FwSyncPlan(targets, opcTargets);
     }
 
     /// <summary>Дисковая фаза: обход папок версий и чтение CHANGELOG.md. Ничего не пишет и в БД не
@@ -517,7 +549,50 @@ public class HierarchyService
             }
         }
 
+        foreach (var opc in plan.OpcTargets ?? new List<FwOpcSyncTarget>())
+        {
+            if (!Directory.Exists(opc.OpcPath)) continue;
+
+            IEnumerable<string> versionDirs;
+            try { versionDirs = Directory.EnumerateDirectories(opc.OpcPath).ToList(); }
+            catch (Exception e) { errors.Add($"{opc.OpcPath}: {e.Message}"); continue; }
+
+            foreach (var versionDir in versionDirs)
+            {
+                var parsed = FwVersionNumber.Parse(Path.GetFileName(versionDir));
+                if (parsed is null) continue;
+                if (opc.KnownVersions.Contains(parsed.Raw)) { skipped++; continue; }
+                // Контроллер выводится из hw-номера (см. PlanFwSync); не вывелся — пропускаем.
+                if (!opc.ControllerByHw.TryGetValue(parsed.HwVersion, out var ctrl)) { skipped++; continue; }
+
+                var target = new FwSyncTarget(opc.SubtypeId, ctrl.ControllerId, opc.GroupName, opc.SubtypeName,
+                    ctrl.ControllerName, opc.OpcPath, opc.KnownVersions);
+                candidates.Add(new FwDiskCandidate(target, parsed, versionDir,
+                    ReadFirmwareFilename(versionDir, errors), ChangelogFile.TryRead(versionDir)));
+                // Две ОПЦ-папки одного подтипа с одним номером версии — теоретически возможны только
+                // при ручной правке диска; помечаем номер как известный, чтобы во второй раз он не
+                // завёлся ещё одной записью в этом же проходе.
+                opc.KnownVersions.Add(parsed.Raw);
+            }
+        }
+
         return new FwDiskScan(candidates, skipped, errors);
+    }
+
+    /// <summary>Имя файла прошивки в папке версии — первый файл, кроме служебного CHANGELOG.md.</summary>
+    private static string ReadFirmwareFilename(string versionDir, List<string> errors)
+    {
+        try
+        {
+            var found = Directory.EnumerateFiles(versionDir)
+                .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
+            return found is null ? "" : Path.GetFileName(found);
+        }
+        catch (Exception e)
+        {
+            errors.Add($"{versionDir}: {e.Message}");
+            return "";
+        }
     }
 
     /// <summary>БД-фаза: заводит записи по тому, что нашёл обход диска.</summary>
@@ -548,8 +623,14 @@ public class HierarchyService
                         : c.Changelog!.Description,
                     Changelog = c.Changelog?.Description ?? "",
                     LaunchTypes = c.Changelog?.LaunchTypes ?? new List<string>(),
+                    // Теги — из того же CHANGELOG.md, что и описание: версия, приехавшая сюда
+                    // сканированием диска (а не через конфиг администратора), иначе оставалась бы
+                    // вообще без тегов и находилась только по названию папки.
+                    Tags = TagString.Join(c.Changelog?.Tags ?? new List<string>()),
                     Status = "active",
                 });
+                foreach (var tag in c.Changelog?.Tags ?? new List<string>())
+                    _db.AddTag(tag);
                 added++;
                 addedItems.Add(c.Label);
             }
