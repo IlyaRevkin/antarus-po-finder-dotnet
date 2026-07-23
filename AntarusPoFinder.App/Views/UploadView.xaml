@@ -186,7 +186,6 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <!-- Тип шкафа + Контроллер side by side, one row — values here are always short
@@ -242,155 +241,170 @@
                             <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34" SelectionChanged="SubtypesSelect_SelectionChanged"/>
                         </Grid>
 
-                        <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа —
-                             используются далеко не в каждой загрузке, но раньше занимали три строки
-                             высоты всегда, даже когда все три чекбокса выключены. Свёрнуты в Expander
-                             по умолчанию (SectionExpander, см. Styles.xaml — обычный WPF Expander не
-                             использован по той же причине, что и у SidebarExpanderHeader: чужеродный
-                             светлый хром на тёмной теме) — раскрывается кликом по заголовку, когда
-                             реально нужен нестандартный шкаф или отключение штампа даты в номере. -->
-                        <Expander x:Name="VersionOptionsExpander" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
-                                  Style="{StaticResource SectionExpander}" Margin="0,4,0,6">
-                            <Expander.Header>
-                                <TextBlock Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold"/>
-                            </Expander.Header>
-                            <StackPanel>
-                                <!-- WrapPanel, not a horizontal StackPanel — at the app's own MinWidth this
-                                     row's three checkboxes are wider than the available column (the right
-                                     column of UploadView's two-column page, further narrowed by the
-                                     ScrollViewer's own vertical scrollbar), and a horizontal StackPanel
-                                     doesn't clip gracefully: it just gets cut off by the ScrollViewer
-                                     (HorizontalScrollBarVisibility is Disabled here, no horizontal scroll to
-                                     reach the rest), rendering "ОПЦ SN" as an unreadable/unclickable sliver
-                                     ("O") at min window width (verified live). WrapPanel wraps the third
-                                     checkbox onto its own line only when space is actually short. -->
-                                <WrapPanel x:Name="VersionOptionsPanel" Orientation="Horizontal" Margin="0,0,0,6">
-                                    <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
-                                              Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
-                                              ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
-                                    <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
-                                              Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
-                                              ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
-                                    <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
-                                              Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
-                                              ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
-                                </WrapPanel>
-
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
-                                    <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
-                                             Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
-                                </Grid>
-
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
-                                    <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
-                                             Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
-                                </Grid>
-                            </StackPanel>
-                        </Expander>
-
                         <!-- Отдельный заголовок вместо инлайновой подписи слева — тот же паттерн, что
-                             у "ОПЦИИ ВЕРСИИ" выше и у "ДОП. ФАЙЛЫ"/"МЕТАДАННЫЕ" по всей странице, вместо
+                             у "ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ"/"МЕТАДАННЫЕ" по всей странице, вместо
                              ряда с подписью в левой узкой колонке, как было — Тип пуска обязателен и
                              концептуально другого рода поле (не переключатель поведения формы, а сама
-                             загружаемая метаданные), стоило визуально отделить от блока опций выше. -->
-                        <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
+                             загружаемая метаданные), стоило визуально отделить от подтипов выше. -->
+                        <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
                         <!-- Раньше это был отдельный горизонтальный StackPanel ВНЕ этой сетки, из-за
                              чего чекбоксы типа пуска висели по своим правилам отступов и не
                              переносились на узком окне (тот же класс бага, что уже чинили у «ОПЦИИ
-                             ВЕРСИИ»). Теперь — такой же WrapPanel в такой же ячейке сетки с теми же
-                             Margin, что у VersionOptionsPanel выше. -->
-                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
+                             ВЕРСИИ», см. VersionOptionsPanel — теперь внутри ExtrasExpander ниже, но
+                             WrapPanel-приём тот же). Такой же WrapPanel в такой же ячейке сетки с теми
+                             же Margin. -->
+                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
                     </Grid>
 
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
                     <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
 
-                    <TextBlock Text="Теги:" Margin="0,10,0,4"/>
-                    <views:TagBubbleEditor x:Name="TagsEditor"/>
+                    <!-- Единый свёрнутый по умолчанию раздел "ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ" — объединяет
+                         то, что раньше было тремя разными местами на странице (свой Expander "ОПЦИИ
+                         ВЕРСИИ", три всегда-развёрнутых ряда доп.файлов, отдельная строка "Теги"), в
+                         один блок. Цель — компактность: на минимальном окне (MainWindow MinHeight=720)
+                         обязательная часть формы выше (метаданные, подтипы, тип пуска, описание) и
+                         кнопка "Загрузить" ниже должны помещаться без прокрутки, а всё необязательное —
+                         под одним кликом. SectionExpander (см. Styles.xaml) — тот же приём, что и у
+                         старого VersionOptionsExpander (обычный WPF Expander не годится, чужеродный
+                         светлый хром на тёмной теме), просто с более крупным содержимым. -->
+                    <Expander x:Name="ExtrasExpander" Style="{StaticResource SectionExpander}" Margin="0,10,0,8">
+                        <Expander.Header>
+                            <TextBlock Text="ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold"/>
+                        </Expander.Header>
+                        <StackPanel>
+                            <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа.
+                                 WrapPanel, не горизонтальный StackPanel — при минимальной ширине окна
+                                 три чекбокса шире доступной колонки, а WrapPanel просто переносит третий
+                                 на свою строку вместо обрезания (тот самый баг с нечитаемым "ОПЦ SN",
+                                 который уже чинили здесь раньше). -->
+                            <TextBlock Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontSize="11" Margin="0,0,0,4"/>
+                            <WrapPanel x:Name="VersionOptionsPanel" Orientation="Horizontal" Margin="0,0,0,6">
+                                <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
+                                          Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
+                                          ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
+                                <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
+                                          Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
+                                          ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
+                                <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
+                                          Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
+                                          ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                            </WrapPanel>
 
-                    <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,14,0,8"/>
-                    <!-- Карта in/out, Карта modbus и Инструкция — три одинаковых полноширинных ряда
-                         (label/textbox/3 icon buttons), а не «Карта in/out» + «Карта modbus» бок о бок
-                         в паре плюс отдельная полноширинная «Инструкция». Парой они экономили строку
-                         высоты, но кнопки Файл/Папка/Очистить у пары стояли примерно на 50% ширины
-                         карточки, а у «Инструкции» — на 100%: три ряда кнопок на разных x читались как
-                         неаккуратная вёрстка. Теперь у всех трёх рядов одна и та же ширина колонки-
-                         подписи (100) и одна и та же раскладка столбцов — кнопки всех трёх рядов стоят
-                         на одном x. Страница внутри ScrollViewer (см. выше), так что лишняя строка
-                         высоты не выталкивает форму за пределы окна — просто чуть больше скролла. -->
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="100"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
-                        <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                    </Grid>
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="100"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
-                        <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                    </Grid>
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="100"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Инструкция:" VerticalAlignment="Center"
-                                   ToolTip="Копируется в папку контроллера &quot;Инструкция&quot;. Необязательное поле."/>
-                        <TextBox Grid.Column="1" x:Name="InstructionsInput" Height="34" Margin="0,0,4,0"/>
-                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFile_Click" ToolTip="Выбрать файл">
-                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsBrowseFolder_Click" ToolTip="Выбрать папку">
-                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="InstructionsClear_Click" ToolTip="Очистить">
-                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                        </Button>
-                    </Grid>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
+                                <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
+                                         Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
+                                <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
+                                         Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
+                            </Grid>
+
+                            <!-- Доп. файлы — три плитки-слота вместо трёх полноширинных рядов
+                                 label+TextBox+3 кнопки (см. FileSlotController и стиль FileSlot в
+                                 Styles.xaml). Сами TextBox (IoMapInput/ModbusMapInput/InstructionsInput)
+                                 никуда не делись — просто Visibility="Collapsed": это по-прежнему
+                                 единственный носитель пути, который читает FirmwareUploadService через
+                                 BuildUploadRequest, плитка лишь пишет/читает его .Text. Порядок и
+                                 подписи — как в исходных трёх рядах: Карта ВВ, Карта modbus,
+                                 Инструкция. -->
+                            <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontSize="11" Margin="0,0,0,6"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" x:Name="IoMapSlot" Style="{StaticResource FileSlot}" Height="64"
+                                        ToolTip="Карта ВВ — копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле.&#x0a;Перетащите файл или папку сюда, либо нажмите для выбора.">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Карта ВВ" Style="{StaticResource MutedText}" FontSize="10" FontWeight="SemiBold"/>
+                                            <Button Grid.Column="1" x:Name="IoMapSlotClear" Style="{StaticResource TagRemoveButton}" Content="×"
+                                                    Visibility="Collapsed" Margin="4,-6,-6,0" ToolTip="Очистить"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" x:Name="IoMapSlotText" Text="+ файл" FontSize="11" TextWrapping="Wrap"
+                                                   TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Column="2" x:Name="ModbusMapSlot" Style="{StaticResource FileSlot}" Height="64"
+                                        ToolTip="Карта modbus — копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле.&#x0a;Перетащите файл или папку сюда, либо нажмите для выбора.">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Карта modbus" Style="{StaticResource MutedText}" FontSize="10" FontWeight="SemiBold"/>
+                                            <Button Grid.Column="1" x:Name="ModbusMapSlotClear" Style="{StaticResource TagRemoveButton}" Content="×"
+                                                    Visibility="Collapsed" Margin="4,-6,-6,0" ToolTip="Очистить"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" x:Name="ModbusMapSlotText" Text="+ файл" FontSize="11" TextWrapping="Wrap"
+                                                   TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Column="4" x:Name="InstructionsSlot" Style="{StaticResource FileSlot}" Height="64"
+                                        ToolTip="Инструкция — копируется в папку контроллера &quot;Инструкция&quot;. Необязательное поле.&#x0a;Перетащите файл или папку сюда, либо нажмите для выбора.">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Инструкция" Style="{StaticResource MutedText}" FontSize="10" FontWeight="SemiBold"/>
+                                            <Button Grid.Column="1" x:Name="InstructionsSlotClear" Style="{StaticResource TagRemoveButton}" Content="×"
+                                                    Visibility="Collapsed" Margin="4,-6,-6,0" ToolTip="Очистить"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1" x:Name="InstructionsSlotText" Text="+ файл" FontSize="11" TextWrapping="Wrap"
+                                                   TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <!-- Скрытые носители значения — см. комментарий выше про FileSlotController.
+                                 Остаются обычными TextBox с теми же x:Name, что и раньше, только без
+                                 собственного UI: FirmwareUploadService/BuildUploadRequest продолжают
+                                 читать их .Text, ничего в контракте загрузки не меняется. -->
+                            <TextBox x:Name="IoMapInput" Visibility="Collapsed"/>
+                            <TextBox x:Name="ModbusMapInput" Visibility="Collapsed"/>
+                            <TextBox x:Name="InstructionsInput" Visibility="Collapsed"/>
+
+                            <TextBlock Text="ТЕГИ" Style="{StaticResource MutedText}" FontSize="11" Margin="0,0,0,4"/>
+                            <views:TagBubbleEditor x:Name="TagsEditor"/>
+                        </StackPanel>
+                    </Expander>
 
                     <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,8,0,8" TextWrapping="Wrap"/>
 

@@ -627,6 +627,28 @@
         <Setter Property="Background" Value="Transparent"/>
     </Style>
 
+    <!-- Плитка-слот для необязательного вложения на UploadView (Карта ВВ / Карта modbus /
+         Инструкция, см. FileSlotController) — компактная замена трём всегда-развёрнутым рядам
+         "подпись + TextBox + три кнопки". Пустая приглушена (обычная рамка), заполненная выделяется
+         акцентом успеха (SuccessBrush), чтобы «файл выбран» читалось с одного взгляда, ещё до чтения
+         текста внутри. Второй визуальный режим переключается через Tag="Filled" — тот же приём, что
+         и у NavButton (Tag="Active") выше: обычный DataTrigger по Tag, никакого хардкода цвета, обе
+         темы подхватываются через DynamicResource как обычно. -->
+    <Style x:Key="FileSlot" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Style.Triggers>
+            <Trigger Property="Tag" Value="Filled">
+                <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- Tag bubble chip, used by TagBubbleEditor (bubble tag pickers/displays across the app) -->
     <Style x:Key="TagBubbleBorder" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource TagBgBrush}"/>

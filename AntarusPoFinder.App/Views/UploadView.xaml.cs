@@ -39,9 +39,13 @@ public partial class UploadView : UserControl
     private static readonly string[] HmiExecutableExts = { ".fsprj" };
     private readonly LaunchTypeChecks _launchChecks;
 
-    private readonly FilePickerRow _ioMapPicker;
-    private readonly FilePickerRow _instrPicker;
-    private readonly FilePickerRow _modbusPicker;
+    // Плитки-слоты доп.файлов (Карта ВВ/Карта modbus/Инструкция) — см. FileSlotController и стиль
+    // FileSlot в Styles.xaml. Каждая связывает Border-плитку в XAML с соответствующим скрытым
+    // TextBox (IoMapInput/ModbusMapInput/InstructionsInput), который остаётся единственным
+    // носителем пути для FirmwareUploadService.
+    private readonly FileSlotController _ioMapSlot;
+    private readonly FileSlotController _modbusMapSlot;
+    private readonly FileSlotController _instrSlot;
     private readonly FilePickerRow _hmiPicker;
 
     private record ReservationOption(string Label, FwVersionReservation? Reservation);
@@ -55,14 +59,16 @@ public partial class UploadView : UserControl
         _ => null,
     };
 
-    /// <summary>"ОПЦИИ ВЕРСИИ" свёрнут по умолчанию (см. UploadView.xaml, VersionOptionsExpander) —
-    /// OnboardingOverlay пропускает шаг, если у цели ActualWidth==0 (см. OnboardingOverlay.ShowStep),
-    /// а свёрнутая панель именно так себя и ведёт. Разворачиваем перед показом шага и форсируем
-    /// layout, чтобы ActualWidth уже был посчитан к моменту, когда overlay его прочитает.</summary>
+    /// <summary>"ОПЦИИ ВЕРСИИ" — часть единого свёрнутого по умолчанию раздела "ДОП. ФАЙЛЫ И ДОП.
+    /// НАСТРОЙКИ" (см. UploadView.xaml, ExtrasExpander — раньше был отдельный VersionOptionsExpander,
+    /// объединены при переходе на плитки доп.файлов). OnboardingOverlay пропускает шаг, если у цели
+    /// ActualWidth==0 (см. OnboardingOverlay.ShowStep), а свёрнутая панель именно так себя и ведёт.
+    /// Разворачиваем перед показом шага и форсируем layout, чтобы ActualWidth уже был посчитан к
+    /// моменту, когда overlay его прочитает.</summary>
     private FrameworkElement ExpandOpcSectionAndReturnTarget()
     {
-        VersionOptionsExpander.IsExpanded = true;
-        VersionOptionsExpander.UpdateLayout();
+        ExtrasExpander.IsExpanded = true;
+        ExtrasExpander.UpdateLayout();
         return VersionOptionsPanel;
     }
 
@@ -74,12 +80,12 @@ public partial class UploadView : UserControl
 
         _launchChecks = new LaunchTypeChecks(LaunchTypesPanel);
 
-        _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "",
-            folderDialogTitle: "Выбрать папку");
-        _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "",
-            folderDialogTitle: "Выбрать папку");
-        _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "",
-            folderDialogTitle: "Выбрать папку");
+        _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
+            fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
+        _modbusMapSlot = new FileSlotController(ModbusMapSlot, ModbusMapSlotText, ModbusMapSlotClear, ModbusMapInput, "+ файл",
+            fileDialogTitle: "Выбрать файл — карта modbus", folderDialogTitle: "Выбрать папку — карта modbus");
+        _instrSlot = new FileSlotController(InstructionsSlot, InstructionsSlotText, InstructionsSlotClear, InstructionsInput, "+ файл",
+            fileDialogTitle: "Выбрать файл — инструкция", folderDialogTitle: "Выбрать папку — инструкция");
         _hmiPicker = new FilePickerRow(OnHmiPathPicked, ClearHmi,
             fileDialogTitle: "Выбрать файл HMI-проекта",
             fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
@@ -743,21 +749,9 @@ public partial class UploadView : UserControl
     }
 
     // ── Attachment fields ─────────────────────────────────────────────────────
-    // Файл.../Папка.../Очистить for all three below are wired through FilePickerRow (see
-    // _ioMapPicker/_instrPicker/_modbusPicker, constructed once in the constructor) instead of
-    // three near-identical dialog-boilerplate blocks (Спринт 2, Задача 2).
-
-    private void IoMapBrowseFile_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFile();
-    private void IoMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFolder();
-    private void IoMapClear_Click(object sender, RoutedEventArgs e) => _ioMapPicker.Clear();
-
-    private void InstructionsBrowseFile_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFile();
-    private void InstructionsBrowseFolder_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFolder();
-    private void InstructionsClear_Click(object sender, RoutedEventArgs e) => _instrPicker.Clear();
-
-    private void ModbusMapBrowseFile_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFile();
-    private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFolder();
-    private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => _modbusPicker.Clear();
+    // Файл/Папка/Очистить for Карта ВВ/Карта modbus/Инструкция — see the FileSlotController fields
+    // (_ioMapSlot/_modbusMapSlot/_instrSlot, constructed once above): each tile wires its own
+    // dialogs/drag&drop/clear internally, no separate Click handlers needed here anymore.
 
     private const string HmiPathPlaceholder = "Перетащите файл, папку или несколько файлов HMI-проекта сюда\nили нажмите для выбора";
 
