@@ -48,6 +48,16 @@ $exeName = "AntarusPoFinder-$Version.exe"
 $exePath = Join-Path $installerDir $exeName
 Copy-Item (Join-Path $publishDir "AntarusPoFinder.App.exe") $exePath -Force
 
+# Фикс подлинности обновлений (см. AntarusPoFinder.App/AppUpdateService.cs): файл с голым hex-хешем
+# SHA256, рядом с exe, под именем "<exe>.sha256" — попадает в тот же релиз ассетом (gh release
+# create просто подхватит его вместе с exe/msi, если передать явно), AppUpdateService при следующем
+# обновлении скачивает его и сверяет с хешем реально скачанного файла ПЕРЕД установкой. Голый хеш
+# (без имени файла после него) — самый простой формат, который однозначно разбирает и sha256sum-
+# совместимый инструмент, и наш собственный парсер (ParseSha256Text берёт первый токен).
+$sha256Hash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLower()
+$sha256Path = "$exePath.sha256"
+Set-Content -Path $sha256Path -Value $sha256Hash -NoNewline -Encoding ascii
+
 $msiName = "AntarusPoFinder-$Version-setup.msi"
 $msiPath = Join-Path $installerDir $msiName
 
@@ -64,4 +74,5 @@ try {
 }
 
 Write-Host "Done: $exePath"
+Write-Host "Done: $sha256Path"
 Write-Host "Done: $msiPath"

@@ -32,6 +32,16 @@ public class HttpAdCredentialValidator : IAdCredentialValidator
     public bool Validate(string domain, string login, string password, out string? error) =>
         ValidateWithStatus(domain, login, password, out error) == AdValidationStatus.Success;
 
+    /// <summary>true, если baseUrl разбирается как абсолютный URL и его схема — не https (в т.ч.
+    /// самый частый практический случай, обычный "http://..."). Не блокирует ничего сама по себе —
+    /// только сигнал для UI/лога (см. ConfigService.AdHttpUrlIsInsecure и предупреждение в
+    /// ValidateWithStatus ниже), потому что Negotiate/NTLM не шифрует сам канал, только
+    /// согласовывает challenge, а значит по не-https соединению логин/пароль фактически идут
+    /// открытым текстом по сети.</summary>
+    public static bool IsInsecureUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>domain приходит по общему контракту (тот же ввод, что и для LDAP-способа), но
     /// намеренно игнорируется здесь — поле логина уже несёт тот формат, который реально работает
     /// против домена (UPN "login@domain", "ДОМЕН\login" или голый "login" — см. пояснение в
@@ -51,6 +61,12 @@ public class HttpAdCredentialValidator : IAdCredentialValidator
             error = $"Некорректный URL веб-сервера для проверки пароля: «{_baseUrl}».";
             return AdValidationStatus.Unavailable;
         }
+
+        // Не блокирует способ — только предупреждение в лог (см. IsInsecureUrl doc-комментарий),
+        // отображение в UI — на усмотрение вызывающей стороны (ConfigService.AdHttpUrlIsInsecure).
+        if (IsInsecureUrl(_baseUrl))
+            System.Diagnostics.Debug.WriteLine(
+                $"[HttpAdCredentialValidator] Внимание: {uri.Host} — не HTTPS, логин/пароль передаются по сети без шифрования канала.");
 
         try
         {

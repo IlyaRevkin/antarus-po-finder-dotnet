@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AntarusPoFinder.Core.Infrastructure;
 using Microsoft.Data.Sqlite;
 
 namespace AntarusPoFinder.Core.Data;
@@ -454,6 +455,8 @@ public partial class Database : IDisposable
     {
         DedupeParamFiles();
         ResetAppStartMinimizedDefaultOnce();
+        SeedDefaultAdminPasswordHash();
+        MigratePlaintextPasswordsToHashesOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -528,6 +531,44 @@ public partial class Database : IDisposable
         if (GetSetting(doneFlag) == "true") return;
 
         SetSetting("app_start_minimized", "false");
+        SetSetting(doneFlag, "true");
+    }
+
+    /// <summary>Заводит хешированный пароль администратора по умолчанию ("12345" — тот же, что
+    /// наладчики использовали всегда, только теперь не открытым текстом), если строки
+    /// settings["admin_password"] ещё вообще нет. Раньше этот дефолт существовал только в коде
+    /// (ConfigService.Defaults) и никогда не писался в БД, пока кто-то явно не сохранял пароль
+    /// через Настройки — с переходом на хеши сравнение пароля (PasswordHasher.Verify) требует
+    /// РЕАЛЬНОГО хеша в БД, а не текстовой подстановки "12345" из кода (хешу его сравнивать не с
+    /// чем), поэтому здесь эта строка заводится один раз явно, при первом открытии/создании БД.
+    /// Идемпотентно само по себе (проверка на пустоту), отдельный флаг-маркер не нужен — в отличие
+    /// от MigratePlaintextPasswordsToHashesOnce ниже, здесь нечего "перезаписать поверх" того, что
+    /// пользователь сам сохранил (Set только если строки ещё нет).</summary>
+    private void SeedDefaultAdminPasswordHash()
+    {
+        if (GetSetting("admin_password") == "")
+            SetSetting("admin_password", PasswordHasher.Hash("12345"));
+    }
+
+    /// <summary>Разовая миграция: если admin_password/programmer_password в settings уже хранятся
+    /// открытым текстом (кто-то менял пароль через Настройки ДО этого фикса — реальный кастомный
+    /// пароль, не дефолт "12345" из SeedDefaultAdminPasswordHash выше, который уже сеет хеш), они
+    /// перехешируются на месте. Пустой programmer_password — осознанное «пароль не задан», не
+    /// трогается (см. ConfigService.SetProgrammerPassword/VerifyProgrammerPassword). Флаг-маркер —
+    /// тот же приём, что и в ResetAppStartMinimizedDefaultOnce выше: гарантирует, что миграция
+    /// реально одноразовая (хотя PasswordHasher.IsHashed и без флага делает повторный проход
+    /// безопасным no-op'ом — флаг просто экономит эту проверку на каждом старте).</summary>
+    private void MigratePlaintextPasswordsToHashesOnce()
+    {
+        const string doneFlag = "migration_password_hash_done";
+        if (GetSetting(doneFlag) == "true") return;
+
+        foreach (var key in new[] { "admin_password", "programmer_password" })
+        {
+            var value = GetSetting(key);
+            if (!string.IsNullOrEmpty(value) && !PasswordHasher.IsHashed(value))
+                SetSetting(key, PasswordHasher.Hash(value));
+        }
         SetSetting(doneFlag, "true");
     }
 

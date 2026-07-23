@@ -413,8 +413,13 @@ public partial class SettingsView : UserControl
         RoleCombo.SelectedValuePath = "RoleId";
         RoleCombo.SelectedValue = _services.Cfg.CurrentRole();
 
-        AdminPwdInput.Password = _services.Cfg.AdminPassword();
-        ProgPwdInput.Password = _services.Cfg.ProgrammerPassword();
+        // Пароли хранятся хешированными (см. ConfigService.SetAdminPassword/SetProgrammerPassword) —
+        // хеш нельзя развернуть обратно в исходный пароль, поэтому поля больше не подставляют
+        // «текущий пароль», как раньше (когда там реально лежал открытый текст). SavePasswords_Click
+        // ниже трактует пустое поле как «не менять» именно из-за этого — иначе первое же открытие
+        // Настроек и нажатие «Сохранить пароли» без единого изменения тихо обнулило бы оба пароля.
+        AdminPwdInput.Password = "";
+        ProgPwdInput.Password = "";
 
         AdDomainInput.Text = _services.Cfg.Get("ad_domain");
         AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
@@ -649,9 +654,8 @@ public partial class SettingsView : UserControl
 
         string? error = selected.RoleId switch
         {
-            "administrator" when password != _services.Cfg.AdminPassword() => "Неверный пароль администратора.",
-            "programmer" when !string.IsNullOrEmpty(_services.Cfg.ProgrammerPassword()) && password != _services.Cfg.ProgrammerPassword()
-                => "Неверный пароль программиста.",
+            "administrator" when !_services.Cfg.VerifyAdminPassword(password) => "Неверный пароль администратора.",
+            "programmer" when !_services.Cfg.VerifyProgrammerPassword(password) => "Неверный пароль программиста.",
             _ => null,
         };
 
@@ -673,10 +677,25 @@ public partial class SettingsView : UserControl
     private void UpdateRollbackAccess() =>
         RollbackFirmwareBtn.Visibility = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
+    /// развернуть обратно), поэтому пустое поле здесь трактуется как «не менять этот пароль», а не
+    /// «очистить его» — иначе открыть Настройки и нажать «Сохранить пароли», не тронув оба поля,
+    /// тихо обнулило бы пароль администратора до пустой строки (для программиста пустой пароль —
+    /// уже осмысленное состояние «не задан», но для администратора пустой пароль означает «войти
+    /// может кто угодно», а это не то, что должно происходить по умолчанию от простого открытия
+    /// вкладки). Известное ограничение такого решения: этой кнопкой больше нельзя вернуть пароль
+    /// программиста обратно в «не задан» пустым полем — единственный способ сейчас ввести какой-то
+    /// пароль явно. Отдельная кнопка «Очистить пароль программиста» — за рамками этого раунда
+    /// правок (см. итоговый отчёт).</summary>
     private void SavePasswords_Click(object sender, RoutedEventArgs e)
     {
-        _services.Cfg.Set("admin_password", AdminPwdInput.Password);
-        _services.Cfg.Set("programmer_password", ProgPwdInput.Password);
+        if (!string.IsNullOrEmpty(AdminPwdInput.Password))
+            _services.Cfg.SetAdminPassword(AdminPwdInput.Password);
+        if (!string.IsNullOrEmpty(ProgPwdInput.Password))
+            _services.Cfg.SetProgrammerPassword(ProgPwdInput.Password);
+
+        AdminPwdInput.Password = "";
+        ProgPwdInput.Password = "";
         _host.ShowStatus("Пароли сохранены");
     }
 

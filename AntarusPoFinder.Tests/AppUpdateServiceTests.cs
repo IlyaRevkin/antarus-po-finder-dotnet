@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.App;
@@ -235,6 +236,174 @@ public class AppUpdateServiceTests
                 DownloadUrl: "https://example.invalid/missing.exe", ExpectedSize: 100);
 
             await Assert.ThrowsAsync<HttpRequestException>(() => AppUpdateService.DownloadReleaseAsync(release));
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    // ── SHA256 integrity check (Фикс 4 — GitHub source) ─────────────────────────────────────────
+
+    [Fact]
+    public async Task DownloadReleaseAsync_Sha256Matches_SavesFile()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes("real release payload");
+        var hashHex = Convert.ToHexString(SHA256.HashData(bytes));
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(req =>
+                req.RequestUri!.AbsoluteUri.EndsWith(".sha256")
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(hashHex) }
+                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) })));
+
+            var release = new UpdateRelease(new Version(1, 2, 3), "AntarusPoFinder-1.2.3.exe", UpdateSourceKind.GitHub,
+                DownloadUrl: "https://example.invalid/AntarusPoFinder-1.2.3.exe", ExpectedSize: bytes.Length,
+                Sha256Url: "https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256");
+
+            var path = await AppUpdateService.DownloadReleaseAsync(release);
+            try { Assert.True(File.Exists(path)); }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task DownloadReleaseAsync_Sha256Mismatch_ThrowsAndDeletesFile()
+    {
+        // The scenario the whole fix exists for: a downloaded file with a CORRECT byte count (so the
+        // existing size check alone would wave it through) but wrong content — e.g. a compromised
+        // release asset, or a proxy that swaps the file while keeping Content-Length intact.
+        var bytes = System.Text.Encoding.UTF8.GetBytes("real release payload");
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(req =>
+                req.RequestUri!.AbsoluteUri.EndsWith(".sha256")
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('a', 64)) } // wrong hash
+                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) })));
+
+            var release = new UpdateRelease(new Version(1, 2, 3), "AntarusPoFinder-1.2.3.exe", UpdateSourceKind.GitHub,
+                DownloadUrl: "https://example.invalid/AntarusPoFinder-1.2.3.exe", ExpectedSize: bytes.Length,
+                Sha256Url: "https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256");
+
+            var tempPath = Path.Combine(Path.GetTempPath(), release.FileName);
+            var ex = await Assert.ThrowsAsync<IOException>(() => AppUpdateService.DownloadReleaseAsync(release));
+
+            Assert.Contains("подлинности", ex.Message);
+            Assert.False(File.Exists(tempPath)); // must not leave a file that failed integrity check behind
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task DownloadReleaseAsync_NoSha256Url_SkipsVerificationAndSucceeds()
+    {
+        // Backward compatibility: a release built before this fix has no .sha256 asset at all
+        // (Sha256Url stays "" — see ListGitHubReleasesAsync) — must behave exactly as before, not
+        // suddenly refuse every old release.
+        var bytes = System.Text.Encoding.UTF8.GetBytes("old release, no sha256 asset");
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) })));
+
+            var release = new UpdateRelease(new Version(1, 2, 3), "AntarusPoFinder-1.2.3.exe", UpdateSourceKind.GitHub,
+                DownloadUrl: "https://example.invalid/release.exe", ExpectedSize: bytes.Length);
+
+            var path = await AppUpdateService.DownloadReleaseAsync(release);
+            try { Assert.True(File.Exists(path)); }
+            finally { if (File.Exists(path)) File.Delete(path); }
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    // ── SHA256 integrity check (Фикс 4 — folder/network-share source) ──────────────────────────
+
+    [Fact]
+    public void VerifyFolderSha256IfPresent_MatchingHash_DoesNotThrow()
+    {
+        using var root = new TempRoot();
+        var exePath = Path.Combine(root.Path, "AntarusPoFinder-1.0.0.exe");
+        File.WriteAllText(exePath, "folder release payload");
+        var hashHex = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(exePath)));
+        File.WriteAllText(exePath + ".sha256", hashHex);
+
+        AppUpdateService.VerifyFolderSha256IfPresent(exePath); // must not throw
+    }
+
+    [Fact]
+    public void VerifyFolderSha256IfPresent_MismatchedHash_Throws()
+    {
+        using var root = new TempRoot();
+        var exePath = Path.Combine(root.Path, "AntarusPoFinder-1.0.0.exe");
+        File.WriteAllText(exePath, "folder release payload");
+        File.WriteAllText(exePath + ".sha256", new string('a', 64));
+
+        var ex = Assert.Throws<IOException>(() => AppUpdateService.VerifyFolderSha256IfPresent(exePath));
+        Assert.Contains("подлинности", ex.Message);
+    }
+
+    [Fact]
+    public void VerifyFolderSha256IfPresent_NoShaFileNextToIt_DoesNotThrow()
+    {
+        // Backward compatibility with releases already sitting in the network update folder from
+        // before this fix, which never had a .sha256 sibling copied alongside them.
+        using var root = new TempRoot();
+        var exePath = Path.Combine(root.Path, "AntarusPoFinder-1.0.0.exe");
+        File.WriteAllText(exePath, "old-style release, no .sha256 sibling");
+
+        AppUpdateService.VerifyFolderSha256IfPresent(exePath);
+    }
+
+    // ── GitHub release listing finds the matching .sha256 asset (Фикс 4) ───────────────────────
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_FindsMatchingSha256Asset()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v1.2.3",
+                "assets": [
+                  { "name": "AntarusPoFinder-1.2.3.exe", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe", "size": 123 },
+                  { "name": "AntarusPoFinder-1.2.3.exe.sha256", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256", "size": 64 },
+                  { "name": "AntarusPoFinder-1.2.3-setup.msi", "browser_download_url": "https://example.invalid/setup.msi", "size": 999 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal("https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256", result.Releases[0].Sha256Url);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_NoSha256Asset_LeavesSha256UrlEmpty()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v1.2.3",
+                "assets": [
+                  { "name": "AntarusPoFinder-1.2.3.exe", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe", "size": 123 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal("", result.Releases[0].Sha256Url);
         }
         finally { AppUpdateService.ResetHttpClientForTests(); }
     }

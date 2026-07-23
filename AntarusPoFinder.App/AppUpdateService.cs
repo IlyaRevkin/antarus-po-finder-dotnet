@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,7 +16,11 @@ namespace AntarusPoFinder.App;
 
 public enum UpdateSourceKind { Folder, GitHub }
 
-public record UpdateRelease(Version Version, string FileName, UpdateSourceKind Source, string LocalPath = "", string DownloadUrl = "", long ExpectedSize = 0);
+/// <summary>Sha256Url (только для GitHub-источника) — прямая ссылка на ассет "&lt;exe&gt;.sha256"
+/// того же релиза, если он есть (см. build.ps1 — генерирует его рядом с exe при сборке). Пусто,
+/// если релиз собран до появления этого фикса и такого ассета в нём нет — тогда проверка
+/// целостности пропускается (обратная совместимость, см. DownloadReleaseAsync).</summary>
+public record UpdateRelease(Version Version, string FileName, UpdateSourceKind Source, string LocalPath = "", string DownloadUrl = "", long ExpectedSize = 0, string Sha256Url = "");
 
 public record UpdateCheckResult(UpdateSourceKind Source, string SourceLabel, List<UpdateRelease> Releases);
 
@@ -111,26 +116,55 @@ public static class AppUpdateService
             if (!Version.TryParse(versionStr, out var version)) continue;
             if (!item.TryGetProperty("assets", out var assets)) continue;
 
+            string? exeName = null;
+            var exeUrl = "";
+            long exeSize = 0;
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
                 if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-                var url = asset.GetProperty("browser_download_url").GetString() ?? "";
-                var size = asset.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0;
-                releases.Add(new UpdateRelease(version, name, UpdateSourceKind.GitHub, DownloadUrl: url, ExpectedSize: size));
+                exeName = name;
+                exeUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
+                exeSize = asset.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0;
                 break;
             }
+            if (exeName is null) continue;
+
+            // Фикс целостности: ищем ассет "<exe>.sha256" В ТОМ ЖЕ релизе (build.ps1 кладёт его
+            // рядом с exe — см. installer/build.ps1). Сравниваем по точному имени, а не "первый
+            // .sha256 в релизе", чтобы не перепутать с каким-нибудь другим вложением.
+            var shaAssetName = exeName + ".sha256";
+            var shaUrl = "";
+            foreach (var asset in assets.EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString() ?? "";
+                if (!string.Equals(name, shaAssetName, StringComparison.OrdinalIgnoreCase)) continue;
+                shaUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
+                break;
+            }
+
+            releases.Add(new UpdateRelease(version, exeName, UpdateSourceKind.GitHub, DownloadUrl: exeUrl, ExpectedSize: exeSize, Sha256Url: shaUrl));
         }
         return releases.OrderByDescending(r => r.Version).ToList();
     }
 
     /// <summary>Устанавливает релиз и перезапускает приложение. Для GitHub-источника сначала
-    /// скачивает .exe-ассет во временную папку.</summary>
+    /// скачивает .exe-ассет во временную папку (с проверкой размера и, если доступен .sha256-ассет,
+    /// SHA256 — см. DownloadReleaseAsync). Для папочного источника (сетевой диск, доверенный —
+    /// администратор сам туда кладёт файлы) размер файлом не проверяется вовсе, а SHA256 сверяется,
+    /// только если рядом реально лежит файл &lt;exe&gt;.sha256 — см. VerifyFolderSha256IfPresent.</summary>
     public static async Task InstallAndRestartAsync(UpdateRelease release)
     {
-        var localPath = release.Source == UpdateSourceKind.Folder
-            ? release.LocalPath
-            : await DownloadReleaseAsync(release);
+        string localPath;
+        if (release.Source == UpdateSourceKind.Folder)
+        {
+            localPath = release.LocalPath;
+            VerifyFolderSha256IfPresent(localPath);
+        }
+        else
+        {
+            localPath = await DownloadReleaseAsync(release);
+        }
         InstallAndRestart(localPath);
     }
 
@@ -138,10 +172,19 @@ public static class AppUpdateService
     /// the downloaded file matches it byte-for-byte before handing it off to be installed — a
     /// silently-truncated download (dropped connection, corporate proxy cutting the stream short)
     /// would otherwise only surface as "downloaded fine, then won't launch", which is much harder
-    /// for a naladchik to diagnose than a clear error right here. Internal (not private) so
-    /// AppUpdateServiceTests can exercise the size-verification logic directly against a fake
-    /// HttpMessageHandler, without going through InstallAndRestartAsync — which shuts the whole
-    /// process down and is not something a test can safely call.</summary>
+    /// for a naladchik to diagnose than a clear error right here.
+    ///
+    /// Фикс подлинности (в дополнение к проверке размера выше, которая ловит только обрыв/усечение):
+    /// если у релиза есть Sha256Url (см. ListGitHubReleasesAsync — ассет "&lt;exe&gt;.sha256" в том же
+    /// релизе), скачанный файл сверяется по SHA256 ПЕРЕД тем, как его вообще можно будет
+    /// установить/запустить — совпадающий размер ничего не говорит о содержимом, а размер+хеш вместе
+    /// делают незаметную подмену файла (скомпрометированный GitHub-аккаунт, MITM без валидного TLS
+    /// и т.п.) практически неосуществимой без обнаружения. Если .sha256-ассета нет (релиз собран до
+    /// этого фикса) — проверка молча пропускается, поведение как раньше (обратная совместимость),
+    /// только в Debug-лог уходит пометка об этом. Internal (not private) so AppUpdateServiceTests can
+    /// exercise the verification logic directly against a fake HttpMessageHandler, without going
+    /// through InstallAndRestartAsync — which shuts the whole process down and is not something a
+    /// test can safely call.</summary>
     internal static async Task<string> DownloadReleaseAsync(UpdateRelease release)
     {
         var tempPath = Path.Combine(Path.GetTempPath(), release.FileName);
@@ -161,7 +204,63 @@ public static class AppUpdateService
                 $"Файл скачался повреждённым (ожидалось {release.ExpectedSize} байт, получено {actualSize}) — попробуйте ещё раз. " +
                 "Если повторяется — вероятно, корпоративный прокси/фаервол обрывает или подменяет соединение с GitHub.");
         }
+
+        if (!string.IsNullOrEmpty(release.Sha256Url))
+        {
+            var expectedHex = await FetchExpectedSha256Async(release.Sha256Url);
+            var actualHex = ComputeSha256Hex(tempPath);
+            if (!string.Equals(expectedHex, actualHex, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(tempPath);
+                throw new IOException(
+                    "Проверка подлинности не пройдена: SHA256 скачанного файла не совпадает с ожидаемым " +
+                    "(файл в релизе на GitHub мог быть подменён или повреждён нестандартным образом). Установка отменена.");
+            }
+        }
+        else
+        {
+            Debug.WriteLine($"[AppUpdateService] Релиз {release.FileName} без .sha256-ассета — проверка подлинности пропущена (старый релиз, обратная совместимость).");
+        }
+
         return tempPath;
+    }
+
+    /// <summary>Симметричная проверка для папочного источника (сетевой диск обновлений) — см.
+    /// InstallAndRestartAsync. Ищет файл рядом с exe по той же схеме именования, что и build.ps1
+    /// создаёт в installer/ (&lt;exe&gt;.sha256) — если администратор скопировал его на сетевой диск
+    /// вместе с exe, подмена файла на самом диске (или порча при копировании) будет обнаружена.
+    /// Internal — та же причина, что и у DownloadReleaseAsync: тестам нужен доступ напрямую.</summary>
+    internal static void VerifyFolderSha256IfPresent(string exePath)
+    {
+        var shaPath = exePath + ".sha256";
+        if (!File.Exists(shaPath))
+        {
+            Debug.WriteLine($"[AppUpdateService] {Path.GetFileName(exePath)}: файл .sha256 рядом не найден — проверка подлинности пропущена (старый релиз в папке обновлений, обратная совместимость).");
+            return;
+        }
+
+        var expectedHex = ParseSha256Text(File.ReadAllText(shaPath));
+        var actualHex = ComputeSha256Hex(exePath);
+        if (!string.Equals(expectedHex, actualHex, StringComparison.OrdinalIgnoreCase))
+            throw new IOException(
+                $"Проверка подлинности не пройдена: SHA256 файла «{Path.GetFileName(exePath)}» не совпадает с .sha256 рядом с ним " +
+                "(файл в папке обновлений мог быть подменён или повреждён). Установка отменена.");
+    }
+
+    /// <summary>Скачивает и парсит содержимое .sha256-ассета — см. ParseSha256Text за форматом.</summary>
+    private static async Task<string> FetchExpectedSha256Async(string url) => ParseSha256Text(await Http.GetStringAsync(url));
+
+    /// <summary>Файл .sha256 может быть либо голым hex-хешем (именно так его пишет build.ps1), либо
+    /// классическим форматом "sha256sum" — "ХЕШ *имя_файла" — на случай, если кто-то когда-нибудь
+    /// сгенерирует его вручную привычной утилитой. Первый пробельно-отделённый токен подходит для
+    /// обоих случаев.</summary>
+    private static string ParseSha256Text(string text) =>
+        text.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+
+    private static string ComputeSha256Hex(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 
     /// <summary>Turns a raw exception from CheckForUpdatesAsync/InstallAndRestartAsync into a

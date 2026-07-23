@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Infrastructure;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -46,6 +47,12 @@ public class ConfigService
         ["root_path"] = @"Z:\Software\Antarus Finder",
         ["second_disk_path"] = "",
         ["inspection_folder"] = "",
+        // Значения ниже — фолбэк ТОЛЬКО для Get("admin_password")/Get("programmer_password"), если
+        // строки settings ещё нет вовсе (крайне маловероятно после Database.SeedDefaultAdminPasswordHash,
+        // который заводит хешированный "12345" уже при создании/открытии БД — см. её doc-комментарий).
+        // Не хеш, потому что PasswordHasher (Core.Infrastructure) сюда не тянется как константа — но
+        // VerifyAdminPassword/VerifyProgrammerPassword ниже сравнивают именно хешем, поэтому в реальности
+        // этот текстовый фолбэк никогда не участвует в сравнении пароля, только в отображении/логах.
         ["admin_password"] = "12345",
         ["programmer_password"] = "",
         ["current_role"] = "naladchik",
@@ -212,8 +219,60 @@ public class ConfigService
     public string AdHttpUrl() => Get("ad_http_url");
     public void SetAdHttpUrl(string url) => Set("ad_http_url", url.Trim());
 
+    /// <summary>Сигнал (не блокировка) для UI/лога: текущий ad_http_url задан и не https — значит
+    /// логин/пароль при способе №2 уходят по сети без шифрования канала (Negotiate/NTLM сам по
+    /// себе канал не шифрует, только согласовывает challenge). Не мешает работе способа —
+    /// в реальном окружении на момент внедрения единственный доступный адрес мог быть только
+    /// HTTP, — но должно быть видно тому, кто это настраивает. См. HttpAdCredentialValidator.IsInsecureUrl
+    /// за самой проверкой схемы (общая логика, не дублируется здесь).</summary>
+    public bool AdHttpUrlIsInsecure()
+    {
+        var url = AdHttpUrl();
+        return !string.IsNullOrWhiteSpace(url) && HttpAdCredentialValidator.IsInsecureUrl(url);
+    }
+
+    /// <summary>Хранимая строка пароля администратора — с этого раунда всегда хеш (см.
+    /// PasswordHasher), НИКОГДА не открытый текст пароля. Оставлена публичной только для мест,
+    /// которым нужно знать «задан ли вообще пароль» (пустая/непустая строка), а не сам пароль —
+    /// для реальной проверки пароля используй <see cref="VerifyAdminPassword"/>, не строковое
+    /// сравнение с результатом этого метода (сравнение с хешем никогда не совпадёт с открытым
+    /// текстом, который ввёл пользователь).</summary>
     public string AdminPassword() => Get("admin_password");
+
+    /// <summary>То же самое для пароля программиста — пустая строка означает «пароль не задан»
+    /// (см. VerifyProgrammerPassword), непустая — всегда хеш, никогда открытый текст.</summary>
     public string ProgrammerPassword() => Get("programmer_password");
+
+    /// <summary>Хеширует и сохраняет новый пароль администратора. В отличие от программиста,
+    /// у администратора нет режима «пароль не задан» — пустая строка здесь так и хешируется
+    /// (пустой пароль), это осознанное поведение вызывающей стороны, а не сигнал «не менять».</summary>
+    public void SetAdminPassword(string plainPassword) => Set("admin_password", PasswordHasher.Hash(plainPassword ?? ""));
+
+    /// <summary>Хеширует и сохраняет новый пароль программиста — кроме одного случая: пустая
+    /// строка сохраняется как есть (не хешируется), потому что пустое значение — это сигнал
+    /// «пароль для роли программиста не требуется» (см. VerifyProgrammerPassword), а не «пароль —
+    /// пустая строка». Если бы пустая строка тоже хешировалась, отличить один случай от другого
+    /// было бы уже нельзя (оба выглядели бы как валидный непустой хеш).</summary>
+    public void SetProgrammerPassword(string plainPassword) =>
+        Set("programmer_password", string.IsNullOrEmpty(plainPassword) ? "" : PasswordHasher.Hash(plainPassword));
+
+    /// <summary>Единственное место, которое должно сравнивать введённый пароль администратора с
+    /// сохранённым — заменяет прежнее прямое сравнение строк (input == AdminPassword()), которое
+    /// сравнивало открытый текст с открытым текстом; теперь сохранённое значение — хеш, поэтому
+    /// сравнение обязано идти через PasswordHasher.Verify (соль, число итераций, сравнение с
+    /// постоянным временем — см. класс).</summary>
+    public bool VerifyAdminPassword(string input) => PasswordHasher.Verify(input ?? "", Get("admin_password"));
+
+    /// <summary>Как VerifyAdminPassword, но с сохранением прежней логики «пустой пароль
+    /// программиста = проверка не требуется, вход в роль пускает без пароля» — это поведение уже
+    /// было в коде до этого фикса (см. RoleSwitchDialog/SettingsView до правки:
+    /// `!string.IsNullOrEmpty(ProgrammerPassword()) &amp;&amp; password != ProgrammerPassword()`),
+    /// здесь оно просто перенесено внутрь ConfigService вместе с самой проверкой.</summary>
+    public bool VerifyProgrammerPassword(string input)
+    {
+        var stored = Get("programmer_password");
+        return string.IsNullOrEmpty(stored) || PasswordHasher.Verify(input ?? "", stored);
+    }
 
     public string CurrentRole() => Get("current_role");
     public void SetRole(string role) => Set("current_role", role);

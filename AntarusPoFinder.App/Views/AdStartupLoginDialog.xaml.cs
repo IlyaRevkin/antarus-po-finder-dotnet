@@ -139,7 +139,11 @@ public partial class AdStartupLoginDialog : Window
     /// launch rather than this becoming a routine bypass.</summary>
     private void AdminEscape_Click(object sender, RoutedEventArgs e)
     {
-        if (AdminEscapePasswordInput.Password != _cfg.AdminPassword())
+        // Сравнение через VerifyAdminPassword, не строковое: AdminPassword() с этого раунда всегда
+        // хранит хеш (см. ConfigService/PasswordHasher), прямое сравнение с введённым открытым
+        // текстом больше никогда бы не совпало — эта правка не входила в исходную зону файлов
+        // (см. отчёт), но без неё запасной вход администратора был бы полностью сломан.
+        if (!_cfg.VerifyAdminPassword(AdminEscapePasswordInput.Password))
         {
             ShowError("Неверный пароль администратора.");
             return;

@@ -139,6 +139,24 @@ public class HttpAdCredentialValidatorTests
         Assert.Equal(AdValidationStatus.Unavailable, status);
         Assert.NotNull(error);
     }
+
+    // ── IsInsecureUrl (Фикс 5 — сигнал для UI/лога, не блокировка способа) ──────────────────────
+
+    [Theory]
+    [InlineData("http://disk.antarus.su/")]
+    [InlineData("http://127.0.0.1:8080/")]
+    public void IsInsecureUrl_HttpScheme_ReturnsTrue(string url) => Assert.True(HttpAdCredentialValidator.IsInsecureUrl(url));
+
+    [Fact]
+    public void IsInsecureUrl_HttpsScheme_ReturnsFalse() =>
+        Assert.False(HttpAdCredentialValidator.IsInsecureUrl("https://disk.antarus.su/"));
+
+    [Fact]
+    public void IsInsecureUrl_UnparseableUrl_ReturnsFalse() =>
+        // Не наше дело здесь решать "плохой URL" — за это отвечает ValidateWithStatus (см.
+        // Validate_MalformedUrl_ReportsUnavailable выше), IsInsecureUrl отвечает только про схему
+        // валидного URL.
+        Assert.False(HttpAdCredentialValidator.IsInsecureUrl("not a url"));
 }
 
 /// <summary>Covers способ="оба" (CombinedAdCredentialValidator) with two fakes — no real AD/HTTP

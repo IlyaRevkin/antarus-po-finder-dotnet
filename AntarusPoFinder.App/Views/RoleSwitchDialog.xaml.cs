@@ -155,9 +155,8 @@ public partial class RoleSwitchDialog : Window
         var password = PasswordInput.Password;
         string? error = selected.RoleId switch
         {
-            "administrator" when password != _cfg.AdminPassword() => "Неверный пароль администратора.",
-            "programmer" when !string.IsNullOrEmpty(_cfg.ProgrammerPassword()) && password != _cfg.ProgrammerPassword()
-                => "Неверный пароль программиста.",
+            "administrator" when !_cfg.VerifyAdminPassword(password) => "Неверный пароль администратора.",
+            "programmer" when !_cfg.VerifyProgrammerPassword(password) => "Неверный пароль программиста.",
             _ => null,
         };
 
