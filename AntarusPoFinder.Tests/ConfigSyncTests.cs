@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -726,6 +727,185 @@ public class ConfigSyncTests
         finally
         {
             Cleanup(pathA, pathB);
+        }
+    }
+
+    /// <summary>Баг-фикс (Задача 1 — «проверь, что эталонная синхронизация работает корректно»):
+    /// MirrorFlatListDeletions раньше считал «известным входящей стороне» только живой список имён
+    /// (data.Tags), игнорируя flat_list_state — из-за чего имя с явной отметкой УДАЛЕНИЯ (уже
+    /// полностью решённое чуть выше, в ImportFlatList, по LWW-таймстемпам) выглядело как «входящей
+    /// стороне вообще неизвестно» и попадало под этот более грубый проход ВТОРОЙ раз, задваивая счёт
+    /// TagsRemoved в предпросмотре. Здесь A добавляет и сразу удаляет тег (явная отметка удаления в
+    /// flat_list_state), у B тот же тег просто существует без какой-либо отметки — ровно тот сценарий,
+    /// где ImportFlatList уже посчитал удаление один раз.</summary>
+    [Fact]
+    public void PreviewImportHierarchyData_Authoritative_DoesNotDoubleCountTagAlreadyHandledByTimestampMerge()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            dbB.AddTag("Е2Е-ДВОЙНОЙ-СЧЁТ");
+
+            dbA.AddTag("Е2Е-ДВОЙНОЙ-СЧЁТ");
+            dbA.DeleteTag("Е2Е-ДВОЙНОЙ-СЧЁТ"); // явная отметка удаления в flat_list_state A
+
+            var exported = dbA.ExportHierarchyData();
+            Assert.DoesNotContain("Е2Е-ДВОЙНОЙ-СЧЁТ", exported.Tags!);
+            Assert.Contains(exported.FlatListState!, s => s.Kind == Database.FlatKindTag && s.Name == "Е2Е-ДВОЙНОЙ-СЧЁТ");
+
+            var preview = dbB.PreviewImportHierarchyData(exported, authoritative: true);
+            // Один и тот же тег не должен считаться удалённым дважды (один раз в ImportFlatList по
+            // отметке времени, второй раз в MirrorFlatListDeletions как "полностью неизвестный").
+            Assert.Equal(1, preview.TagsRemoved);
+
+            var counts = dbB.ImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(1, counts.TagsRemoved);
+            Assert.DoesNotContain("Е2Е-ДВОЙНОЙ-СЧЁТ", dbB.GetAllTags());
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    /// <summary>Баг-фикс, более серьёзная половина той же дыры: MirrorFlatListDeletions не должен
+    /// перезаписывать решение, которое ImportFlatList уже принял по LWW-таймстемпам. Если у B тег
+    /// возвращён (RevivedAt) ПОЗЖЕ, чем его удаление на A (DeletedAt), ImportFlatList сознательно
+    /// ничего не делает — более свежая локальная отметка побеждает. Раньше MirrorFlatListDeletions,
+    /// не зная о flat_list_state вообще, всё равно удалял бы тег, потому что его нет в живом списке
+    /// A — стирая ровно то более свежее решение, которое вся эта LWW-система должна была защитить.</summary>
+    [Fact]
+    public void ImportHierarchyData_Authoritative_KeepsTagRevivedLocallyAfterIncomingDeletion()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            // A удаляет тег в момент t1.
+            dbA.AddTag("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ");
+            dbA.DeleteTag("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ");
+            System.Threading.Thread.Sleep(1100); // гарантируем строго более позднюю секундную отметку у B
+
+            // B, не зная об этом, позже (t2 > t1) сам возвращает тот же тег — сознательное локальное действие.
+            dbB.AddTag("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ");
+            Assert.Contains("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ", dbB.GetAllTags());
+
+            var exported = dbA.ExportHierarchyData(); // снимок A всё ещё несёт отметку удаления с t1
+            Assert.DoesNotContain("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ", exported.Tags!);
+
+            var counts = dbB.ImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(0, counts.TagsRemoved); // более свежее локальное возвращение не должно быть стёрто
+            Assert.Contains("Е2Е-СВЕЖЕЕ-ВОЗВРАЩЕНИЕ", dbB.GetAllTags());
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    // ── Задача 1 — предпросмотр разницы эталонной синхронизации ПЕРЕД отправкой ────────────────
+    // (Database.PreviewAuthoritativeDiff — сравнение локального ExportHierarchyData с тем, что
+    // СЕЙЧАС лежит в общем конфиге на диске; в NetworkSyncView это AuthoritativeDiffDialog).
+
+    [Fact]
+    public void PreviewAuthoritativeDiff_ReportsAddedAndRemovedNamesPerCategory()
+    {
+        var pathLocal = NewTempDb();
+        try
+        {
+            using var dbLocal = new Database(pathLocal);
+
+            // Локальная машина (та, что собирается отправить эталон) добавляет новый тег и нового
+            // производителя — их ещё нет в снимке "на диске".
+            dbLocal.AddTag("НОВЫЙ-ТЕГ");
+            dbLocal.AddParamManufacturer("НОВЫЙ-ПРОИЗВОДИТЕЛЬ");
+            var local = dbLocal.ExportHierarchyData();
+
+            // "На диске" — снимок с чужим тегом/производителем, которых на локальной машине нет:
+            // они должны попасть в Removed. Начинаем с локального экспорта той же машины ДО правок
+            // выше, чтобы группы/подтипы/контроллеры совпадали (ноль шума в остальных категориях).
+            var onDisk = new HierarchyExportData
+            {
+                EquipmentGroups = local.EquipmentGroups,
+                EquipmentSubtypes = local.EquipmentSubtypes,
+                ControllerModels = local.ControllerModels,
+                ControllerModifications = local.ControllerModifications,
+                ParamManufacturers = new List<ExportedManufacturer> { new() { Name = "СТАРЫЙ-ПРОИЗВОДИТЕЛЬ" } },
+                Tags = new List<string> { "СТАРЫЙ-ТЕГ" },
+                AllowedExtensions = local.AllowedExtensions,
+                AllowedExtensionsHmi = local.AllowedExtensionsHmi,
+            };
+
+            var diff = Database.PreviewAuthoritativeDiff(local, onDisk);
+            Assert.True(diff.HasChanges);
+
+            var tags = diff.Categories.Single(c => c.Label == "Теги");
+            Assert.Contains("НОВЫЙ-ТЕГ", tags.Added);
+            Assert.Contains("СТАРЫЙ-ТЕГ", tags.Removed);
+
+            var manufacturers = diff.Categories.Single(c => c.Label == "Производители ПЧ/УПП");
+            Assert.Contains("НОВЫЙ-ПРОИЗВОДИТЕЛЬ", manufacturers.Added);
+            Assert.Contains("СТАРЫЙ-ПРОИЗВОДИТЕЛЬ", manufacturers.Removed);
+
+            // Группы/подтипы/контроллеры/модификации идентичны на обеих сторонах — без изменений.
+            var groups = diff.Categories.Single(c => c.Label == "Типы шкафов");
+            Assert.False(groups.HasChanges);
+        }
+        finally
+        {
+            Cleanup(pathLocal);
+        }
+    }
+
+    [Fact]
+    public void PreviewAuthoritativeDiff_IdenticalSnapshots_ReportsNoChanges()
+    {
+        var pathLocal = NewTempDb();
+        try
+        {
+            using var dbLocal = new Database(pathLocal);
+            var local = dbLocal.ExportHierarchyData();
+
+            var diff = Database.PreviewAuthoritativeDiff(local, local);
+            Assert.False(diff.HasChanges);
+            Assert.Equal(0, diff.TotalAdded);
+            Assert.Equal(0, diff.TotalRemoved);
+        }
+        finally
+        {
+            Cleanup(pathLocal);
+        }
+    }
+
+    [Fact]
+    public void PreviewAuthoritativeDiff_NoSharedConfigYet_TreatsEverythingLocalAsAdded()
+    {
+        var pathLocal = NewTempDb();
+        try
+        {
+            using var dbLocal = new Database(pathLocal);
+            dbLocal.AddTag("ПЕРВАЯ-ОТПРАВКА");
+            var local = dbLocal.ExportHierarchyData();
+
+            // Первая эталонная синхронизация вообще — на диске ещё ничего нет (см.
+            // ConfigSyncService.ReadCurrentDiskHierarchyAsync: пустой HierarchyExportData()).
+            var diff = Database.PreviewAuthoritativeDiff(local, new HierarchyExportData());
+
+            Assert.Equal(0, diff.TotalRemoved);
+            var tags = diff.Categories.Single(c => c.Label == "Теги");
+            Assert.Contains("ПЕРВАЯ-ОТПРАВКА", tags.Added);
+            Assert.Empty(tags.Removed);
+        }
+        finally
+        {
+            Cleanup(pathLocal);
         }
     }
 }

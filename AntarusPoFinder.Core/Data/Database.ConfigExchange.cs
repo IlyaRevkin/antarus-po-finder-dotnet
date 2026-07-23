@@ -6,6 +6,25 @@ using System.Text.Json;
 
 namespace AntarusPoFinder.Core.Data;
 
+/// <summary>Одна категория предпросмотра разницы эталонной синхронизации — см.
+/// <see cref="Database.PreviewAuthoritativeDiff"/>. Added/Removed — уже отсортированные списки имён
+/// (не отдельные записи целиком: для предпросмотра ПЕРЕД отправкой важно только «что появится/
+/// исчезнет по имени», а не полное содержимое строки).</summary>
+public record AuthoritativeDiffCategory(string Label, List<string> Added, List<string> Removed)
+{
+    public bool HasChanges => Added.Count > 0 || Removed.Count > 0;
+}
+
+/// <summary>Результат Database.PreviewAuthoritativeDiff — показывается в AuthoritativeDiffDialog
+/// администратору ПЕРЕД «Сделать это состояние эталонным для всех» (см. NetworkSyncView.
+/// PushAuthoritative_Click), чтобы решение принималось не вслепую.</summary>
+public record AuthoritativeSyncDiff(List<AuthoritativeDiffCategory> Categories)
+{
+    public int TotalAdded => Categories.Sum(c => c.Added.Count);
+    public int TotalRemoved => Categories.Sum(c => c.Removed.Count);
+    public bool HasChanges => Categories.Any(c => c.HasChanges);
+}
+
 public partial class Database
 {
     /// <summary>Задел (Задача 7) — «сохранить у себя, не выгружать»: помечает строку fw_versions
@@ -195,6 +214,65 @@ public partial class Database
     /// before this parameter existed.</summary>
     public ImportCounts ImportHierarchyData(HierarchyExportData data, bool authoritative = false) => ImportHierarchyDataCore(data, apply: true, authoritative);
 
+    /// <summary>Задача 1 (эталонная синхронизация) — предпросмотр разницы ПЕРЕД отправкой: что
+    /// добавится/удалится по каждой из восьми справочных категорий, если <paramref name="local"/>
+    /// (свежий ExportHierarchyData этой машины — то, что уйдёт в эталон) станет полной заменой того,
+    /// что прямо сейчас лежит в общем конфиге на диске (<paramref name="onDisk"/> — снимок,
+    /// прочитанный и разобранный ConfigSyncService.ReadCurrentDiskHierarchyAsync). Администратор не
+    /// видит чужие базы данных, поэтому и это сравнение — не то же самое, что реально произойдёт на
+    /// каждой конкретной принимающей машине (там ещё сработает мягкий FK-предохранитель из
+    /// ImportHierarchyDataCore/MirrorFlatListDeletions, которого здесь намеренно нет — эта машина не
+    /// знает, что ещё используется на чужих машинах); это лучшее доступное приближение — диск как
+    /// прокси для «того, что сейчас применяют получатели».
+    ///
+    /// Чисто по именам (без sync_id) — предпросмотр должен быть понятен человеку, читающему список
+    /// перед необратимой отправкой, а не только машине; сравнение регистронезависимое, как и
+    /// остальные плоские списки-справочники ниже (ImportFlatList/MirrorFlatListDeletions).</summary>
+    public static AuthoritativeSyncDiff PreviewAuthoritativeDiff(HierarchyExportData local, HierarchyExportData onDisk)
+    {
+        var categories = new List<AuthoritativeDiffCategory>
+        {
+            DiffCategory("Типы шкафов",
+                local.EquipmentGroups.Select(g => g.Name),
+                onDisk.EquipmentGroups.Select(g => g.Name)),
+            DiffCategory("Подтипы",
+                local.EquipmentSubtypes.Select(s => $"{s.GroupName} / {s.Name}"),
+                onDisk.EquipmentSubtypes.Select(s => $"{s.GroupName} / {s.Name}")),
+            DiffCategory("Контроллеры",
+                local.ControllerModels.Select(c => c.Name),
+                onDisk.ControllerModels.Select(c => c.Name)),
+            DiffCategory("Модификации контроллеров",
+                local.ControllerModifications.Select(m => $"{m.ControllerName} / {m.DisplayName}"),
+                onDisk.ControllerModifications.Select(m => $"{m.ControllerName} / {m.DisplayName}")),
+            DiffCategory("Производители ПЧ/УПП",
+                (local.ParamManufacturers ?? new()).Select(m => m.Name),
+                (onDisk.ParamManufacturers ?? new()).Select(m => m.Name)),
+            DiffCategory("Теги",
+                local.Tags ?? new(),
+                onDisk.Tags ?? new()),
+            DiffCategory("Разрешённые расширения",
+                local.AllowedExtensions ?? new(),
+                onDisk.AllowedExtensions ?? new()),
+            DiffCategory("Разрешённые расширения HMI",
+                local.AllowedExtensionsHmi ?? new(),
+                onDisk.AllowedExtensionsHmi ?? new()),
+        };
+        return new AuthoritativeSyncDiff(categories);
+    }
+
+    /// <summary>Одна категория PreviewAuthoritativeDiff — множественная разница по строковым именам,
+    /// регистронезависимо и с обрезкой пробелов, как и везде в плоских списках-справочниках этого
+    /// файла. Added/Removed отсортированы для стабильного, предсказуемого порядка в UI.</summary>
+    private static AuthoritativeDiffCategory DiffCategory(string label, IEnumerable<string> localNames, IEnumerable<string> diskNames)
+    {
+        var local = new HashSet<string>(localNames.Select(n => n.Trim()).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+        var disk = new HashSet<string>(diskNames.Select(n => n.Trim()).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+
+        var added = local.Where(n => !disk.Contains(n)).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        var removed = disk.Where(n => !local.Contains(n)).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        return new AuthoritativeDiffCategory(label, added, removed);
+    }
+
     /// <summary>Согласует один плоский список-справочник (производители/теги/расширения) по
     /// отметкам времени из flat_list_state вместо прежнего слепого зеркала (см. Database.FlatLists.cs
     /// о том, почему зеркало теряло только что добавленные записи).
@@ -260,12 +338,28 @@ public partial class Database
     /// ImportFlatList: удаляет локальную запись плоского списка, которой нет во входящем ПОЛНОМ
     /// снимке вообще (ни живой, ни с отметкой удаления) — см. вызов в ImportHierarchyDataCore для
     /// того, почему обычный ImportFlatList намеренно этого не делает. isUsedLocally — необязательный
-    /// «мягкий» предохранитель (null — не нужен, как у allowed_extensions).</summary>
+    /// «мягкий» предохранитель (null — не нужен, как у allowed_extensions).
+    ///
+    /// <paramref name="incomingStateNames"/> — имена из data.FlatListState для ЭТОГО kind (живые И
+    /// удалённые, см. вызовы ниже) — БАГ-ФИКС: раньше сюда передавали только incomingNames (живой
+    /// список), из-за чего имя с явной отметкой УДАЛЕНИЯ (значит уже полностью решённое чуть выше, в
+    /// ImportFlatList, по LWW-таймстемпам) выглядело как «входящей стороне вообще неизвестно» и
+    /// попадало под этот, более грубый, проход ВТОРОЙ раз. В preview (apply=false) это удваивало
+    /// TagsRemoved/ManufacturersRemoved и т.п. для одного и того же имени (ImportFlatList уже
+    /// посчитал его как удаление, потом этот проход считал снова). В реальном apply опаснее: если
+    /// ImportFlatList сознательно ОСТАВИЛ имя как есть, потому что ЛОКАЛЬНАЯ отметка (например,
+    /// более свежее возвращение) новее входящей отметки удаления — этот проход, не зная о состоянии
+    /// вообще, всё равно удалял бы его, стирая то самое более свежее локальное решение, которое LWW-
+    /// merge выше специально сохранил. Имя с любой отметкой уже полностью в ведении ImportFlatList —
+    /// трогать его здесь второй раз нельзя; сюда должны попадать только имена, у которых нет вообще
+    /// никакого следа во входящем снимке (ни в живом списке, ни в flat_list_state).</summary>
     private void MirrorFlatListDeletions(Func<List<string>> getLocalNames, Action<string> removeLocal,
-        IEnumerable<string> incomingNames, Func<string, bool>? isUsedLocally, bool apply,
+        IEnumerable<string> incomingNames, IEnumerable<string> incomingStateNames, Func<string, bool>? isUsedLocally, bool apply,
         Action countRemoved, Action countSkipped)
     {
-        var incoming = new HashSet<string>(incomingNames.Select(n => n.Trim()).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+        var incoming = new HashSet<string>(
+            incomingNames.Concat(incomingStateNames).Select(n => n.Trim()).Where(n => n.Length > 0),
+            StringComparer.OrdinalIgnoreCase);
         foreach (var name in getLocalNames())
         {
             if (incoming.Contains(name)) continue;
@@ -810,19 +904,29 @@ public partial class Database
         //    загруженным файлам) — для них предохранитель не нужен.
         if (authoritative)
         {
+            // Имена с состоянием (живым ИЛИ удалённым) по каждому виду — уже полностью разобраны
+            // ImportFlatList выше по LWW-таймстемпам; MirrorFlatListDeletions ниже не должен трогать
+            // их повторно (см. её доку про баг-фикс двойного счёта/потери более свежей локальной
+            // отметки).
+            var flatState = data.FlatListState ?? new();
+
             var usedTags = CollectUsedTagWords();
-            MirrorFlatListDeletions(GetAllTags, DeleteTag, data.Tags ?? new(), usedTags.Contains,
+            MirrorFlatListDeletions(GetAllTags, DeleteTag, data.Tags ?? new(),
+                flatState.Where(s => s.Kind == FlatKindTag).Select(s => s.Name), usedTags.Contains,
                 apply, () => counts.TagsRemoved++, () => counts.TagsSkippedDelete++);
 
             var usedManufacturers = CollectUsedManufacturers();
             MirrorFlatListDeletions(GetParamManufacturers, DeleteParamManufacturer,
-                (data.ParamManufacturers ?? new()).Select(m => m.Name), usedManufacturers.Contains,
+                (data.ParamManufacturers ?? new()).Select(m => m.Name),
+                flatState.Where(s => s.Kind == FlatKindManufacturer).Select(s => s.Name), usedManufacturers.Contains,
                 apply, () => counts.ManufacturersRemoved++, () => counts.ManufacturersSkippedDelete++);
 
-            MirrorFlatListDeletions(GetAllowedExtensions, RemoveAllowedExtension, data.AllowedExtensions ?? new(), null,
+            MirrorFlatListDeletions(GetAllowedExtensions, RemoveAllowedExtension, data.AllowedExtensions ?? new(),
+                flatState.Where(s => s.Kind == FlatKindExtension).Select(s => s.Name), null,
                 apply, () => counts.ExtensionsRemoved++, () => counts.ExtensionsSkippedDelete++);
 
-            MirrorFlatListDeletions(GetAllowedExtensionsHmi, RemoveAllowedExtensionHmi, data.AllowedExtensionsHmi ?? new(), null,
+            MirrorFlatListDeletions(GetAllowedExtensionsHmi, RemoveAllowedExtensionHmi, data.AllowedExtensionsHmi ?? new(),
+                flatState.Where(s => s.Kind == FlatKindExtensionHmi).Select(s => s.Name), null,
                 apply, () => counts.ExtensionsHmiRemoved++, () => counts.ExtensionsHmiSkippedDelete++);
         }
 

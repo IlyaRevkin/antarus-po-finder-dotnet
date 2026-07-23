@@ -51,20 +51,23 @@
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,20">
                 <StackPanel>
                     <TextBlock Text="ПОЛУЧЕНИЕ ОБНОВЛЕНИЙ КОНФИГА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Справочник оборудования, теги и резервы номеров, изменённые кем-то другим на общем диске, подтягиваются на этот компьютер автоматически с указанным интервалом — подтверждать вручную не нужно."
+                    <!-- Задача 2: раньше здесь был настраиваемый интервал опроса (sync_interval_min) —
+                         убран, потому что новая система синхронизации подтягивает изменения сама:
+                         маркер ревизии проверяется на фиксированном коротком интервале (см.
+                         MainWindowViewModel._revisionPollTimer, ~75 сек) плюс мгновенно по событию
+                         изменения файла (FileSystemWatcher на revision.json, best-effort — не на
+                         каждой сетевой шаре поддерживается уведомлениями). Настраиваемый интервал
+                         делал ровно ту же дешёвую проверку, просто реже и без выигрыша — поле убрано
+                         из интерфейса, сама настройка (и таймер, который её ещё уважает) в коде
+                         осталась нетронутой на случай отладки. -->
+                    <TextBlock Text="Справочник оборудования, теги и резервы номеров, изменённые кем-то другим на общем диске, подтягиваются на этот компьютер автоматически — как только на диске появляется новая версия, без подтверждения вручную."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                        <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="SyncIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
-                        <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                        <Button Content="Сохранить" Click="SaveSyncInterval_Click"/>
-                    </StackPanel>
-                    <TextBlock Text="0 — автосинхронизация отключена (ручная кнопка «Синхронизировать сейчас» ниже всё равно работает)."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal">
-                        <Button x:Name="SyncNowButton" Content="Синхронизировать сейчас" Click="SyncNow_Click" Margin="0,0,12,0"/>
+                        <Button x:Name="SyncNowButton" Content="Синхронизировать сейчас" Style="{StaticResource SecondaryButton}" Click="SyncNow_Click" Margin="0,0,12,0"/>
                         <TextBlock x:Name="LastSyncText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
                     </StackPanel>
+                    <TextBlock Text="Ручная кнопка выше — подстраховка на случай, если диск на минуту отвалился: автоматика и так проверяет обновления регулярно."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,4,0,0"/>
                     <TextBlock x:Name="LastCheckText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,4,0,0"
                                ToolTip="Обновляется на каждой фоновой проверке, даже если изменений на диске не нашлось — если эта отметка не сдвигается, фоновая проверка не запускается вовсе; если сдвигается, а «Последняя синхронизация» выше — нет, изменений на диске просто не найдено."/>
                     <TextBlock x:Name="RevisionText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,2,0,0"
@@ -80,15 +83,21 @@
             <Border x:Name="PushSection" Style="{StaticResource CardBorder}" Visibility="Collapsed">
                 <StackPanel>
                     <TextBlock Text="ОТПРАВКА ИЗМЕНЕНИЙ НА ДИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Изменения, сделанные на этом компьютере (иерархия, теги, резервы), отправляются на общий диск, откуда их подтянут остальные компьютеры."
+                    <!-- Задача 2: интервал ниже (config_push_interval_min) НЕ убран, в отличие от
+                         интервала получения выше — он не дублирует ничего автоматического. Каждое
+                         изменение справочника (тип шкафа, тег, производитель и т.п.) отправляется на
+                         диск сразу же, само по себе (см. MainWindowViewModel.PushCatalogChange) — этот
+                         интервал только подстраховка на случай, если тот немедленный пуш не удался
+                         (диск был недоступен в момент правки): периодически досылает накопленное. -->
+                    <TextBlock Text="Изменения справочника (иерархия, теги, резервы) отправляются на общий диск сразу же, как только их сделали. Интервал ниже — не основной механизм, а подстраховка: если в момент правки диск был недоступен, накопленные изменения досылаются повторно с этим интервалом."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                         <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
                         <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                        <Button Content="Сохранить" Click="SavePushInterval_Click"/>
+                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Click="SavePushInterval_Click"/>
                     </StackPanel>
-                    <TextBlock Text="0 — автоотправка отключена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
+                    <TextBlock Text="0 — подстраховочная автоотправка отключена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Отправить сейчас" Style="{StaticResource SecondaryButton}" Click="PushNow_Click" Margin="0,0,12,0"/>

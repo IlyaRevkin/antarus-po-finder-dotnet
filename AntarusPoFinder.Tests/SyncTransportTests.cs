@@ -309,6 +309,66 @@ public class SyncTransportTests
         }
         finally { ResetTransportFactory(); }
     }
+
+    // ── Задача 1 — предпросмотр разницы эталонной синхронизации (дисковая фаза) ────────────────
+
+    [Fact]
+    public async Task PreviewAuthoritativeSyncAsync_ComparesLocalExport_AgainstWhatIsCurrentlyOnDisk()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        try
+        {
+            // "На диске" прямо сейчас — обычный экспорт от A с тегом OLD.
+            m.DbA.AddTag("PREVIEW-OLD");
+            ConfigSyncService.Export(m.SvcA, root, "profileA");
+
+            // Локально (B, готовится сделать себя эталоном): другой тег, OLD не добавлен.
+            m.DbB.AddTag("PREVIEW-NEW");
+
+            var (diff, error) = await ConfigSyncService.PreviewAuthoritativeSyncAsync(m.SvcB, root);
+            Assert.Null(error);
+            Assert.NotNull(diff);
+
+            var tags = diff!.Categories.Single(c => c.Label == "Теги");
+            Assert.Contains("PREVIEW-NEW", tags.Added);   // появится у остальных
+            Assert.Contains("PREVIEW-OLD", tags.Removed); // удалится у остальных
+        }
+        finally { ResetTransportFactory(); }
+    }
+
+    [Fact]
+    public async Task PreviewAuthoritativeSyncAsync_NoSharedConfigOnDiskYet_TreatsLocalAsAllAdded()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        try
+        {
+            m.DbA.AddTag("PREVIEW-FIRST-EVER");
+
+            var (diff, error) = await ConfigSyncService.PreviewAuthoritativeSyncAsync(m.SvcA, root);
+            Assert.Null(error);
+            Assert.NotNull(diff);
+            Assert.Equal(0, diff!.TotalRemoved);
+            Assert.Contains("PREVIEW-FIRST-EVER", diff.Categories.Single(c => c.Label == "Теги").Added);
+        }
+        finally { ResetTransportFactory(); }
+    }
+
+    [Fact]
+    public async Task PreviewAuthoritativeSyncAsync_DriveUnavailable_ReturnsError()
+    {
+        using var m = new TwoMachines();
+        try
+        {
+            var (diff, error) = await ConfigSyncService.PreviewAuthoritativeSyncAsync(m.SvcA, @"Z:\этого-пути-точно-нет-antarus-test");
+            Assert.Null(diff);
+            Assert.NotNull(error);
+        }
+        finally { ResetTransportFactory(); }
+    }
 }
 
 /// <summary>Накопитель локальных изменений, готовых к отправке (Задача 4, отправитель) — Database.

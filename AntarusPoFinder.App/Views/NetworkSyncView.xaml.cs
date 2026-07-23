@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App.Views;
@@ -78,7 +79,6 @@ public partial class NetworkSyncView : UserControl
         RootPathInput.Text = _services.Cfg.RootPath();
         SecondDiskInput.Text = _services.Cfg.SecondDiskPath();
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
-        SyncIntervalInput.Text = _services.Cfg.SyncIntervalMin().ToString();
 
         PushIntervalInput.Text = _services.Cfg.ConfigPushIntervalMin().ToString();
 
@@ -125,18 +125,6 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus("Папка осмотра сохранена", category: NotificationCategory.Sync);
     }
 
-
-    private void SaveSyncInterval_Click(object sender, RoutedEventArgs e)
-    {
-        if (!int.TryParse(SyncIntervalInput.Text.Trim(), out var v) || v < 0)
-        {
-            AppMessageBox.Show("Введите целое число минут (0 — отключить автосинхронизацию).", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        _services.Cfg.SetSyncIntervalMin(v);
-        _host.SetSyncIntervalMinutes(v);
-        _host.ShowStatus(v == 0 ? "Автосинхронизация с диском отключена" : $"Интервал синхронизации: {v} мин", category: NotificationCategory.Sync);
-    }
 
     /// <summary>Асинхронная, как и фоновый тик синхронизации: обе долгие части (чтение общего
     /// конфига с шары и досмотр папок версий) уходят в фоновый поток, а внизу окна всё это время
@@ -263,14 +251,15 @@ public partial class NetworkSyncView : UserControl
     /// (типы шкафов/подтипы/контроллеры/модификации/производители/теги/оба списка расширений) —
     /// удалить у себя всё, чего нет в этом снимке (см. Database.ImportHierarchyData(authoritative),
     /// FK-предохранитель там же). Прошивки/параметры/резервы/пользователей это НЕ касается вообще —
-    /// см. SkipKeys/ImportHierarchyDataCore. Необратимая для чужих машин операция — поэтому жёсткий
-    /// YesNo с явным перечислением последствий и MessageBoxResult.No по умолчанию, а не молчаливое
-    /// расширение обычной кнопки «Отправить сейчас».
+    /// см. SkipKeys/ImportHierarchyDataCore. Необратимая для чужих машин операция.
     ///
-    /// Точное число записей, которые уедут как удаление НА КАЖДОЙ ИЗ чужих машин, здесь показать
-    /// нельзя — эта машина не видит их локальные БД (только сама сравнивает свой справочник с
-    /// собой, что тривиально даёт ноль). Поэтому результат ниже — то же самое «что отправлено»,
-    /// что и у обычной отправки, плюс текстовое напоминание о последствиях у получателей.</summary>
+    /// Задача 1: раньше здесь был просто текстовый YesNo без списка того, что реально изменится —
+    /// оператор подтверждал операцию вслепую. Теперь ПЕРЕД подтверждением считается и показывается
+    /// разница (Database.PreviewAuthoritativeDiff/ConfigSyncService.PreviewAuthoritativeSyncAsync —
+    /// свой справочник против того, что СЕЙЧАС на диске) в AuthoritativeDiffDialog: что добавится и
+    /// что удалится по каждой категории. Точное число записей, которые уедут как удаление НА КАЖДОЙ
+    /// ИЗ чужих машин, всё равно показать нельзя — эта машина не видит их локальные БД, только диск
+    /// как приближение к тому, что получатели уже применили; сам диалог явно об этом предупреждает.</summary>
     private async void PushAuthoritative_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
@@ -280,16 +269,20 @@ public partial class NetworkSyncView : UserControl
             return;
         }
 
-        var confirm = AppMessageBox.Show(
-            "Эта операция сделает справочник ЭТОЙ машины эталоном для ВСЕХ остальных компьютеров.\n\n" +
-            "При следующей синхронизации на каждом другом компьютере будут УДАЛЕНЫ записи справочника " +
-            "(типы шкафов, подтипы, контроллеры, модификации, производители ПЧ/УПП, теги, разрешённые " +
-            "расширения), которых нет на этой машине прямо сейчас. Запись, которую там ещё использует " +
-            "локальная прошивка или файл параметров, будет сохранена и пропущена — данные не теряются.\n\n" +
-            "Прошивки, файлы параметров, резервы номеров и пользователи НЕ затрагиваются — удаляются " +
-            "только записи справочника.\n\nПродолжить?",
-            "Эталонная синхронизация", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-        if (confirm != MessageBoxResult.Yes) return;
+        AuthoritativeSyncDiff? diff;
+        string? diffError;
+        using (_host.BeginBusy("Сравнение справочника с диском…"))
+            (diff, diffError) = await ConfigSyncService.PreviewAuthoritativeSyncAsync(_services, root);
+
+        if (diffError is not null)
+        {
+            AppMessageBox.Show($"Не удалось сравнить справочник с диском:\n{diffError}", "Эталонная синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var diffDialog = new AuthoritativeDiffDialog(diff!) { Owner = Application.Current.MainWindow };
+        diffDialog.ShowDialog();
+        if (!diffDialog.Confirmed) return;
 
         PushAuthoritativeButton.IsEnabled = false;
         try

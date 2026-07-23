@@ -266,6 +266,51 @@ public static class ConfigSyncService
         return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
     }
 
+    /// <summary>Задача 1 (эталонная синхронизация) — дисковая фаза предпросмотра разницы ПЕРЕД
+    /// отправкой: читает ТЕКУЩИЙ общий конфиг с диска целиком, специально НЕ через revision-гейт
+    /// ReadShared (тому нужен только «выросла ли ревизия относительно того, что применила ЭТА
+    /// машина» — здесь нужно ровно то, что на диске СЕЙЧАС, независимо от того, что эта машина уже
+    /// видела). Пустой HierarchyExportData(), если общего конфига на диске ещё нет вовсе (самая первая
+    /// синхронизация вообще) — тогда предпросмотр справедливо покажет «добавится всё, что есть
+    /// локально, удалится ничего».</summary>
+    public static async Task<(HierarchyExportData? OnDisk, string? Error)> ReadCurrentDiskHierarchyAsync(string root)
+    {
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            return (null, "Сетевой диск недоступен.");
+
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var transport = TransportFactory(root);
+                var bytes = transport.ReadConfigAsync().GetAwaiter().GetResult();
+                if (bytes is null) return (new HierarchyExportData(), (string?)null);
+
+                var (_, hierarchy) = ParseBytes(bytes);
+                return (hierarchy, (string?)null);
+            });
+        }
+        catch (Exception e)
+        {
+            return (null, e.Message);
+        }
+    }
+
+    /// <summary>Задача 1 — полный предпросмотр эталонной синхронизации: свой экспорт (то, что уйдёт
+    /// в эталон) против того, что СЕЙЧАС лежит в общем конфиге на диске (см.
+    /// ReadCurrentDiskHierarchyAsync выше и Database.PreviewAuthoritativeDiff за тем, почему это
+    /// сравнение — по именам и лучшее доступное приближение, а не точный список того, что удалится
+    /// на КАЖДОЙ чужой машине). Показывается в AuthoritativeDiffDialog перед подтверждением в
+    /// NetworkSyncView.PushAuthoritative_Click.</summary>
+    public static async Task<(AuthoritativeSyncDiff? Diff, string? Error)> PreviewAuthoritativeSyncAsync(AppServices services, string root)
+    {
+        var (onDisk, error) = await ReadCurrentDiskHierarchyAsync(root);
+        if (error is not null) return (null, error);
+
+        var local = services.Db.ExportHierarchyData();
+        return (Database.PreviewAuthoritativeDiff(local, onDisk!), null);
+    }
+
     private static int ReadCurrentRevision(string root)
     {
         try { return TransportFactory(root).ReadRevisionAsync().GetAwaiter().GetResult()?.Revision ?? 0; }
