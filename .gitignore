@@ -21,10 +21,13 @@ installer/*.log
 
 ## Test/automation scratch (screenshots, throwaway scripts — never app code)
 AntarusPoFinder.Tests/scratch/
-## Собранная копия для живого прогона GUI и её вывод — не исходники
-.livetest/
+## Собранная копия для живого прогона GUI и её вывод — не исходники.
+## Шаблон, а не точное имя: прогонов бывает несколько подряд (.livetest2, .livetest3_data,
+## .livetest3_drive.py — сборка, изолированный профиль, скрипты pywinauto и скриншоты).
+.livetest*
 .testout/
 .buildcheck/
+.commitmsg.txt
 
 ## IDE
 .vs/
