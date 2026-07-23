@@ -227,11 +227,15 @@ public partial class SettingsView : UserControl
     }
 
     // ── Nested-scroll bubbling ───────────────────────────────────────────────
-    // Every tab's grids/lists sit inside one long MainScrollViewer. Each grid/list has its own
+    // Only the "free-flowing fields" tabs (Общие/Иерархия/Модерация/Теги) still live inside
+    // MainScrollViewer — see the big comment above it in the XAML. Their grids/lists have their own
     // internal ScrollViewer, and WPF's default behavior marks a mouse-wheel event as handled the
     // moment the inner ScrollViewer touches it — even once it's already at the top/bottom — so the
     // wheel never reaches MainScrollViewer and scrolling the page while hovering a table gets stuck.
     // This forwards the wheel to MainScrollViewer once the inner one has nowhere left to scroll.
+    // The other 4 tabs (Прошивки/Резервация/Быстрый доступ/Пользователи) aren't wired to this at
+    // all anymore — their DataGrid is the only scrollable thing on the tab, so the default WPF
+    // behavior (mouse wheel scrolls the grid, full stop) is exactly right there.
 
     private void ScrollableChild_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -311,13 +315,23 @@ public partial class SettingsView : UserControl
         RenderTagsTab();
     }
 
+    /// <summary>Клиентский фильтр по подстроке (см. TagsFilterInput) — тегов обычно немного, поэтому
+    /// отдельного индекса/запроса к БД не требуется, достаточно отфильтровать уже загруженный список
+    /// перед отрисовкой баблов. Кнопка добавления тега показывается всегда, даже если фильтр ничего
+    /// не нашёл — иначе непонятно, как добавить тег, когда список пуст из-за фильтра.</summary>
     private void RenderTagsTab()
     {
         TagsBubblesPanel.Children.Clear();
-        foreach (var tag in _services.Db.GetAllTags())
+        var filter = TagsFilterInput.Text.Trim();
+        var tags = filter.Length == 0
+            ? _services.Db.GetAllTags()
+            : _services.Db.GetAllTags().Where(t => t.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var tag in tags)
             TagsBubblesPanel.Children.Add(tag == _renamingTag ? MakeTagRenameBubble(tag) : MakeTagBubble(tag));
         TagsBubblesPanel.Children.Add(_addingTag ? MakeTagAddInputBubble() : MakeTagAddButtonBubble());
     }
+
+    private void TagsFilter_Changed(object sender, TextChangedEventArgs e) => RenderTagsTab();
 
     private Border MakeTagBubble(string tag)
     {
@@ -409,10 +423,6 @@ public partial class SettingsView : UserControl
 
     private void LoadGeneral()
     {
-        RoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
-        RoleCombo.SelectedValuePath = "RoleId";
-        RoleCombo.SelectedValue = _services.Cfg.CurrentRole();
-
         // Пароли хранятся хешированными (см. ConfigService.SetAdminPassword/SetProgrammerPassword) —
         // хеш нельзя развернуть обратно в исходный пароль, поэтому поля больше не подставляют
         // «текущий пароль», как раньше (когда там реально лежал открытый текст). SavePasswords_Click
@@ -647,30 +657,6 @@ public partial class SettingsView : UserControl
         }
     }
 
-    private void SwitchRole_Click(object sender, RoutedEventArgs e)
-    {
-        if (RoleCombo.SelectedItem is not RoleOption selected) return;
-        var password = RolePasswordInput.Password;
-
-        string? error = selected.RoleId switch
-        {
-            "administrator" when !_services.Cfg.VerifyAdminPassword(password) => "Неверный пароль администратора.",
-            "programmer" when !_services.Cfg.VerifyProgrammerPassword(password) => "Неверный пароль программиста.",
-            _ => null,
-        };
-
-        if (error is not null)
-        {
-            AppMessageBox.Show(error, "Доступ", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        _host.SwitchRole(selected.RoleId);
-        RolePasswordInput.Password = "";
-        _host.ShowStatus($"Роль изменена: {selected.Label}");
-        UpdateRollbackAccess();
-    }
-
     /// <summary>Откат — программист/администраторское действие (как в Upload); прячем кнопку
     /// в Прошивках от всех кроме administrator (единственная роль с доступом и к Настройкам,
     /// и к Загрузке).</summary>
@@ -684,9 +670,8 @@ public partial class SettingsView : UserControl
     /// уже осмысленное состояние «не задан», но для администратора пустой пароль означает «войти
     /// может кто угодно», а это не то, что должно происходить по умолчанию от простого открытия
     /// вкладки). Известное ограничение такого решения: этой кнопкой больше нельзя вернуть пароль
-    /// программиста обратно в «не задан» пустым полем — единственный способ сейчас ввести какой-то
-    /// пароль явно. Отдельная кнопка «Очистить пароль программиста» — за рамками этого раунда
-    /// правок (см. итоговый отчёт).</summary>
+    /// программиста обратно в «не задан» пустым полем — для этого рядом отдельная кнопка «Очистить
+    /// пароль программиста» (см. ClearProgrammerPassword_Click).</summary>
     private void SavePasswords_Click(object sender, RoutedEventArgs e)
     {
         if (!string.IsNullOrEmpty(AdminPwdInput.Password))
@@ -697,6 +682,18 @@ public partial class SettingsView : UserControl
         AdminPwdInput.Password = "";
         ProgPwdInput.Password = "";
         _host.ShowStatus("Пароли сохранены");
+    }
+
+    /// <summary>Единственный способ вернуть пароль программиста в состояние «не задан» — пустое
+    /// поле в SavePasswords_Click означает «не менять», поэтому оттуда это сделать нельзя (см. её
+    /// комментарий). ConfigService.SetProgrammerPassword("") хранит пустую строку как есть, не
+    /// хешируя её, — тот же смысл «пароль не требуется», что и у изначально незаданного пароля
+    /// (см. ConfigService.VerifyProgrammerPassword).</summary>
+    private void ClearProgrammerPassword_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetProgrammerPassword("");
+        ProgPwdInput.Password = "";
+        _host.ShowStatus("Пароль программиста сброшен — роль «Программист» больше не требует пароля");
     }
 
     private void SaveAdGroups_Click(object sender, RoutedEventArgs e)
@@ -742,13 +739,32 @@ public partial class SettingsView : UserControl
         public string LastLoginAt => Record.LastLoginAt;
     }
 
+    /// <summary>Полный ростер, загруженный из БД — источник для клиентского фильтра (см.
+    /// UsersFilterInput/ApplyUsersFilter). Пользователей обычно не так много, чтобы городить
+    /// запрос к БД под каждое нажатие клавиши — фильтруем уже загруженный список.</summary>
+    private List<UserRow> _allUsersData = new();
+
     private void LoadUsersTab()
     {
-        UsersGrid.ItemsSource = _services.Db.GetAppUsers().Select(u => new UserRow { Record = u }).ToList();
+        _allUsersData = _services.Db.GetAppUsers().Select(u => new UserRow { Record = u }).ToList();
+        ApplyUsersFilter();
 
         UserRoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
         UserRoleCombo.SelectedValuePath = "RoleId";
     }
+
+    private void ApplyUsersFilter()
+    {
+        var filter = UsersFilterInput.Text.Trim();
+        UsersGrid.ItemsSource = filter.Length == 0
+            ? _allUsersData
+            : _allUsersData.Where(u =>
+                    u.AdLogin.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    u.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+    }
+
+    private void UsersFilter_Changed(object sender, TextChangedEventArgs e) => ApplyUsersFilter();
 
     private void RefreshUsers_Click(object sender, RoutedEventArgs e) => LoadUsersTab();
 

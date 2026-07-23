@@ -602,6 +602,14 @@
         <Setter Property="IsReadOnly" Value="True"/>
     </Style>
 
+    <!-- Более просторный вариант обычного DataGrid — используется точечно там, где заголовки
+         столбцов иначе обрезаются (напр. таблицы вкладки "Иерархия" в Настройках: "Префикс типа",
+         "Префикс подтипа"). Не трогает базовый стиль DataGrid выше — он общий на всё приложение. -->
+    <Style x:Key="RoomyDataGrid" TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
+        <Setter Property="RowHeight" Value="34"/>
+        <Setter Property="ColumnHeaderHeight" Value="38"/>
+    </Style>
+
     <!-- Card container (search results, dialogs) -->
     <Style x:Key="CardBorder" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
