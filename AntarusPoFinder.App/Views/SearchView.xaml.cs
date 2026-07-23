@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -391,7 +391,8 @@ public partial class SearchView : UserControl
         var dlg = new EditFirmwareDialog(_services.Db, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes, dlg.ResultHmiExecutableHint);
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
         _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }
@@ -412,11 +413,11 @@ public partial class SearchView : UserControl
     private static string? FindUsableFile(string dir, string? preferredName = null)
     {
         if (!Directory.Exists(dir)) return null;
-        if (!string.IsNullOrEmpty(preferredName))
-        {
-            var preferred = Path.Combine(dir, preferredName);
-            if (File.Exists(preferred)) return preferred;
-        }
+        // Подсказка может указывать на файл во ВЛОЖЕННОЙ папке («Driver\App.exe») — разбирает и
+        // проверяет её ExecutableHintResolver, он же отсекает мусорные значения (абсолютный путь,
+        // «..»), которые могли приехать с другой машины через синхронизацию конфига.
+        var preferred = ExecutableHintResolver.Resolve(dir, preferredName);
+        if (preferred is not null) return preferred;
         return Directory.EnumerateFiles(dir).FirstOrDefault(f =>
             Path.GetExtension(f).ToLowerInvariant() is var ext && ext != ".md" && ext != ".txt" && ext != ".log");
     }
@@ -612,11 +613,8 @@ public partial class SearchView : UserControl
             return;
         }
 
-        if (Directory.Exists(path) && !string.IsNullOrEmpty(result.HmiExecutableHint))
-        {
-            var exePath = Path.Combine(path, result.HmiExecutableHint);
-            if (File.Exists(exePath)) { TryOpen(exePath); return; }
-        }
+        var hmiExe = ExecutableHintResolver.Resolve(path, result.HmiExecutableHint);
+        if (hmiExe is not null) { TryOpen(hmiExe); return; }
         TryOpen(path);
     }
 

@@ -384,23 +384,23 @@ public partial class UploadView : UserControl
     /// fallback: ask the operator directly which file in the folder is the one to run. Purely a
     /// display hint (FwVersionRecord.ExecutableHint/HmiExecutableHint); the whole folder is always
     /// copied regardless (support files/drivers alongside the executable are often required).
-    /// Silent when exactly one candidate matches a known extension — only ambiguous/empty cases
-    /// interrupt the operator.</summary>
+    /// Silent when exactly one candidate matches a known extension — только неоднозначные/пустые
+    /// случаи отвлекают оператора.
+    ///
+    /// И поиск кандидата, и сам выбор теперь идут по ВСЕМУ дереву папки, а не только по верхнему
+    /// уровню: проект, у которого .psl/.fsprj лежит во вложенной папке, раньше и не определялся
+    /// автоматически, и не мог быть указан руками — в списке были только файлы корня.</summary>
     private string? PromptExecutableHint(string folderPath, string[] knownExts, string contextLabel)
     {
-        List<string> topLevelFiles;
-        try { topLevelFiles = Directory.EnumerateFiles(folderPath).Select(Path.GetFileName).ToList()!; }
-        catch { return null; }
-        if (topLevelFiles.Count == 0) return null;
-
-        var matches = topLevelFiles.Where(f => knownExts.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).ToList();
-        if (matches.Count == 1) return matches[0];
+        var auto = ExecutableHintResolver.AutoDetect(folderPath, knownExts);
+        if (auto is not null) return auto;
+        if (ExecutableHintResolver.ListRelativeFiles(folderPath).Count == 0) return null;
 
         var folderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar));
         return PickFileDialog.Pick(Window.GetWindow(this), "Выбрать исполняемый файл",
-            $"В папке «{folderName}» не найден файл со стандартным расширением для {contextLabel}.\n" +
-            "Укажите, какой файл в папке является исполняемым — сама папка будет скопирована целиком в любом случае:",
-            topLevelFiles);
+            $"В папке «{folderName}» не найден однозначный файл со стандартным расширением для {contextLabel}.\n" +
+            "Укажите, какой файл является исполняемым (двойной клик по папке — зайти внутрь) — сама папка будет скопирована целиком в любом случае:",
+            folderPath);
     }
 
     // ── PSL / KINCO auto-detection ────────────────────────────────────────────

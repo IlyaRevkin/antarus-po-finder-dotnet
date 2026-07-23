@@ -2,15 +2,36 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
-        Width="420" SizeToContent="Height" MaxHeight="480"
+        Width="480" Height="520" MinWidth="380" MinHeight="360"
         Background="{DynamicResource BgBrush}"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
-    <StackPanel Margin="16">
-        <TextBlock x:Name="LabelText" Margin="0,0,0,8" TextWrapping="Wrap"/>
-        <ListBox x:Name="FilesList" MaxHeight="280" MouseDoubleClick="FilesList_MouseDoubleClick"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="Пропустить" Style="{StaticResource SecondaryButton}" Width="100" Margin="0,0,8,0" Click="Skip_Click"/>
-            <Button Content="ОК" Width="90" Click="Ok_Click" IsDefault="True"/>
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="LabelText" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+        <!-- Строка «где я сейчас» — диалог теперь умеет заходить в подпапки, без неё после пары
+             двойных кликов непонятно, файл из какой папки будет выбран. -->
+        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,8">
+            <TextBlock x:Name="CurrentPathText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+        </Border>
+
+        <ListBox Grid.Row="2" x:Name="FilesList" MouseDoubleClick="FilesList_MouseDoubleClick"
+                 SelectionChanged="FilesList_SelectionChanged"/>
+
+        <TextBlock Grid.Row="3" x:Name="SelectedText" Style="{StaticResource MutedText}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button Content="Пропустить" Style="{StaticResource SecondaryButton}" Width="110" Margin="0,0,8,0" Click="Skip_Click"
+                    ToolTip="Не указывать исполняемый файл — программа будет открывать первый подходящий файл в папке."/>
+            <Button x:Name="OkButton" Content="ОК" Width="90" Click="Ok_Click" IsDefault="True"/>
         </StackPanel>
-    </StackPanel>
+    </Grid>
 </Window>

@@ -1,8 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Windows;
-using System.Windows.Controls;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -11,9 +10,15 @@ namespace AntarusPoFinder.App.Views;
 
 public partial class EditFirmwareDialog : Window
 {
+    private const string NoExecutableText = "— первый подходящий файл в папке —";
+
     private readonly Database _db;
     private readonly LaunchTypeChecks _checks;
-    private readonly bool _hmiExecutablePickerShown;
+
+    private readonly string? _plcFolder;
+    private readonly string? _hmiFolder;
+    private string _plcHint = "";
+    private string _hmiHint = "";
 
     public string ResultDescription { get; private set; } = "";
     public string ResultTags { get; private set; } = "";
@@ -22,6 +27,9 @@ public partial class EditFirmwareDialog : Window
     /// UpdateFwVersion treats null as "leave unchanged", same as the other optional params, so this
     /// dialog never blanks out an existing hint for firmware that doesn't have this panel at all.</summary>
     public string? ResultHmiExecutableHint { get; private set; }
+    /// <summary>То же самое для исполняемого файла прошивки ПЛК (FwVersionRecord.ExecutableHint) —
+    /// его раньше вообще нельзя было переназначить после загрузки.</summary>
+    public string? ResultExecutableHint { get; private set; }
 
     public EditFirmwareDialog(Database db, FwVersionRecord v, string title)
     {
@@ -33,26 +41,53 @@ public partial class EditFirmwareDialog : Window
 
         _checks = new LaunchTypeChecks(LaunchTypesPanel, v.LaunchTypes);
 
-        // Lets the operator (re)pick which file inside an uploaded HMI folder is the one that
-        // "HMI-проект" should open — e.g. the folder had no recognizable extension at upload time
-        // and the wrong file (or none) got picked then, or the HMI project's own layout changed since.
+        // Позволяет (пере)выбрать, какой файл внутри загруженной папки открывается по кнопкам карточки
+        // — например, при загрузке в папке не было файла с узнаваемым расширением и выбрался не тот
+        // (или вообще никакой), либо структура проекта с тех пор изменилась. Строка показывается
+        // только если на диске реально лежит ПАПКА: для одиночного файла выбирать нечего.
+        if (!string.IsNullOrEmpty(v.DiskPath) && Directory.Exists(v.DiskPath))
+        {
+            _plcFolder = v.DiskPath;
+            _plcHint = ExecutableHintResolver.Normalize(v.ExecutableHint) ?? "";
+            PlcExecutableRow.Visibility = Visibility.Visible;
+            ExecutablesPanel.Visibility = Visibility.Visible;
+        }
         if (!string.IsNullOrEmpty(v.HmiPath) && Directory.Exists(v.HmiPath))
         {
-            List<string> files;
-            // Share went unreachable between the dialog opening and this listing, or a permissions
-            // hiccup on the HMI folder — falls back to "no picker shown", same as the existing
-            // "HmiPath doesn't exist" branch just below the outer if. The dialog's other fields (tags,
-            // status) are unaffected either way.
-            try { files = Directory.EnumerateFiles(v.HmiPath).Select(Path.GetFileName).ToList()!; }
-            catch { files = new(); }
-            if (files.Count > 0)
-            {
-                HmiExecutableCombo.ItemsSource = files;
-                HmiExecutableCombo.SelectedItem = files.FirstOrDefault(f => string.Equals(f, v.HmiExecutableHint, System.StringComparison.OrdinalIgnoreCase)) ?? files[0];
-                HmiExecutablePanel.Visibility = Visibility.Visible;
-                _hmiExecutablePickerShown = true;
-            }
+            _hmiFolder = v.HmiPath;
+            _hmiHint = ExecutableHintResolver.Normalize(v.HmiExecutableHint) ?? "";
+            HmiExecutableRow.Visibility = Visibility.Visible;
+            ExecutablesPanel.Visibility = Visibility.Visible;
         }
+        RefreshExecutableTexts();
+    }
+
+    private void RefreshExecutableTexts()
+    {
+        PlcExecutableText.Text = string.IsNullOrEmpty(_plcHint) ? NoExecutableText : _plcHint;
+        HmiExecutableText.Text = string.IsNullOrEmpty(_hmiHint) ? NoExecutableText : _hmiHint;
+    }
+
+    private void PickPlcExecutable_Click(object sender, RoutedEventArgs e)
+    {
+        if (_plcFolder is null) return;
+        var picked = PickFileDialog.PickRelative(this, "Исполняемый файл прошивки ПЛК",
+            "Какой файл открывать по кнопке «Открыть прошивку ПЛК»?\nДвойной клик по папке — зайти внутрь.",
+            _plcFolder, _plcHint);
+        if (picked.Outcome == PickFileOutcome.Cancelled) return;
+        _plcHint = picked.RelativePath ?? "";
+        RefreshExecutableTexts();
+    }
+
+    private void PickHmiExecutable_Click(object sender, RoutedEventArgs e)
+    {
+        if (_hmiFolder is null) return;
+        var picked = PickFileDialog.PickRelative(this, "Исполняемый файл HMI-проекта",
+            "Какой файл открывать по кнопке «Открыть HMI проект»?\nДвойной клик по папке — зайти внутрь.",
+            _hmiFolder, _hmiHint);
+        if (picked.Outcome == PickFileOutcome.Cancelled) return;
+        _hmiHint = picked.RelativePath ?? "";
+        RefreshExecutableTexts();
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -62,8 +97,8 @@ public partial class EditFirmwareDialog : Window
         foreach (var tag in tags) _db.AddTag(tag);
         ResultTags = string.Join(' ', tags);
         ResultLaunchTypes = _checks.Selected;
-        if (_hmiExecutablePickerShown)
-            ResultHmiExecutableHint = HmiExecutableCombo.SelectedItem as string ?? "";
+        if (_plcFolder is not null) ResultExecutableHint = _plcHint;
+        if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         DialogResult = true;
     }
 

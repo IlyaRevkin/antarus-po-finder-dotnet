@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Domain;
@@ -64,7 +64,8 @@ public partial class NewVersionsView : UserControl
         var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes, dlg.ResultHmiExecutableHint);
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",

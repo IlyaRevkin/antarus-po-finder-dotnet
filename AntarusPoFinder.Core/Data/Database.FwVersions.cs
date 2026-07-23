@@ -58,9 +58,10 @@ public partial class Database
         return id is long l ? (int)l : -1;
     }
 
-    /// <summary>Update editable fields (description, tags, launch_types, HMI executable hint) of a fw_version.</summary>
+    /// <summary>Update editable fields (description, tags, launch_types, исполняемые файлы ПЛК/HMI)
+    /// of a fw_version. Любой параметр null — «не трогать это поле».</summary>
     public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null,
-        string? hmiExecutableHint = null)
+        string? hmiExecutableHint = null, string? executableHint = null)
     {
         var sets = new List<string>();
         var values = new List<(string, object)>();
@@ -68,6 +69,7 @@ public partial class Database
         if (tags is not null) { sets.Add("tags=@tags"); values.Add(("@tags", tags)); }
         if (launchTypes is not null) { sets.Add("launch_types=@launch_types"); values.Add(("@launch_types", JsonSerializer.Serialize(launchTypes))); }
         if (hmiExecutableHint is not null) { sets.Add("hmi_executable_hint=@hmi_executable_hint"); values.Add(("@hmi_executable_hint", hmiExecutableHint)); }
+        if (executableHint is not null) { sets.Add("executable_hint=@executable_hint"); values.Add(("@executable_hint", executableHint)); }
         if (sets.Count == 0) return;
 
         ExecuteNonQuery($"UPDATE fw_versions SET {string.Join(", ", sets)} WHERE id=@id", cmd =>

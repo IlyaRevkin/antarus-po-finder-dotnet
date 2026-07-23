@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -1359,7 +1359,8 @@ public partial class SettingsView : UserControl
         var dlg = new EditFirmwareDialog(_services.Db, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes, dlg.ResultHmiExecutableHint);
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
@@ -1436,7 +1437,8 @@ public partial class SettingsView : UserControl
         bool otherChanged = v.Description != dlg.ResultDescription ||
             !new HashSet<string>(v.LaunchTypes, StringComparer.OrdinalIgnoreCase).SetEquals(dlg.ResultLaunchTypes);
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes, dlg.ResultHmiExecutableHint);
+        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
         _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
             : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
             : $"Без изменений: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);

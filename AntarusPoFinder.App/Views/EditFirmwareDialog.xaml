@@ -22,10 +22,35 @@
              StackPanel просто обрезался бы без возможности до него добраться. -->
         <WrapPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
 
-        <StackPanel x:Name="HmiExecutablePanel" Visibility="Collapsed" Margin="0,0,0,16">
-            <TextBlock Text="Исполняемый файл HMI-проекта:" Margin="0,0,0,4"
-                       ToolTip="Какой файл в папке HMI-проекта открывать по кнопке «HMI-проект»."/>
-            <ComboBox x:Name="HmiExecutableCombo" Height="34"/>
+        <!-- Модерация исполняемых файлов: и для ПЛК, и для HMI (раньше можно было переназначить
+             только HMI, и только среди файлов КОРНЯ папки — если нужный файл лежал во вложенной
+             папке, выбрать его было нечем). Кнопка открывает PickFileDialog с обходом подпапок. -->
+        <StackPanel x:Name="ExecutablesPanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="ИСПОЛНЯЕМЫЕ ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+
+            <Grid x:Name="PlcExecutableRow" Margin="0,0,0,6" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Прошивка ПЛК:" VerticalAlignment="Center"
+                           ToolTip="Какой файл в папке версии открывать по кнопке «Открыть прошивку ПЛК»."/>
+                <TextBlock Grid.Column="1" x:Name="PlcExecutableText" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+                <Button Grid.Column="2" Content="Выбрать..." Style="{StaticResource SecondaryButton}" Click="PickPlcExecutable_Click"/>
+            </Grid>
+
+            <Grid x:Name="HmiExecutableRow" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="HMI-проект:" VerticalAlignment="Center"
+                           ToolTip="Какой файл в папке HMI-проекта открывать по кнопке «Открыть HMI проект»."/>
+                <TextBlock Grid.Column="1" x:Name="HmiExecutableText" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+                <Button Grid.Column="2" Content="Выбрать..." Style="{StaticResource SecondaryButton}" Click="PickHmiExecutable_Click"/>
+            </Grid>
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
