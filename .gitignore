@@ -9,6 +9,7 @@ release_out/
 
 ## Installer build output (built from installer/Package.wxs — never the source)
 installer/*.msi
+installer/*.exe
 installer/*.wixpdb
 installer/*.log
 .wix/
