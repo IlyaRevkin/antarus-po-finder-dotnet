@@ -11,6 +11,10 @@
                 <TextBlock x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0"/>
+            <!-- Что реально лежит рядом с версией (LFS/PSL/HMI/параметры/документы). Раньше это было
+                 видно только по тому, есть ли пункт в меню «Ещё» — то есть «есть ли LFS» приходилось
+                 выяснять, открыв меню и не найдя там строки. -->
+            <TextBlock x:Name="FilesLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
             <TextBlock x:Name="DescLabel" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" Margin="0,4,0,0"
                        MouseLeftButtonUp="DescLabel_Click"/>
             <views:TagBubbleEditor x:Name="TagsView" Margin="0,4,0,0"/>

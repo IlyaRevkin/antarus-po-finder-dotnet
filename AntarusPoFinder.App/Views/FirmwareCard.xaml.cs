@@ -23,10 +23,21 @@ public sealed record FirmwareCardFlags
     public bool HasHmi { get; init; }
     public bool HasMap { get; init; }
 
-    /// <summary>Нашёлся .lfs / .psl — кнопки открытия этих файлов показываются только тогда, когда
-    /// открывать реально есть что.</summary>
+    /// <summary>Нашёлся .lfs / .psl. У Segnetics-проектов (см. <see cref="IsSegnetics"/>) пункты меню
+    /// для них показываются ВСЕГДА: спрятанная строка «Открыть файл LFS» не отличима от «я не туда
+    /// посмотрел», поэтому отсутствие файла — это неактивный пункт с объяснением, а не пустое
+    /// место.</summary>
     public bool HasLfs { get; init; }
     public bool HasPsl { get; init; }
+
+    /// <summary>Бывают ли у этой версии .psl/.lfs вообще (SegneticsProject.IsRelevant). У шкафа на
+    /// KINCO их не бывает, и «LFS —» там означало бы потерянный файл вместо «не про эту версию».</summary>
+    public bool IsSegnetics { get; init; }
+
+    /// <summary>Обход диска (LFS/PSL/HMI/карта) ещё идёт — карточка уже нарисована, но про файлы
+    /// рядом с версией пока ничего не известно. Нужен, чтобы «нет LFS» не показывалось секунду как
+    /// факт, пока сетевую папку ещё читают (см. SearchView.ScanDiskFlagsAsync).</summary>
+    public bool DiskScanPending { get; init; }
 
     public bool CanEditTags { get; init; }
 
@@ -66,6 +77,7 @@ public partial class FirmwareCard : UserControl
     public FirmwareCard()
     {
         InitializeComponent();
+        MorePopup.Closed += MorePopup_Closed;
     }
 
     public void Configure(HierarchyResult result, FirmwareCardFlags flags)
@@ -101,15 +113,27 @@ public partial class FirmwareCard : UserControl
 
         SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
 
+        ShowFilesLine(result, flags);
+
         ActionsPanel.Children.Clear();
         MorePanel.Children.Clear();
 
-        // ── Основной ряд: только то, ради чего карточку открывают ──────────
-        // Порядок: сначала «Открыть прошивку ПЛК», СРАЗУ за ней «Открыть HMI проект» — две кнопки
-        // открытия самого ПО стоят рядом, а не разнесены через полсписка.
-        var plcBtn = MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
-        if (!string.IsNullOrEmpty(result.ExecutableHint))
-            plcBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
+        // ── Основной ряд: открыть → посмотреть → залить ────────────────────
+        // Порядок соответствует тому, как карточкой пользуются: сначала открыть проект, потом
+        // сопутствующее (панель, параметры), последней — заливка в контроллер. Всё остальное —
+        // в меню «Ещё», сгруппированное по смыслу.
+        //
+        // Название первой кнопки зависит от того, что реально лежит рядом: у Segnetics-проектов
+        // открывается исходник .psl (залитый .lfs текстовым редактором открывать бессмысленно), и
+        // кнопка так и называется — раньше она называлась «Открыть прошивку ПЛК» независимо от
+        // того, что откроется, и оператор не понимал, PSL это или нет.
+        var plcLabel = flags.HasPsl && string.IsNullOrEmpty(result.ExecutableHint)
+            ? "Открыть проект PSL"
+            : "Открыть прошивку ПЛК";
+        var plcBtn = MakeActionButton(plcLabel, (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
+        plcBtn.ToolTip = !string.IsNullOrEmpty(result.ExecutableHint)
+            ? $"Исполняемый файл: {result.ExecutableHint}"
+            : flags.HasPsl ? "Исходный проект SMLogix (.psl)" : null;
         ActionsPanel.Children.Add(plcBtn);
 
         if (flags.HasHmi)
@@ -123,37 +147,100 @@ public partial class FirmwareCard : UserControl
         if (flags.HasParams)
             ActionsPanel.Children.Add(MakeActionButton("Параметры", (_, _) => ParamsRequested?.Invoke(this, EventArgs.Empty)));
 
-        if (!string.IsNullOrEmpty(result.InstructionsPath))
-            ActionsPanel.Children.Add(MakeActionButton("Инструкции", (_, _) => InstructionsRequested?.Invoke(this, EventArgs.Empty)));
-
-        var loaderBtn = MakeActionButton("Загрузить в ПЛК", (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
-        loaderBtn.ToolTip = "Загрузка в контроллер через лоадер: параметры, прогресс и лог";
+        var loaderBtn = MakeActionButton(flags.HasLfs ? "Загрузить в ПЛК (LFS)" : "Загрузить в ПЛК",
+            (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
+        loaderBtn.ToolTip = flags.HasLfs
+            ? "Загрузка в контроллер через лоадер: найденный .lfs подставится сам, дальше — параметры, прогресс и лог"
+            : "Загрузка в контроллер через лоадер. Рядом с версией нет .lfs — файл придётся выбрать вручную в диалоге";
         ActionsPanel.Children.Add(loaderBtn);
 
-        // ── Меню «Ещё»: всё остальное ─────────────────────────────────────
-        AddMenuItem("Открыть папку с файлом", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
-        if (flags.HasLfs)
+        // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
+        AddMenuHeader("Файлы версии");
+        AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
+        // У Segnetics-проекта пункты LFS/PSL показываются всегда — неактивный пункт с причиной
+        // честнее, чем исчезнувшая строка. У остальных (KINCO и т.п.) их не бывает в принципе, и
+        // строка про них — просто мусор в меню.
+        if (flags.IsSegnetics)
+        {
             AddMenuItem("Открыть файл LFS", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
-                "Скомпилированный файл, который заливается в контроллер");
-        if (flags.HasPsl)
+                flags.HasLfs
+                    ? "Скомпилированный файл, который заливается в контроллер"
+                    : "Рядом с версией нет .lfs — версия загружена без скомпилированного файла",
+                enabled: flags.HasLfs);
             AddMenuItem("Открыть файл PSL", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
-                "Исходный проект SMLogix");
-        if (!string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap)
-            AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty));
-        if (!string.IsNullOrEmpty(result.ModbusMapPath))
-            AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty));
-        AddMenuItem("История", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
-        if (flags.CanEditTags)
-            AddMenuItem("Теги", () => TagsEditRequested?.Invoke(this, EventArgs.Empty));
+                flags.HasPsl
+                    ? "Исходный проект SMLogix"
+                    : "Рядом с версией нет .psl — либо это не проект SMLogix, либо исходник не выкладывали",
+                enabled: flags.HasPsl);
+        }
         AddMenuItem("Обновить локальную копию с диска", () => DownloadRequested?.Invoke(this, EventArgs.Empty),
             "Скопировать версию с сетевого диска заново — если автосинхронизация выключена или не удалась");
 
+        AddMenuHeader("Документация");
+        var hasIoMap = !string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap;
+        AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty),
+            hasIoMap ? null : "Карта in/out к этой версии не приложена", enabled: hasIoMap);
+        var hasModbus = !string.IsNullOrEmpty(result.ModbusMapPath);
+        AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty),
+            hasModbus ? null : "Карта modbus к этой версии не приложена", enabled: hasModbus);
+        var hasInstructions = !string.IsNullOrEmpty(result.InstructionsPath);
+        AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
+            hasInstructions ? null : "Инструкция к этой версии не приложена", enabled: hasInstructions);
+
+        AddMenuHeader("Версия");
+        AddMenuItem("История версий", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
+        if (flags.CanEditTags)
+            AddMenuItem("Теги и описание", () => TagsEditRequested?.Invoke(this, EventArgs.Empty));
+
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
-        moreBtn.ToolTip = "Папка с файлами, LFS/PSL, карты, история, теги, синхронизация";
+        moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, теги";
         ActionsPanel.Children.Add(moreBtn);
         MorePopup.PlacementTarget = moreBtn;
 
-        ShowInitialSyncStatus(flags);
+        // Только при первой отрисовке: карточка перерисовывается второй раз, когда досчитается
+        // обход диска (SearchView.ScanDiskFlagsAsync), и затирать этим уже показанный ход
+        // автосинхронизации («Синхронизация с диском…», «✓ Локальная копия обновлена») нельзя.
+        if (!_syncStatusShown)
+        {
+            _syncStatusShown = true;
+            ShowInitialSyncStatus(flags);
+        }
+    }
+
+    private bool _syncStatusShown;
+
+    /// <summary>Строка «что лежит рядом с версией». У Segnetics LFS/PSL показываются с явным «нет» —
+    /// именно про них был вопрос «есть он или нет»; остальное перечисляется, только когда есть.</summary>
+    private void ShowFilesLine(HierarchyResult result, FirmwareCardFlags flags)
+    {
+        FilesLabel.ToolTip = flags.IsSegnetics
+            ? ".LFS — скомпилированный файл, его заливают в контроллер лоадером.\n" +
+              ".PSL — исходный проект SMLogix, его открывают для правки."
+            : null;
+
+        if (flags.DiskScanPending)
+        {
+            FilesLabel.Visibility = Visibility.Visible;
+            FilesLabel.Text = "Файлы: проверяем папку версии…";
+            return;
+        }
+
+        var parts = new List<string>();
+        // «LFS —»/«PSL —» — только там, где эти файлы бывают: у KINCO-шкафа их отсутствие не новость,
+        // а прочерк выглядел бы как потерянный файл (см. SegneticsProject).
+        if (flags.IsSegnetics)
+        {
+            parts.Add(flags.HasLfs ? "LFS ✓" : "LFS —");
+            parts.Add(flags.HasPsl ? "PSL ✓" : "PSL —");
+        }
+        if (flags.HasHmi) parts.Add("HMI ✓");
+        if (flags.HasParams) parts.Add("параметры ✓");
+        if (!string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap) parts.Add("карта ВВ ✓");
+        if (!string.IsNullOrEmpty(result.ModbusMapPath)) parts.Add("карта modbus ✓");
+        if (!string.IsNullOrEmpty(result.InstructionsPath)) parts.Add("инструкция ✓");
+        // Ни одного файла-спутника — строка не нужна вовсе, пустое «Файлы:» только занимает место.
+        FilesLabel.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FilesLabel.Text = "Файлы: " + string.Join(" · ", parts);
     }
 
     // ── Статус локальной копии ────────────────────────────────────────────
@@ -203,7 +290,21 @@ public partial class FirmwareCard : UserControl
         return btn;
     }
 
-    private void AddMenuItem(string text, Action action, string? tooltip = null)
+    private void AddMenuHeader(string text)
+    {
+        var header = new TextBlock
+        {
+            Text = text.ToUpperInvariant(),
+            Style = (Style)FindResource("MutedText"),
+            Margin = new Thickness(2, MorePanel.Children.Count == 0 ? 0 : 8, 0, 4),
+            FontSize = 10,
+        };
+        MorePanel.Children.Add(header);
+    }
+
+    /// <summary>enabled=false — пункт остаётся на месте, но недоступен, а tooltip объясняет, почему
+    /// (см. комментарий про LFS/PSL в Configure).</summary>
+    private void AddMenuItem(string text, Action action, string? tooltip = null, bool enabled = true)
     {
         var btn = new Button
         {
@@ -212,8 +313,12 @@ public partial class FirmwareCard : UserControl
             Margin = new Thickness(0, 0, 0, 4),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
+            IsEnabled = enabled,
+            // Подсказка на выключенной кнопке по умолчанию не показывается — иначе объяснение
+            // «почему нельзя» невидимо ровно в том случае, ради которого написано.
             ToolTip = tooltip,
         };
+        if (tooltip is not null) ToolTipService.SetShowOnDisabled(btn, true);
         btn.Click += (_, _) =>
         {
             MorePopup.IsOpen = false;
@@ -222,7 +327,20 @@ public partial class FirmwareCard : UserControl
         MorePanel.Children.Add(btn);
     }
 
-    private void ToggleMore() => MorePopup.IsOpen = !MorePopup.IsOpen;
+    /// <summary>Popup со StaysOpen="False" закрывается сам по клику мимо — и клик по самой кнопке
+    /// «Ещё ▾» тоже считается «мимо». Обработчик Click приходит уже ПОСЛЕ этого закрытия, видит
+    /// IsOpen=false и открывает меню заново: меню невозможно было закрыть той же кнопкой, которой
+    /// открыл (жалоба «нажимаю — ничего, тыкаю несколько раз»). Поэтому клик, пришедший сразу после
+    /// автозакрытия, считается закрывающим.</summary>
+    private DateTime _morePopupClosedAt = DateTime.MinValue;
+
+    private void MorePopup_Closed(object? sender, EventArgs e) => _morePopupClosedAt = DateTime.Now;
+
+    private void ToggleMore()
+    {
+        if (!MorePopup.IsOpen && (DateTime.Now - _morePopupClosedAt).TotalMilliseconds < 250) return;
+        MorePopup.IsOpen = !MorePopup.IsOpen;
+    }
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {

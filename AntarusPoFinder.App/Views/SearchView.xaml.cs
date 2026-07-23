@@ -151,23 +151,27 @@ public partial class SearchView : UserControl
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
-        var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
+        var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
 
         foreach (var result in results)
         {
             var subtypeName = _subtypesById.TryGetValue(result.SubtypeId, out var sub) ? sub.Name : "";
-            var (hasLfs, hasPsl) = ScanLoaderFiles(result);
+            // Только дешёвые признаки: локальный кэш (свой диск) и запрос в SQLite. Всё, что требует
+            // обхода папки версии — она обычно на сетевом диске — считается потом, в фоне
+            // (ScanDiskFlagsAsync): раньше это делалось прямо здесь, синхронно, на КАЖДЫЙ результат,
+            // и «Найти» на десяти результатах вешало окно на секунды — ровно жалоба «нажимаю кнопку,
+            // ничего не происходит, тыкаю несколько раз — тогда находит» (клики копились в очереди).
             var flags = new FirmwareCardFlags
             {
                 HasLocal = HasLocal(result),
                 HasAnyLocal = HasAnyLocal(result),
                 HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
-                HasHmi = HasHmiTarget(result),
-                HasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null,
-                HasLfs = hasLfs,
-                HasPsl = hasPsl,
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
+                DiskScanPending = true,
+                // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
+                // реально нашлось рядом (см. ScanDiskFlagsAsync).
+                IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint),
             };
 
             var card = new FirmwareCard();
@@ -188,7 +192,7 @@ public partial class SearchView : UserControl
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
-            if (autoSync && !flags.HasLocal) pendingSync.Add((card, result));
+            pending.Add((card, result, flags));
         }
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
@@ -197,7 +201,74 @@ public partial class SearchView : UserControl
             return;
         }
 
-        if (pendingSync.Count > 0) _ = AutoSyncMissingAsync(pendingSync, _searchGeneration);
+        _ = ScanDiskFlagsAsync(pending, _searchGeneration);
+    }
+
+    // ── Что лежит рядом с версией на диске ────────────────────────────────
+    // Обход папки версии (LFS/PSL/HMI/карта ВВ) — единственная по-настоящему медленная часть выдачи:
+    // папка живёт на сетевом диске компании, который регулярно отвечает через раз. Поэтому карточки
+    // рисуются сразу, а этот обход идёт следом в фоне и дорисовывает их по мере готовности.
+
+    private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi, bool HasMap);
+
+    /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
+    /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
+    /// нашлось.</summary>
+    private static DiskScan ScanVersionFolder(HierarchyResult result)
+    {
+        bool lfs = false, psl = false, hmiFile = false;
+        foreach (var dir in CandidateFolders(result))
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (ext == LoaderFiles.LfsExtension) lfs = true;
+                    else if (ext == LoaderFiles.PslExtension) psl = true;
+                    else if (KincoHmiExts.Contains(ext)) hmiFile = true;
+                }
+            }
+            catch (Exception) { /* недоступная папка — просто «не нашли», см. LoaderFiles.Find */ }
+            if (lfs || psl || hmiFile) break;
+        }
+
+        var hasHmi = !string.IsNullOrEmpty(result.HmiPath)
+            || ExecutableHintResolver.Normalize(result.HmiExecutableHint) is not null
+            || hmiFile;
+        var hasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null;
+        return new DiskScan(lfs, psl, hasHmi, hasMap);
+    }
+
+    /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
+    /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
+    /// что и AutoSyncMissingAsync.</summary>
+    private async Task ScanDiskFlagsAsync(List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)> cards, int generation)
+    {
+        var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
+
+        foreach (var (card, result, baseFlags) in cards)
+        {
+            if (generation != _searchGeneration) return;
+
+            var scan = await Task.Run(() => ScanVersionFolder(result));
+            if (generation != _searchGeneration) return;
+
+            card.Configure(result, baseFlags with
+            {
+                HasLfs = scan.HasLfs,
+                HasPsl = scan.HasPsl,
+                HasHmi = scan.HasHmi,
+                HasMap = scan.HasMap,
+                DiskScanPending = false,
+                IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
+            });
+
+            if (baseFlags.AutoSync && !baseFlags.HasLocal) pendingSync.Add((card, result));
+        }
+
+        if (pendingSync.Count > 0) await AutoSyncMissingAsync(pendingSync, generation);
     }
 
     // ── Автосинхронизация локальных копий ─────────────────────────────────
@@ -558,14 +629,6 @@ public partial class SearchView : UserControl
         return Directory.Exists(result.FirmwareDir) ? result.FirmwareDir : null;
     }
 
-    /// <summary>Есть ли что открывать кнопкой «Открыть HMI проект»: отдельно загруженный HMI-проект,
-    /// явно указанный файл панели внутри папки версии, или (для старых записей без подсказок) файл с
-    /// KINCO-расширением рядом с прошивкой.</summary>
-    private static bool HasHmiTarget(HierarchyResult result) =>
-        !string.IsNullOrEmpty(result.HmiPath)
-        || ExecutableHintResolver.Normalize(result.HmiExecutableHint) is not null
-        || FindFiltered(result, KincoHmiExts) is not null;
-
     /// <summary>Проекты, где ПЛК и панель лежат в ОДНОЙ папке — это не только KINCO: то же бывает у
     /// любого вендора, где панель собирается отдельным файлом рядом с программой ПЛК. Поэтому сначала
     /// смотрим на явно указанный оператором исполняемый файл (работает для любого проекта и для
@@ -576,6 +639,15 @@ public partial class SearchView : UserControl
         if (ResolveHintedFile(result, result.ExecutableHint) is { } hinted)
         {
             TryOpen(hinted);
+            return;
+        }
+        // Проект Segnetics: рядом лежат .psl (исходник SMLogix) и .lfs (скомпилированный файл для
+        // заливки). Открывать надо именно .psl — .lfs не открывается ничем, кроме лоадера, а общая
+        // эвристика «первый непонятный файл в папке» вполне могла взять его и молча открыть блокнот
+        // (карточка теперь и называет эту кнопку «Открыть проект PSL», когда исходник найден).
+        if (LoaderFiles.FindIn(CandidateFolders(result), LoaderFiles.PslExtension) is { } psl)
+        {
+            TryOpen(psl);
             return;
         }
         if (FindFiltered(result, KincoHmiExts) is not null && FindFiltered(result, KincoPlcExts) is not null)
@@ -640,31 +712,6 @@ public partial class SearchView : UserControl
             return;
         }
         Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-    }
-
-    /// <summary>Есть ли рядом с версией собранный .lfs и исходный .psl. Одним проходом по первой же
-    /// папке-кандидату, где вообще что-то нашлось: отдельные поиски на каждое расширение удваивали
-    /// бы обход дерева на КАЖДЫЙ результат поиска, а это часто сетевой диск.</summary>
-    private static (bool HasLfs, bool HasPsl) ScanLoaderFiles(HierarchyResult result)
-    {
-        foreach (var dir in CandidateFolders(result))
-        {
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
-            bool lfs = false, psl = false;
-            try
-            {
-                foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
-                {
-                    var ext = Path.GetExtension(file);
-                    if (string.Equals(ext, LoaderFiles.LfsExtension, StringComparison.OrdinalIgnoreCase)) lfs = true;
-                    else if (string.Equals(ext, LoaderFiles.PslExtension, StringComparison.OrdinalIgnoreCase)) psl = true;
-                    if (lfs && psl) break;
-                }
-            }
-            catch (Exception) { /* недоступная папка — просто «не нашли», см. LoaderFiles.Find */ }
-            if (lfs || psl) return (lfs, psl);
-        }
-        return (false, false);
     }
 
     private void OpenLoaderFile(HierarchyResult result, string extension, string label)
