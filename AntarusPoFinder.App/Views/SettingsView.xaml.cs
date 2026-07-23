@@ -26,18 +26,22 @@ public partial class SettingsView : UserControl
     private readonly IAppHost _host;
     private List<FwVersionRecord> _fwVersionsData = new();
 
-    /// <summary>One row per subtype — the unified ТИПЫ/ПОДТИПЫ table. A group always has at least
-    /// one subtype row (see Database.EnsureEveryGroupHasSubtype), so this is also the complete list
-    /// of groups; there's no separate group-only grid to keep in sync with it.</summary>
+    /// <summary>One row per subtype — the unified ТИПЫ/ПОДТИПЫ table. Normally a group has at least
+    /// one subtype row (Database.EnsureEveryGroupHasSubtype backfills a «—» placeholder on startup),
+    /// but a group CAN temporarily end up with zero: the config import mirrors subtype deletions from
+    /// another machine, and the backfill only runs at startup. Such a group used to vanish from this
+    /// table entirely while still being offered in Загрузка ПО's «Тип шкафа» combo — a junk type the
+    /// operator could see everywhere except where it can be deleted (his exact report). It now shows
+    /// as a row with Subtype == null, so it can be selected, renamed and deleted like any other.</summary>
     private class HierarchyRow
     {
         public EquipmentGroup Group { get; init; } = null!;
-        public EquipmentSubType Subtype { get; init; } = null!;
+        public EquipmentSubType? Subtype { get; init; }
         public string GroupName => Group.Name;
         public int GroupPrefix => Group.Prefix;
-        public string SubtypeName => Subtype.Name;
-        public int SubtypePrefix => Subtype.Prefix;
-        public string FolderName => Subtype.FolderName;
+        public string SubtypeName => Subtype?.Name ?? "(нет подтипов)";
+        public string SubtypePrefix => Subtype is null ? "—" : Subtype.Prefix.ToString();
+        public string FolderName => Subtype?.FolderName ?? Group.Name;
     }
 
     /// <summary>Flattens controller types + their modifications into one grid: one row per modification,
@@ -777,7 +781,15 @@ public partial class SettingsView : UserControl
         var groups = _services.Db.GetAllEquipmentGroups();
         var hierarchyRows = new List<HierarchyRow>();
         foreach (var g in groups)
-            hierarchyRows.AddRange(_services.Db.GetSubtypesForGroup(g.Id!.Value).Select(s => new HierarchyRow { Group = g, Subtype = s }));
+        {
+            var subtypes = _services.Db.GetSubtypesForGroup(g.Id!.Value);
+            // Тип без подтипов — тоже строка (см. HierarchyRow): иначе он невидим здесь, но виден в
+            // «Загрузке ПО», и удалить его из интерфейса нечем.
+            if (subtypes.Count == 0)
+                hierarchyRows.Add(new HierarchyRow { Group = g, Subtype = null });
+            else
+                hierarchyRows.AddRange(subtypes.Select(s => new HierarchyRow { Group = g, Subtype = s }));
+        }
         HierarchyGrid.ItemsSource = hierarchyRows;
 
         var prevSelection = ControllersGrid.SelectedItem is ControllerModRow prevRow
@@ -866,7 +878,7 @@ public partial class SettingsView : UserControl
 
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Тип шкафа добавлен: {trimmedGroupName} ({folderName})");
     }
 
     /// <summary>"Переименовать тип/подтип"/"Изменить префикс типа/подтипа" used to be four separate
@@ -921,7 +933,7 @@ public partial class SettingsView : UserControl
         }
         _services.Db.UpsertEquipmentGroup(new EquipmentGroup { Name = group.Name, Prefix = prefix, SortOrder = group.SortOrder });
         LoadHierarchy();
-        _host.ShowStatus($"Префикс типа «{group.Name}» изменён на {prefix}", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Префикс типа «{group.Name}» изменён на {prefix}");
     }
 
     /// <summary>Unlike the prefix (a DB-only value), the group's Name is also its on-disk folder
@@ -962,7 +974,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.RenameEquipmentGroup(group.Id!.Value, trimmed);
         LoadHierarchy();
-        _host.ShowStatus($"Тип шкафа переименован: «{group.Name}» → «{trimmed}»", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Тип шкафа переименован: «{group.Name}» → «{trimmed}»");
     }
 
     private void AddSubtype_Click(object sender, RoutedEventArgs e)
@@ -1004,12 +1016,12 @@ public partial class SettingsView : UserControl
         });
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Подтип добавлен: {folderName}", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Подтип добавлен: {folderName}");
     }
 
     private void EditSubtypePrefix_Click(object sender, RoutedEventArgs e)
     {
-        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row || row.Subtype is null)
         {
             AppMessageBox.Show("Выберите подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -1036,7 +1048,7 @@ public partial class SettingsView : UserControl
             SortOrder = row.Subtype.SortOrder,
         });
         LoadHierarchy();
-        _host.ShowStatus($"Префикс подтипа «{row.FolderName}» изменён на {prefix}", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Префикс подтипа «{row.FolderName}» изменён на {prefix}");
     }
 
     /// <summary>Same disk-folder-move reasoning as RenameGroup_Click. Not offered for the "—"
@@ -1044,7 +1056,7 @@ public partial class SettingsView : UserControl
     /// own, so there's nothing meaningful to rename.</summary>
     private void RenameSubtype_Click(object sender, RoutedEventArgs e)
     {
-        if (HierarchyGrid.SelectedItem is not HierarchyRow row)
+        if (HierarchyGrid.SelectedItem is not HierarchyRow row || row.Subtype is null)
         {
             AppMessageBox.Show("Выберите подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -1082,7 +1094,7 @@ public partial class SettingsView : UserControl
         var newFolderName = $"{row.GroupName}-{trimmed}";
         _services.Db.RenameEquipmentSubtype(row.Subtype.Id!.Value, trimmed, newFolderName);
         LoadHierarchy();
-        _host.ShowStatus($"Подтип переименован: «{row.Subtype.Name}» → «{trimmed}»", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Подтип переименован: «{row.Subtype.Name}» → «{trimmed}»");
     }
 
     /// <summary>Deletes the subtype in the selected row. A group can't be left without any subtype
@@ -1093,6 +1105,21 @@ public partial class SettingsView : UserControl
         if (HierarchyGrid.SelectedItem is not HierarchyRow row)
         {
             AppMessageBox.Show("Выберите строку для удаления.", "Удаление", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // Тип без подтипов (см. HierarchyRow) — удалять нечего, кроме самого типа.
+        if (row.Subtype is null)
+        {
+            var replyGroup = AppMessageBox.Show(
+                $"У типа «{row.GroupName}» нет ни одного подтипа. Удалить сам тип шкафа?",
+                "Удалить тип шкафа", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (replyGroup != MessageBoxResult.Yes) return;
+
+            _services.Db.DeleteEquipmentGroup(row.Group.Id!.Value);
+            LoadHierarchy();
+            MoveDeletedFolder(row.GroupName);
+            _host.PushCatalogChange($"Тип шкафа «{row.GroupName}» удалён");
             return;
         }
 
@@ -1107,6 +1134,7 @@ public partial class SettingsView : UserControl
             _services.Db.DeleteEquipmentGroup(row.Subtype.GroupId);
             LoadHierarchy();
             MoveDeletedFolder(row.GroupName);
+            _host.PushCatalogChange($"Тип шкафа «{row.GroupName}» удалён");
             return;
         }
 
@@ -1117,6 +1145,7 @@ public partial class SettingsView : UserControl
         _services.Db.DeleteEquipmentSubtype(row.Subtype.Id!.Value);
         LoadHierarchy();
         MoveDeletedFolder(row.FolderName);
+        _host.PushCatalogChange($"Подтип «{row.FolderName}» удалён");
     }
 
     private void AddController_Click(object sender, RoutedEventArgs e)
@@ -1127,7 +1156,7 @@ public partial class SettingsView : UserControl
         _services.Db.UpsertControllerModel(new ControllerModel { Name = upper, SortOrder = ControllersGrid.Items.Count + 1 });
         LoadHierarchy();
         AutoRebuild();
-        _host.ShowStatus($"Контроллер добавлен: {upper}", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Контроллер добавлен: {upper}");
     }
 
     private void AddModification_Click(object sender, RoutedEventArgs e)
@@ -1142,6 +1171,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.AddControllerModification(row.ControllerId, dlg.ModName, dlg.HwVersion, dlg.Description);
         LoadHierarchy();
+        _host.PushCatalogChange($"Модификация добавлена: {dlg.ModName}");
         _host.ShowStatus($"Модификация добавлена: {dlg.ModName} (hw{dlg.HwVersion})", category: NotificationCategory.Hierarchy);
     }
 
@@ -1161,6 +1191,7 @@ public partial class SettingsView : UserControl
 
             _services.Db.DeleteControllerModification(modId);
             LoadHierarchy();
+            _host.PushCatalogChange($"Модификация «{row.DisplayName}» удалена");
             return;
         }
 
@@ -1171,6 +1202,7 @@ public partial class SettingsView : UserControl
         _services.Db.DeleteControllerModel(row.ControllerId);
         LoadHierarchy();
         MoveDeletedFolder(row.ControllerName);
+        _host.PushCatalogChange($"Контроллер «{row.ControllerName}» удалён");
     }
 
     private void AddManufacturer_Click(object sender, RoutedEventArgs e)
@@ -1180,6 +1212,7 @@ public partial class SettingsView : UserControl
         _services.Db.AddParamManufacturer(name.Trim());
         LoadHierarchy();
         AutoRebuild();
+        _host.PushCatalogChange($"Производитель ПЧ/УПП добавлен: {name.Trim()}");
     }
 
     private void DeleteManufacturer_Click(object sender, RoutedEventArgs e)
@@ -1196,6 +1229,7 @@ public partial class SettingsView : UserControl
         _services.Db.DeleteParamManufacturer(name);
         LoadHierarchy();
         MoveDeletedFolder(name);
+        _host.PushCatalogChange($"Производитель ПЧ/УПП «{name}» удалён");
     }
 
     private void AddExtension_Click(object sender, RoutedEventArgs e)
@@ -1205,7 +1239,7 @@ public partial class SettingsView : UserControl
         _services.Db.AddAllowedExtension(ext);
         ExtInput.Text = "";
         LoadHierarchy();
-        _host.ShowStatus($"Расширение добавлено: .{ext.ToLowerInvariant().TrimStart('.')}", category: NotificationCategory.Hierarchy);
+        _host.PushCatalogChange($"Расширение добавлено: .{ext.ToLowerInvariant().TrimStart('.')}");
     }
 
     private void DeleteExtension_Click(object sender, RoutedEventArgs e)
@@ -1221,6 +1255,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.RemoveAllowedExtension(ext);
         LoadHierarchy();
+        _host.PushCatalogChange($"Расширение «.{ext}» удалено");
     }
 
     private void RebuildHierarchy_Click(object sender, RoutedEventArgs e)

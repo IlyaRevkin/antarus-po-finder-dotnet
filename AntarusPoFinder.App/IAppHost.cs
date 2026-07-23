@@ -33,4 +33,9 @@ public interface IAppHost
     /// successful firmware upload) so the availability/file count isn't stale until the next
     /// periodic RunSync tick.</summary>
     void RefreshDiskStatus();
+
+    /// <summary>Отправляет общий справочник (иерархия, производители ПЧ/УПП, теги, расширения) на
+    /// сетевой диск сразу после того, как администратор его изменил — см.
+    /// MainWindowViewModel.PushCatalogChange. what — что именно поменялось, попадает в статус-строку.</summary>
+    void PushCatalogChange(string what);
 }

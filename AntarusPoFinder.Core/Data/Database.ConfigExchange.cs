@@ -429,6 +429,36 @@ public partial class Database
             if (apply) ExecuteNonQuery("DELETE FROM equipment_subtypes WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
         }
 
+        // ── Типы шкафов, удалённые на выгружавшей машине — та же дыра, что была у подтипов и
+        //    контроллеров, и последняя из этой серии. Удалённый тип шкафа возвращался с любой машины
+        //    (или из лежащего на диске JSON), которая ещё не знала о его удалении — «мусорный тип
+        //    шкафа», который удаляешь, а он снова тут. Правила ровно те же: только строки с sync_id
+        //    (по чему ещё соотносить со входящим снимком) и только если на тип локально уже ничего
+        //    не ссылается. Идёт ПОСЛЕ удаления подтипов: тип, у которого только что удалили
+        //    последний подтип, в этом же проходе может уехать целиком.
+        var incomingGroupSyncIds = new HashSet<string>(
+            data.EquipmentGroups.Where(g => !string.IsNullOrEmpty(g.SyncId)).Select(g => g.SyncId));
+        var localGroups = new List<(int Id, string SyncId)>();
+        using (var r = ExecuteReader("SELECT id, sync_id FROM equipment_groups WHERE sync_id IS NOT NULL AND sync_id != ''"))
+            while (r.Read())
+                localGroups.Add((r.GetInt32(0), r.GetString(1)));
+
+        foreach (var (id, syncId) in localGroups)
+        {
+            if (incomingGroupSyncIds.Contains(syncId)) continue;
+
+            var referenced = ExecuteScalar("SELECT 1 WHERE EXISTS(SELECT 1 FROM equipment_subtypes WHERE group_id=@id)",
+                cmd => cmd.Parameters.AddWithValue("@id", id)) is not null;
+            if (referenced)
+            {
+                counts.GroupsSkippedDelete++;
+                continue;
+            }
+
+            counts.GroupsRemoved++;
+            if (apply) ExecuteNonQuery("DELETE FROM equipment_groups WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+        }
+
         // ── Controller models (upsert by sync_id, fallback to name) ─────────────
         var controllerSyncToId = new Dictionary<string, int>();
         foreach (var c in data.ControllerModels)

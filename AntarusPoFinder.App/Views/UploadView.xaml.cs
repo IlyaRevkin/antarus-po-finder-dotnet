@@ -75,6 +75,12 @@ public partial class UploadView : UserControl
 
     // ── Combo population / reload ────────────────────────────────────────────
 
+    /// <summary>Страница живёт в кэше между переходами (MainWindowViewModel._pageCache) — без явного
+    /// перечитывания в комбобоксах остаются справочники на момент её первой отрисовки. Отсюда и
+    /// «удалил мусорный тип шкафа в Настройках, а в Загрузке он всё ещё есть»: в Настройках список
+    /// перечитывается после каждой правки, а здесь — нет.</summary>
+    public void RefreshIfActive() => ReloadCombos();
+
     private void ReloadCombos()
     {
         var prevGroupId = (GroupCombo.SelectedItem as EquipmentGroup)?.Id;

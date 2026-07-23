@@ -174,6 +174,11 @@ public class ImportCounts
 {
     public int GroupsAdded { get; set; }
     public int GroupsUpdated { get; set; }
+    /// <summary>Тип шкафа, удалённый на выгружавшей машине — зеркалится так же, как подтипы и
+    /// контроллеры (см. ImportHierarchyDataCore). Без этого удалённый мусорный тип возвращался с
+    /// любой машины/старого JSON, которые о его удалении ещё не знали.</summary>
+    public int GroupsRemoved { get; set; }
+    public int GroupsSkippedDelete { get; set; }
     public int SubtypesAdded { get; set; }
     public int SubtypesUpdated { get; set; }
     public int SubtypesRemoved { get; set; }
@@ -210,7 +215,7 @@ public class ImportCounts
     public int ConflictsFound { get; set; }
 
     public int TotalChanges =>
-        GroupsAdded + GroupsUpdated + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
+        GroupsAdded + GroupsUpdated + GroupsRemoved + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
         ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
         AppUsersAdded + AppUsersUpdated;

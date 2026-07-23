@@ -124,6 +124,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             networkView.RefreshIfActive();
         if (pageId == "tickets" && _pageCache[pageId] is TicketsView ticketsView)
             ticketsView.RefreshIfActive();
+        // Загрузка ПО / Параметры перечитывают справочники (типы шкафов, подтипы, контроллеры,
+        // производители) — иначе в комбобоксах остаётся состояние на момент первой отрисовки
+        // страницы, см. UploadView.RefreshIfActive.
+        if (pageId == "upload" && _pageCache[pageId] is UploadView uploadView)
+            uploadView.RefreshIfActive();
+        if (pageId == "params" && _pageCache[pageId] is ParamsView paramsView)
+            paramsView.RefreshIfActive();
 
         foreach (var item in NavItems)
             item.IsActive = item.PageId == pageId;
@@ -863,6 +870,52 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _configPushTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
         _configPushTimer.Tick += (_, _) => PushConfigNow();
         _configPushTimer.Start();
+    }
+
+    /// <summary>Изменение ОБЩЕГО справочника (тип/подтип шкафа, контроллер, производитель ПЧ/УПП,
+    /// тег, расширение) уезжает на сетевой диск сразу, а не ждёт таймера автоотправки.
+    ///
+    /// Почему это понадобилось: приём чужого конфига включён у всех и по умолчанию (sync_interval_min
+    /// = 5 мин), а ОТПРАВКА — только у администратора и по умолчанию ВЫКЛЮЧЕНА
+    /// (config_push_interval_min = 0, см. ConfigService). То есть добавленный производитель ПЧ/УПП
+    /// физически не мог доехать до коллег, пока администратор отдельно не зайдёт на страницу
+    /// «Сетевые диски» и не нажмёт «Отправить сейчас» — а он про это не знал и справедливо считал,
+    /// что синхронизация сломана («добавил производителей — у коллеги их нет»). Правки merge-логики
+    /// (Database.FlatLists) этого не лечили: отправлять было нечего.
+    ///
+    /// Порядок «сначала забрать, потом отдать» обязателен: Export перезаписывает ВЕСЬ общий снимок,
+    /// и отдать свой, не забрав перед этим чужой, — известный способ затереть чужие правки (см.
+    /// ConfigSyncService.PushAppUsersOnly). CheckForConfigUpdate — ровно то же, что делает
+    /// периодический таймер приёма, так что дороже обычного тика это не стоит.
+    ///
+    /// Только администратор: полный экспорт другим ролям запрещён намеренно (там же). Для них метод
+    /// работает как обычный ShowStatus — правка остаётся локальной, ровно как и раньше.</summary>
+    public void PushCatalogChange(string what)
+    {
+        if (CurrentRole != "administrator")
+        {
+            ShowStatus(what, category: NotificationCategory.Hierarchy);
+            return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root))
+        {
+            ShowStatus($"{what}. На сетевой диск не отправлено — диск недоступен, у коллег изменение не появится",
+                10000, NotificationCategory.Hierarchy);
+            return;
+        }
+
+        try
+        {
+            CheckForConfigUpdate();
+            ConfigSyncService.Export(_services, root, $"{_services.CurrentUserName} ({RoleLabel})");
+            ShowStatus($"{what} · отправлено на сетевой диск", 5000, NotificationCategory.Hierarchy);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus($"{what}. Не удалось отправить на сетевой диск: {ex.Message}", 12000, NotificationCategory.Hierarchy);
+        }
     }
 
     /// <summary>Runs silently on SUCCESS — no status-bar toast — same reasoning as

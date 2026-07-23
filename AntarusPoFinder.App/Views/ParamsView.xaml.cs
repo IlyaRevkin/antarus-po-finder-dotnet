@@ -40,6 +40,12 @@ public partial class ParamsView : UserControl
         Loaded += (_, _) => PopulateCombos();
     }
 
+    /// <summary>Страница живёт в кэше между переходами (MainWindowViewModel._pageCache), поэтому
+    /// справочники в комбобоксах — те, что были на момент её первой отрисовки. Всё, что поменялось
+    /// потом (в Настройках или прилетело синхронизацией с другой машины), до неё не доезжало: новый
+    /// производитель не появлялся, удалённый тип шкафа продолжал предлагаться.</summary>
+    public void RefreshIfActive() => PopulateCombos();
+
     private void PopulateCombos()
     {
         var groups = _services.Db.GetAllEquipmentGroups();
