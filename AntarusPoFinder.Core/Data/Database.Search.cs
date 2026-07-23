@@ -62,12 +62,19 @@ public partial class Database
         {
             var fields = new[] { row.GroupName, row.SubtypeName, row.SubtypeFolder, row.CtrlName };
             var tagWords = (row.Tags ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            // Тип пуска (УПП/ПП/ПЧ/КПЧ) оператор отмечает при загрузке версии и потом ищет ровно по
+            // нему — «НГР ПЧ». До этого launch_types не участвовал в подсчёте вообще: отмеченный при
+            // загрузке тип пуска нигде в поиске не учитывался, находилось только то, что случайно
+            // совпало с именем подтипа/тегом. Вес как у тега, а не как у имени: это явно
+            // проставленный признак версии, а не побочное совпадение в названии папки.
+            var launchTypes = row.LaunchTypes ?? new List<string>();
 
             int score = 0;
             foreach (var token in qTokens)
             {
                 if (fields.Any(f => TokenMatches(token, f, exactWord))) score += 1;
                 if (tagWords.Any(t => TokenMatches(token, t, exactWord))) score += 2;
+                if (launchTypes.Any(lt => TokenMatches(token, lt, exactWord))) score += 2;
             }
             return score;
         }
