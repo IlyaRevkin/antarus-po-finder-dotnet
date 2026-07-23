@@ -26,8 +26,16 @@ public class ConfigService
     public static readonly string LocalFw = Path.Combine(AppData, "firmware");
     public static readonly string LocalTemplates = Path.Combine(AppData, "templates");
 
-    /// <summary>Тип пуска — fixed set, matches the Python app's LAUNCH_TYPES.</summary>
-    public static readonly string[] LaunchTypes = ["УПП", "ПП", "ПЧ", "КПЧ"];
+    /// <summary>Тип пуска — fixed set. Первые четыре пришли из Python-версии (LAUNCH_TYPES); пятый
+    /// (<see cref="LaunchTypeNone"/>) добавлен потому, что часть шкафов вообще не имеет типа пуска, а
+    /// поле обязательное — раньше в таком случае приходилось ставить заведомо неверную галочку.
+    /// Хранится в launch_types (JSON-массив) ровно так же, как остальные четыре — отдельного
+    /// значения/флага в схеме нет, чтобы не плодить второй способ выразить одно и то же.</summary>
+    public static readonly string[] LaunchTypes = ["УПП", "ПП", "ПЧ", "КПЧ", LaunchTypeNone];
+
+    /// <summary>«Тип пуска отсутствует» — взаимоисключающий с остальными четырьмя (см.
+    /// AntarusPoFinder.App.Views.LaunchTypeChecks: при его выборе остальные снимаются и блокируются).</summary>
+    public const string LaunchTypeNone = "Отсутствует";
 
     private static readonly Dictionary<string, string> Defaults = new()
     {

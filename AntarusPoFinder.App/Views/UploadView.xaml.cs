@@ -30,7 +30,7 @@ public partial class UploadView : UserControl
     /// PromptExecutableHint). Single-file picks never need this: the file itself is unambiguous.</summary>
     private static readonly string[] MainExecutableExts = { ".psl", ".lfs", ".kpr", ".kpj", ".dpj" };
     private static readonly string[] HmiExecutableExts = { ".fsprj" };
-    private readonly Dictionary<string, CheckBox> _launchChecks = new();
+    private readonly LaunchTypeChecks _launchChecks;
 
     private readonly FilePickerRow _ioMapPicker;
     private readonly FilePickerRow _instrPicker;
@@ -55,12 +55,7 @@ public partial class UploadView : UserControl
         _services = services;
         _host = host;
 
-        foreach (var lt in ConfigService.LaunchTypes)
-        {
-            var cb = new CheckBox { Content = lt, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
-            _launchChecks[lt] = cb;
-            LaunchTypesPanel.Children.Add(cb);
-        }
+        _launchChecks = new LaunchTypeChecks(LaunchTypesPanel);
 
         _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "",
             folderDialogTitle: "Выбрать папку");
@@ -577,7 +572,7 @@ public partial class UploadView : UserControl
         var group = GroupCombo.SelectedItem as EquipmentGroup;
         var subOption = SubCombo.SelectedItem as SubtypeOption;
         var mod = CtrlCombo.SelectedItem as ControllerModification;
-        var launchTypes = _launchChecks.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList();
+        var launchTypes = _launchChecks.Selected;
 
         return new FirmwareUploadRequest
         {
@@ -619,7 +614,7 @@ public partial class UploadView : UserControl
         OpcSnCheck.IsChecked = false;
         ReqNumInput.Text = "";
         CabinetSnInput.Text = "";
-        foreach (var cb in _launchChecks.Values) cb.IsChecked = false;
+        _launchChecks.ClearAll();
         DescInput.Text = "";
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
         IoMapInput.Text = "";

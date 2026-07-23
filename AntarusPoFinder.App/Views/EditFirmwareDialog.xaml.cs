@@ -12,7 +12,7 @@ namespace AntarusPoFinder.App.Views;
 public partial class EditFirmwareDialog : Window
 {
     private readonly Database _db;
-    private readonly Dictionary<string, CheckBox> _checks = new();
+    private readonly LaunchTypeChecks _checks;
     private readonly bool _hmiExecutablePickerShown;
 
     public string ResultDescription { get; private set; } = "";
@@ -31,17 +31,7 @@ public partial class EditFirmwareDialog : Window
         DescriptionInput.Text = v.Description;
         TagsEditor.Configure(v.Tags.Split(' ', System.StringSplitOptions.RemoveEmptyEntries), () => _db.GetAllTags());
 
-        foreach (var lt in ConfigService.LaunchTypes)
-        {
-            var cb = new CheckBox
-            {
-                Content = lt,
-                Margin = new Thickness(0, 0, 12, 0),
-                IsChecked = v.LaunchTypes.Contains(lt),
-            };
-            _checks[lt] = cb;
-            LaunchTypesPanel.Children.Add(cb);
-        }
+        _checks = new LaunchTypeChecks(LaunchTypesPanel, v.LaunchTypes);
 
         // Lets the operator (re)pick which file inside an uploaded HMI folder is the one that
         // "HMI-проект" should open — e.g. the folder had no recognizable extension at upload time
@@ -71,7 +61,7 @@ public partial class EditFirmwareDialog : Window
         var tags = TagsEditor.Tags;
         foreach (var tag in tags) _db.AddTag(tag);
         ResultTags = string.Join(' ', tags);
-        ResultLaunchTypes = _checks.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList();
+        ResultLaunchTypes = _checks.Selected;
         if (_hmiExecutablePickerShown)
             ResultHmiExecutableHint = HmiExecutableCombo.SelectedItem as string ?? "";
         DialogResult = true;

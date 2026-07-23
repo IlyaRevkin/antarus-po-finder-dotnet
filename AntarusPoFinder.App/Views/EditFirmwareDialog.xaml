@@ -17,7 +17,10 @@
         <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,12"/>
 
         <TextBlock Text="Тип пуска:" Margin="0,0,0,4"/>
-        <StackPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
+        <!-- WrapPanel, не горизонтальный StackPanel: пятый тип пуска («Отсутствует», см.
+             ConfigService.LaunchTypes) не помещается в 520px ширины окна одной строкой и у
+             StackPanel просто обрезался бы без возможности до него добраться. -->
+        <WrapPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
 
         <StackPanel x:Name="HmiExecutablePanel" Visibility="Collapsed" Margin="0,0,0,16">
             <TextBlock Text="Исполняемый файл HMI-проекта:" Margin="0,0,0,4"

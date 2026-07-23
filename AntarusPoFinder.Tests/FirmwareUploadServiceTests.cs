@@ -131,6 +131,32 @@ public class FirmwareUploadServiceTests : IDisposable
         }
     }
 
+    /// <summary>Пятый тип пуска «Отсутствует» — это обычное значение launch_types, а не отдельный
+    /// флаг: валидация «выберите хотя бы один тип пуска» должна его принимать, а сам он должен
+    /// доезжать в БД и в CHANGELOG.md ровно как остальные четыре.</summary>
+    [Fact]
+    public void Upload_LaunchTypeNone_IsAcceptedAndStored()
+    {
+        Assert.Contains(ConfigService.LaunchTypeNone, ConfigService.LaunchTypes);
+
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.LaunchTypes = new() { ConfigService.LaunchTypeNone };
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            var stored = _db.GetFwVersionById(result.FwVersionId);
+            Assert.Equal(new[] { ConfigService.LaunchTypeNone }, stored!.LaunchTypes);
+            Assert.Contains(ConfigService.LaunchTypeNone,
+                File.ReadAllText(Path.Combine(result.DestinationFolder!, "CHANGELOG.md")));
+        }
+        finally { File.Delete(src); }
+    }
+
     [Fact]
     public void Upload_OpcRequestAndSnEnabled_FilenameAndFolderReflectBoth()
     {
