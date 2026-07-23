@@ -23,10 +23,7 @@ public sealed record FirmwareCardFlags
     public bool HasHmi { get; init; }
     public bool HasMap { get; init; }
 
-    /// <summary>Нашёлся .lfs / .psl. У Segnetics-проектов (см. <see cref="IsSegnetics"/>) пункты меню
-    /// для них показываются ВСЕГДА: спрятанная строка «Открыть файл LFS» не отличима от «я не туда
-    /// посмотрел», поэтому отсутствие файла — это неактивный пункт с объяснением, а не пустое
-    /// место.</summary>
+    /// <summary>Нашёлся .lfs / .psl.</summary>
     public bool HasLfs { get; init; }
     public bool HasPsl { get; init; }
 
@@ -188,37 +185,38 @@ public partial class FirmwareCard : UserControl
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
-        // В меню — ВТОРОЙ файл пары, тот, что не попал на основную кнопку. У Segnetics-проекта он
-        // показывается всегда: нет — значит неактивный пункт с причиной. У остальных (KINCO и т.п.)
-        // .lfs/.psl не бывает в принципе, и строки про них — просто мусор в меню.
+        // В меню — ВТОРОЙ файл пары, тот, что не попал на основную кнопку. Пункт добавляется, только
+        // если файл реально есть — серый неактивный пункт для несуществующего файла только загромождал
+        // меню (у KINCO и т.п. .lfs/.psl не бывает в принципе, у остальных версий второй файл часто
+        // просто не выкладывали — оба случая одинаково не про что жать).
         if (flags.IsSegnetics)
         {
-            if (primary != PrimaryFile.Psl)
+            if (primary != PrimaryFile.Psl && flags.HasPsl)
                 AddMenuItem("Открыть проект (PSL)", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
-                    flags.HasPsl
-                        ? "Исходный проект SMLogix — открывают, когда нужно править"
-                        : "Рядом с версией нет .psl — либо это не проект SMLogix, либо исходник не выкладывали",
-                    enabled: flags.HasPsl);
-            if (primary != PrimaryFile.Lfs)
+                    "Исходный проект SMLogix — открывают, когда нужно править");
+            if (primary != PrimaryFile.Lfs && flags.HasLfs)
                 AddMenuItem("Открыть прошивку (LFS)", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
-                    flags.HasLfs
-                        ? "Скомпилированный файл, который заливается в контроллер"
-                        : "Рядом с версией нет .lfs — версия загружена без скомпилированного файла",
-                    enabled: flags.HasLfs);
+                    "Скомпилированный файл, который заливается в контроллер");
         }
         AddMenuItem("Обновить локальную копию с диска", () => DownloadRequested?.Invoke(this, EventArgs.Empty),
             "Скопировать версию с сетевого диска заново — если автосинхронизация выключена или не удалась");
 
-        AddMenuHeader("Документация");
+        // Тот же принцип: пункта нет вовсе, если приложенного файла нет — не серая недоступная строка.
+        // Раздел целиком пропускается, если нечего показать — иначе «ДОКУМЕНТАЦИЯ» висела бы пустым
+        // заголовком без единого пункта под ним.
         var hasIoMap = !string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap;
-        AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty),
-            hasIoMap ? null : "Карта in/out к этой версии не приложена", enabled: hasIoMap);
         var hasModbus = !string.IsNullOrEmpty(result.ModbusMapPath);
-        AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty),
-            hasModbus ? null : "Карта modbus к этой версии не приложена", enabled: hasModbus);
         var hasInstructions = !string.IsNullOrEmpty(result.InstructionsPath);
-        AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
-            hasInstructions ? null : "Инструкция к этой версии не приложена", enabled: hasInstructions);
+        if (hasIoMap || hasModbus || hasInstructions)
+        {
+            AddMenuHeader("Документация");
+            if (hasIoMap)
+                AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty));
+            if (hasModbus)
+                AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty));
+            if (hasInstructions)
+                AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty));
+        }
 
         AddMenuHeader("Версия");
         AddMenuItem("История версий", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
@@ -353,9 +351,10 @@ public partial class FirmwareCard : UserControl
         MorePanel.Children.Add(header);
     }
 
-    /// <summary>enabled=false — пункт остаётся на месте, но недоступен, а tooltip объясняет, почему
-    /// (см. комментарий про LFS/PSL в Configure).</summary>
-    private void AddMenuItem(string text, Action action, string? tooltip = null, bool enabled = true)
+    /// <summary>Пункт добавляется, только пока для него действительно есть что показать (см. вызовы в
+    /// Configure) — недоступных серых пунктов с объяснением «почему нельзя» больше нет, поэтому и
+    /// enabled-параметр здесь не нужен.</summary>
+    private void AddMenuItem(string text, Action action, string? tooltip = null)
     {
         var btn = new Button
         {
@@ -364,12 +363,8 @@ public partial class FirmwareCard : UserControl
             Margin = new Thickness(0, 0, 0, 4),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
-            IsEnabled = enabled,
-            // Подсказка на выключенной кнопке по умолчанию не показывается — иначе объяснение
-            // «почему нельзя» невидимо ровно в том случае, ради которого написано.
             ToolTip = tooltip,
         };
-        if (tooltip is not null) ToolTipService.SetShowOnDisabled(btn, true);
         btn.Click += (_, _) =>
         {
             MorePopup.IsOpen = false;

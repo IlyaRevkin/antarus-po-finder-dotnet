@@ -169,18 +169,17 @@
                         <!-- Одна и та же прошивка часто подходит нескольким подтипам шкафа. Основной
                              подтип (комбобокс выше) задаёт номер версии, папку на диске и резерв
                              номера; здесь выбираются ДОПОЛНИТЕЛЬНЫЕ — им заводится своя запись, а на
-                             диск кладётся ярлык на ту же папку версии, без дублирования файлов. -->
+                             диск кладётся ярлык на ту же папку версии, без дублирования файлов. Сам
+                             выбор — чекбоксы прямо в выпадающем списке (SubtypeMultiSelect), без
+                             отдельного модального окна. -->
                         <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="Ещё подтипы:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="Подтипы шкафов, которым подходит эта же прошивка — файлы не дублируются, в их папки кладётся ярлык."/>
-                            <TextBlock Grid.Column="1" x:Name="ExtraSubtypesLabel" Text="не выбраны" Style="{StaticResource MutedText}"
-                                       VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
-                            <Button Grid.Column="2" Content="Выбрать..." Style="{StaticResource SecondaryButton}" Click="PickExtraSubtypes_Click"/>
+                            <views:SubtypeMultiSelect Grid.Column="1" x:Name="ExtraSubtypesSelect" Height="34"/>
                         </Grid>
 
                         <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа
@@ -240,64 +239,56 @@
                     <views:TagBubbleEditor x:Name="TagsEditor"/>
 
                     <TextBlock Text="ДОП. ФАЙЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,14,0,8"/>
-                    <!-- Карта in/out + Карта modbus side by side — both are the same shape (label/textbox/
-                         3 icon buttons) and rarely need much width for a path, so pairing them saves a
-                         full row of vertical space vs. stacking every optional field one under another
-                         (see round 39 layout-compacting pass: buttons were going off the bottom of the
-                         window with HMI expanded, scroll alone was papering over a form that was simply
-                         too tall — this trims real height instead of just hiding the overflow). -->
+                    <!-- Карта in/out, Карта modbus и Инструкция — три одинаковых полноширинных ряда
+                         (label/textbox/3 icon buttons), а не «Карта in/out» + «Карта modbus» бок о бок
+                         в паре плюс отдельная полноширинная «Инструкция». Парой они экономили строку
+                         высоты, но кнопки Файл/Папка/Очистить у пары стояли примерно на 50% ширины
+                         карточки, а у «Инструкции» — на 100%: три ряда кнопок на разных x читались как
+                         неаккуратная вёрстка. Теперь у всех трёх рядов одна и та же ширина колонки-
+                         подписи (100) и одна и та же раскладка столбцов — кнопки всех трёх рядов стоят
+                         на одном x. Страница внутри ScrollViewer (см. выше), так что лишняя строка
+                         высоты не выталкивает форму за пределы окна — просто чуть больше скролла. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="20"/>
-                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <!-- Both mini-grids' label column is the SAME fixed width (100) as each other
-                             AND as the "Инструкция" row below — the earlier version used 90/100/130
-                             respectively, so the two side-by-side textboxes ended up visibly different
-                             widths and "Инструкция" didn't line up with either column above it. -->
-                        <Grid Grid.Column="0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center" TextWrapping="Wrap"
-                                       ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
-                            <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
-                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
-                                <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                            <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                                <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                            <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
-                                <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                        </Grid>
-                        <Grid Grid.Column="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center" TextWrapping="Wrap"
-                                       ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
-                            <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
-                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
-                                <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                            <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
-                                <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                            <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
-                                <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
-                            </Button>
-                        </Grid>
+                        <TextBlock Grid.Column="0" Text="Карта in/out:" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   ToolTip="Копируется в папку контроллера &quot;Карта ВВ&quot;. Необязательное поле."/>
+                        <TextBox Grid.Column="1" x:Name="IoMapInput" Height="34" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFile_Click" ToolTip="Выбрать файл">
+                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="IoMapClear_Click" ToolTip="Очистить">
+                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                    </Grid>
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Карта modbus:" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   ToolTip="Копируется в папку контроллера &quot;Карта Modbus&quot;. Необязательное поле."/>
+                        <TextBox Grid.Column="1" x:Name="ModbusMapInput" Height="34" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFile_Click" ToolTip="Выбрать файл">
+                            <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapBrowseFolder_Click" ToolTip="Выбрать папку">
+                            <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="ModbusMapClear_Click" ToolTip="Очистить">
+                            <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                        </Button>
                     </Grid>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>

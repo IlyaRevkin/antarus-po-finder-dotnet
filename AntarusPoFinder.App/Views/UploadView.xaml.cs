@@ -114,6 +114,7 @@ public partial class UploadView : UserControl
         {
             SubCombo.ItemsSource = null;
             UpdatePreview();
+            RefreshExtraSubtypeCandidates();
             return;
         }
 
@@ -128,54 +129,47 @@ public partial class UploadView : UserControl
 
         RefreshReservationPicker();
         UpdatePreview();
+        // Если SelectedIndex выше не поменялся по значению (напр. остался -1 при первой отрисовке
+        // страницы) — SelectionChanged не сработает, и на каскад из SubCombo_SelectionChanged
+        // рассчитывать нельзя. Пересобираем кандидатов явно.
+        RefreshExtraSubtypeCandidates();
     }
 
     // ── Дополнительные подтипы ────────────────────────────────────────────────
 
-    /// <summary>Подтипы, которым подходит эта же прошивка (кроме основного). Файлы под них не
-    /// дублируются — см. FirmwareUploadRequest.ExtraSubtypes.</summary>
-    private List<EquipmentSubType> _extraSubtypes = new();
-
-    private void PickExtraSubtypes_Click(object sender, RoutedEventArgs e)
+    /// <summary>Пересобирает список кандидатов «Ещё подтипы» под текущую группу/основной подтип —
+    /// вызывается и при смене типа шкафа, и при смене основного подтипа (см. PopulateSubtypes и
+    /// SubCombo_SelectionChanged). Уже отмеченные кандидаты, которые остаются валидными (не совпали
+    /// с новым основным подтипом), сохраняются — теряется только то, что реально стало неприменимо.</summary>
+    private void RefreshExtraSubtypeCandidates()
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group)
         {
-            AppMessageBox.Show("Сначала выберите тип шкафа.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
+            ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
             return;
         }
         var mainId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
         var candidates = _services.Db.GetSubtypesForGroup(group.Id!.Value)
             .Where(s => s.Id is not null && s.Id != mainId)
             .ToList();
-        if (candidates.Count == 0)
-        {
-            AppMessageBox.Show("У этого типа шкафа больше нет других подтипов.", "Дополнительные подтипы", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        var picked = PickSubtypesDialog.Pick(Window.GetWindow(this),
-            "Каким ещё подтипам подходит эта прошивка?\nФайлы не дублируются: в папку каждого выбранного подтипа ляжет ярлык на ту же версию.",
-            candidates, _extraSubtypes.Where(s => s.Id is not null).Select(s => s.Id!.Value));
-        if (picked is null) return;
-
-        _extraSubtypes = picked;
-        UpdateExtraSubtypesLabel();
+        var keepIds = ExtraSubtypesSelect.Selected.Where(s => s.Id is not null).Select(s => s.Id!.Value);
+        ExtraSubtypesSelect.SetItems(candidates, keepIds);
     }
-
-    private void UpdateExtraSubtypesLabel() =>
-        ExtraSubtypesLabel.Text = _extraSubtypes.Count == 0
-            ? "не выбраны"
-            : string.Join(", ", _extraSubtypes.Select(s => s.Name == "—" ? s.FolderName : s.Name));
 
     private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // Подтипы принадлежат группе — при смене типа шкафа ранее выбранные дополнительные подтипы
-        // относятся уже к другой группе и молча уехали бы не туда.
-        _extraSubtypes.Clear();
-        UpdateExtraSubtypesLabel();
+        // относятся уже к другой группе и молча уехали бы не туда. Сброс — пустой список кандидатов
+        // прямо сейчас; PopulateSubtypes() ниже пересоберёт кандидатов под новую группу.
+        ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
         PopulateSubtypes();
     }
-    private void SubCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { RefreshReservationPicker(); UpdatePreview(); }
+    private void SubCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshReservationPicker();
+        UpdatePreview();
+        RefreshExtraSubtypeCandidates();
+    }
     private void CtrlCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => OnCtrlChanged();
 
     private void OnCtrlChanged()
@@ -712,7 +706,7 @@ public partial class UploadView : UserControl
             SourcePath = _srcPath ?? "",
             Group = group,
             Subtype = subOption?.Subtype,
-            ExtraSubtypes = _extraSubtypes.ToList(),
+            ExtraSubtypes = ExtraSubtypesSelect.Selected,
             Modification = mod,
             LaunchTypes = launchTypes,
             Description = DescInput.Text.Trim(),
@@ -745,8 +739,7 @@ public partial class UploadView : UserControl
         _executableHint = null;
         _hmiExecutableHint = null;
         DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
-        _extraSubtypes.Clear();
-        UpdateExtraSubtypesLabel();
+        ExtraSubtypesSelect.ClearAll();
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
         OpcReqNumCheck.IsChecked = false;
