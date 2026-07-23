@@ -204,6 +204,62 @@ public class EndToEndSyncTests
         Assert.Single(paramFilesB); // must stay exactly one row after 3 repeated sync rounds, not grow
     }
 
+    /// <summary>Две повторные жалобы пользователя одним сценарием: «добавил производителей ПЧ/УПП —
+    /// у коллеги их нет» и «удалил тип шкафа, а он никуда не делся». Обе — про общий справочник,
+    /// и обе проверяются здесь через реальный Export/CheckForUpdate/Apply, а не через
+    /// ImportHierarchyData напрямую.
+    ///
+    /// Тип шкафа БЕЗ подтипов взят намеренно: зеркалирование удаления пропускает группу, на которую
+    /// на принимающей машине ещё кто-то ссылается (GroupsSkippedDelete) — сознательная защита от
+    /// сноса чужих данных, так что удаляемость проверяется на том случае, где она обязана работать.
+    /// Последний круг — про воскрешение: удалённый тип не должен вернуться на следующем же обмене,
+    /// именно так он возвращался раньше (см. FORTUS в памяти проекта).</summary>
+    [Fact]
+    public void CatalogChange_ManufacturerAddedAndEmptyGroupDeleted_ReachesOtherMachineAndStaysDeleted()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        var dbA = m.DbA; var dbB = m.DbB;
+
+        dbA.AddParamManufacturer("Е2Е-ПРОИЗВОДИТЕЛЬ");
+        var throwawayGroupId = dbA.UpsertEquipmentGroup(new EquipmentGroup
+        {
+            Name = "Е2Е-МУСОРНЫЙ-ТИП", Prefix = 91, SortOrder = 91,
+        });
+        Assert.Empty(dbA.GetSubtypesForGroup(throwawayGroupId));
+
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var update = ConfigSyncService.CheckForUpdate(m.SvcB, out var err);
+        Assert.True(err is null, err);
+        ConfigSyncService.Apply(m.SvcB, update!.ConfigPath, root);
+
+        Assert.Contains("Е2Е-ПРОИЗВОДИТЕЛЬ", dbB.GetParamManufacturers());
+        Assert.Contains(dbB.GetAllEquipmentGroups(), g => g.Name == "Е2Е-МУСОРНЫЙ-ТИП");
+
+        // ── A удаляет и производителя, и тип шкафа — B обязан отзеркалить оба удаления ──
+        System.Threading.Thread.Sleep(1100); // exported_at посекундный, см. соседние тесты
+        dbA.DeleteParamManufacturer("Е2Е-ПРОИЗВОДИТЕЛЬ");
+        dbA.DeleteEquipmentGroup(throwawayGroupId);
+
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var update2 = ConfigSyncService.CheckForUpdate(m.SvcB, out var err2);
+        Assert.True(err2 is null, err2);
+        var applied = ConfigSyncService.Apply(m.SvcB, update2!.ConfigPath, root);
+
+        Assert.DoesNotContain("Е2Е-ПРОИЗВОДИТЕЛЬ", dbB.GetParamManufacturers());
+        Assert.DoesNotContain(dbB.GetAllEquipmentGroups(), g => g.Name == "Е2Е-МУСОРНЫЙ-ТИП");
+        Assert.True(applied.Counts.GroupsRemoved >= 1);
+
+        // ── Ещё один обмен: удалённое не воскресает ──
+        System.Threading.Thread.Sleep(1100);
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var update3 = ConfigSyncService.CheckForUpdate(m.SvcB, out _);
+        if (update3 is not null) ConfigSyncService.Apply(m.SvcB, update3.ConfigPath, root);
+        Assert.DoesNotContain("Е2Е-ПРОИЗВОДИТЕЛЬ", dbB.GetParamManufacturers());
+        Assert.DoesNotContain(dbB.GetAllEquipmentGroups(), g => g.Name == "Е2Е-МУСОРНЫЙ-ТИП");
+    }
+
     private static void UpdateModificationDescription(string dbPath, int modificationId, string description)
     {
         // There's no in-app rename UI for this yet — opens a second raw connection to the same

@@ -65,6 +65,22 @@ public class SearchByLaunchTypeTests
         Assert.Empty(hits);
     }
 
+    /// <summary>Список типов пуска закрытый, и короткие в нём — подстроки длинных («ПЧ» в «КПЧ»,
+    /// «ПП» в «УПП»). Подстрочное совпадение поднимало по запросу «ПЧ» ещё и шкафы, отмеченные КПЧ —
+    /// причём в обычном режиме поиска, без галочки «точное совпадение слова», то есть по умолчанию.</summary>
+    [Theory]
+    [InlineData("ПЧ", "КПЧ")]
+    [InlineData("ПП", "УПП")]
+    public void QueryByLaunchType_DoesNotMatchLongerLaunchTypeContainingIt(string query, string marked)
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        AddVersion(db, "КНС", 1, new List<string> { marked });
+
+        Assert.Empty(SearchService.Search(db, query));
+    }
+
     [Fact]
     public void LaunchTypeIsShownOnTheCard_SoTheHitIsExplainable()
     {

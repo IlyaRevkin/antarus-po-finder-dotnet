@@ -74,7 +74,12 @@ public partial class Database
             {
                 if (fields.Any(f => TokenMatches(token, f, exactWord))) score += 1;
                 if (tagWords.Any(t => TokenMatches(token, t, exactWord))) score += 2;
-                if (launchTypes.Any(lt => TokenMatches(token, lt, exactWord))) score += 2;
+                // Сравнение целым значением, а не подстрокой, и НЕЗАВИСИМО от «точного совпадения
+                // слова»: список типов пуска закрытый (ConfigService.LaunchTypes), и почти каждый
+                // короткий в нём — подстрока длинного («ПЧ» в «КПЧ», «ПП» в «УПП»). Подстрочно
+                // «НГР ПЧ» поднимало ещё и шкафы с КПЧ — тип пуска не то поле, где полезно угадывать.
+                if (launchTypes.Any(lt => string.Equals(lt, token, StringComparison.OrdinalIgnoreCase)))
+                    score += 2;
             }
             return score;
         }
