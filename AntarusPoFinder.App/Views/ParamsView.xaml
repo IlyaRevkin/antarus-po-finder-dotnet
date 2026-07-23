@@ -46,41 +46,43 @@
                          layouts). This page has the full width to itself so it wasn't observed to overflow
                          here, but keeping both rows on the same resilient pattern — not just the same
                          pixel numbers — is the point, since they're explicitly kept in sync. -->
-                    <!-- Первая колонка — 110, как и у всех строк ниже («Подтип(ы):»/«Файл:»/«Описание:»),
-                         а не Auto: левый край GroupCombo должен начинаться там же, где начинаются
-                         поля ниже. С Auto ширина подписи «Тип шкафа:» подгонялась под текст и левый
-                         край комбобоксов уезжал левее/правее полей ниже — комбобоксы и поля визуально
-                         не выравнивались по x. Подтип раньше стоял тут же отдельным ComboBox — теперь
-                         единый чек-комбобокс (см. ниже), ему нужна вся ширина строки. -->
+                    <!-- Тип шкафа + Подтип(ы) + Производитель — все три в ОДНОМ ряду (как в
+                         UploadView, где эти же три коротких поля стоят рядом). Подтип раньше был
+                         отдельной строкой ниже во всю ширину — единый чек-комбобокс SubtypeMultiSelect
+                         добавили позже, чем сложился этот ряд, и его просто дописали снизу отдельной
+                         полноширинной строкой; это читалось так, будто подтип оторван от типа шкафа.
+                         Первая колонка — 110, как и у всех строк ниже («Файл:»/«Описание:»), а не
+                         Auto: левый край GroupCombo должен начинаться там же, где начинаются поля
+                         ниже. С Auto ширина подписи «Тип шкафа:» подгонялась под текст и левый край
+                         комбобоксов уезжал левее/правее полей ниже — комбобоксы и поля визуально не
+                         выравнивались по x. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
-                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
+                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="200"/>
                             <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
+                            <ColumnDefinition Width="*" MinWidth="100" MaxWidth="220"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="200"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Тип шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
                                   DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
-                        <TextBlock Grid.Column="3" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="ManufCombo" Grid.Column="4" Height="34"/>
-                    </Grid>
 
-                    <!-- Основной И дополнительные подтипы — один чек-комбобокс (SubtypeMultiSelect,
-                         тот же контрол, что и в UploadView): первый отмеченный становится основным и
-                         определяет папку, куда файл реально копируется на диск; остальные отмеченные —
-                         дополнительные, им заводится своя запись, а в их папку кладётся ярлык на тот
-                         же файл, без дублирования на диске. Та же пара «подпись слева 110 +
-                         содержимое», что у строк «Файл:»/«Описание:» ниже. -->
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="110"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Подтип(ы):" VerticalAlignment="Center" Margin="0,0,8,0"
+                        <!-- Основной И дополнительные подтипы — один чек-комбобокс (SubtypeMultiSelect,
+                             тот же контрол, что и в UploadView): первый отмеченный становится основным
+                             и определяет папку, куда файл реально копируется на диск; остальные
+                             отмеченные — дополнительные, им заводится своя запись, а в их папку
+                             кладётся ярлык на тот же файл, без дублирования на диске. Та же высота
+                             (34), что у соседних ComboBox — стоит компактно в общем ряду. -->
+                        <TextBlock Grid.Column="3" Text="Подтип(ы):" VerticalAlignment="Center" Margin="0,0,8,0"
                                    ToolTip="Первый отмеченный — основной: файл копируется в его папку. Остальные отмеченные — дополнительные, файл не дублируется, в их папки кладётся ярлык."/>
-                        <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34"/>
+                        <views:SubtypeMultiSelect x:Name="SubtypesSelect" Grid.Column="4" Height="34"/>
+
+                        <TextBlock Grid.Column="6" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="ManufCombo" Grid.Column="7" Height="34"/>
                     </Grid>
 
                     <!-- Клик по самой drag&amp;drop-зоне выбирает файл — та же логика, что в

@@ -94,6 +94,21 @@ public partial class UploadView : UserControl
 
         Loaded += (_, _) => ReloadCombos();
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
+
+        // Стрелка/подсказка в заголовке ExtrasExpander (см. UploadView.xaml) должны отражать
+        // текущее состояние — "▸ ...нажмите, чтобы развернуть" пока свёрнуто, "▾ ...нажмите, чтобы
+        // свернуть" когда раскрыт. Обычный WPF Expander такое умеет через встроенный шеврон, но
+        // здесь заголовок — наш собственный Border/StackPanel (шеврон SectionExpander слишком мелкий,
+        // пользователь на живом прогоне не заметил, что заголовок кликабелен), поэтому переключаем
+        // вручную по событиям Expanded/Collapsed.
+        ExtrasExpander.Expanded += (_, _) => SetExtrasHeaderState(expanded: true);
+        ExtrasExpander.Collapsed += (_, _) => SetExtrasHeaderState(expanded: false);
+    }
+
+    private void SetExtrasHeaderState(bool expanded)
+    {
+        ExtrasHeaderArrow.Text = expanded ? "▾" : "▸";
+        ExtrasHeaderHint.Text = expanded ? "  —  нажмите, чтобы свернуть" : "  —  нажмите, чтобы развернуть";
     }
 
     // ── Combo population / reload ────────────────────────────────────────────

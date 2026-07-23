@@ -184,61 +184,68 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <!-- Тип шкафа + Контроллер side by side, one row — values here are always short
-                             (НГР, ХП, SMH4…), so stretching each combo across the whole form width like
-                             a free-text field wasted most of a wide column on empty space. Подтип раньше
-                             стоял тут же третьей короткой колонкой (обычный ComboBox) — теперь это
-                             отдельная строка ниже с единым чек-комбобоксом (SubtypesSelect), где
-                             одновременно выбираются и основной, и дополнительные подтипы, так что для
-                             него нужна вся ширина, а не треть строки. -->
+                        <!-- Тип шкафа + Подтип(ы) + Контроллер — все три в ОДНОМ ряду. Раньше подтип
+                             жил отдельной строкой ниже во всю ширину (единый чек-комбобокс
+                             SubtypeMultiSelect добавили позже, чем сложился этот ряд, и его просто
+                             дописали снизу) — это читалось так, будто подтип не относится к типу
+                             шкафа/контроллеру, хотя смысл ровно тот же "короткое значение из
+                             справочника", что и у соседей. Вернули все три поля в один ряд; описание
+                             выбранного контроллера (CtrlDescLabel) теперь отдельной строкой ПОД
+                             Контроллером (последняя пара колонок), а не под Типом шкафа слева — это
+                             подпись именно контроллера. -->
                         <!-- Комбо-колонки — proportional (star) с Min/MaxWidth, не фиксированный
                              пиксельный Width — эта строка живёт в узкой правой колонке двухколоночной
                              страницы (левая — 340px drop-zone/preview), фиксированная ширина переполняла
                              бы окно в неразвёрнутом виде (см. ParamsView, где та же строка шире — там
-                             вся ширина страницы). Star-размер даёт WPF сжимать обе колонки вместе вместо
-                             переполнения, MaxWidth не даёт им раздуться шире исходного вида, когда места
-                             достаточно. -->
-                        <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
+                             вся ширина страницы). Star-размер даёт WPF сжимать все три колонки вместе
+                             вместо переполнения, MaxWidth не даёт им раздуться шире исходного вида,
+                             когда места достаточно. При MainWindow.MinWidth=1100 на правую колонку
+                             остаётся ~650-700px — трёх коротких полей (мин. по 80-90px каждое) это
+                             свободно вмещает без переноса. -->
+                        <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
-                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*" MinWidth="80" MaxWidth="170"/>
+                                <ColumnDefinition Width="12"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
+                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="190"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="200"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
-                            <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
+                            <ComboBox x:Name="GroupCombo" Grid.Row="0" Grid.Column="1" Height="34"
                                       DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
-                            <TextBlock Grid.Column="3" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,6,0"
-                                       ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
-                            <ComboBox x:Name="CtrlCombo" Grid.Column="4" Height="34"
-                                      DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
-                        </Grid>
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
-                                   FontSize="11" Margin="0,2,0,6" TextWrapping="Wrap"/>
-
-                        <!-- Основной И дополнительные подтипы — теперь ОДИН чек-комбобокс
-                             (SubtypeMultiSelect): первый отмеченный становится основным (задаёт номер
-                             версии, папку на диске и резерв — как раньше отдельный ComboBox SubCombo),
-                             остальные отмеченные — дополнительные (им заводится своя запись, а на диск
-                             кладётся ярлык на ту же папку версии, без дублирования файлов). Раньше это
-                             были два разных виджета в двух разных строках; см. SubtypesSelect_
-                             SelectionChanged ниже — тот же каскад (резерв/превью пути), что раньше
-                             висел на SubCombo_SelectionChanged. -->
-                        <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Подтип(ы) *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                            <!-- Основной И дополнительные подтипы — один чек-комбобокс
+                                 (SubtypeMultiSelect): первый отмеченный становится основным (задаёт
+                                 номер версии, папку на диске и резерв — как раньше отдельный ComboBox
+                                 SubCombo), остальные отмеченные — дополнительные (им заводится своя
+                                 запись, а на диск кладётся ярлык на ту же папку версии, без
+                                 дублирования файлов). Та же высота (34), что у соседних ComboBox —
+                                 стоит компактно между Типом и Контроллером, а не отдельной полноширинной
+                                 строкой. -->
+                            <TextBlock Grid.Row="0" Grid.Column="3" Text="Подтип(ы) *:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="Первый отмеченный — основной: задаёт папку на диске, номер версии и резерв. Остальные отмеченные — дополнительные: файл не дублируется, в их папки кладётся ярлык."/>
-                            <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34" SelectionChanged="SubtypesSelect_SelectionChanged"/>
+                            <views:SubtypeMultiSelect x:Name="SubtypesSelect" Grid.Row="0" Grid.Column="4" Height="34" SelectionChanged="SubtypesSelect_SelectionChanged"/>
+
+                            <TextBlock Grid.Row="0" Grid.Column="6" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
+                            <ComboBox x:Name="CtrlCombo" Grid.Row="0" Grid.Column="7" Height="34"
+                                      DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
+
+                            <!-- Описание выбранного контроллера — строго под полем Контроллера (те же
+                                 две последние колонки), а не под Типом шкафа: это подпись контроллера,
+                                 а не типа шкафа, и должна визуально принадлежать своему полю. -->
+                            <TextBlock Grid.Row="1" Grid.Column="6" Grid.ColumnSpan="2" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
+                                       FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"/>
                         </Grid>
 
                         <!-- Отдельный заголовок вместо инлайновой подписи слева — тот же паттерн, что
@@ -246,14 +253,14 @@
                              ряда с подписью в левой узкой колонке, как было — Тип пуска обязателен и
                              концептуально другого рода поле (не переключатель поведения формы, а сама
                              загружаемая метаданные), стоило визуально отделить от подтипов выше. -->
-                        <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,10,0,6"/>
                         <!-- Раньше это был отдельный горизонтальный StackPanel ВНЕ этой сетки, из-за
                              чего чекбоксы типа пуска висели по своим правилам отступов и не
                              переносились на узком окне (тот же класс бага, что уже чинили у «ОПЦИИ
                              ВЕРСИИ», см. VersionOptionsPanel — теперь внутри ExtrasExpander ниже, но
                              WrapPanel-приём тот же). Такой же WrapPanel в такой же ячейке сетки с теми
                              же Margin. -->
-                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
+                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
                     </Grid>
 
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
@@ -270,7 +277,24 @@
                          светлый хром на тёмной теме), просто с более крупным содержимым. -->
                     <Expander x:Name="ExtrasExpander" Style="{StaticResource SectionExpander}" Margin="0,10,0,8">
                         <Expander.Header>
-                            <TextBlock Text="ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold"/>
+                            <!-- Обычной подписи оказалось недостаточно — на живом прогоне пользователь
+                                 не понял, что по заголовку можно кликнуть и раздел раскроется (родной
+                                 шеврон SectionExpander мелкий, 12px, см. Styles.xaml — не трогаем).
+                                 Оборачиваем в заметную полосу-Border с крупной стрелкой и явной
+                                 подсказкой "нажмите, чтобы развернуть/свернуть"; текст стрелки/подсказки
+                                 меняется местами в ExtrasExpander_Expanded/Collapsed (UploadView.xaml.cs).
+                                 Курсор-рука для всей полосы уже даёт сам ToggleButton в шаблоне
+                                 SectionExpander — Border ниже её не переопределяет, просто наследует. -->
+                            <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                                    BorderThickness="1" CornerRadius="4" Padding="10,7">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="ExtrasHeaderArrow" Text="▸" FontSize="14" FontWeight="Bold"
+                                               Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="ExtrasHeaderHint" Text="  —  нажмите, чтобы развернуть" Style="{StaticResource MutedText}"
+                                               FontStyle="Italic" FontSize="11" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
                         </Expander.Header>
                         <StackPanel>
                             <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа.

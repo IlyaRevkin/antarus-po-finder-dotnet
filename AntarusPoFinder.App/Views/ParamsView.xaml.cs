@@ -48,15 +48,27 @@ public partial class ParamsView : UserControl
 
     private void PopulateCombos()
     {
+        var prevGroupId = (GroupCombo.SelectedItem as EquipmentGroup)?.Id;
+        var prevManuf = ManufCombo.SelectedItem as string;
+
         var groups = _services.Db.GetAllEquipmentGroups();
         var manufs = _services.Db.GetParamManufacturers();
 
+        // Ничего не выбирается автоматически при первом открытии страницы (-1), как и в
+        // UploadView.ReloadCombos — молчаливый выбор первого типа/подтипа/производителя делал
+        // слишком лёгкой загрузку файла параметров не в тот шкаф незаметно для оператора. При
+        // повторном заходе на страницу (RefreshIfActive) прежний выбор восстанавливается, если он
+        // всё ещё валиден — иначе он бы сбрасывался на каждый переход между вкладками.
         GroupCombo.ItemsSource = groups;
-        if (groups.Count > 0) GroupCombo.SelectedIndex = 0;
+        GroupCombo.SelectedIndex = prevGroupId is not null
+            ? Math.Max(0, groups.FindIndex(g => g.Id == prevGroupId))
+            : -1;
         PopulateSubtypes();
 
         ManufCombo.ItemsSource = manufs;
-        if (manufs.Count > 0) ManufCombo.SelectedIndex = 0;
+        ManufCombo.SelectedIndex = prevManuf is not null
+            ? Math.Max(0, manufs.FindIndex(m => m == prevManuf))
+            : -1;
 
         var filterGroups = new System.Collections.Generic.List<EquipmentGroup> { new() { Id = null, Name = "Все группы" } };
         filterGroups.AddRange(groups);
@@ -86,10 +98,10 @@ public partial class ParamsView : UserControl
     /// <summary>Наполняет единый чек-комбобокс подтипов (SubtypesSelect) под текущую группу — как и
     /// в UploadView, раньше это был отдельный ComboBox (основной подтип) плюс SetItems с исключённым
     /// основным для второго контрола, теперь один SetItems на полный список. Текущая отметка
-    /// сохраняется по валидности ID (см. SubtypeMultiSelect.SetItems), кроме первой отрисовки
-    /// страницы — там ничего ещё не отмечено, и первый подтип группы отмечается основным сразу,
-    /// чтобы форма была готова к загрузке без лишнего клика (тот же смысл, что раньше был у
-    /// SubCombo.SelectedIndex = 0).</summary>
+    /// сохраняется по валидности ID (см. SubtypeMultiSelect.SetItems) — первый подтип группы больше
+    /// НЕ отмечается автоматически (раньше отмечался, чтобы форма была готова к загрузке без лишнего
+    /// клика, но это же незаметно позволяло загрузить файл не в тот подтип): по умолчанию ничего не
+    /// выбрано, как и у GroupCombo/ManufCombo (см. PopulateCombos), оператор выбирает подтип явно.</summary>
     private void PopulateSubtypes()
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group)
@@ -98,11 +110,7 @@ public partial class ParamsView : UserControl
             return;
         }
         var subtypes = _services.Db.GetSubtypesForGroup(group.Id!.Value);
-        var currentOrder = SubtypesSelect.Selected.Where(s => s.Id is not null).Select(s => s.Id!.Value).ToList();
-        var preselect = currentOrder.Count == 0 && subtypes.Count > 0 && subtypes[0].Id is not null
-            ? new System.Collections.Generic.List<int> { subtypes[0].Id!.Value }
-            : currentOrder;
-        SubtypesSelect.SetItems(subtypes, preselect);
+        SubtypesSelect.SetItems(subtypes);
     }
 
     private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
