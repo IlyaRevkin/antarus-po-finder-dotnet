@@ -70,22 +70,23 @@ public partial class FirmwareCard : UserControl
         SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
 
         ActionsPanel.Children.Clear();
+
+        // Порядок кнопок: сначала «Открыть прошивку ПЛК», СРАЗУ за ней «Открыть HMI проект» —
+        // две кнопки открытия самого ПО стоят рядом, а не разнесены через полсписка (раньше
+        // HMI-кнопка была последней, после Инструкций).
+        // hasHmi — старый KINCO-детект по расширениям файлов внутри одной папки; остаётся только
+        // как фоллбэк для уже загруженных записей без явных хинтов исполняемых файлов.
+        var plcBtn = hasHmi
+            ? MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty))
+            : MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
+        if (!string.IsNullOrEmpty(result.ExecutableHint))
+            plcBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
+        ActionsPanel.Children.Add(plcBtn);
+
         if (hasHmi)
-        {
-            ActionsPanel.Children.Add(MakeActionButton("Открыть ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty)));
-            ActionsPanel.Children.Add(MakeActionButton("Открыть HMI", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty)));
-        }
-        else
-        {
-            // Single-file firmware (Segnetics PSL/LFS today — no separate PLC/HMI project to split
-            // like KINCO above). "Открыть прошивку" reads clearer than a bare "Открыть". If a future
-            // vendor (e.g. Owen) needs its own split — module firmware vs. PLC firmware — add another
-            // branch here the same way hasHmi does for KINCO, rather than overloading this one.
-            var openBtn = MakeActionButton("Открыть прошивку", (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
-            if (!string.IsNullOrEmpty(result.ExecutableHint))
-                openBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
-            ActionsPanel.Children.Add(openBtn);
-        }
+            ActionsPanel.Children.Add(MakeActionButton("Открыть HMI проект", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty)));
+        else if (!string.IsNullOrEmpty(result.HmiPath))
+            ActionsPanel.Children.Add(MakeActionButton("Открыть HMI проект", (_, _) => HmiProjectRequested?.Invoke(this, EventArgs.Empty)));
 
         ActionsPanel.Children.Add(MakeActionButton("Открыть папку с файлом", (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty)));
 
@@ -106,9 +107,6 @@ public partial class FirmwareCard : UserControl
 
         if (!string.IsNullOrEmpty(result.InstructionsPath))
             ActionsPanel.Children.Add(MakeActionButton("Инструкции", (_, _) => InstructionsRequested?.Invoke(this, EventArgs.Empty)));
-
-        if (!string.IsNullOrEmpty(result.HmiPath))
-            ActionsPanel.Children.Add(MakeActionButton("HMI-проект", (_, _) => HmiProjectRequested?.Invoke(this, EventArgs.Empty)));
 
         ActionsPanel.Children.Add(MakeActionButton("История", (_, _) => HistoryRequested?.Invoke(this, EventArgs.Empty)));
 
