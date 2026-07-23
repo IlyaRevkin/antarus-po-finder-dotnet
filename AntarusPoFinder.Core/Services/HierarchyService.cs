@@ -407,7 +407,14 @@ public class HierarchyService
                         var label = sub.Name == "—" ? $"{g.Name}/{ctrl.Name}/{parsed.Raw}" : $"{g.Name}/{sub.Name}/{ctrl.Name}/{parsed.Raw}";
                         try
                         {
-                            var filename = Directory.EnumerateFiles(versionDir).FirstOrDefault();
+                            // Имя файла — первый файл в папке, но НЕ служебный CHANGELOG.md: при
+                            // перечислении он часто оказывается первым по алфавиту, и строка
+                            // получала filename="CHANGELOG.md" вместо самой прошивки.
+                            var filename = Directory.EnumerateFiles(versionDir)
+                                .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
+                            // Описание и типы пуска берём из CHANGELOG.md, который положила туда
+                            // загрузившая машина — заглушка остаётся только там, где файла нет.
+                            var changelog = ChangelogFile.TryRead(versionDir);
                             _db.AddFwVersion(new Domain.FwVersionRecord
                             {
                                 SubtypeId = sub.Id!.Value,
@@ -420,7 +427,11 @@ public class HierarchyService
                                 VersionRaw = parsed.Raw,
                                 Filename = filename is null ? "" : Path.GetFileName(filename),
                                 DiskPath = versionDir,
-                                Description = "(синхронизировано с диска)",
+                                Description = string.IsNullOrWhiteSpace(changelog?.Description)
+                                    ? ChangelogFile.DiskSyncPlaceholder
+                                    : changelog!.Description,
+                                Changelog = changelog?.Description ?? "",
+                                LaunchTypes = changelog?.LaunchTypes ?? new List<string>(),
                                 Status = "active",
                             });
                             added++;

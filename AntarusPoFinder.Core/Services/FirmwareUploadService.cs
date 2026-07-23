@@ -243,7 +243,7 @@ public static class FirmwareUploadService
         var user = db.GetOrCreateUser(request.AuthorUserName, request.AuthorUserName);
 
         var warnings = new List<string>();
-        try { WriteChangelog(dstFolder, fwv, launchTypes, desc); }
+        try { ChangelogFile.Write(dstFolder, fwv, launchTypes, desc); }
         catch (Exception ex) { warnings.Add($"CHANGELOG.md: {ex.Message}"); }
 
         string ioMapStored = "";
@@ -416,19 +416,4 @@ public static class FirmwareUploadService
         }
     }
 
-    private static void WriteChangelog(string folder, FwVersionNumber fwv, List<string> launchTypes, string desc)
-    {
-        var lines = new List<string>
-        {
-            $"# {fwv.Raw}",
-            $"Дата: {fwv.DtStr}",
-            $"Тип пуска: {string.Join(", ", launchTypes)}",
-        };
-        if (!string.IsNullOrEmpty(desc))
-        {
-            lines.Add("");
-            lines.Add(desc);
-        }
-        File.WriteAllText(Path.Combine(folder, "CHANGELOG.md"), string.Join("\n", lines), new UTF8Encoding(false));
-    }
 }

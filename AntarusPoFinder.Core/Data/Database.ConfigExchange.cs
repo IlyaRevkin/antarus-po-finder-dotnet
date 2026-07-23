@@ -693,7 +693,8 @@ public partial class Database
             var existing = ExecuteReader(
                 """
                 SELECT id, status, released, io_map_path, instructions_path, hmi_path,
-                       executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path
+                       executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
+                       description, launch_types
                 FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
                 """, cmd =>
                 {
@@ -702,17 +703,19 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@v", fv.VersionRaw);
                 });
             (int Id, string Status, int Released, string IoMapPath, string InstructionsPath, string HmiPath,
-                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath)? existingRow = null;
+                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
+                string Description, string LaunchTypes)? existingRow = null;
             using (existing)
                 if (existing.Read())
                     existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"),
                         GetString(existing, "io_map_path"), GetString(existing, "instructions_path"), GetString(existing, "hmi_path"),
                         GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"),
-                        GetString(existing, "deleted_at"), GetString(existing, "disk_path"));
+                        GetString(existing, "deleted_at"), GetString(existing, "disk_path"),
+                        GetString(existing, "description"), GetString(existing, "launch_types", "[]"));
 
             if (existingRow is not null)
             {
-                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath) = existingRow.Value;
+                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath, localDesc, localLaunchTypes) = existingRow.Value;
 
                 // Rule 1 — already deleted here: permanent, never revived by an incoming row that
                 // just hasn't caught up yet (see class doc above).
@@ -760,8 +763,24 @@ public partial class Database
                 var newExecHint = Backfill(localExecHint, fv.ExecutableHint);
                 var newHmiExecHint = Backfill(localHmiExecHint, fv.HmiExecutableHint);
                 var newModbus = Backfill(localModbus, fv.ModbusMapPath);
+
+                // Описание/типы пуска — тот же Backfill, но «пустым» здесь считается ещё и заглушка
+                // ChangelogFile.DiskSyncPlaceholder. Строку могло создать сканирование диска
+                // (HierarchyService.SyncFwFromDisk), которое видит только папки и о настоящем
+                // описании не знает; без этого исключения заглушка выигрывала у входящего настоящего
+                // описания навсегда — жалоба «прошивки с другого компа приходят с описанием
+                // "синхронизировано с диска" вместо моего». В обратную сторону не работает: входящую
+                // заглушку локальным описанием не перетираем (Backfill сам её отбросит как «incoming
+                // пустой»), и уже заполненное вручную описание тоже неприкосновенно.
+                bool IsBlankDesc(string s) => string.IsNullOrWhiteSpace(s) || s.Trim() == Services.ChangelogFile.DiskSyncPlaceholder;
+                var newDesc = IsBlankDesc(localDesc) && !IsBlankDesc(fv.Description) ? fv.Description : localDesc;
+                bool IsBlankLaunchTypes(string s) => string.IsNullOrWhiteSpace(s) || s.Trim() is "[]" or "null";
+                var newLaunchTypes = IsBlankLaunchTypes(localLaunchTypes) && !IsBlankLaunchTypes(fv.LaunchTypes)
+                    ? fv.LaunchTypes : localLaunchTypes;
+
                 var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
-                                    newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus;
+                                    newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
+                                    newDesc != localDesc || newLaunchTypes != localLaunchTypes;
 
                 var advances = (localStatus == "active" && incomingStatus != "active") ||
                                (localReleased == 0 && fv.Released != 0) || fieldsChanged;
@@ -771,10 +790,13 @@ public partial class Database
                 if (!apply) continue;
                 ExecuteNonQuery("""
                     UPDATE fw_versions SET status=@st, released=@rel, io_map_path=@io, instructions_path=@instr,
-                        hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb
+                        hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
+                        description=@desc, launch_types=@lt
                     WHERE id=@id
                     """, cmd =>
                 {
+                    cmd.Parameters.AddWithValue("@desc", newDesc);
+                    cmd.Parameters.AddWithValue("@lt", newLaunchTypes);
                     cmd.Parameters.AddWithValue("@st", localStatus == "active" ? incomingStatus : localStatus);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
                     cmd.Parameters.AddWithValue("@io", newIoMap);
