@@ -99,12 +99,20 @@
                 <StackPanel>
                     <TextBlock Text="МЕТАДАННЫЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
 
+                    <!-- Ширина колонки-подписи — 100, ровно как у «Карта in/out»/«Карта modbus»/
+                         «Инструкция» в блоке ДОП. ФАЙЛЫ ниже (раньше здесь было 130, из-за чего поля
+                         № заявки/SN шкафа начинались на 30px правее, чем всё остальное на странице).
+                         Заголовки секций и панели чекбоксов вынесены в Column 0 со ColumnSpan 2 —
+                         раньше они сидели в Column 1, т.е. с отступом 130px, тогда как «МЕТАДАННЫЕ»,
+                         «ДОП. ФАЙЛЫ», «Изменения в этой версии» и drag&drop-зона слева начинаются от
+                         левого края. Именно это и выглядело как «отступы разъезжаются». -->
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="100"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -154,7 +162,7 @@
                                       DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
                         </Grid>
 
-                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
+                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
                                    FontSize="11" Margin="0,2,0,6" TextWrapping="Wrap"/>
 
                         <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа
@@ -162,7 +170,7 @@
                              от соседних обязательных полей ("Тип пуска" и т.п.) — не сразу читалось, что
                              это именно необязательные ПЕРЕКЛЮЧАТЕЛИ поведения, а не поля для заполнения.
                              Общий заголовок + все три чекбокса в одной строке (Round 43). -->
-                        <TextBlock Grid.Row="2" Grid.Column="1" Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,4,0,6"/>
                         <!-- WrapPanel, not a horizontal StackPanel — at the app's own MinWidth this row's
                              three checkboxes are wider than the available column (the right column of
                              UploadView's two-column page, further narrowed by the ScrollViewer's own
@@ -173,7 +181,7 @@
                              WrapPanel wraps the third checkbox onto its own line only when space is
                              actually short — identical single-line look at every width this was already
                              tested at. -->
-                        <WrapPanel x:Name="VersionOptionsPanel" Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                        <WrapPanel x:Name="VersionOptionsPanel" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
                             <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
                                       Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
                                       ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
@@ -185,11 +193,11 @@
                                       ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
                         </WrapPanel>
 
-                        <TextBlock Grid.Row="4" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBlock Grid.Row="4" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,6" Visibility="Collapsed"/>
                         <TextBox Grid.Row="4" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
 
-                        <TextBlock Grid.Row="5" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,8,6" Visibility="Collapsed"/>
+                        <TextBlock Grid.Row="5" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,6" Visibility="Collapsed"/>
                         <TextBox Grid.Row="5" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
                                  Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
 
@@ -198,9 +206,14 @@
                              ряда с подписью в левой узкой колонке, как было — Тип пуска обязателен и
                              концептуально другого рода поле (не переключатель поведения формы, а сама
                              загружаемая метаданные), стоило визуально отделить от блока опций выше. -->
-                        <TextBlock Grid.Row="6" Grid.Column="1" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
+                        <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
+                        <!-- Раньше это был отдельный горизонтальный StackPanel ВНЕ этой сетки, из-за
+                             чего чекбоксы типа пуска висели по своим правилам отступов и не
+                             переносились на узком окне (тот же класс бага, что уже чинили у «ОПЦИИ
+                             ВЕРСИИ»). Теперь — такой же WrapPanel в такой же ячейке сетки с теми же
+                             Margin, что у VersionOptionsPanel выше. -->
+                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
                     </Grid>
-                    <StackPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,6"/>
 
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
                     <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
