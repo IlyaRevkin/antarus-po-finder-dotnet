@@ -558,6 +558,9 @@ public partial class UploadView : UserControl
 
             case FirmwareUploadOutcome.Success:
                 _host.ShowStatus($"Загружено: {result.Record!.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+                // We just wrote files to the disk — refresh the footer file count now instead of
+                // letting it sit stale until the next periodic RunSync tick.
+                _host.RefreshDiskStatus();
 
                 var msg = $"Прошивка загружена:\n{result.DestinationFolder}";
                 if (result.Warnings.Count > 0)

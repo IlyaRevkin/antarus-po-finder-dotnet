@@ -88,6 +88,10 @@ public partial class NetworkSyncView : UserControl
     {
         _services.Cfg.SetRootPath(RootPathInput.Text.Trim());
         _host.ShowStatus("Путь сохранён", category: NotificationCategory.Sync);
+        // Create the folder tree on the new path and refresh the footer "Диск: …" indicator right
+        // away — otherwise the footer stays stale (contradicting the toast above) until the next
+        // periodic sync tick, and on sync_interval_min=0 it never updates until the app restarts.
+        _host.OnRootPathChanged();
     }
 
     private void BrowseSecondDisk_Click(object sender, RoutedEventArgs e)

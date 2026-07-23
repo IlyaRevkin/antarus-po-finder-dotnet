@@ -20,4 +20,17 @@ public interface IAppHost
     /// config_push_interval_min setting — called from NetworkSyncView right after it's saved, so the
     /// change takes effect immediately instead of waiting for the next role switch.</summary>
     void RefreshConfigSync();
+
+    /// <summary>Called right after the root disk path is changed (NetworkSyncView.SaveRoot_Click):
+    /// creates the folder structure on the new path if it's missing AND refreshes the footer disk
+    /// indicator immediately. Without this the "Диск: …" footer only recomputed on the periodic
+    /// RunSync tick (every sync_interval_min, or never when that's 0), so saving a valid path left
+    /// the footer contradicting the "Путь сохранён" toast for minutes, and a fresh machine's disk
+    /// stayed empty until the first upload happened to create the tree.</summary>
+    void OnRootPathChanged();
+
+    /// <summary>Recomputes the footer disk indicator now — call after writing to the disk (e.g. a
+    /// successful firmware upload) so the availability/file count isn't stale until the next
+    /// periodic RunSync tick.</summary>
+    void RefreshDiskStatus();
 }

@@ -708,16 +708,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     private void RunSync()
     {
-        var root = _services.Cfg.RootPath();
-        if (!string.IsNullOrEmpty(root) && System.IO.Directory.Exists(root))
-        {
-            var fileCount = System.Linq.Enumerable.Count(System.IO.Directory.EnumerateFiles(root, "*", System.IO.SearchOption.AllDirectories));
-            DiskStatusText = $"Диск: ✓  ({fileCount} файлов)";
-        }
-        else
-        {
-            DiskStatusText = "Диск: ✗ недоступен";
-        }
+        RefreshDiskStatus();
         RefreshModerationBadge();
 
         try
@@ -775,6 +766,31 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     // ── IAppHost ──────────────────────────────────────────────────────────────
+
+    /// <summary>Recomputes only the footer disk indicator. Extracted from RunSync so callers that
+    /// change the root path or write to the disk can refresh it on demand instead of leaving it
+    /// stale until the next periodic RunSync tick — which, with sync_interval_min=0, never comes.</summary>
+    public void RefreshDiskStatus()
+    {
+        var root = _services.Cfg.RootPath();
+        if (!string.IsNullOrEmpty(root) && System.IO.Directory.Exists(root))
+        {
+            var fileCount = System.Linq.Enumerable.Count(System.IO.Directory.EnumerateFiles(root, "*", System.IO.SearchOption.AllDirectories));
+            DiskStatusText = $"Диск: ✓  ({fileCount} файлов)";
+        }
+        else
+        {
+            DiskStatusText = "Диск: ✗ недоступен";
+        }
+    }
+
+    public void OnRootPathChanged()
+    {
+        // Same order StartTimers uses (structure first, then status) — EnsureHierarchy may create the
+        // tree, which changes the file count RefreshDiskStatus reports.
+        EnsureHierarchy();
+        RefreshDiskStatus();
+    }
 
     public void ReloadSidebarApps()
     {
