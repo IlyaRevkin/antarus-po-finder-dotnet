@@ -74,7 +74,10 @@ public class ConfigService
         ["inspection_auto_cleanup_days"] = "0",
         ["inspection_auto_cleanup_minutes"] = "",
         ["quick_apps_display_mode"] = "sidebar",
-        ["app_start_minimized"] = "true",
+        // Раньше "true" — на новых установках больше не навязываем свёрнутый старт (см. также
+        // Database.ResetAppStartMinimizedDefaultOnce — разовый сброс этого значения для баз,
+        // созданных до этого изменения, у которых оно уже сохранено как "true").
+        ["app_start_minimized"] = "false",
         ["layout_fallback_enabled"] = "true",
         ["layout_fallback_threshold"] = "3",
         ["ad_require_login"] = "false",

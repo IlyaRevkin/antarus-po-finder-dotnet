@@ -162,7 +162,11 @@
                  bar were sized independently) and never lined up. A shared row's height is the max of
                  whichever cell is tallest, so both bottom edges always land on the exact same row
                  boundary, however tall either side's content is (e.g. "иконки с подписями" is taller
-                 than plain icons, or the bar is hidden entirely in "sidebar" quick-apps mode). -->
+                 than plain icons). When the bar is hidden entirely ("sidebar" quick-apps mode, the
+                 default) this row still reserves the sidebar header's own height — but the page
+                 content Border below no longer waits for it: it spans into this row too, so it isn't
+                 left dangling under an empty gap that has nothing of its own to justify (see that
+                 Border's own comment near the bottom of this Grid). -->
             <Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource BgSidebarBrush}"
                     BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1" Padding="12,16,12,12">
                 <StackPanel VerticalAlignment="Center">
@@ -181,7 +185,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource BgSidebarBrush}"
+            <Border Grid.Row="0" Grid.Column="1" Panel.ZIndex="1" Background="{DynamicResource BgSidebarBrush}"
                     BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1"
                     Visibility="{Binding QuickAppsTopVisible, Converter={StaticResource BoolToVis}}">
                 <ItemsControl ItemsSource="{Binding QuickApps}" Margin="16,10" VerticalAlignment="Center">
@@ -416,8 +420,21 @@
                 </DockPanel>
             </Border>
 
-            <!-- Content (below the shared header band — see QuickAppsTopVisible bar above) -->
-            <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BgBrush}">
+            <!-- Content — spans Row="0" (the header band row) AND Row="1", not just Row="1", so that
+                 in "sidebar" quick-apps mode (default: QuickAppsTopVisible false, no icon bar above)
+                 the page content itself reaches all the way up to the window's top edge instead of
+                 leaving an empty gap the height of the sidebar's own logo/role band — that band only
+                 exists on the sidebar side; content had nothing of its own to justify matching it.
+                 Spanning an Auto row (0) together with the Star row (1) is deliberate: WPF's Grid
+                 does NOT let a Star+Auto-spanning child inflate the Auto row's height, so Row 0
+                 still sizes to exactly the sidebar header's own height, same as before — this only
+                 gives content a place to show through when column 1's row 0 is otherwise empty.
+                 When QuickAppsTopVisible IS true ("top"/"top_labeled" mode), the icon bar Border
+                 above sits in that same Row 0/Column 1 cell with Panel.ZIndex="1" and an opaque
+                 background, so it still fully covers this Border there — content only becomes
+                 visible below it, exactly as before; the two bands' bottom borders still land on
+                 the same row boundary (Row 0's height is unchanged), so that alignment isn't lost. -->
+            <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Background="{DynamicResource BgBrush}">
                 <ContentControl Content="{Binding CurrentPageContent}"/>
             </Border>
         </Grid>

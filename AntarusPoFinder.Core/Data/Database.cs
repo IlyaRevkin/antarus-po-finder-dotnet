@@ -453,6 +453,7 @@ public partial class Database : IDisposable
     private void RunDataMigrations()
     {
         DedupeParamFiles();
+        ResetAppStartMinimizedDefaultOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -509,6 +510,25 @@ public partial class Database : IDisposable
             var ph = IntParamPlaceholders(dupIds);
             ExecWithIntParams($"DELETE FROM param_files WHERE id IN ({ph})", dupIds);
         }
+    }
+
+    /// <summary>One-off сброс: app_start_minimized раньше по умолчанию был "true" — приложение
+    /// молча запускалось свёрнутым, и это раздражало пользователей, которые никогда сознательно
+    /// эту галочку не ставили (см. ConfigService.Defaults, теперь дефолт "false"). Смена одного
+    /// только дефолта не помогает базам, где значение уже физически сохранено в settings как
+    /// "true" (например, любое сохранение через Настройки записывает все поля страницы, включая
+    /// эту галочку, даже если пользователь её не трогал) — такие базы продолжили бы читать "true"
+    /// из settings, а не новый дефолт. Здесь старый навязанный дефолт осознанно сбрасывается один
+    /// раз, безусловно (не только когда значение равно "true" — важна не текущая величина, а сам
+    /// факт, что раньше выбора не было), а флаг-маркер ниже гарантирует, что это разовое действие
+    /// не повторится и не затрёт значение, которое пользователь позже выставит сам через Настройки.</summary>
+    private void ResetAppStartMinimizedDefaultOnce()
+    {
+        const string doneFlag = "migration_app_start_minimized_reset_done";
+        if (GetSetting(doneFlag) == "true") return;
+
+        SetSetting("app_start_minimized", "false");
+        SetSetting(doneFlag, "true");
     }
 
     /// <summary>A cabinet type (group) must never exist without at least one subtype — "—" is the

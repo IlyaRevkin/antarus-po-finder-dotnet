@@ -74,8 +74,18 @@
                                     ToolTip="Настроить эту категорию уведомлений">
                                 <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="11"/>
                             </Border>
+                            <!-- ClipToBounds — WPF Grid does NOT clip a child to its own cell when the
+                                 child's desired width exceeds it: this text column is a Star column,
+                                 fine for wrapping normal sentences, but a single unbroken long token
+                                 (a firmware filename, a version string, a path — exactly what shows up
+                                 in a lot of this app's status messages) can't be wrapped at all and was
+                                 rendering past this column's right edge, straight over the "Показать"
+                                 button in Column="3" next to it. Clipping to this element's own arranged
+                                 bounds keeps that overflow inside its own column instead of on top of
+                                 the button — the rare long token gets hard-cut rather than overlapping,
+                                 which is the safe outcome here. -->
                             <TextBlock Grid.Column="2" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center"
-                                       Foreground="{DynamicResource TextBrush}"/>
+                                       ClipToBounds="True" Foreground="{DynamicResource TextBrush}"/>
                             <Button Grid.Column="3" Content="Показать" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"
                                     Visibility="{Binding CanReopen, Converter={StaticResource BoolToVis}}" Click="Reopen_Click"/>
                         </Grid>
