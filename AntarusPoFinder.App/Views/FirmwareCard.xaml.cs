@@ -13,8 +13,10 @@ public partial class FirmwareCard : UserControl
 {
     public HierarchyResult Result { get; private set; } = null!;
 
-    public event EventHandler? OpenRequested;
     public event EventHandler? OpenFolderRequested;
+    /// <summary>Открыть прошивку ПЛК / HMI-проект. Какой именно файл открывается — решает SearchView
+    /// (подсказка исполняемого файла у записи, отдельная папка HMI-проекта, старый детект по
+    /// расширениям); карточка про эти варианты не знает и рисует по одной кнопке на каждый.</summary>
     public event EventHandler? OpenPlcRequested;
     public event EventHandler? OpenHmiRequested;
     public event EventHandler? DownloadRequested;
@@ -22,10 +24,6 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? ModbusMapRequested;
     public event EventHandler? ParamsRequested;
     public event EventHandler? InstructionsRequested;
-    /// <summary>Separately-uploaded HMI project (see UploadView "Добавить HMI-проект") — not to be
-    /// confused with OpenHmiRequested above, which opens the HMI file inside a KINCO folder that
-    /// already mixes PLC+HMI files together (hasHmi in SearchView).</summary>
-    public event EventHandler? HmiProjectRequested;
     public event EventHandler? HistoryRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
@@ -74,19 +72,18 @@ public partial class FirmwareCard : UserControl
         // Порядок кнопок: сначала «Открыть прошивку ПЛК», СРАЗУ за ней «Открыть HMI проект» —
         // две кнопки открытия самого ПО стоят рядом, а не разнесены через полсписка (раньше
         // HMI-кнопка была последней, после Инструкций).
-        // hasHmi — старый KINCO-детект по расширениям файлов внутри одной папки; остаётся только
-        // как фоллбэк для уже загруженных записей без явных хинтов исполняемых файлов.
-        var plcBtn = hasHmi
-            ? MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty))
-            : MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
+        var plcBtn = MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
         if (!string.IsNullOrEmpty(result.ExecutableHint))
             plcBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
         ActionsPanel.Children.Add(plcBtn);
 
         if (hasHmi)
-            ActionsPanel.Children.Add(MakeActionButton("Открыть HMI проект", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty)));
-        else if (!string.IsNullOrEmpty(result.HmiPath))
-            ActionsPanel.Children.Add(MakeActionButton("Открыть HMI проект", (_, _) => HmiProjectRequested?.Invoke(this, EventArgs.Empty)));
+        {
+            var hmiBtn = MakeActionButton("Открыть HMI проект", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty));
+            if (!string.IsNullOrEmpty(result.HmiExecutableHint))
+                hmiBtn.ToolTip = $"Исполняемый файл: {result.HmiExecutableHint}";
+            ActionsPanel.Children.Add(hmiBtn);
+        }
 
         ActionsPanel.Children.Add(MakeActionButton("Открыть папку с файлом", (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty)));
 

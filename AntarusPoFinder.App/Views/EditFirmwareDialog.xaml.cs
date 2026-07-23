@@ -67,9 +67,23 @@ public partial class EditFirmwareDialog : Window
             PlcExecutableRow.Visibility = Visibility.Visible;
             ExecutablesPanel.Visibility = Visibility.Visible;
         }
+        // HMI-файл живёт либо в отдельной папке HMI-проекта (чекбокс «Добавить HMI-проект» при
+        // загрузке), либо прямо в папке версии рядом с прошивкой ПЛК — так устроены не только KINCO,
+        // а любой проект, где ПЛК и панель собираются в одну папку. Раньше во втором случае строка
+        // просто не показывалась, и назначить HMI-файл было нечем — кнопка «Открыть HMI проект»
+        // могла опираться только на захардкоженный список KINCO-расширений.
         if (!string.IsNullOrEmpty(v.HmiPath) && Directory.Exists(v.HmiPath))
-        {
             _hmiFolder = v.HmiPath;
+        else if (_plcFolder is not null)
+        {
+            _hmiFolder = _plcFolder;
+            HmiExecutableLabel.Text = "HMI в папке:";
+            HmiExecutableLabel.ToolTip = "Отдельной папки HMI-проекта у этой версии нет — файл панели " +
+                "можно указать прямо в папке прошивки (в т.ч. во вложенной), тогда в поиске появится " +
+                "кнопка «Открыть HMI проект».";
+        }
+        if (_hmiFolder is not null)
+        {
             _hmiHint = ExecutableHintResolver.Normalize(v.HmiExecutableHint) ?? "";
             HmiExecutableRow.Visibility = Visibility.Visible;
             ExecutablesPanel.Visibility = Visibility.Visible;

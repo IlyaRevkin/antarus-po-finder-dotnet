@@ -152,21 +152,19 @@ public partial class SearchView : UserControl
             var hasAnyLocal = HasAnyLocal(result);
             var subtypeName = _subtypesById.TryGetValue(result.SubtypeId, out var sub) ? sub.Name : "";
             var hasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0;
-            var hasHmi = FindFiltered(result, KincoHmiExts) is not null;
+            var hasHmi = HasHmiTarget(result);
             var hasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null;
 
             var card = new FirmwareCard();
             card.Configure(result, hasLocal, hasAnyLocal, hasParams, hasHmi, hasMap, canEditTags);
-            card.OpenRequested += (s, _) => OpenFirmware(((FirmwareCard)s!).Result);
             card.OpenFolderRequested += (s, _) => OpenFirmwareFolder(((FirmwareCard)s!).Result);
-            card.OpenPlcRequested += (s, _) => OpenFiltered(((FirmwareCard)s!).Result, KincoPlcExts, "ПЛК");
-            card.OpenHmiRequested += (s, _) => OpenFiltered(((FirmwareCard)s!).Result, KincoHmiExts, "HMI");
+            card.OpenPlcRequested += (s, _) => OpenPlc(((FirmwareCard)s!).Result);
+            card.OpenHmiRequested += (s, _) => OpenHmi(((FirmwareCard)s!).Result);
             card.DownloadRequested += (s, _) => DownloadFirmware(((FirmwareCard)s!).Result);
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
             card.InstructionsRequested += (s, _) => OpenInstructions(((FirmwareCard)s!).Result);
-            card.HmiProjectRequested += (s, _) => OpenHmiProject(((FirmwareCard)s!).Result);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -446,28 +444,84 @@ public partial class SearchView : UserControl
 
     // ── Card actions ──────────────────────────────────────────────────────
 
+    /// <summary>Папки, в которых может лежать эта версия, в порядке предпочтения: точная папка версии
+    /// в локальном кэше, остальные локальные версии этой прошивки (свежие первыми), и только потом
+    /// сетевая папка — открывать локальную копию всегда лучше, чем дёргать сеть.</summary>
+    private static IEnumerable<string> CandidateFolders(HierarchyResult result)
+    {
+        var baseDir = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name));
+        yield return Path.Combine(baseDir, result.VersionRaw);
+
+        if (Directory.Exists(baseDir))
+            foreach (var sub in Directory.EnumerateDirectories(baseDir).OrderByDescending(d => d))
+                yield return sub;
+
+        if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
+    }
+
+    /// <summary>Файл, на который указывает подсказка исполняемого файла, в первой же папке, где он
+    /// реально есть. Null — если подсказки нет или файл не найден нигде.</summary>
+    private static string? ResolveHintedFile(HierarchyResult result, string? hint)
+    {
+        if (ExecutableHintResolver.Normalize(hint) is null) return null;
+        foreach (var dir in CandidateFolders(result))
+            if (ExecutableHintResolver.Resolve(dir, hint) is { } resolved) return resolved;
+        return null;
+    }
+
     private static string? ResolveOpenTarget(HierarchyResult result)
     {
-        var localDir = SanitizeName(result.Name);
-        string? target = FindUsableFile(Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw), result.ExecutableHint);
+        foreach (var dir in CandidateFolders(result))
+            if (FindUsableFile(dir, result.ExecutableHint) is { } target) return target;
 
-        if (target is null)
+        // Ничего похожего на открываемый файл — но если папка версии на диске есть, показать хотя бы
+        // её содержимое полезнее, чем сказать «не найдено».
+        return Directory.Exists(result.FirmwareDir) ? result.FirmwareDir : null;
+    }
+
+    /// <summary>Есть ли что открывать кнопкой «Открыть HMI проект»: отдельно загруженный HMI-проект,
+    /// явно указанный файл панели внутри папки версии, или (для старых записей без подсказок) файл с
+    /// KINCO-расширением рядом с прошивкой.</summary>
+    private static bool HasHmiTarget(HierarchyResult result) =>
+        !string.IsNullOrEmpty(result.HmiPath)
+        || ExecutableHintResolver.Normalize(result.HmiExecutableHint) is not null
+        || FindFiltered(result, KincoHmiExts) is not null;
+
+    /// <summary>Проекты, где ПЛК и панель лежат в ОДНОЙ папке — это не только KINCO: то же бывает у
+    /// любого вендора, где панель собирается отдельным файлом рядом с программой ПЛК. Поэтому сначала
+    /// смотрим на явно указанный оператором исполняемый файл (работает для любого проекта и для
+    /// файлов во вложенных папках), и только если подсказки нет — на старый детект по расширениям,
+    /// иначе «первый подходящий файл в папке» может открыть файл панели вместо программы ПЛК.</summary>
+    private void OpenPlc(HierarchyResult result)
+    {
+        if (ResolveHintedFile(result, result.ExecutableHint) is { } hinted)
         {
-            var baseDir = Path.Combine(ConfigService.LocalFw, localDir);
-            if (Directory.Exists(baseDir))
-            {
-                foreach (var sub in Directory.EnumerateDirectories(baseDir).OrderByDescending(d => d))
-                {
-                    target = FindUsableFile(sub, result.ExecutableHint);
-                    if (target is not null) break;
-                }
-            }
+            TryOpen(hinted);
+            return;
         }
+        if (FindFiltered(result, KincoHmiExts) is not null && FindFiltered(result, KincoPlcExts) is not null)
+        {
+            OpenFiltered(result, KincoPlcExts, "ПЛК");
+            return;
+        }
+        OpenFirmware(result);
+    }
 
-        if (target is null && Directory.Exists(result.FirmwareDir))
-            target = FindUsableFile(result.FirmwareDir, result.ExecutableHint) ?? result.FirmwareDir;
-
-        return target;
+    /// <summary>Зеркально OpenPlc: отдельная папка HMI-проекта (чекбокс «Добавить HMI-проект» при
+    /// загрузке) → явно указанный файл панели внутри папки версии → старый детект по расширениям.</summary>
+    private void OpenHmi(HierarchyResult result)
+    {
+        if (!string.IsNullOrEmpty(result.HmiPath))
+        {
+            OpenHmiProject(result);
+            return;
+        }
+        if (ResolveHintedFile(result, result.HmiExecutableHint) is { } hinted)
+        {
+            TryOpen(hinted);
+            return;
+        }
+        OpenFiltered(result, KincoHmiExts, "HMI");
     }
 
     private void OpenFirmware(HierarchyResult result)
@@ -597,11 +651,9 @@ public partial class SearchView : UserControl
         TryOpen(path);
     }
 
-    /// <summary>Opens the separately-uploaded HMI project (see UploadView's "Добавить HMI-проект"
-    /// checkbox — distinct from the KINCO same-folder PLC/HMI split above, OpenFiltered/hasHmi).
-    /// When HmiPath is a folder and the operator recorded which file inside is the executable
-    /// (HmiExecutableHint, set via PickFileDialog at upload time), that file is opened directly
-    /// instead of just revealing the folder.</summary>
+    /// <summary>Отдельно загруженный HMI-проект (чекбокс «Добавить HMI-проект» в загрузке). Если это
+    /// папка и оператор указал, какой файл внутри исполняемый (HmiExecutableHint), открывается сразу
+    /// он, а не просто папка. Вызывается только из OpenHmi — см. порядок вариантов там.</summary>
     private void OpenHmiProject(HierarchyResult result)
     {
         var path = result.HmiPath;
