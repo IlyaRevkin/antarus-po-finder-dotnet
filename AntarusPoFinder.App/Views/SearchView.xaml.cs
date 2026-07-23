@@ -578,7 +578,34 @@ public partial class SearchView : UserControl
         return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
     }
 
-    private void PerformSchemasSearch(string query)
+    /// <summary>Обход второго диска, который выполняет прямо сейчас фоновая задача EnsureScanned —
+    /// null, когда ничего не идёт. Ключ дедупликации — путь диска: пока обход конкретного диска не
+    /// завершился, повторный поиск по Схемам (второй клик «Найти», фоновый RefreshIfActive, смена
+    /// фильтра/режима) ждёт ТУ ЖЕ задачу вместо второго параллельного Directory.EnumerateFiles по тем
+    /// же сотням гигабайт.</summary>
+    private Task? _schemasScanTask;
+    private string? _schemasScanDiskPath;
+
+    private void PerformSchemasSearch(string query) => _ = PerformSchemasSearchAsync(query, _searchGeneration);
+
+    /// <summary>Асинхронная версия поиска по Схемам. Единственная по-настоящему медленная часть —
+    /// обход второго диска в SchematicService: сетевая шара бывает под 400 ГБ, и Directory.
+    /// EnumerateFiles по всем подпапкам раньше шёл прямо здесь, синхронно, на потоке интерфейса —
+    /// первый поиск за сессию (и первый после смены пути второго диска, пока не наполнился кэш
+    /// SchematicService) намертво вешал окно на всё время обхода.
+    ///
+    /// Обход уходит в Task.Run под тем же индикатором занятости внизу окна, что и остальные фоновые
+    /// операции (см. AutoSyncMissingAsync, DownloadFirmware) — окно остаётся отзывчивым, оператор
+    /// может уйти на другую вкладку. Только сам обход (EnsureScanned) идёт в фоне: подбор совпадений
+    /// по конкретному запросу (Matches) — это уже дешёвая фильтрация прогретого кэша в памяти, и её
+    /// нарочно оставляем синхронной на потоке интерфейса, потому что у неё out-параметры (usedFallback/
+    /// convertedQuery для проверки раскладки клавиатуры) — через await/Task их не передать, а вызывать
+    /// после await, как здесь, можно.
+    ///
+    /// generation — тот же приём, что и в ScanDiskFlagsAsync/AutoSyncMissingAsync: если за время обхода
+    /// стартовал новый поиск (другой запрос, режим или фильтр), устаревшая выдача просто не рисуется —
+    /// новая уже отрисована собственным запуском этого же метода.</summary>
+    private async Task PerformSchemasSearchAsync(string query, int generation)
     {
         var diskPath = _services.Cfg.SecondDiskPath();
         if (string.IsNullOrEmpty(diskPath))
@@ -591,6 +618,32 @@ public partial class SearchView : UserControl
 
         const string schemaNotFoundHint = "Схема не найдена — проверьте название шкафа или второй диск";
         var exact = ExactWordCheck.IsChecked == true;
+
+        using var busy = _host.BeginBusy("Чтение второго диска…");
+
+        // Проверка/присваивание ниже — синхронный код до первого await, выполняется целиком на потоке
+        // интерфейса без прерываний, а SearchView — единственный потребитель SchematicService (одна
+        // страница, живёт в кэше вкладок MainWindowViewModel), поэтому гонки с другим вызовом этого же
+        // метода здесь быть не может — то же рассуждение, что и у _searchGeneration.
+        if (_schemasScanTask is null || _schemasScanDiskPath != diskPath)
+        {
+            _schemasScanDiskPath = diskPath;
+            _schemasScanTask = Task.Run(() => _services.Schematics.EnsureScanned(diskPath));
+        }
+        var scanTask = _schemasScanTask;
+
+        try { await scanTask; }
+        finally
+        {
+            // Обход этого диска завершён (успешно или с ошибкой) — следующий поиск прогревает кэш
+            // заново своим Task.Run; если диск не поменялся, SchematicService.Scanned() сам увидит
+            // валидный кэш и вернёт его почти мгновенно, так что это не лишний обход с нуля.
+            if (ReferenceEquals(_schemasScanTask, scanTask)) { _schemasScanTask = null; _schemasScanDiskPath = null; }
+        }
+
+        // Выдача уже устарела — другой поиск запустился и закончился (или ещё идёт) поверх этого.
+        if (generation != _searchGeneration) return;
+
         var hits = _services.Schematics.Matches(diskPath, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
         if (hits.Count == 0)

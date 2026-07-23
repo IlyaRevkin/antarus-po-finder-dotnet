@@ -93,4 +93,30 @@ public class SchematicServiceTests : IDisposable
         var hits = new SchematicService().Matches(_root, "НЕТ_ТАКОГО_ШКАФА");
         Assert.Empty(hits);
     }
+
+    /// <summary>SearchView.PerformSchemasSearchAsync now runs the heavy walk (EnsureScanned, in a
+    /// background Task.Run) separately from the actual query matching (Matches, synchronous on the UI
+    /// thread afterwards — see its out-parameters) — this covers that split still finds everything the
+    /// old one-shot Matches() call did, including files nested under territory subfolders.</summary>
+    [Fact]
+    public void EnsureScanned_ThenMatches_FindsNestedFiles_SameAsOneShotMatches()
+    {
+        var service = new SchematicService();
+        service.EnsureScanned(_root);
+        var hits = service.Matches(_root, "ПЖ-101");
+        Assert.Equal(2, hits.Count);
+        Assert.All(hits, h => Assert.Equal("ПЖ-101", h.CabinetName));
+    }
+
+    /// <summary>EnsureScanned alone (no query yet) must still populate the cache that CabinetHits and
+    /// Matches read from — otherwise the SearchView split would warm nothing and every search would
+    /// re-walk the disk regardless.</summary>
+    [Fact]
+    public void EnsureScanned_PopulatesCacheUsedByCabinetHits()
+    {
+        var service = new SchematicService();
+        service.EnsureScanned(_root);
+        var all = service.CabinetHits(_root);
+        Assert.Equal(6, all.Count); // 2 (ПЖ-101) + 1 (НГР-205) + 1 (КПЧ-9) + 1 (КПЧ-12) + 1 (НАСОС-5)
+    }
 }

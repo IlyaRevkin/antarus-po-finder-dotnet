@@ -17,7 +17,15 @@ public record SchematicHit(string CabinetName, string Path);
 /// Expected structure on the second disk (either works, at any nesting depth):
 ///   .../ПЖ-101/схема.pdf   — folder named after the cabinet; every schematic file inside counts
 ///   .../НГР-205.pdf        — file named directly after the cabinet
-/// Every matching file is returned, not just the first one per folder.</summary>
+/// Every matching file is returned, not just the first one per folder.
+///
+/// This service itself stays synchronous and knows nothing about threads — the caller decides where
+/// to run it. In practice that's SearchView, which pushes the cold-cache walk (the expensive part,
+/// see EnsureScanned) into a background Task.Run so the network-share enumeration never blocks the
+/// UI thread. Not thread-safe by itself (the cache fields below aren't locked) — fine today because
+/// SearchView is this service's only caller and dedupes concurrent scans of the same disk path itself
+/// before ever reaching here; don't call this from more than one place at once without adding
+/// locking.</summary>
 public class SchematicService
 {
     private static readonly string[] SchematicExtensions =
@@ -35,6 +43,16 @@ public class SchematicService
         _cachedDiskPath = null;
         _cache = new();
     }
+
+    /// <summary>Прогревает кэш для указанного диска без фильтрации по запросу — тяжёлая часть
+    /// (полный обход дерева папок, Directory.EnumerateFiles по SearchOption.AllDirectories) идёт
+    /// именно здесь; последующие Matches() для того же diskPath обращаются к уже наполненному кэшу
+    /// и работают быстро, как обычная фильтрация списка в памяти. Отдельный метод существует специально
+    /// для того, чтобы вызывающий (SearchView.PerformSchemasSearchAsync) мог обернуть в фоновый поток
+    /// именно обход — и не плодить параллельные обходы одного и того же диска, если несколько поисков
+    /// подряд целятся в один diskPath, — а сам подбор совпадений по конкретному запросу (Matches, с его
+    /// out-параметрами раскладки-фолбэка) оставить синхронным на потоке интерфейса.</summary>
+    public void EnsureScanned(string diskPath) => Scanned(diskPath);
 
     /// <summary>All schematic files found on disk, sorted by cabinet name. Cached per disk path
     /// until InvalidateCache().</summary>
