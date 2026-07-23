@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
@@ -69,7 +70,7 @@ public partial class FirmwareUpdatesWindow : Window
         changesBtn.Click += (_, _) => ShowChangelog(u);
 
         var updateBtn = new Button { Content = "Обновить", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
-        updateBtn.Click += (_, _) => { ApplyUpdate(u); Render(); };
+        updateBtn.Click += async (_, _) => await ApplyBatchAsync(new List<FirmwareUpdateInfo> { u });
 
         var autoCheck = new CheckBox
         {
@@ -98,11 +99,14 @@ public partial class FirmwareUpdatesWindow : Window
         AppMessageBox.Show(text, $"Что нового — {u.Name} {u.Latest.VersionRaw}", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private bool ApplyUpdate(FirmwareUpdateInfo u)
+    /// <summary>Копирование — в фоновом потоке: прошивка тянется с сетевой шары, и раньше на всё это
+    /// время замирало не только это окно, но и всё приложение за ним.</summary>
+    private async Task<bool> ApplyUpdateAsync(FirmwareUpdateInfo u)
     {
         try
         {
-            FirmwareSync.CopyToLocal(SearchService.ToHierarchyResult(u.Latest));
+            var source = SearchService.ToHierarchyResult(u.Latest);
+            await Task.Run(() => FirmwareSync.CopyToLocal(source));
             UpdatedCount++;
             _updates.Remove(u);
             return true;
@@ -114,20 +118,38 @@ public partial class FirmwareUpdatesWindow : Window
         }
     }
 
-    private void UpdateAll_Click(object sender, RoutedEventArgs e)
+    /// <summary>Общий ход для всех трёх кнопок обновления: пока идёт копирование, кнопки погашены
+    /// (иначе повторный клик запустил бы второй проход по тем же прошивкам), внизу видно, какая
+    /// именно версия сейчас тянется и сколько их осталось.</summary>
+    private async Task ApplyBatchAsync(List<FirmwareUpdateInfo> batch)
     {
-        foreach (var u in _updates.ToList())
-            ApplyUpdate(u);
-        Render();
+        if (batch.Count == 0) return;
+
+        UpdateAllButton.IsEnabled = false;
+        UpdateSelectedButton.IsEnabled = false;
+        ProgressPanel.Visibility = Visibility.Visible;
+        try
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                ProgressText.Text = $"Обновление: {batch[i].Name} ({i + 1} из {batch.Count})";
+                ProgressIndicator.Value = i * 100.0 / batch.Count;
+                await ApplyUpdateAsync(batch[i]);
+            }
+        }
+        finally
+        {
+            ProgressPanel.Visibility = Visibility.Collapsed;
+            ProgressText.Text = "";
+            ProgressIndicator.Value = 0;
+            Render(); // сам расставит IsEnabled — в том числе гасит кнопки, когда обновлять больше нечего
+        }
     }
 
-    private void UpdateSelected_Click(object sender, RoutedEventArgs e)
-    {
-        foreach (var kv in _selectCheckboxes.ToList())
-            if (kv.Value.IsChecked == true)
-                ApplyUpdate(kv.Key);
-        Render();
-    }
+    private async void UpdateAll_Click(object sender, RoutedEventArgs e) => await ApplyBatchAsync(_updates.ToList());
+
+    private async void UpdateSelected_Click(object sender, RoutedEventArgs e) =>
+        await ApplyBatchAsync(_selectCheckboxes.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList());
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

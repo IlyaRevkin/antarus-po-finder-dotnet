@@ -301,21 +301,36 @@ public partial class SearchView : UserControl
 
         // Последовательно, а не параллельно: сетевой диск компании и так регулярно отваливается
         // (см. NetworkPathHelper), десяток одновременных копирований делу не поможет.
-        foreach (var (card, result) in pending)
+        //
+        // Ход виден дважды: подробно на самой карточке и общей строкой внизу окна — карточка может
+        // быть уже прокручена за экран, а «программа не отвечает» пользователь замечает как раз
+        // тогда, когда не на что посмотреть.
+        using var busy = _host.BeginBusy("Синхронизация локальных копий…");
+        for (int i = 0; i < pending.Count; i++)
         {
+            var (card, result) = pending[i];
             if (generation != _searchGeneration) return;
-            if (string.IsNullOrEmpty(result.FirmwareDir) || !Directory.Exists(result.FirmwareDir))
+
+            busy.Text = $"Синхронизация: {result.Name} {result.VersionRaw}".Trim();
+            busy.Report(i, pending.Count);
+
+            if (string.IsNullOrEmpty(result.FirmwareDir))
             {
-                card.SetSyncStatus($"Папка версии не найдена на диске: {result.FirmwareDir}", "WarningBrush");
+                card.SetSyncStatus("Папка версии на диске не указана", "WarningBrush");
                 continue;
             }
 
             card.SetSyncStatus("Синхронизация с диском…");
             try
             {
-                var dst = await Task.Run(() => FirmwareSync.CopyToLocal(result));
+                // Проверка существования — тоже поход на сетевой диск, поэтому вместе с копированием
+                // уходит в фоновый поток: на отвалившейся шаре она сама по себе висит секундами.
+                var dst = await Task.Run(() =>
+                    Directory.Exists(result.FirmwareDir) ? FirmwareSync.CopyToLocal(result) : null);
                 if (generation != _searchGeneration) return;
-                card.SetSyncStatus($"✓ Локальная копия обновлена: {dst}", "SuccessBrush");
+                card.SetSyncStatus(dst is null
+                    ? $"Папка версии не найдена на диске: {result.FirmwareDir}"
+                    : $"✓ Локальная копия обновлена: {dst}", dst is null ? "WarningBrush" : "SuccessBrush");
             }
             catch (Exception ex)
             {
@@ -751,7 +766,9 @@ public partial class SearchView : UserControl
             $"{result.Name} {result.VersionRaw}".Trim(), source);
     }
 
-    private void DownloadFirmware(HierarchyResult result)
+    /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с
+    /// сетевой шары и бывает в сотни мегабайт, а раньше на всё это время окно просто замирало.</summary>
+    private async void DownloadFirmware(HierarchyResult result)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(result.FirmwareDir))
@@ -768,7 +785,8 @@ public partial class SearchView : UserControl
         string dst;
         try
         {
-            dst = FirmwareSync.CopyToLocal(result);
+            using (_host.BeginBusy($"Скачивание: {result.Name} {result.VersionRaw}".Trim()))
+                dst = await Task.Run(() => FirmwareSync.CopyToLocal(result));
         }
         catch (Exception ex)
         {

@@ -114,7 +114,7 @@
                                  ToolTip="Краткое описание (необязательно)"/>
                     </Grid>
 
-                    <Button Content="Загрузить параметры" HorizontalAlignment="Right" Height="36" Margin="0,10,0,0" Click="Upload_Click"/>
+                    <Button x:Name="UploadBtn" Content="Загрузить параметры" HorizontalAlignment="Right" Height="36" Margin="0,10,0,0" Click="Upload_Click"/>
                 </StackPanel>
             </Border>
 

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Domain;
@@ -167,7 +168,9 @@ public partial class ParamsView : UserControl
             SetFile(files[0]);
     }
 
-    private void Upload_Click(object sender, RoutedEventArgs e)
+    /// <summary>Копирование на сетевой диск — в фоновом потоке, с индикатором внизу окна: файлы
+    /// параметров бывают увесистые, а шара компании регулярно отвечает через раз.</summary>
+    private async void Upload_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_srcPath) || !File.Exists(_srcPath))
         {
@@ -194,15 +197,25 @@ public partial class ParamsView : UserControl
         if (GroupCombo.SelectedItem is not EquipmentGroup group) return;
 
         var dstFolder = _services.Hierarchy.ParamsPath(root, group.Name, subOption.Subtype.Name, manuf);
+        var srcPath = _srcPath;
         try
         {
-            Directory.CreateDirectory(dstFolder);
-            File.Copy(_srcPath, Path.Combine(dstFolder, Path.GetFileName(_srcPath)), overwrite: true);
+            UploadBtn.IsEnabled = false;
+            using (_host.BeginBusy($"Загрузка параметров: {Path.GetFileName(srcPath)}"))
+                await Task.Run(() =>
+                {
+                    Directory.CreateDirectory(dstFolder);
+                    File.Copy(srcPath, Path.Combine(dstFolder, Path.GetFileName(srcPath)), overwrite: true);
+                });
         }
         catch (Exception ex)
         {
             AppMessageBox.Show(ex.Message, "Ошибка файла", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
+        }
+        finally
+        {
+            UploadBtn.IsEnabled = true;
         }
 
         var record = new ParamFile
