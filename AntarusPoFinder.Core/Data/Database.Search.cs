@@ -17,14 +17,11 @@ public record FirmwareSearchFilters
     public int? ControllerId { get; init; }
     public string? LaunchType { get; init; }
 
-    /// <summary>Тег целиком (не слово из него) — см. TagString.</summary>
-    public string? Tag { get; init; }
-
     public static readonly FirmwareSearchFilters None = new();
 
     public bool IsEmpty =>
         GroupId is null && SubtypeId is null && ControllerId is null &&
-        string.IsNullOrWhiteSpace(LaunchType) && string.IsNullOrWhiteSpace(Tag);
+        string.IsNullOrWhiteSpace(LaunchType);
 }
 
 /// <summary>Строка выдачи вместе с тем, чем она заслужила своё место: очки релевантности и сколько
@@ -254,7 +251,6 @@ public partial class Database
         if (!string.IsNullOrWhiteSpace(f.LaunchType) &&
             !(row.LaunchTypes ?? new List<string>()).Any(lt => string.Equals(lt, f.LaunchType, StringComparison.OrdinalIgnoreCase)))
             return false;
-        if (!string.IsNullOrWhiteSpace(f.Tag) && !TagString.Contains(row.Tags, f.Tag!)) return false;
         return true;
     }
 

@@ -169,17 +169,24 @@ public class SearchTagsAndFiltersTests
         Assert.Empty(SearchService.Search(db, ""));
     }
 
+    /// <summary>Раньше это проверялось через отдельный фильтр «Тег» в панели фильтров — его убрали
+    /// (поиск по тегу теперь идёт прямо из строки поиска с «Точное совпадение слова», см.
+    /// ExactSearchByFullCabinetNameTag_FindsOnlyThatFirmware), но гарантия «совпадает весь тег
+    /// целиком, а не слово внутри более длинного тега» должна остаться — проверяем её здесь тем же
+    /// путём, каким теперь и пользуется оператор.</summary>
     [Fact]
-    public void TagFilter_MatchesWholeTag_NotAWordInsideIt()
+    public void ExactWordSearch_MatchesWholeTag_NotJustWordsInsideALongerTag()
     {
         using var dbFile = new TempDb();
         using var db = new Database(dbFile.Path);
 
         var exact = AddVersion(db, "КНС", 1, TagString.Join(new[] { "шкаф пожарный" }));
-        AddVersion(db, "УПД", 2, TagString.Join(new[] { "шкаф" }));
+        // Тег длиннее запроса, но содержит оба его слова — раньше через фильтр TagString.Contains
+        // такое тоже не совпало бы (сравнение целым значением), и «тег-фраза» этот же принцип
+        // сохраняет: полное совпадение нормализованного запроса с ОДНИМ тегом сужает выдачу.
+        AddVersion(db, "УПД", 2, TagString.Join(new[] { "шкаф пожарный резервный" }));
 
-        var hits = SearchService.Search(db, "", exactWord: false,
-            filters: new FirmwareSearchFilters { Tag = "шкаф пожарный" });
+        var hits = SearchService.Search(db, "шкаф пожарный", exactWord: true);
 
         var hit = Assert.Single(hits);
         Assert.Equal(exact, hit.FwVersionId);

@@ -104,14 +104,7 @@ public partial class SearchView : UserControl
             controllers.Where(c => c.Id is not null).Select(c => new FilterOption(c.Name, c.Id)));
         FillFilter(FilterLaunchCombo, "Тип пуска: любой",
             ConfigService.LaunchTypes.Select(lt => new FilterOption(lt, null, lt)));
-        // Теги — только те, что реально стоят на версиях: справочник целиком (GetAllTags) содержит и
-        // те, которые никому ещё не проставили, и выбирать их в фильтре бессмысленно — пустая выдача.
-        _allTagOptions = _services.Db.GetTagsInUse().Select(t => new FilterOption(t, null, t)).ToList();
-        FillFilter(FilterTagCombo, TagFilterAnyLabel, _allTagOptions);
     }
-
-    private const string TagFilterAnyLabel = "Тег: любой";
-    private List<FilterOption> _allTagOptions = new();
 
     private static void FillFilter(ComboBox combo, string anyLabel, IEnumerable<FilterOption> options)
     {
@@ -126,35 +119,7 @@ public partial class SearchView : UserControl
         combo.SelectedIndex = restored < 0 ? 0 : restored;
     }
 
-    /// <summary>Набранное в поле тега сужает список — это и есть «поиск тегов»: список у наладчика
-    /// длинный, и пролистывать его до нужного названия шкафа руками бессмысленно. Пока оператор
-    /// печатает, выбор не сбрасываем и поиск не перезапускаем — только когда он выберет тег из
-    /// списка (SelectionChanged) или очистит поле.</summary>
-    private void FilterTagText_Changed(object sender, TextChangedEventArgs e)
-    {
-        if (_reloadingTagOptions || FilterTagCombo.ItemsSource is null) return;
-
-        var text = FilterTagCombo.Text?.Trim() ?? "";
-        var matching = text.Length == 0
-            ? _allTagOptions
-            : _allTagOptions.Where(o => o.Label.Contains(text, StringComparison.CurrentCultureIgnoreCase)).ToList();
-
-        _reloadingTagOptions = true;
-        var items = new List<FilterOption> { new(TagFilterAnyLabel) };
-        items.AddRange(matching);
-        FilterTagCombo.ItemsSource = items;
-        FilterTagCombo.Text = text;
-        FilterTagCombo.IsDropDownOpen = text.Length > 0 && matching.Count > 0;
-        _reloadingTagOptions = false;
-    }
-
-    private bool _reloadingTagOptions;
-
-    private void Filter_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (_reloadingTagOptions) return;
-        PerformSearch();
-    }
+    private void Filter_Changed(object sender, SelectionChangedEventArgs e) => PerformSearch();
 
     private void ResetFilters_Click(object sender, RoutedEventArgs e)
     {
@@ -165,12 +130,8 @@ public partial class SearchView : UserControl
 
     private void ResetFilterCombos()
     {
-        _reloadingTagOptions = true;
         foreach (var combo in new[] { FilterGroupCombo, FilterSubtypeCombo, FilterControllerCombo, FilterLaunchCombo })
             if (combo.Items.Count > 0) combo.SelectedIndex = 0;
-        FilterTagCombo.ItemsSource = new List<FilterOption> { new(TagFilterAnyLabel) }.Concat(_allTagOptions).ToList();
-        FilterTagCombo.SelectedIndex = 0;
-        _reloadingTagOptions = false;
     }
 
     /// <summary>Что выбрано в панели фильтров прямо сейчас. Свёрнутая панель фильтры НЕ отменяет —
@@ -184,7 +145,6 @@ public partial class SearchView : UserControl
             SubtypeId = (FilterSubtypeCombo.SelectedItem as FilterOption)?.Id,
             ControllerId = (FilterControllerCombo.SelectedItem as FilterOption)?.Id,
             LaunchType = (FilterLaunchCombo.SelectedItem as FilterOption)?.Text,
-            Tag = (FilterTagCombo.SelectedItem as FilterOption)?.Text,
         };
     }
 

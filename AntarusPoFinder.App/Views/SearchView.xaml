@@ -28,7 +28,7 @@
             <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"/>
             <Button Grid.Column="2" x:Name="FiltersToggle" Content="Фильтры ▾" Style="{StaticResource SecondaryButton}"
                     Height="38" Margin="8,0,0,0" Click="ToggleFilters_Click"
-                    ToolTip="Сузить выдачу по типу шкафа, подтипу, контроллеру, типу пуска или тегу"/>
+                    ToolTip="Сузить выдачу по типу шкафа, подтипу, контроллеру или типу пуска"/>
             <Button Grid.Column="3" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
         </Grid>
 
@@ -39,40 +39,40 @@
                 Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                 BorderThickness="1" CornerRadius="6" Padding="10">
             <StackPanel>
+                <!-- Единая ширина колонки (170) на все четыре фильтра — раньше у каждого комбобокса
+                     было своё случайное значение (170/170/150/130/230), и ряд выглядел рваным,
+                     особенно после переноса на вторую строку в узком окне. Ширина задана на
+                     StackPanel-обёртке, а не на самом ComboBox — только так и подпись, и поле
+                     растягиваются на одинаковую ширину колонки. -->
                 <WrapPanel>
-                    <StackPanel Margin="0,0,12,6">
+                    <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterGroupCombo" Width="170" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterGroupCombo" Height="28" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
-                    <StackPanel Margin="0,0,12,6">
+                    <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Подтип" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterSubtypeCombo" Width="170" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterSubtypeCombo" Height="28" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
-                    <StackPanel Margin="0,0,12,6">
+                    <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Контроллер" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterControllerCombo" Width="150" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterControllerCombo" Height="28" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
-                    <StackPanel Margin="0,0,12,6">
+                    <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Тип пуска" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterLaunchCombo" Width="130" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterLaunchCombo" Height="28" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
-                    </StackPanel>
-                    <StackPanel Margin="0,0,12,6">
-                        <TextBlock Text="Тег" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterTagCombo" Width="230" Height="28" DisplayMemberPath="Label"
-                                  IsEditable="True" IsTextSearchEnabled="True" StaysOpenOnEdit="True"
-                                  TextBoxBase.TextChanged="FilterTagText_Changed"
-                                  SelectionChanged="Filter_Changed"
-                                  ToolTip="Поиск по тегам: начните набирать — список сузится. Тег из нескольких слов ищется целиком"/>
                     </StackPanel>
                     <Button Content="Сбросить фильтры" Style="{StaticResource SecondaryButton}" Height="28"
-                            VerticalAlignment="Bottom" Margin="0,0,0,6" Click="ResetFilters_Click"/>
+                            VerticalAlignment="Bottom" Margin="0,0,0,8" Click="ResetFilters_Click"/>
                 </WrapPanel>
+                <!-- Поиск по тегу теперь идёт из обычной строки поиска (см. SearchInput) — тег с
+                     точным совпадением слова сворачивает выдачу до одной прошивки, см.
+                     Database.SearchFwVersions. Отдельного фильтра «Тег» здесь больше нет. -->
                 <TextBlock x:Name="FiltersHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
-                           Text="Фильтры действуют только для поиска по прошивкам. С пустым запросом покажет всё, что подходит под фильтры."/>
+                           Text="Фильтры действуют только для поиска по прошивкам. С пустым запросом покажет всё, что подходит под фильтры. Поиск по тегу — прямо в строке поиска (с «Точное совпадение слова» найдёт ровно нужный шкаф)."/>
             </StackPanel>
         </Border>
 
