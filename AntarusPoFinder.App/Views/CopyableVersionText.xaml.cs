@@ -37,7 +37,6 @@ public partial class CopyableVersionText : UserControl
         try { Clipboard.SetText(Text); }
         catch { return; }
 
-        var original = Label.Foreground;
         // Every use of this control is inside a DataGrid cell (Прошивки/Модерация/Резервация номеров/
         // NewVersionsView/HistoryDialog) — clicking to copy on an already-SELECTED row was flashing the
         // plain SuccessBrush (tuned to read on the normal card background) on top of the row's own
@@ -52,7 +51,17 @@ public partial class CopyableVersionText : UserControl
         timer.Tick += (_, _) =>
         {
             timer.Stop();
-            Label.Foreground = original;
+            // ClearValue, а не "Label.Foreground = original" (как было раньше): захватывать текущий
+            // резолвленный Brush и переприсваивать его как ЛОКАЛЬНОЕ значение окончательно рвёт
+            // Binding, который держит стиль Styles.xaml (Foreground ячейки DataGridCell, переключается
+            // между обычным и TextOnAccentBrush при выделении строки) — родительский Style.Resources
+            // ставит на этот TextBlock именно Binding, а не Setter, и присвоение локального значения
+            // вообще любого Brush навсегда отключает его. После первого клика по любой версии в
+            // таблице (Прошивки/Модерация/Резервация) её текст переставал реагировать на выделение
+            // строки — оставался тёмным на синем акцентном фоне (ровно баг «выделено — чёрный текст
+            // на синем»). ClearValue снимает локальное значение и возвращает управление Foreground
+            // обратно Binding/наследованию — цвет снова корректно следует за выделением ячейки.
+            Label.ClearValue(TextBlock.ForegroundProperty);
         };
         timer.Start();
     }

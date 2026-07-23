@@ -306,11 +306,11 @@
                               Style="{StaticResource RoomyDataGrid}"
                               PreviewMouseWheel="ScrollableChild_PreviewMouseWheel" MouseDoubleClick="HierarchyGrid_MouseDoubleClick">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Тип шкафа" Binding="{Binding GroupName}" Width="Auto" MinWidth="120"/>
-                            <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="Auto" MinWidth="110"/>
-                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="100"/>
-                            <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="Auto" MinWidth="130"/>
-                            <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*" MinWidth="140"/>
+                            <DataGridTextColumn Header="Тип шкафа" Binding="{Binding GroupName}" Width="Auto" MinWidth="120" ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*" MinWidth="140" ElementStyle="{StaticResource DataGridCellText}"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
@@ -328,10 +328,10 @@
                               Style="{StaticResource RoomyDataGrid}"
                               PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Тип" Binding="{Binding ControllerName}" Width="Auto" MinWidth="70"/>
-                            <DataGridTextColumn Header="Модификация" Binding="{Binding DisplayName}" Width="1.2*" MinWidth="130"/>
-                            <DataGridTextColumn Header="hw_version" Binding="{Binding HwVersionText}" Width="Auto" MinWidth="100"/>
-                            <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" MinWidth="160"/>
+                            <DataGridTextColumn Header="Тип" Binding="{Binding ControllerName}" Width="Auto" MinWidth="70" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Модификация" Binding="{Binding DisplayName}" Width="1.2*" MinWidth="130" ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="hw_version" Binding="{Binding HwVersionText}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
@@ -406,11 +406,12 @@
                     <TextBlock x:Name="ModerationCountText" Text="Версии без тегов"
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                     <DataGrid x:Name="ModGrid" Height="360" AutoGenerateColumns="False" Margin="0,0,0,10"
+                              Style="{StaticResource RoomyDataGrid}"
                               MouseDoubleClick="ModGrid_MouseDoubleClick" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
-                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
-                            <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                            <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                             <DataGridTemplateColumn Header="Версия" Width="160">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
@@ -418,8 +419,8 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Описание" Binding="{Binding Record.Description}" Width="*"/>
-                            <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
+                            <DataGridTextColumn Header="Описание" Binding="{Binding Record.Description}" Width="*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal">
@@ -481,11 +482,12 @@
             <CheckBox Grid.Row="3" x:Name="FwNeedsModerationCheck" Content="Только требующие модерации" Margin="0,0,0,10"
                       Checked="FwModerationFilter_Changed" Unchecked="FwModerationFilter_Changed"/>
             <DataGrid Grid.Row="4" x:Name="FwGrid" AutoGenerateColumns="False" MinHeight="120" Margin="0,0,0,10"
+                      Style="{StaticResource RoomyDataGrid}"
                       MouseDoubleClick="FwGrid_MouseDoubleClick">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
-                    <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
-                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                    <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTemplateColumn Header="Версия" Width="160">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
@@ -493,12 +495,15 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
-                    <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
-                    <DataGridTextColumn Header="Теги" Binding="{Binding Tags}" Width="*"/>
+                    <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Теги" Binding="{Binding Tags}" Width="*" MinWidth="120" ElementStyle="{StaticResource DataGridCellText}"/>
                 </DataGrid.Columns>
+                <!-- BasedOn на общий (немаркерный) стиль DataGridRow из Styles.xaml — иначе этот
+                     RowStyle полностью ЗАМЕНЯЕТ собой общий стиль (а не дополняет), и строки FwGrid
+                     остались бы без общего hover/selected вида, добавленного централизованно. -->
                 <DataGrid.RowStyle>
-                    <Style TargetType="DataGridRow">
+                    <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
                                 <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
@@ -533,11 +538,12 @@
                 <TextBlock Text="ч (0 — без ограничения)" VerticalAlignment="Center" Margin="0,0,16,0"/>
                 <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Click="SaveReservationTtl_Click"/>
             </StackPanel>
-            <DataGrid Grid.Row="2" x:Name="ReservationsGrid" AutoGenerateColumns="False" MinHeight="120" Margin="0,0,0,10">
+            <DataGrid Grid.Row="2" x:Name="ReservationsGrid" AutoGenerateColumns="False" MinHeight="120" Margin="0,0,0,10"
+                      Style="{StaticResource RoomyDataGrid}">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80"/>
-                    <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="80"/>
-                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
+                    <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTemplateColumn Header="Номер" Width="160">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
@@ -545,9 +551,12 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="Кем зарезервирован" Binding="{Binding Record.ReservedBy}" Width="140"/>
-                    <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="120"/>
-                    <DataGridTextColumn Header="Истекает" Binding="{Binding ExpiresLabel}" Width="140"/>
+                    <!-- Единственная звёздная (свободного размера) колонка — логин может быть
+                         заметно длиннее заголовка "Кем зарезервирован", остальные поля здесь короткие
+                         фиксированные коды/даты, как и в других таблицах приложения. -->
+                    <DataGridTextColumn Header="Кем зарезервирован" Binding="{Binding Record.ReservedBy}" Width="*" MinWidth="170" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Истекает" Binding="{Binding ExpiresLabel}" Width="Auto" MinWidth="140" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                 </DataGrid.Columns>
             </DataGrid>
             <StackPanel Grid.Row="3" Orientation="Horizontal">
@@ -606,12 +615,13 @@
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <TextBox Grid.Row="1" x:Name="UsersFilterInput" Height="34" Margin="0,0,0,10"
                      ToolTip="Фильтр по AD-логину или роли…" TextChanged="UsersFilter_Changed"/>
-            <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10">
+            <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"
+                      Style="{StaticResource RoomyDataGrid}">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="AD-логин" Binding="{Binding AdLogin}" Width="180"/>
-                    <DataGridTextColumn Header="Роль" Binding="{Binding RoleLabel}" Width="140"/>
-                    <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="160"/>
-                    <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="160"/>
+                    <DataGridTextColumn Header="AD-логин" Binding="{Binding AdLogin}" Width="*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Роль" Binding="{Binding RoleLabel}" Width="Auto" MinWidth="120" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="Auto" MinWidth="160" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                 </DataGrid.Columns>
             </DataGrid>
             <Grid Grid.Row="3" Margin="0,0,0,8">

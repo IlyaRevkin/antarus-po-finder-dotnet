@@ -47,25 +47,33 @@
                 <WrapPanel>
                     <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterGroupCombo" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterGroupCombo" Height="30" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
                     <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Подтип" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterSubtypeCombo" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterSubtypeCombo" Height="30" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
                     <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Контроллер" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterControllerCombo" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterControllerCombo" Height="30" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
                     <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Тип пуска" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterLaunchCombo" Height="28" DisplayMemberPath="Label"
+                        <ComboBox x:Name="FilterLaunchCombo" Height="30" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
-                    <Button Content="Сбросить фильтры" Style="{StaticResource SecondaryButton}" Height="28"
+                    <!-- Как и у SecondaryButton, вертикальный Padding (8+8) плюс рамка (1+1) требуют
+                         примерно 34px на содержимое — жёсткий Height="28" (как у соседних
+                         ComboBox-полей ряда) не уменьшал этот padding, а просто обрезал
+                         ContentPresenter, из-за чего надпись "Сбросить фильтры" была видна не целиком.
+                         CompactSecondaryButton — тот же вид кнопки с уменьшенным padding и MinHeight
+                         вместо Height (см. её комментарий в Styles.xaml, сделана ровно для этого
+                         случая: компактный ряд кнопок рядом с невысокими полями) — кнопка становится
+                         на пару пикселей выше соседних комбобоксов, но текст внутри не обрезается. -->
+                    <Button Content="Сбросить фильтры" Style="{StaticResource CompactSecondaryButton}"
                             VerticalAlignment="Bottom" Margin="0,0,0,8" Click="ResetFilters_Click"/>
                 </WrapPanel>
                 <!-- Поиск по тегу теперь идёт из обычной строки поиска (см. SearchInput) — тег с

@@ -565,6 +565,33 @@
         <Setter Property="Width" Value="0"/>
     </Style>
 
+    <!-- DataGridRow — до этой правки отдельного стиля не было вовсе, поэтому строка выделения/
+         наведения бралась из системной темы Windows (Aero2/Classic), а не из палитры приложения:
+         системная подсветка красит фон под системный акцентный цвет (не обязательно совпадает с
+         AccentBrush темы) и не трогает Foreground — обычно это "пряталось" за тем, что DataGridCell
+         ниже сам красит Background/Foreground при выделении поверх строки, но для НЕ выделенных
+         строк (обычное наведение мышью) фон строки был не наш — сквозь прозрачный (по умолчанию)
+         фон DataGridCell была видна either системная, либо вовсе никакая подсветка, в зависимости от
+         темы Windows у конкретного пользователя. Теперь строка держит свой вид полностью в рамках
+         приложения и теми же двумя ресурсами, что и DataGridCell ниже (один источник истины для
+         обоих состояний, а не два независимых): в покое — прозрачна (виден RowBackground/
+         AlternatingRowBackground у самого DataGrid), при наведении — лёгкий тон BgSidebarBrush
+         (текст не переключаем, обычный TextBrush на этом тоне достаточно контрастен в обеих темах),
+         при выделении — AccentBrush/TextOnAccentBrush, совпадающие с тем, что делает DataGridCell. -->
+    <Style TargetType="DataGridRow">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <Style TargetType="DataGridCell">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -588,6 +615,30 @@
         </Style.Triggers>
     </Style>
 
+    <!-- Готовые ElementStyle для DataGridTextColumn — единый вид ячейки во всех таблицах приложения
+         (см. HierarchyGrid/ControllersGrid/ModGrid/FwGrid/ReservationsGrid/UsersGrid в SettingsView):
+         однострочный текст с многоточием вместо переноса (высота строки в RoomyDataGrid фиксирована,
+         перенос всё равно обрежется по высоте) и вертикальное центрирование. Foreground намеренно НЕ
+         задаётся здесь: явный ElementStyle (в отличие от обычного нестилизованного TextBlock выше)
+         заменяет собой implicit-резолюцию стиля целиком, поэтому Foreground этого TextBlock просто
+         наследуется (Foreground — inherited-свойство) от родительской DataGridCell — а она уже
+         переключает Foreground на TextOnAccentBrush при выделении (см. стиль DataGridCell выше), и
+         это наследование ничем не перекрывается, раз Setter на Foreground здесь отсутствует. -->
+    <Style x:Key="DataGridCellText" TargetType="TextBlock">
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="TextWrapping" Value="NoWrap"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+
+    <!-- Тот же вид, но по центру — для коротких/числовых полей (короткие коды, даты, статусы),
+         см. "числа/короткие поля по центру" в списке правок таблиц. HorizontalAlignment="Stretch"
+         обязателен: без него TextBlock сжимается до ширины текста и TextAlignment="Center" внутри
+         него самого же ничего не центрирует относительно всей ячейки. -->
+    <Style x:Key="DataGridCellTextCentered" TargetType="TextBlock" BasedOn="{StaticResource DataGridCellText}">
+        <Setter Property="TextAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    </Style>
+
     <Style TargetType="DataGrid">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -602,9 +653,12 @@
         <Setter Property="IsReadOnly" Value="True"/>
     </Style>
 
-    <!-- Более просторный вариант обычного DataGrid — используется точечно там, где заголовки
-         столбцов иначе обрезаются (напр. таблицы вкладки "Иерархия" в Настройках: "Префикс типа",
-         "Префикс подтипа"). Не трогает базовый стиль DataGrid выше — он общий на всё приложение. -->
+    <!-- Более просторный вариант обычного DataGrid — единый вид для ВСЕХ информационных таблиц
+         Настроек (Иерархия/Прошивки/Резервация номеров/Пользователи/Модерация — раньше только
+         Иерархия использовала этот стиль, у остальных были более тесные стандартные высоты строк/
+         заголовков, из-за чего таблицы на разных вкладках выглядели по-разному). Не трогает базовый
+         стиль DataGrid выше — тот остаётся общим на всё приложение (в т.ч. таблицы вне Настроек, не
+         переведённые на этот стиль явно), RoomyDataGrid применяется точечно через Style="{StaticResource RoomyDataGrid}". -->
     <Style x:Key="RoomyDataGrid" TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
         <Setter Property="RowHeight" Value="34"/>
         <Setter Property="ColumnHeaderHeight" Value="38"/>
