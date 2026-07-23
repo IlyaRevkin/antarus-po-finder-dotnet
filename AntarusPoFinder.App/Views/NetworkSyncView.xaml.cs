@@ -44,6 +44,13 @@ public partial class NetworkSyncView : UserControl
         var lastPush = _services.Cfg.ConfigLastPushedAt();
         LastPushText.Text = string.IsNullOrEmpty(lastPush) ? "" : $"Последняя отправка: {lastPush}";
 
+        // Задача 2 — watermark ревизии маркера (config_last_synced_revision), читается напрямую
+        // через ConfigService.Get, т.к. типизированного свойства для него нет (см. ConfigSyncService.
+        // LocalWatermarkRevision — это его же ключ). "0"/пусто — либо синхронизации ещё не было,
+        // либо общий диск ещё не знает о ревизиях (общий конфиг от версии приложения без маркера).
+        var revision = _services.Cfg.Get("config_last_synced_revision");
+        RevisionText.Text = string.IsNullOrEmpty(revision) || revision == "0" ? "" : $"Ревизия конфига на этой машине: {revision}";
+
         var conflictCount = _services.Db.PendingHierarchyConflictCount();
         ConflictStatusPanel.Visibility = conflictCount > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (conflictCount > 0)

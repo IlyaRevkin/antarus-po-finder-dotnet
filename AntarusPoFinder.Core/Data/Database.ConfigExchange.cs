@@ -8,6 +8,17 @@ namespace AntarusPoFinder.Core.Data;
 
 public partial class Database
 {
+    /// <summary>Задел (Задача 7) — «сохранить у себя, не выгружать»: помечает строку fw_versions
+    /// так, что ExportHierarchyData её больше не включает в общий конфиг (см. WHERE fv.is_local_only
+    /// в запросе ниже). Нет своего UI-переключателя ещё (минимум по задаче — только схема и фильтр
+    /// экспорта), но метод уже готов для будущей галочки в UploadView.</summary>
+    public void SetFwVersionLocalOnly(int fwVersionId, bool localOnly) =>
+        ExecuteNonQuery("UPDATE fw_versions SET is_local_only=@v WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@v", localOnly ? 1 : 0);
+            cmd.Parameters.AddWithValue("@id", fwVersionId);
+        });
+
     public HierarchyExportData ExportHierarchyData()
     {
         var data = new HierarchyExportData();
@@ -91,6 +102,7 @@ public partial class Database
             JOIN equipment_subtypes es ON fv.subtype_id  = es.id
             JOIN equipment_groups   eg ON es.group_id    = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.is_local_only = 0
             ORDER BY fv.id
             """))
             while (r.Read())

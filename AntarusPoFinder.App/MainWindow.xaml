@@ -10,6 +10,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -91,7 +93,59 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="4">
+        <!-- Плашка-накопитель изменений, готовых к отправке (Задача 4, отправитель) — неисчезающая
+             по дизайну, пока накопитель не пуст: в отличие от остальных баннеров здесь нет
+             автоскрытия по таймеру (см. MainWindowViewModel.RefreshPendingChangesBanner). -->
+        <Border Grid.Row="4" Background="{DynamicResource AccentBrush}"
+                Visibility="{Binding PendingChangesBannerVisible, Converter={StaticResource BoolToVis}}">
+            <StackPanel Margin="16,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding PendingChangesSummary}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Отправить всё" Margin="12,0,8,0"
+                            Command="{Binding SendPendingChangesNowCommand}"/>
+                    <Button Grid.Column="2" Content="Список" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                            Command="{Binding TogglePendingChangesDetailsCommand}"/>
+                    <Button Grid.Column="3" Content="Скрыть" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding DismissPendingChangesBannerCommand}"/>
+                </Grid>
+                <ItemsControl ItemsSource="{Binding PendingChangesDetails}" Margin="0,6,0,0"
+                              Visibility="{Binding PendingChangesDetailsVisible, Converter={StaticResource BoolToVis}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{DynamicResource TextOnAccentBrush}" Margin="0,1"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- Плашка «Поступили изменения» (Задача 4, приёмник) — информационная, аддитивные
+             изменения/удаления к этому моменту уже применены (п.5 дизайна синхронизации, см.
+             MainWindowViewModel.ShowIncomingChangesBanner); конфликты правки одного поля идут через
+             отдельный баннер конфликтов выше, сюда не попадают. -->
+        <Border Grid.Row="5" Background="{DynamicResource AccentBrush}"
+                Visibility="{Binding IncomingChangesBannerVisible, Converter={StaticResource BoolToVis}}">
+            <Grid Margin="16,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding IncomingChangesBannerText}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Скрыть" Style="{StaticResource SecondaryButton}"
+                        Command="{Binding DismissIncomingChangesBannerCommand}"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="215"/>
                 <ColumnDefinition Width="*"/>
@@ -372,7 +426,7 @@
              программа синхронизируется с диском, копирует прошивку или отправляет конфиг, снизу
              видно, ЧТО именно идёт. До этого фоновые операции выполнялись прямо на потоке
              интерфейса и молча: окно переставало отвечать, и это было неотличимо от «зависла». -->
-        <Border Grid.Row="5" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="7" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid Margin="10,4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -394,6 +448,6 @@
         </Border>
 
         <!-- Onboarding tour overlay — sits on top of everything, only populated while the tour runs -->
-        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="6" Focusable="False"/>
+        <ContentControl x:Name="OnboardingHost" Grid.Row="0" Grid.RowSpan="8" Focusable="False"/>
     </Grid>
 </Window>

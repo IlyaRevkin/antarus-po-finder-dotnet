@@ -253,6 +253,17 @@ public partial class Database : IDisposable
                  incoming_json TEXT NOT NULL,
                  created_at    TEXT NOT NULL DEFAULT ''
              );
+
+             -- Изменения справочника, накопленные этой машиной и ещё не отправленные на общий диск —
+             -- см. Database.SyncPending.cs и плашку «Изменений готово к отправке» в MainWindowViewModel.
+             -- Machine-local: никогда не входит в общий конфиг, не приезжает с других машин.
+             CREATE TABLE IF NOT EXISTS sync_pending_changes (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ts          TEXT NOT NULL DEFAULT '',
+                 author      TEXT NOT NULL DEFAULT '',
+                 change_type TEXT NOT NULL DEFAULT '',
+                 description TEXT NOT NULL DEFAULT ''
+             );
              """);
 
         EnsureIndexes();
@@ -339,6 +350,12 @@ public partial class Database : IDisposable
         // ExportHierarchyData/ImportHierarchyDataCore (kept IN the sync payload so the deletion itself
         // reaches every other machine, not just this one).
         AddColumnsIfMissing("fw_versions", ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
+
+        // Задел (Задача 7): «сохранить у себя, не выгружать» — строка с is_local_only=1 просто
+        // пропускается ExportHierarchyData (см. Database.ConfigExchange.cs), т.е. никогда не попадёт
+        // в общий конфиг и не уедет к коллегам. UI-переключателя пока нет (минимум по задаче) —
+        // только схема и фильтр экспорта, готовые для будущей галочки в UploadView.
+        AddColumnsIfMissing("fw_versions", ("is_local_only", "INTEGER NOT NULL DEFAULT 0"));
 
         // Backfilling `released` from existing tags is only correct the ONE TIME this column is
         // introduced on an old database — after that, release status must come solely from the

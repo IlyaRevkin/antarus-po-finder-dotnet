@@ -67,6 +67,8 @@
                     </StackPanel>
                     <TextBlock x:Name="LastCheckText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,4,0,0"
                                ToolTip="Обновляется на каждой фоновой проверке, даже если изменений на диске не нашлось — если эта отметка не сдвигается, фоновая проверка не запускается вовсе; если сдвигается, а «Последняя синхронизация» выше — нет, изменений на диске просто не найдено."/>
+                    <TextBlock x:Name="RevisionText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,2,0,0"
+                               ToolTip="Ревизия маркера Конфиг\revision.json, которую эта машина уже применила — по ней проверка обновлений понимает, тянуть ли конфиг целиком, без сравнения по часам."/>
                     <StackPanel x:Name="ConflictStatusPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
                         <TextBlock x:Name="ConflictStatusText" Text="" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
                         <Button Content="Показать и решить" Style="{StaticResource SecondaryButton}" Click="ShowConflicts_Click"/>

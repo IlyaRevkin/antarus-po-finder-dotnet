@@ -13,8 +13,10 @@ using AntarusPoFinder.Core.Services;
 namespace AntarusPoFinder.App.Services;
 
 /// <summary>Прочитанный и разобранный общий конфиг с сетевого диска — результат дисковой фазы,
-/// который дальше разбирают уже против локальной БД (см. ConfigSyncService.CheckForUpdateAsync).</summary>
-public record SharedConfigSnapshot(string Path, JsonObject RootNode, HierarchyExportData Hierarchy)
+/// который дальше разбирают уже против локальной БД (см. ConfigSyncService.CheckForUpdateAsync).
+/// Revision/Changes — то, что дал маркер Конфиг\revision.json (см. ISyncTransport); Revision=0 и
+/// Changes=null означают «маркера на этом диске ещё нет», т.е. legacy-путь по exported_at.</summary>
+public record SharedConfigSnapshot(string Path, JsonObject RootNode, HierarchyExportData Hierarchy, int Revision = 0, List<SyncChangeEntry>? Changes = null)
 {
     public string ExportedAt => RootNode["exported_at"]?.GetValue<string>() ?? "";
     public string ExportedBy => RootNode["exported_by"]?.GetValue<string>() ?? "?";
@@ -22,7 +24,12 @@ public record SharedConfigSnapshot(string Path, JsonObject RootNode, HierarchyEx
 
 internal record SharedConfigRead(SharedConfigSnapshot? Snapshot, string? Error);
 
-public record ConfigUpdateInfo(string ConfigPath, string ExportedAt, string ExportedBy, int SettingsChanged, ImportCounts Diff);
+/// <summary>Revision/Changes — см. SharedConfigSnapshot. CriticalSchemaMismatch — входящий
+/// schema_version отличается от того, что понимает эта версия приложения (см.
+/// ConfigSyncService.CurrentSchemaVersion): применяется всё равно (см. п.5 дизайна — «критическое
+/// расхождение применяется принудительно с уведомлением»), это поле только чтобы
+/// MainWindowViewModel мог отдельно, заметно об этом уведомить.</summary>
+public record ConfigUpdateInfo(string ConfigPath, string ExportedAt, string ExportedBy, int SettingsChanged, ImportCounts Diff, int Revision = 0, List<SyncChangeEntry>? Changes = null, bool CriticalSchemaMismatch = false);
 public record ConfigApplyResult(int SettingsApplied, ImportCounts Counts, string ExportedAt, string ExportedBy);
 public record ConfigExportResult(string ExportedAt, string ExportedBy, HierarchyExportData Hierarchy);
 
@@ -41,8 +48,27 @@ public static class ConfigSyncService
         "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
         "allowed_extensions", "fw_version_reservations", "fw_versions", "param_files", "app_users",
-        "flat_list_state",
+        "flat_list_state", "schema_version",
     };
+
+    /// <summary>Версия формата общего конфига — сегодня меняется только вместе с реальной сменой
+    /// схемы обмена (не с каждым мелким полем). Записывается в каждый экспорт (см. PrepareExport) и
+    /// сверяется на приёме (см. Analyze) — расхождение считается «критическим уровнем» из п.5
+    /// дизайна синхронизации: применяется принудительно (ничего не блокируем), но
+    /// MainWindowViewModel обязан заметно уведомить об этом оператора через
+    /// ConfigUpdateInfo.CriticalSchemaMismatch, а не проглотить молча.</summary>
+    private const int CurrentSchemaVersion = 1;
+
+    /// <summary>Сколько последних записей журнала изменений хранит маркер ревизии — см.
+    /// SyncRevisionMarker.Changes и BumpRevisionMarkerCas.</summary>
+    private const int MaxChangelogEntries = 50;
+
+    /// <summary>Единственная точка, через которую ConfigSyncService обращается к каналу обмена —
+    /// сегодня всегда файловая шара (см. FileShareTransport), но переключить канал на будущий
+    /// HTTPS/WebDAV/обратный прокси — это заменить одну эту строку, без изменений во всей остальной
+    /// логике ниже. Публичное поле (не readonly) — тесты могут подменить фабрику своей реализацией
+    /// ISyncTransport, не трогая файловую систему вовсе.</summary>
+    public static Func<string, ISyncTransport> TransportFactory { get; set; } = root => new FileShareTransport(root);
 
     /// <summary>Настройка — это всегда скалярное значение; массивы и объекты в корне файла — это
     /// выгрузка иерархии, которая читается отдельно (см. SkipKeys выше). Список имён приходится
@@ -67,6 +93,14 @@ public static class ConfigSyncService
         "ad_group_administrator", "ad_group_programmer", "ad_group_naladchik", "ad_auth_mode", "ad_http_url",
         "sync_interval_min", "quick_apps",
         "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at", "config_last_checked_at",
+        // config_last_pushed_at — тот же per-machine watermark, что и два соседних выше, но раньше
+        // (до этого фикса) сюда не был добавлен: FinishExport пишет его ПОСЛЕ того, как первый
+        // экспорт уже ушёл на диск, поэтому в первый payload он не попадал, а во ВТОРОЙ — уже попадал
+        // (GetAllSettings() к тому моменту его уже видит) и утекал как "чужая настройка изменилась" —
+        // ложный SettingsChanged=1 на приёмнике при полностью пустом реальном дифе. Обнаружено этим
+        // же раундом правок (Задача 2/3 — тест на "нечего применять после второго экспорта").
+        "config_last_pushed_at",
+        "config_last_synced_revision",
         "scan_resolution_dpi", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
@@ -86,7 +120,8 @@ public static class ConfigSyncService
     /// the caller can surface it (e.g. status bar) without blocking the app on it.</summary>
     public static ConfigUpdateInfo? CheckForUpdate(AppServices services, out string? error)
     {
-        var read = ReadShared(services.Cfg.RootPath());
+        var localRevision = LocalWatermarkRevision(services);
+        var read = ReadShared(services.Cfg.RootPath(), localRevision);
         error = read.Error;
         if (read.Snapshot is null) return null;
 
@@ -102,25 +137,44 @@ public static class ConfigSyncService
     public static async Task<(ConfigUpdateInfo? Info, string? Error, SharedConfigSnapshot? Snapshot)> CheckForUpdateAsync(AppServices services)
     {
         var root = services.Cfg.RootPath();
-        var read = await Task.Run(() => ReadShared(root));
+        var localRevision = LocalWatermarkRevision(services);
+        var read = await Task.Run(() => ReadShared(root, localRevision));
         if (read.Snapshot is null) return (null, read.Error, null);
 
         try { return (Analyze(services, read.Snapshot), null, read.Snapshot); }
         catch (Exception e) { return (null, e.Message, null); }
     }
 
-    /// <summary>Дисковая фаза: прочитать и разобрать общий конфиг. В БД не ходит.</summary>
-    private static SharedConfigRead ReadShared(string root)
+    /// <summary>Дисковая фаза: прочитать и разобрать общий конфиг. В БД не ходит (кроме передаваемого
+    /// снаружи <paramref name="localWatermarkRevision"/> — это уже прочитанное вызывающим значение
+    /// настройки, а не отдельный поход в БД внутри этого метода).
+    ///
+    /// Задача 2/3: СНАЧАЛА читаем только маркер ревизии (крошечный, незашифрованный файл) — если его
+    /// revision не превышает то, что эта машина уже применяла, до чтения и расшифровки самого
+    /// (потенциально тяжёлого на медленной шаре) конфига дело не доходит вовсе. Отсутствие маркера
+    /// (marker is null — общий диск ещё не знает о ревизиях, более старая версия приложения на
+    /// машине-экспортёре, или маркер повреждён гонкой записи) — откатываемся на прежнюю схему:
+    /// читаем конфиг целиком, Analyze сравнивает exported_at как раньше.</summary>
+    private static SharedConfigRead ReadShared(string root, int localWatermarkRevision)
     {
         try
         {
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return new SharedConfigRead(null, null);
 
-            var path = ConfigPathFor(root);
-            if (!File.Exists(path)) return new SharedConfigRead(null, null);
+            var transport = TransportFactory(root);
+            SyncRevisionMarker? marker;
+            try { marker = transport.ReadRevisionAsync().GetAwaiter().GetResult(); }
+            catch { marker = null; }
 
-            var (rootNode, hierarchyData) = Parse(path);
-            return new SharedConfigRead(new SharedConfigSnapshot(path, rootNode, hierarchyData), null);
+            if (marker is not null && marker.Revision <= localWatermarkRevision)
+                return new SharedConfigRead(null, null);
+
+            var bytes = transport.ReadConfigAsync().GetAwaiter().GetResult();
+            if (bytes is null) return new SharedConfigRead(null, null);
+
+            var (rootNode, hierarchyData) = ParseBytes(bytes);
+            var path = ConfigPathFor(root);
+            return new SharedConfigRead(new SharedConfigSnapshot(path, rootNode, hierarchyData, marker?.Revision ?? 0, marker?.Changes), null);
         }
         catch (Exception e)
         {
@@ -132,15 +186,49 @@ public static class ConfigSyncService
     private static ConfigUpdateInfo? Analyze(AppServices services, SharedConfigSnapshot snap)
     {
         services.Cfg.SetConfigLastCheckedAt(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"));
-        if (string.IsNullOrEmpty(snap.ExportedAt) || string.CompareOrdinal(snap.ExportedAt, services.Cfg.ConfigLastSyncedAt()) <= 0)
-            return null;
+
+        // Ревизия ещё не в ходу на этом общем диске (снимок пришёл по legacy-пути — см. ReadShared,
+        // marker is null) — то же самое сравнение по exported_at, что было всегда, поведение не
+        // меняется ни для старых общих дисков, ни для уже существующих тестов/сценариев.
+        if (snap.Revision <= 0)
+        {
+            if (string.IsNullOrEmpty(snap.ExportedAt) || string.CompareOrdinal(snap.ExportedAt, services.Cfg.ConfigLastSyncedAt()) <= 0)
+                return null;
+        }
+        // else: ReadShared уже отфильтровал случай «ревизия не выросла» — сюда попадают только
+        // снимки строго новее последнего применённого этой машиной маркера.
 
         var settingsChanged = CountSettingsChanges(services, snap.RootNode);
         var diff = services.Db.PreviewImportHierarchyData(snap.Hierarchy);
-        if (settingsChanged == 0 && diff.TotalChanges == 0) return null;
 
-        return new ConfigUpdateInfo(snap.Path, snap.ExportedAt, snap.ExportedBy, settingsChanged, diff);
+        var incomingSchema = ParseSchemaVersion(snap.RootNode);
+        var criticalSchemaMismatch = incomingSchema > 0 && incomingSchema != CurrentSchemaVersion;
+
+        if (settingsChanged == 0 && diff.TotalChanges == 0 && !criticalSchemaMismatch)
+        {
+            // Нечего применять, но эта ревизия уже «найдена» — запоминаем её как достигнутую, иначе
+            // следующий тик снова читал и разбирал бы тот же самый неизменившийся конфиг целиком
+            // вместо дешёвой проверки одного маркера (см. ReadShared).
+            if (snap.Revision > 0) SetLocalWatermarkRevision(services, snap.Revision);
+            return null;
+        }
+
+        return new ConfigUpdateInfo(snap.Path, snap.ExportedAt, snap.ExportedBy, settingsChanged, diff, snap.Revision, snap.Changes, criticalSchemaMismatch);
     }
+
+    private static int ParseSchemaVersion(JsonObject rootNode) =>
+        int.TryParse(rootNode["schema_version"]?.GetValue<string>(), out var v) ? v : 0;
+
+    /// <summary>Watermark ревизии — «последняя ревизия маркера, которую эта машина уже применила
+    /// (или подтвердила, что применять нечего)», хранится как обычная настройка через
+    /// ConfigService.Get/Set напрямую (config_last_synced_revision в SkipSettingsKeys выше — никогда
+    /// не уезжает в общий конфиг, per-machine ровно как config_last_synced_at/config_last_checked_at
+    /// рядом с ним).</summary>
+    private static int LocalWatermarkRevision(AppServices services) =>
+        int.TryParse(services.Cfg.Get("config_last_synced_revision"), out var v) ? v : 0;
+
+    private static void SetLocalWatermarkRevision(AppServices services, int revision) =>
+        services.Cfg.Set("config_last_synced_revision", revision.ToString());
 
     /// <summary>Applies the shared config for real — used by both the manual Import button and the
     /// banner's "Обновить сейчас". Records exported_at as this machine's new sync watermark so the
@@ -155,8 +243,21 @@ public static class ConfigSyncService
 
         var exportedAt = Watermark(snap);
         services.Cfg.SetConfigLastSyncedAt(exportedAt);
+        // Этот overload принимает голый путь, а не уже прочитанный SharedConfigSnapshot — маркер
+        // ревизии перечитываем отдельно (тот же общий диск, currentRoot), чтобы watermark ревизии
+        // (см. LocalWatermarkRevision) продвинулся вместе с exported_at. Никогда не двигаем его
+        // назад — маркер мог оказаться временно недоступен/повреждён (см. FileShareTransport.
+        // ReadRevisionAsync), это best-effort довесок к основному применению, а не источник истины.
+        var newRevision = ReadCurrentRevision(currentRoot);
+        if (newRevision > LocalWatermarkRevision(services)) SetLocalWatermarkRevision(services, newRevision);
 
         return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
+    }
+
+    private static int ReadCurrentRevision(string root)
+    {
+        try { return TransportFactory(root).ReadRevisionAsync().GetAwaiter().GetResult()?.Revision ?? 0; }
+        catch { return 0; }
     }
 
     /// <summary>То же применение, но досмотр диска (SyncFwFromDisk — обход всех папок версий на
@@ -173,6 +274,11 @@ public static class ConfigSyncService
 
         var exportedAt = Watermark(snap);
         services.Cfg.SetConfigLastSyncedAt(exportedAt);
+        // snap уже несёт ревизию, вычитанную ReadShared вместе с самим конфигом — повторно маркер не
+        // перечитываем (в отличие от Apply(configPath) выше, у которого снимка нет). Тот же
+        // «никогда не назад» guard — снимок мог быть построен ДО более свежего экспорта, который
+        // случился, пока applyAsync выполнялся.
+        if (snap.Revision > LocalWatermarkRevision(services)) SetLocalWatermarkRevision(services, snap.Revision);
 
         return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
     }
@@ -215,34 +321,92 @@ public static class ConfigSyncService
     /// <summary>Writes the shared config file — used by the manual "Отправить сейчас"/"Экспорт на
     /// диск" buttons and the administrator's periodic auto-push timer. Throws if the shared drive
     /// isn't reachable; callers decide how to surface that (message box vs. a swallowed background
-    /// tick).</summary>
-    public static ConfigExportResult Export(AppServices services, string root, string exportedBy)
+    /// tick). <paramref name="changeDescriptions"/> — человекочитаемые описания того, что именно
+    /// отправляется (см. Database.SyncPendingChange), которые лягут в журнал маркера ревизии (см.
+    /// BumpRevisionMarkerCas) и покажутся в плашке «Поступили изменения» на принимающих машинах.
+    /// Null (по умолчанию — все существующие вызовы) означает «обычный полный экспорт без списка
+    /// конкретных изменений», журнал получает одну общую запись.</summary>
+    public static ConfigExportResult Export(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null)
     {
         var prepared = PrepareExport(services, root, exportedBy);
         WriteExport(prepared);
+        BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions);
         FinishExport(services, prepared);
         return prepared.Result;
     }
 
-    /// <summary>То же самое, но запись файла на сетевой диск идёт в фоновом потоке — сбор данных из
-    /// БД и отметка «отправлено» остаются на вызывающем потоке.</summary>
-    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy)
+    /// <summary>То же самое, но запись файла на сетевой диск (и обновление маркера ревизии) идёт в
+    /// фоновом потоке — сбор данных из БД и отметка «отправлено» остаются на вызывающем потоке.</summary>
+    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null)
     {
         var prepared = PrepareExport(services, root, exportedBy);
-        await Task.Run(() => WriteExport(prepared));
+        await Task.Run(() =>
+        {
+            WriteExport(prepared);
+            BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions);
+        });
         FinishExport(services, prepared);
         return prepared.Result;
     }
 
-    private record PreparedExport(string ExportPath, byte[] Bytes, ConfigExportResult Result);
+    /// <summary>Best-effort compare-and-swap маркера ревизии (Задача 6). Сам конфиг транспорт уже
+    /// перезаписал (WriteExport выше) — эта функция только поднимает revision и склеивает журнал
+    /// изменений. Читаем текущий маркер, пишем revision+1, перечитываем — если после записи маркер
+    /// оказался не тем, что мы только что написали (кто-то вклинился между чтением и записью — на
+    /// голой сетевой шаре это реальный сценарий при экспорте с двух машин почти одновременно),
+    /// повторяем с уже новым базовым значением. НЕ претендует на строгую транзакцию (её на файловой
+    /// шаре нет в принципе) — цель сузить окно потери чужой ревизии/записи журнала, а не закрыть его
+    /// полностью. Если три попытки подряд расходятся с чужой записью — сдаёмся молча: сам конфиг уже
+    /// корректно записан, revision может остаться на одну «отправку» позади реальности до следующего
+    /// экспорта с этой же машины (следующий Export снова попытается поднять её).</summary>
+    private static void BumpRevisionMarkerCas(string root, string exportedBy, IEnumerable<string>? changeDescriptions)
+    {
+        var transport = TransportFactory(root);
+        var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+        var descriptions = (changeDescriptions ?? new[] { "Полная синхронизация справочника" }).ToList();
+        if (descriptions.Count == 0) descriptions.Add("Полная синхронизация справочника");
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            SyncRevisionMarker? current;
+            try { current = transport.ReadRevisionAsync().GetAwaiter().GetResult(); }
+            catch { current = null; }
+
+            var nextRevision = (current?.Revision ?? 0) + 1;
+            var newEntries = descriptions.Select(d => new SyncChangeEntry { Ts = now, Author = exportedBy, Type = "catalog", Description = d });
+            var changes = newEntries.Concat(current?.Changes ?? new List<SyncChangeEntry>()).Take(MaxChangelogEntries).ToList();
+            var marker = new SyncRevisionMarker { Revision = nextRevision, ExportedAt = now, ExportedBy = exportedBy, Changes = changes };
+
+            try
+            {
+                transport.WriteRevisionAsync(marker).GetAwaiter().GetResult();
+                var reread = transport.ReadRevisionAsync().GetAwaiter().GetResult();
+                // Сравниваем не только revision, но и то, ЧТО именно там лежит (ExportedAt/ExportedBy) —
+                // если бы сверяли только число, гонка «другая машина посчитала ТУ ЖЕ следующую
+                // ревизию и переписала маркер сразу после нас» осталась бы незамеченной: числа
+                // совпали бы, а наш журнал изменений оказался бы молча потерян под чужим. Полное
+                // совпадение содержимого — единственный надёжный признак «это точно то, что мы сами
+                // только что написали, никто не вклинился».
+                if (reread is not null && reread.Revision == nextRevision && reread.ExportedAt == now && reread.ExportedBy == exportedBy)
+                    return; // успех
+            }
+            catch
+            {
+                // Сетевой сбой посреди записи маркера — конфиг уже записан верно (WriteExport выше),
+                // это best-effort довесок к нему, следующий Export с этой же машины поднимет ревизию
+                // снова. Не бросаем — экспорт как целое не должен падать из-за маркера.
+                return;
+            }
+        }
+    }
+
+    private record PreparedExport(string Root, string ExportPath, byte[] Bytes, ConfigExportResult Result);
 
     /// <summary>БД-фаза экспорта: собрать снимок и зашифровать его в память.</summary>
     private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy)
     {
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             throw new DirectoryNotFoundException("Сетевой диск недоступен.");
-
-        var configDir = Path.Combine(root, "Конфиг");
 
         var exportedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
         var payload = new JsonObject
@@ -257,6 +421,9 @@ public static class ConfigSyncService
             // letter) — without this, imported paths point at a root that only resolves on the
             // exporting machine, and files "vanish" for everyone else.
             ["source_root_path"] = root,
+            // Формат общего конфига (см. CurrentSchemaVersion) — сверяется на приёме (Analyze), не
+            // блокирует применение, только даёт основание для «критического» уведомления (п.5).
+            ["schema_version"] = CurrentSchemaVersion.ToString(),
         };
         // SkipSettingsKeys is per-machine-only data (passwords, this machine's own disk paths,
         // AD-login-gate timers, inspection auto-cleanup schedule, etc. — see that field's doc).
@@ -278,20 +445,16 @@ public static class ConfigSyncService
             payload[kv.Key] = kv.Value;
         }
 
-        var exportPath = Path.Combine(configDir, "po_finder_config.json");
+        var exportPath = ConfigPathFor(root);
         var bytes = ConfigFileCrypto.Encrypt(payload.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
-        return new PreparedExport(exportPath, bytes, new ConfigExportResult(exportedAt, exportedBy, hierarchy));
+        return new PreparedExport(root, exportPath, bytes, new ConfigExportResult(exportedAt, exportedBy, hierarchy));
     }
 
-    /// <summary>Дисковая фаза экспорта: записать готовые байты. В БД не ходит.</summary>
-    private static void WriteExport(PreparedExport prepared)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(prepared.ExportPath)!);
-        FileSystemHelpers.UnprotectForOwnWrite(prepared.ExportPath);
-        File.WriteAllBytes(prepared.ExportPath, prepared.Bytes);
-        FileSystemHelpers.ProtectFromExternalEdits(prepared.ExportPath);
-    }
+    /// <summary>Дисковая фаза экспорта: записать готовые байты через транспорт (Задача 1 — раньше
+    /// была прямая File.WriteAllBytes здесь). В БД не ходит.</summary>
+    private static void WriteExport(PreparedExport prepared) =>
+        TransportFactory(prepared.Root).WriteConfigAsync(prepared.Bytes).GetAwaiter().GetResult();
 
     /// <summary>We're by definition current with what we just wrote — otherwise this same machine's
     /// own pull check would immediately offer to "update" from the file it just exported.</summary>
@@ -299,6 +462,9 @@ public static class ConfigSyncService
     {
         services.Cfg.SetConfigLastSyncedAt(prepared.Result.ExportedAt);
         services.Cfg.SetConfigLastPushedAt(prepared.Result.ExportedAt);
+        // Полный экспорт по определению уносит на диск ВСЁ текущее состояние этой машины (Задача 4) —
+        // значит и всё, что накопилось в sync_pending_changes, теперь отправлено.
+        services.Db.ClearSyncPendingChanges();
     }
 
     /// <summary>Lets a non-administrator contribute their own AD-login roster entry to the shared
@@ -367,9 +533,14 @@ public static class ConfigSyncService
     /// this feature existed at all, any config file on the share) looks like, so falling back to
     /// reading the bytes as plain UTF-8 JSON keeps those working during the rollout instead of
     /// erroring out on every machine that hasn't upgraded yet.</summary>
-    private static (JsonObject RootNode, HierarchyExportData Hierarchy) Parse(string configPath)
+    private static (JsonObject RootNode, HierarchyExportData Hierarchy) Parse(string configPath) =>
+        ParseBytes(File.ReadAllBytes(configPath));
+
+    /// <summary>Тот же разбор, что раньше делал Parse(path) целиком — вынесен отдельно, потому что
+    /// ReadShared теперь получает байты уже прочитанными через ISyncTransport (Задача 1), а не сам
+    /// читает файл с диска.</summary>
+    private static (JsonObject RootNode, HierarchyExportData Hierarchy) ParseBytes(byte[] bytes)
     {
-        var bytes = File.ReadAllBytes(configPath);
         var text = ConfigFileCrypto.TryDecrypt(bytes) ?? Encoding.UTF8.GetString(bytes);
         var rootNode = JsonNode.Parse(text)!.AsObject();
         var hierarchyData = JsonSerializer.Deserialize<HierarchyExportData>(text) ?? new HierarchyExportData();

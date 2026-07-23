@@ -29,6 +29,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private DispatcherTimer? _configCheckTimer;
     private DispatcherTimer? _configPullRepeatTimer;
     private DispatcherTimer? _configPushTimer;
+    /// <summary>Задача 3: лёгкий fallback-опрос маркера ревизии — работает НЕЗАВИСИМО от
+    /// sync_interval_min (который может быть равен 0, т.е. отключён пользователем) на фиксированном
+    /// малом интервале, потому что сама проверка дешёвая (см. ConfigSyncService.ReadShared — читает
+    /// только Конфиг\revision.json, пока ревизия не выросла).</summary>
+    private DispatcherTimer? _revisionPollTimer;
+    /// <summary>Best-effort триггер по изменению файла (Задача 3) — ДОПОЛНЕНИЕ к опросу выше, не
+    /// замена: по SMB FileSystemWatcher ненадёжен (событие может не долететь/задвоиться/опоздать).
+    /// См. SetupConfigWatcher.</summary>
+    private System.IO.FileSystemWatcher? _configWatcher;
     private UpdateRelease? _pendingUpdate;
     private int? _lastModerationCount;
     private List<FirmwareUpdateInfo> _pendingFwUpdates = new();
@@ -61,6 +70,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private string _unknownItemsBannerText = "";
     [ObservableProperty] private bool _hierarchyConflictBannerVisible;
     [ObservableProperty] private string _hierarchyConflictBannerText = "";
+    /// <summary>Задача 4 (отправитель) — «Изменений готово к отправке: N», см. RefreshPendingChangesBanner.
+    /// В отличие от остальных баннеров эта плашка не самоскрывается по таймеру: пока накопитель не
+    /// пуст, ей положено оставаться на виду (по дизайну — «неисчезающая плашка»).</summary>
+    [ObservableProperty] private bool _pendingChangesBannerVisible;
+    [ObservableProperty] private string _pendingChangesSummary = "";
+    [ObservableProperty] private int _pendingChangesCount;
+    [ObservableProperty] private bool _pendingChangesDetailsVisible;
+    /// <summary>Задача 4 (приёмник) — «Поступили изменения (N): […]», см. ShowIncomingChangesBanner.</summary>
+    [ObservableProperty] private bool _incomingChangesBannerVisible;
+    [ObservableProperty] private string _incomingChangesBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
     /// <summary>Быстрый доступ display mode — see ConfigService.QuickAppsDisplayMode. Two separate
     /// Visibility-driving flags (rather than one enum bound with a converter) because MainWindow.xaml
@@ -84,9 +103,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     public ObservableCollection<NavItem> NavItems { get; } = new();
     public ObservableCollection<QuickAppItem> QuickApps { get; } = new();
     public ObservableCollection<NotificationEntry> NotificationHistory { get; } = new();
+    /// <summary>Развёрнутый список накопителя изменений (Задача 4) — по одной строке-описанию на
+    /// каждую запись Database.SyncPendingChange, показывается только пока PendingChangesDetailsVisible.</summary>
+    public ObservableCollection<string> PendingChangesDetails { get; } = new();
 
     private const int NotificationHistoryLimit = 100;
     private const int BannerAutoHideMs = 10000;
+    /// <summary>Задача 3 — интервал fallback-опроса маркера ревизии, см. _revisionPollTimer.</summary>
+    private static readonly TimeSpan RevisionPollInterval = TimeSpan.FromSeconds(75);
 
     /// <summary>How often the app re-checks for a new self-update after the one-time startup check —
     /// see StartTimers/_periodicUpdateCheckTimer. Deliberately not a user-facing setting (unlike
@@ -397,6 +421,72 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             _configPullRepeatTimer.Start();
         };
         _configCheckTimer.Start();
+
+        // Задача 3: лёгкий fallback-опрос маркера ревизии — работает НЕЗАВИСИМО от sync_interval_min
+        // (может быть 0, т.е. периодика приёма выключена пользователем) на собственном фиксированном
+        // малом интервале, потому что сама проверка дешёвая, пока ревизия не выросла (см.
+        // ConfigSyncService.ReadShared — читает только маленький незашифрованный маркер, не весь
+        // конфиг). Переиспользует тот же CheckForConfigUpdateAsync, что и остальные тики приёма —
+        // _configSyncRunning guard внутри него не даёт им наложиться друг на друга.
+        _revisionPollTimer = new DispatcherTimer { Interval = RevisionPollInterval };
+        _revisionPollTimer.Tick += async (_, _) => await CheckForConfigUpdateAsync();
+        _revisionPollTimer.Start();
+
+        // FileSystemWatcher на Конфиг\revision.json — best-effort триггер «по изменению» (Задача 3),
+        // ДОПОЛНЕНИЕ к опросу выше, а не замена: по SMB он ненадёжен (событие может не долететь,
+        // задвоиться или прийти с задержкой) — если событие не пришло, следующий тик
+        // _revisionPollTimer/_configPullRepeatTimer всё равно всё увидит.
+        SetupConfigWatcher();
+
+        RefreshPendingChangesBanner();
+    }
+
+    /// <summary>Пересоздаёт наблюдатель за Конфиг\revision.json на текущем root_path. Best-effort:
+    /// сетевая шара может не поддерживать уведомления вовсе, отсутствовать в момент вызова или
+    /// отвалиться посреди работы приложения — во всех случаях наблюдатель просто не работает, и
+    /// синхронизация продолжает жить на fallback-опросе (_revisionPollTimer/_configPullRepeatTimer).
+    /// Вызывается из StartTimers и повторно при смене пути диска (см. OnRootPathChangedAsync).</summary>
+    private void SetupConfigWatcher()
+    {
+        _configWatcher?.Dispose();
+        _configWatcher = null;
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root)) return;
+
+        try
+        {
+            var configDir = System.IO.Path.Combine(root, "Конфиг");
+            if (!System.IO.Directory.Exists(configDir)) return;
+
+            var watcher = new System.IO.FileSystemWatcher(configDir, "revision.json")
+            {
+                NotifyFilter = System.IO.NotifyFilters.LastWrite | System.IO.NotifyFilters.Size | System.IO.NotifyFilters.CreationTime,
+            };
+            watcher.Changed += OnConfigWatcherEvent;
+            watcher.Created += OnConfigWatcherEvent;
+            watcher.Renamed += OnConfigWatcherEvent;
+            watcher.EnableRaisingEvents = true;
+            _configWatcher = watcher;
+        }
+        catch
+        {
+            // Сеть/права/драйвер шары не поддерживают уведомления о файле — тихо остаёмся на
+            // fallback-опросе, ничего критичного не сломалось.
+            _configWatcher = null;
+        }
+    }
+
+    /// <summary>Событие FileSystemWatcher приходит на СВОЁМ потоке (не UI) — через Dispatcher, иначе
+    /// CheckForConfigUpdateAsync (трогает ObservableProperty-поля) упадёт с ошибкой доступа к
+    /// объекту с другого потока. Отдельного debounce-таймера не нужно: _configSyncRunning guard
+    /// внутри CheckForConfigUpdateAsync уже гасит наложение тиков, а несколько событий подряд
+    /// (Changed+Created на некоторых реализациях шар прилетают парой на одну и ту же запись) просто
+    /// сольются в один (максимум два подряд) фактических тика.</summary>
+    private void OnConfigWatcherEvent(object sender, System.IO.FileSystemEventArgs e)
+    {
+        try { Application.Current?.Dispatcher.BeginInvoke(async () => await CheckForConfigUpdateAsync()); }
+        catch { /* приложение закрывается / диспетчер недоступен — событию просто некуда деться */ }
     }
 
     // ── App updates ───────────────────────────────────────────────────────────
@@ -715,10 +805,105 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             ReloadSidebarApps();
             RefreshSearchIfActive();
             CheckForHierarchyConflicts();
+            ShowIncomingChangesBanner(info);
+            // Другая машина могла тем временем отправить экспорт (и тем самым очистить СВОЙ
+            // накопитель) — здесь же дешёвый повод перечитать и наш собственный счётчик, а не только
+            // после PushCatalogChange/PushConfigNow.
+            RefreshPendingChangesBanner();
         }
         finally
         {
             _configSyncRunning = false;
+        }
+    }
+
+    /// <summary>Задача 4 (приёмник) / 5 (уровни применения): аддитивные изменения и удаления к этому
+    /// моменту УЖЕ применены (см. Apply выше) — не спрашиваем, применять ли их (п.5: "где спрашивать
+    /// бессмысленно, не спрашиваем" — удаления обязаны применяться всегда, иначе «мусор воскресает»,
+    /// аддитивные безопасны сами по себе), но и не молчим о них: эта плашка перечисляет, ЧТО именно
+    /// применилось — источник текста — журнал изменений маркера ревизии (ConfigUpdateInfo.Changes,
+    /// человекочитаемые описания, см. SyncRevisionMarker), а не сырой ImportCounts diff. Конфликты
+    /// правки одного поля на двух машинах сюда не попадают — они уже обработаны отдельно, через
+    /// ConflictResolutionDialog (см. CheckForHierarchyConflicts выше, которая вызывается раньше).
+    /// Критическое расхождение версии схемы конфига — отдельное громкое уведомление (тоже
+    /// неблокирующее, п.5: "применяется принудительно с уведомлением").</summary>
+    private void ShowIncomingChangesBanner(ConfigUpdateInfo info)
+    {
+        if (info.Changes is { Count: > 0 } changes && _services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.Sync))
+        {
+            var preview = string.Join("; ", changes.Take(5).Select(c => c.Description));
+            var more = changes.Count > 5 ? $" и ещё {changes.Count - 5}" : "";
+            IncomingChangesBannerText = $"Поступили изменения с общего диска ({changes.Count}): {preview}{more}";
+            IncomingChangesBannerVisible = true;
+            AddNotification(IncomingChangesBannerText, NotificationCategory.Sync, reopen: () => IncomingChangesBannerVisible = true);
+            ScheduleBannerAutoHide(() => IncomingChangesBannerVisible = false);
+        }
+
+        if (info.CriticalSchemaMismatch)
+            ShowStatus("Критическое расхождение версии схемы общего конфига — применено принудительно. Проверьте, что у всех коллег установлена одна версия приложения.",
+                15000, NotificationCategory.Sync);
+    }
+
+    [RelayCommand]
+    private void DismissIncomingChangesBanner() => IncomingChangesBannerVisible = false;
+
+    // ── Плашка-накопитель изменений, готовых к отправке (Задача 4, отправитель) ─────────────────
+
+    private void RefreshPendingChangesBanner()
+    {
+        var pending = _services.Db.GetSyncPendingChanges();
+        PendingChangesCount = pending.Count;
+        PendingChangesBannerVisible = pending.Count > 0;
+        PendingChangesSummary = pending.Count == 0 ? "" : $"Изменений готово к отправке: {pending.Count}";
+
+        PendingChangesDetails.Clear();
+        foreach (var change in pending)
+            PendingChangesDetails.Add(change.Description);
+    }
+
+    [RelayCommand]
+    private void TogglePendingChangesDetails() => PendingChangesDetailsVisible = !PendingChangesDetailsVisible;
+
+    /// <summary>Неисчезающая по дизайну (п.4) — в отличие от остальных баннеров скрытие здесь не
+    /// очищает накопитель, только прячет саму плашку до следующего изменения (следующий
+    /// PushCatalogChange или входящий тик снова покажет её, пока в таблице что-то есть).</summary>
+    [RelayCommand]
+    private void DismissPendingChangesBanner() => PendingChangesBannerVisible = false;
+
+    [RelayCommand]
+    private async Task SendPendingChangesNow()
+    {
+        if (CurrentRole != "administrator")
+        {
+            // Полный экспорт — привилегия администратора (см. PushCatalogChangeAsync ниже за тем же
+            // объяснением) — у остальных ролей накопитель просто ждёт, пока администратор отправит
+            // свой собственный экспорт (тот подхватит всё текущее состояние локальной БД целиком).
+            ShowStatus("Отправка на диск доступна только администратору — изменения останутся в очереди", 8000, NotificationCategory.Sync);
+            return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root))
+        {
+            ShowStatus("Сетевой диск недоступен — изменения останутся в очереди", 8000, NotificationCategory.Sync);
+            return;
+        }
+
+        try
+        {
+            using var busy = Busy.Begin("Отправка изменений на диск…");
+            // Забрать чужое перед тем как отдать своё — тот же порядок, что PushCatalogChangeAsync
+            // (Export перезаписывает ВЕСЬ общий снимок, отправка без предварительного приёма рискует
+            // затереть чужие изменения).
+            await CheckForConfigUpdateAsync();
+            var descriptions = _services.Db.GetSyncPendingChanges().Select(c => c.Description).ToList();
+            await ConfigSyncService.ExportAsync(_services, root, $"{_services.CurrentUserName} ({RoleLabel})", descriptions);
+            RefreshPendingChangesBanner();
+            ShowStatus("Изменения отправлены на диск", category: NotificationCategory.Sync);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus($"Не удалось отправить изменения: {ex.Message}", 12000, NotificationCategory.Sync);
         }
     }
 
@@ -930,6 +1115,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // tree, which changes the file count RefreshDiskStatus reports.
         await EnsureHierarchyAsync();
         await RefreshDiskStatusAsync();
+        // Наблюдатель за revision.json (Задача 3) смотрит на конкретную папку конкретного root —
+        // путь сменился, пересоздаём его на новом месте (или гасим, если новый путь пуст).
+        SetupConfigWatcher();
     }
 
     public void ReloadSidebarApps()
@@ -1029,6 +1217,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     private async Task PushCatalogChangeAsync(string what)
     {
+        // Задача 4 (отправитель): любое изменение справочника сначала попадает в локальный
+        // накопитель (Database.SyncPendingChange) — не только ради счётчика на плашке, но и как
+        // источник записи в журнал маркера ревизии ниже (ExportAsync(changeDescriptions:)), даже
+        // если отправка произойдёт прямо сейчас (администратор). Для остальных ролей это ЕДИНСТВЕННЫЙ
+        // след изменения — см. класс-doc метода ниже за тем, почему их правки дальше не уезжают.
+        _services.Db.AddSyncPendingChange("catalog", what, _services.CurrentUserName);
+        RefreshPendingChangesBanner();
+
         if (CurrentRole != "administrator")
         {
             ShowStatus(what, category: NotificationCategory.Hierarchy);
@@ -1047,7 +1243,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             using var busy = Busy.Begin("Отправка справочника на диск…");
             await CheckForConfigUpdateAsync();
-            await ConfigSyncService.ExportAsync(_services, root, $"{_services.CurrentUserName} ({RoleLabel})");
+            var descriptions = _services.Db.GetSyncPendingChanges().Select(c => c.Description).ToList();
+            await ConfigSyncService.ExportAsync(_services, root, $"{_services.CurrentUserName} ({RoleLabel})", descriptions);
+            RefreshPendingChangesBanner();
             ShowStatus($"{what} · отправлено на сетевой диск", 5000, NotificationCategory.Hierarchy);
         }
         catch (Exception ex)
@@ -1072,8 +1270,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         try
         {
             var exportedBy = $"{_services.CurrentUserName} ({RoleLabel})";
+            var descriptions = _services.Db.GetSyncPendingChanges().Select(c => c.Description).ToList();
             using (Busy.Begin("Отправка конфига на диск…"))
-                await ConfigSyncService.ExportAsync(_services, root, exportedBy);
+                await ConfigSyncService.ExportAsync(_services, root, exportedBy, descriptions);
+            RefreshPendingChangesBanner();
             if (_configPushLastFailed)
             {
                 _configPushLastFailed = false;
