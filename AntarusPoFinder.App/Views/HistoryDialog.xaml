@@ -32,12 +32,15 @@
                     </DataGridTemplateColumn>
                     <DataGridTextColumn Header="Дата" Binding="{Binding DateDisplay}" Width="130"/>
                     <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="100"/>
-                    <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
+                    <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="140"/>
                     <DataGridTextColumn Header="Описание" Binding="{Binding DescriptionShort}" Width="*"/>
                 </DataGrid.Columns>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
                             <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
                                 <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
                             </DataTrigger>

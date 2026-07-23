@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
 
@@ -20,15 +21,28 @@ public partial class HistoryDialog : Window
             : Record.UploadDate;
         public string CtrlName => Record.CtrlName;
         public bool IsRolledBack => Record.Status == "rolled_back";
-        public string StatusLabel => IsRolledBack ? "Откатана" : "Активна";
+        /// <summary>Самая свежая живая версия — выделяется жирным в таблице.</summary>
+        public bool IsCurrent { get; init; }
+        public string StatusLabel { get; init; } = "";
         public string DescriptionShort => Record.Description.Length > 80 ? Record.Description[..80] + "…" : Record.Description;
     }
 
+    /// <summary>«Активна» стояло у КАЖДОЙ не откатанной строки — то есть у всей истории сразу
+    /// (реальная жалоба: «загружаю прошивку, а в истории все активные»). Что именно считать
+    /// актуальным — см. FwHistoryStatus; versions приходят от новых к старым, как их отдаёт
+    /// Database.GetFwVersionsHistory.</summary>
     public HistoryDialog(string cabinetTitle, System.Collections.Generic.List<FwVersionRecord> versions)
     {
         InitializeComponent();
         Title = $"История версий — {cabinetTitle}";
-        VersionsGrid.ItemsSource = versions.Select(v => new Row { Record = v }).ToList();
+
+        var labels = FwHistoryStatus.Labels(versions);
+        VersionsGrid.ItemsSource = versions.Select((v, i) => new Row
+        {
+            Record = v,
+            IsCurrent = labels[i] == FwHistoryStatus.Current,
+            StatusLabel = labels[i],
+        }).ToList();
         if (VersionsGrid.Items.Count > 0) VersionsGrid.SelectedIndex = 0;
     }
 
