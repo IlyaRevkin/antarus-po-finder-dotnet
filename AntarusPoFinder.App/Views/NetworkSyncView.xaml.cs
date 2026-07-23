@@ -131,7 +131,10 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus(v == 0 ? "Автосинхронизация с диском отключена" : $"Интервал синхронизации: {v} мин", category: NotificationCategory.Sync);
     }
 
-    private void SyncNow_Click(object sender, RoutedEventArgs e)
+    /// <summary>Асинхронная, как и фоновый тик синхронизации: обе долгие части (чтение общего
+    /// конфига с шары и досмотр папок версий) уходят в фоновый поток, а внизу окна всё это время
+    /// висит индикатор — раньше нажатие «Синхронизировать сейчас» просто вешало окно до конца.</summary>
+    private async void SyncNow_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -140,20 +143,42 @@ public partial class NetworkSyncView : UserControl
             return;
         }
 
-        var info = ConfigSyncService.CheckForUpdate(_services, out var error);
-        if (error is not null)
+        // Повторный клик, пока идёт первый, дал бы два параллельных импорта одного и того же файла.
+        SyncNowButton.IsEnabled = false;
+        try
         {
-            AppMessageBox.Show($"Не удалось проверить обновление конфига:\n{error}", "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (info is null)
-        {
-            LastSyncText.Text = $"Изменений нет. Последняя синхронизация: {_services.Cfg.ConfigLastSyncedAt()}";
-            _host.ShowStatus("Изменений на диске нет — конфиг уже актуален", category: NotificationCategory.Sync);
-            return;
-        }
+            ConfigUpdateInfo? info;
+            string? error;
+            SharedConfigSnapshot? snapshot;
+            using (_host.BeginBusy("Проверка обновлений на диске…"))
+                (info, error, snapshot) = await ConfigSyncService.CheckForUpdateAsync(_services);
 
-        var result = ConfigSyncService.Apply(_services, info.ConfigPath, root);
+            if (error is not null)
+            {
+                AppMessageBox.Show($"Не удалось проверить обновление конфига:\n{error}", "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (info is null || snapshot is null)
+            {
+                LastSyncText.Text = $"Изменений нет. Последняя синхронизация: {_services.Cfg.ConfigLastSyncedAt()}";
+                _host.ShowStatus("Изменений на диске нет — конфиг уже актуален", category: NotificationCategory.Sync);
+                return;
+            }
+
+            ConfigApplyResult result;
+            using (_host.BeginBusy("Синхронизация прошивок с диском…"))
+                result = await ConfigSyncService.ApplyAsync(_services, snapshot, root);
+
+            ShowSyncResult(result);
+        }
+        finally
+        {
+            SyncNowButton.IsEnabled = true;
+        }
+    }
+
+    private void ShowSyncResult(ConfigApplyResult result)
+    {
         _host.ReloadSidebarApps();
         LastSyncText.Text = $"Последняя синхронизация: {result.ExportedAt} (от {result.ExportedBy})";
 
@@ -196,7 +221,7 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus(v == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {v} мин", category: NotificationCategory.Sync);
     }
 
-    private void PushNow_Click(object sender, RoutedEventArgs e)
+    private async void PushNow_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -208,7 +233,9 @@ public partial class NetworkSyncView : UserControl
         try
         {
             var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
-            var result = ConfigSyncService.Export(_services, root, exportedBy);
+            ConfigExportResult result;
+            using (_host.BeginBusy("Отправка конфига на диск…"))
+                result = await ConfigSyncService.ExportAsync(_services, root, exportedBy);
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
             AppMessageBox.Show(
                 $"Отправлено:\nПрошивок: {result.Hierarchy.FwVersions.Count}\nФайлов параметров: {result.Hierarchy.ParamFiles.Count}\n" +

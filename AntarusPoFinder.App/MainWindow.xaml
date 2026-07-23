@@ -368,11 +368,28 @@
             </Border>
         </Grid>
 
-        <!-- Status bar -->
+        <!-- Status bar. Здесь же — единственный индикатор фоновой работы (BusyTracker): пока
+             программа синхронизируется с диском, копирует прошивку или отправляет конфиг, снизу
+             видно, ЧТО именно идёт. До этого фоновые операции выполнялись прямо на потоке
+             интерфейса и молча: окно переставало отвечать, и это было неотличимо от «зависла». -->
         <Border Grid.Row="5" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid Margin="10,4">
-                <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource MutedText}" HorizontalAlignment="Left"/>
-                <TextBlock Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}" HorizontalAlignment="Right"/>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Style="{StaticResource MutedText}"
+                           HorizontalAlignment="Left" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0"
+                            Visibility="{Binding Busy.IsBusy, Converter={StaticResource BoolToVis}}">
+                    <ProgressBar Width="90" Height="6" VerticalAlignment="Center" Maximum="100"
+                                 IsIndeterminate="{Binding Busy.IsIndeterminate}" Value="{Binding Busy.Progress}"/>
+                    <TextBlock Text="{Binding Busy.Text}" Style="{StaticResource MutedText}" Margin="8,0,0,0"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>
         </Border>
 

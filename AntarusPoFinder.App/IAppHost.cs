@@ -1,3 +1,4 @@
+using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App;
@@ -11,6 +12,12 @@ public interface IAppHost
     /// Уведомления filter can actually apply to it. If the category is disabled, the message is
     /// fully suppressed: no status-bar flash, no history entry (see MainWindowViewModel.ShowStatus).</summary>
     void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General);
+
+    /// <summary>Открывает индикатор фоновой работы внизу окна (рядом с «Диск: …») до Dispose.
+    /// Обязателен для всего, что ходит на сетевой диск дольше мгновения: страница сама может
+    /// оставаться отзывчивой, но пользователю нужно видеть, что программа занята, а не «висит» —
+    /// см. BusyTracker и MainWindowViewModel.RunSyncAsync.</summary>
+    IBusyScope BeginBusy(string text);
     void SetSyncIntervalMinutes(int minutes);
     void ReloadSidebarApps();
     void SwitchRole(string role);

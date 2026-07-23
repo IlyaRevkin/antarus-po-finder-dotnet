@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -1258,7 +1259,7 @@ public partial class SettingsView : UserControl
         _host.PushCatalogChange($"Расширение «.{ext}» удалено");
     }
 
-    private void RebuildHierarchy_Click(object sender, RoutedEventArgs e)
+    private async void RebuildHierarchy_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -1266,7 +1267,12 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show("Сетевой диск недоступен.", "Иерархия", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var result = _services.Hierarchy.EnsureStructure(root);
+        // План по БД здесь, создание сотен папок на сетевом диске — в фоне (см. HierarchyService,
+        // блок про двухфазные операции): окно во время этого больше не «висит».
+        var plan = _services.Hierarchy.PlanStructure(root);
+        EnsureStructureResult result;
+        using (_host.BeginBusy("Проверка структуры диска…"))
+            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
         if (result.Errors.Count > 0)
             AppMessageBox.Show(string.Join("\n", result.Errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
         else
@@ -1274,7 +1280,7 @@ public partial class SettingsView : UserControl
         _host.ShowStatus($"Структура обновлена: {result.CreatedCount} папок", category: NotificationCategory.Sync);
     }
 
-    private void SyncFwFromDisk_Click(object sender, RoutedEventArgs e)
+    private async void SyncFwFromDisk_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -1282,7 +1288,13 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show("Сетевой диск недоступен.", "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var result = _services.Hierarchy.SyncFwFromDisk(root);
+        // Обход всех папок версий — единственная долгая часть, и она уходит в фоновый поток; записи
+        // в БД по найденному делаются здесь же, на потоке интерфейса.
+        var plan = _services.Hierarchy.PlanFwSync(root);
+        FwDiskScan scan;
+        using (_host.BeginBusy("Синхронизация прошивок с диском…"))
+            scan = await Task.Run(() => HierarchyService.ScanFwDisk(plan));
+        var result = _services.Hierarchy.ImportFwCandidates(scan);
         if (!result.Ok)
         {
             var msg = result.Errors.Count > 0 ? string.Join("\n", result.Errors.Take(5)) : "Неизвестная ошибка";
@@ -1301,7 +1313,7 @@ public partial class SettingsView : UserControl
         _host.ShowStatus($"Синхронизация завершена: +{result.Added} версий" + (result.AddedItems.Count > 0 ? " (" + string.Join(", ", result.AddedItems.Take(3)) + (result.AddedItems.Count > 3 ? "…" : "") + ")" : ""), category: NotificationCategory.Sync);
     }
 
-    private void ScanUnknown_Click(object sender, RoutedEventArgs e)
+    private async void ScanUnknown_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -1309,7 +1321,10 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show("Сетевой диск недоступен.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var unknown = _services.Hierarchy.ScanUnknownFiles(root);
+        var names = _services.Hierarchy.SnapshotNames();
+        List<UnknownEntry> unknown;
+        using (_host.BeginBusy("Проверка диска на неизвестные файлы…"))
+            unknown = await Task.Run(() => HierarchyService.ScanUnknownFiles(root, names));
         if (unknown.Count == 0)
         {
             AppMessageBox.Show("Неизвестных файлов/папок не найдено.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Information);

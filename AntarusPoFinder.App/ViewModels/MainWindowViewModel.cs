@@ -36,6 +36,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private bool _configPushLastFailed;
     private bool _fwAutoUpdateLastFailed;
 
+    /// <summary>Тик синхронизации теперь асинхронный, значит следующий может прийти, пока предыдущий
+    /// ещё ждёт сетевой диск (диск отвечает медленнее, чем sync_interval_min). Раньше такого быть не
+    /// могло — всё выполнялось внутри одного Tick на потоке интерфейса. Наложение прогонов не даёт
+    /// ничего, кроме второй порции нагрузки на тот же диск, поэтому лишний тик просто пропускается.</summary>
+    private bool _syncRunning;
+    private bool _configSyncRunning;
+
     private bool _suppressThemeToggleHandler;
 
     [ObservableProperty] private string _roleLabel = "";
@@ -64,6 +71,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Only meaningful while QuickAppsTopVisible is true — whether each bubble in the top
     /// row also shows its shortcut name underneath ("top_labeled" mode) or is icon-only ("top").</summary>
     [ObservableProperty] private bool _quickAppsTopShowLabels;
+
+    /// <summary>Индикатор фоновой работы в статус-строке (рядом с «Диск: …»). Всё, что ходит на
+    /// сетевой диск, обязано открывать здесь область на время работы — иначе для пользователя это
+    /// выглядит как зависшая программа, ровно на что и жаловались.</summary>
+    public BusyTracker Busy { get; } = new();
 
     public string CurrentRole { get; private set; } = "naladchik";
     public string CurrentTheme { get; private set; } = "light";
@@ -315,10 +327,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // before they ever clicked "Показать". Running structure-and-cleanup first means the first
         // scan the operator sees reflects reality: only genuinely still-unresolved items.
         _hierarchy2sTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
-        _hierarchy2sTimer.Tick += (_, _) =>
+        _hierarchy2sTimer.Tick += async (_, _) =>
         {
             _hierarchy2sTimer!.Stop();
-            EnsureHierarchy();
+            await EnsureHierarchyAsync();
         };
         _hierarchy2sTimer.Start();
 
@@ -326,14 +338,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // "periodic auto-sync disabled on this machine" (see ConfigService.SyncIntervalMin); the
         // one-time startup sync above still runs regardless, only the repeat is skipped.
         _sync1500msTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
-        _sync1500msTimer.Tick += (_, _) =>
+        _sync1500msTimer.Tick += async (_, _) =>
         {
             _sync1500msTimer!.Stop();
-            RunSync();
+            await RunSyncAsync();
             var minutes = _services.Cfg.SyncIntervalMin();
             if (minutes <= 0) return;
             _syncRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _syncRepeatTimer.Tick += (_, _) => RunSync();
+            _syncRepeatTimer.Tick += async (_, _) => await RunSyncAsync();
             _syncRepeatTimer.Start();
         };
         _sync1500msTimer.Start();
@@ -363,10 +375,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         // 3000ms once: check whether any locally cached firmware has a newer version on the server.
         _fwUpdateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(3000) };
-        _fwUpdateCheckTimer.Tick += (_, _) =>
+        _fwUpdateCheckTimer.Tick += async (_, _) =>
         {
             _fwUpdateCheckTimer!.Stop();
-            CheckForFirmwareUpdates();
+            await CheckForFirmwareUpdatesAsync();
         };
         _fwUpdateCheckTimer.Start();
 
@@ -374,14 +386,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // automatically — settings are 100% local-only by design (see ConfigSyncService.
         // SkipSettingsKeys), so applying without a confirmation click is safe.
         _configCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(3500) };
-        _configCheckTimer.Tick += (_, _) =>
+        _configCheckTimer.Tick += async (_, _) =>
         {
             _configCheckTimer!.Stop();
-            CheckForConfigUpdate();
+            await CheckForConfigUpdateAsync();
             var minutes = _services.Cfg.SyncIntervalMin();
             if (minutes <= 0) return;
             _configPullRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _configPullRepeatTimer.Tick += (_, _) => CheckForConfigUpdate();
+            _configPullRepeatTimer.Tick += async (_, _) => await CheckForConfigUpdateAsync();
             _configPullRepeatTimer.Start();
         };
         _configCheckTimer.Start();
@@ -459,7 +471,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     // ── Firmware updates ─────────────────────────────────────────────────────
 
-    private void CheckForFirmwareUpdates()
+    private async Task CheckForFirmwareUpdatesAsync()
     {
         List<FirmwareUpdateInfo> updates;
         try
@@ -486,14 +498,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // firmware that's been silently stuck out of date for hours/days is no longer invisible.
         var autoUpdated = 0;
         var autoFailed = new List<string>();
-        foreach (var u in autoOnes)
+        if (autoOnes.Count > 0)
         {
-            try
+            // Копирование с сетевого диска — в фоновом потоке и с прогрессом снизу: раньше это
+            // молча вешало окно на всё время, пока тянулись все автообновляемые прошивки.
+            using var busy = Busy.Begin("Обновление прошивок…");
+            for (int i = 0; i < autoOnes.Count; i++)
             {
-                FirmwareSync.CopyToLocal(SearchService.ToHierarchyResult(u.Latest));
-                autoUpdated++;
+                var u = autoOnes[i];
+                busy.Text = $"Обновление прошивки: {u.Name}";
+                busy.Report(i, autoOnes.Count);
+                try
+                {
+                    var source = SearchService.ToHierarchyResult(u.Latest);
+                    await Task.Run(() => FirmwareSync.CopyToLocal(source));
+                    autoUpdated++;
+                }
+                catch (Exception ex) { autoFailed.Add($"{u.Name}: {ex.Message}"); }
             }
-            catch (Exception ex) { autoFailed.Add($"{u.Name}: {ex.Message}"); }
         }
         if (autoUpdated > 0)
             ShowStatus($"Автоматически обновлено прошивок: {autoUpdated}", 6000, NotificationCategory.FirmwareAndParams);
@@ -521,7 +543,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     [RelayCommand]
-    private void UpdateAllFw()
+    private async Task UpdateAllFw()
     {
         // A manual, explicitly-clicked action — same per-item error surfacing as
         // FirmwareUpdatesWindow.ApplyUpdate (the "Показать"/details path for the same banner), which
@@ -529,17 +551,25 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         var count = 0;
         var stillPending = new List<FirmwareUpdateInfo>();
         var failedMessages = new List<string>();
-        foreach (var u in _pendingFwUpdates.ToList())
+        var pending = _pendingFwUpdates.ToList();
+        using (var busy = Busy.Begin("Обновление прошивок…"))
         {
-            try
+            for (int i = 0; i < pending.Count; i++)
             {
-                FirmwareSync.CopyToLocal(SearchService.ToHierarchyResult(u.Latest));
-                count++;
-            }
-            catch (Exception ex)
-            {
-                stillPending.Add(u);
-                failedMessages.Add($"{u.Name}: {ex.Message}");
+                var u = pending[i];
+                busy.Text = $"Обновление прошивки: {u.Name}";
+                busy.Report(i, pending.Count);
+                try
+                {
+                    var source = SearchService.ToHierarchyResult(u.Latest);
+                    await Task.Run(() => FirmwareSync.CopyToLocal(source));
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    stillPending.Add(u);
+                    failedMessages.Add($"{u.Name}: {ex.Message}");
+                }
             }
         }
         _pendingFwUpdates = stillPending;
@@ -584,13 +614,22 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// ScanUnknownFiles is read-only (nothing gets moved/deleted here, unlike EnsureHierarchy's own
     /// top-level auto-move) — the operator decides what happens to each item via
     /// ShowUnknownItemsDetails, one at a time or in bulk.</summary>
-    private void CheckForUnknownItems()
+    private async Task CheckForUnknownItemsAsync()
     {
         var root = _services.Cfg.RootPath();
-        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root)) return;
+        if (string.IsNullOrEmpty(root)) return;
 
         List<UnknownEntry> unknown;
-        try { unknown = _services.Hierarchy.ScanUnknownFiles(root); }
+        try
+        {
+            // Имена справочников — из БД здесь, обход диска — в фоне: см. HierarchyService, блок
+            // про двухфазные операции (соединение SQLite одно и не потокобезопасно).
+            var names = _services.Hierarchy.SnapshotNames();
+            using var busy = Busy.Begin("Проверка диска на неизвестные файлы…");
+            unknown = await Task.Run(() =>
+                System.IO.Directory.Exists(root) ? HierarchyService.ScanUnknownFiles(root, names) : null!);
+            if (unknown is null) return;
+        }
         catch { return; } // best effort — flaky network mount, next tick retries
 
         _pendingUnknownItems = unknown;
@@ -609,7 +648,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     [RelayCommand]
-    private void ShowUnknownItemsDetails()
+    private async Task ShowUnknownItemsDetails()
     {
         // Re-scan right before showing, rather than trust whatever _pendingUnknownItems still holds
         // from the last periodic tick (up to sync_interval_min minutes old, default 5) — on a shared
@@ -617,7 +656,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // have already moved/removed an item by the time the operator gets around to clicking
         // "Показать". A live rescan is what the manual Настройки → Иерархия scan button already did;
         // the notification path deserves the same freshness guarantee.
-        CheckForUnknownItems();
+        await CheckForUnknownItemsAsync();
         if (_pendingUnknownItems.Count == 0) return;
 
         var dlg = new UnknownFilesDialog(_services, _services.Cfg.RootPath(), _pendingUnknownItems) { Owner = Application.Current.MainWindow };
@@ -626,7 +665,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // Re-scan again afterwards rather than trust the dialog's own bookkeeping — a reassign/move/
         // delete can fail partway through (see UnknownFilesDialog's per-item error handling), and the
         // disk is the single source of truth for what's still actually unresolved.
-        CheckForUnknownItems();
+        await CheckForUnknownItemsAsync();
     }
 
     [RelayCommand]
@@ -647,24 +686,40 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// throughout the day — read as constant spam). The result is only visible as a passive "last
     /// synced" timestamp on the Сетевые диски page (NetworkSyncView.RefreshIfActive), which the user
     /// can check whenever they care, rather than being interrupted by it.</summary>
-    private void CheckForConfigUpdate()
+    private async Task CheckForConfigUpdateAsync()
     {
-        var info = ConfigSyncService.CheckForUpdate(_services, out var error);
-        if (error is not null)
+        if (_configSyncRunning) return; // тик пришёл, пока предыдущий ещё тянет диск — просто пропускаем
+        _configSyncRunning = true;
+        try
         {
-            // Root reachable but reading/parsing the shared config itself failed — worth telling
-            // the user, unlike an unreachable share (already covered by DiskStatusText) or "no
-            // update yet", which stay silent. The app keeps running on the local copy regardless.
-            ShowStatus($"Не удалось проверить обновление конфига: {error}", 8000, NotificationCategory.Sync);
-            return;
-        }
-        if (info is null) return;
+            SharedConfigSnapshot? snapshot;
+            ConfigUpdateInfo? info;
+            string? error;
+            using (Busy.Begin("Проверка обновлений на диске…"))
+                (info, error, snapshot) = await ConfigSyncService.CheckForUpdateAsync(_services);
 
-        var root = _services.Cfg.RootPath();
-        ConfigSyncService.Apply(_services, info.ConfigPath, root);
-        ReloadSidebarApps();
-        RefreshSearchIfActive();
-        CheckForHierarchyConflicts();
+            if (error is not null)
+            {
+                // Root reachable but reading/parsing the shared config itself failed — worth telling
+                // the user, unlike an unreachable share (already covered by DiskStatusText) or "no
+                // update yet", which stay silent. The app keeps running on the local copy regardless.
+                ShowStatus($"Не удалось проверить обновление конфига: {error}", 8000, NotificationCategory.Sync);
+                return;
+            }
+            if (info is null || snapshot is null) return;
+
+            var root = _services.Cfg.RootPath();
+            using (Busy.Begin("Синхронизация прошивок с диском…"))
+                await ConfigSyncService.ApplyAsync(_services, snapshot, root);
+
+            ReloadSidebarApps();
+            RefreshSearchIfActive();
+            CheckForHierarchyConflicts();
+        }
+        finally
+        {
+            _configSyncRunning = false;
+        }
     }
 
     /// <summary>Surfaces held-back hierarchy conflicts (see Database.ClassifyHierarchyChange) the same
@@ -713,20 +768,29 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [RelayCommand]
     private void DismissHierarchyConflictsBanner() => HierarchyConflictBannerVisible = false;
 
-    private void RunSync()
+    private async Task RunSyncAsync()
     {
-        RefreshDiskStatus();
-        RefreshModerationBadge();
-
+        if (_syncRunning) return;
+        _syncRunning = true;
         try
         {
-            var expired = _services.Db.ExpireStaleReservations();
-            if (expired > 0) ShowStatus($"Просрочено резервов номеров: {expired} (номера пропущены навсегда)", 8000, NotificationCategory.FirmwareAndParams);
-        }
-        catch { /* best effort — next tick will retry */ }
+            await RefreshDiskStatusAsync();
+            RefreshModerationBadge();
 
-        CleanupInspectionFolder();
-        CheckForUnknownItems();
+            try
+            {
+                var expired = _services.Db.ExpireStaleReservations();
+                if (expired > 0) ShowStatus($"Просрочено резервов номеров: {expired} (номера пропущены навсегда)", 8000, NotificationCategory.FirmwareAndParams);
+            }
+            catch { /* best effort — next tick will retry */ }
+
+            await CleanupInspectionFolderAsync();
+            await CheckForUnknownItemsAsync();
+        }
+        finally
+        {
+            _syncRunning = false;
+        }
     }
 
     /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupMinutes() from the
@@ -734,18 +798,20 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// timer as the rest of RunSync (startup + every sync_interval_min) instead of a dedicated timer,
     /// same reasoning as EnsureHierarchy/ExpireStaleReservations above: one more periodic background
     /// check, not a whole new schedule.</summary>
-    private void CleanupInspectionFolder()
+    private async Task CleanupInspectionFolderAsync()
     {
         var minutes = _services.Cfg.InspectionAutoCleanupMinutes();
         if (minutes <= 0) return;
 
         var folder = _services.Cfg.Get("inspection_folder");
-        if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder)) return;
+        if (string.IsNullOrEmpty(folder)) return;
 
         try
         {
-            var result = InspectionCleanupService.Cleanup(folder, minutes, DateTime.Now);
-            if (result.DeletedCount == 0) return;
+            var now = DateTime.Now;
+            var result = await Task.Run(() =>
+                System.IO.Directory.Exists(folder) ? InspectionCleanupService.Cleanup(folder, minutes, now) : null);
+            if (result is null || result.DeletedCount == 0) return;
 
             var preview = string.Join(", ", result.DeletedNames.Take(3));
             var more = result.DeletedNames.Count > 3 ? $" и ещё {result.DeletedNames.Count - 3}" : "";
@@ -755,11 +821,18 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         catch { /* best effort — next tick will retry */ }
     }
 
-    private void EnsureHierarchy()
+    private async Task EnsureHierarchyAsync()
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root)) return;
-        var result = _services.Hierarchy.EnsureStructure(root);
+
+        // План — по БД (быстро, здесь), создание папок на сетевом диске — в фоне. Сотни CreateDirectory
+        // по медленной шаре и были одной из тех «программа не отвечает при запуске» пауз.
+        var plan = _services.Hierarchy.PlanStructure(root);
+        EnsureStructureResult result;
+        using (Busy.Begin("Проверка структуры диска…"))
+            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
+
         if (result.CreatedCount > 0)
             ShowStatus($"Структура диска создана: {result.CreatedCount} папок", 6000, NotificationCategory.Sync);
         // EnsureStructure also auto-moves top-level unrecognised names into «Неизвестное» — this used
@@ -777,26 +850,46 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Recomputes only the footer disk indicator. Extracted from RunSync so callers that
     /// change the root path or write to the disk can refresh it on demand instead of leaving it
     /// stale until the next periodic RunSync tick — which, with sync_interval_min=0, never comes.</summary>
-    public void RefreshDiskStatus()
+    public void RefreshDiskStatus() => _ = RefreshDiskStatusAsync();
+
+    /// <summary>Пересчёт индикатора — это рекурсивный обход ВСЕГО сетевого диска (EnumerateFiles по
+    /// всем подпапкам), самая заметная из «программа зависла» пауз: на общей шаре он занимает
+    /// секунды. Считаем в фоновом потоке, в БД при этом не ходим вообще.</summary>
+    public async Task RefreshDiskStatusAsync()
     {
         var root = _services.Cfg.RootPath();
-        if (!string.IsNullOrEmpty(root) && System.IO.Directory.Exists(root))
-        {
-            var fileCount = System.Linq.Enumerable.Count(System.IO.Directory.EnumerateFiles(root, "*", System.IO.SearchOption.AllDirectories));
-            DiskStatusText = $"Диск: ✓  ({fileCount} файлов)";
-        }
-        else
+        if (string.IsNullOrEmpty(root))
         {
             DiskStatusText = "Диск: ✗ недоступен";
+            return;
         }
+
+        using var busy = Busy.Begin("Проверка диска…");
+        DiskStatusText = await Task.Run(() =>
+        {
+            try
+            {
+                if (!System.IO.Directory.Exists(root)) return "Диск: ✗ недоступен";
+                var fileCount = System.Linq.Enumerable.Count(
+                    System.IO.Directory.EnumerateFiles(root, "*", System.IO.SearchOption.AllDirectories));
+                return $"Диск: ✓  ({fileCount} файлов)";
+            }
+            catch
+            {
+                // Шара отвалилась посреди обхода — для индикатора это то же самое, что «недоступен».
+                return "Диск: ✗ недоступен";
+            }
+        });
     }
 
-    public void OnRootPathChanged()
+    public void OnRootPathChanged() => _ = OnRootPathChangedAsync();
+
+    private async Task OnRootPathChangedAsync()
     {
         // Same order StartTimers uses (structure first, then status) — EnsureHierarchy may create the
         // tree, which changes the file count RefreshDiskStatus reports.
-        EnsureHierarchy();
-        RefreshDiskStatus();
+        await EnsureHierarchyAsync();
+        await RefreshDiskStatusAsync();
     }
 
     public void ReloadSidebarApps()
@@ -835,7 +928,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         else
         {
             _syncRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _syncRepeatTimer.Tick += (_, _) => RunSync();
+            _syncRepeatTimer.Tick += async (_, _) => await RunSyncAsync();
             _syncRepeatTimer.Start();
         }
 
@@ -846,12 +939,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         else
         {
             _configPullRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _configPullRepeatTimer.Tick += (_, _) => CheckForConfigUpdate();
+            _configPullRepeatTimer.Tick += async (_, _) => await CheckForConfigUpdateAsync();
             _configPullRepeatTimer.Start();
         }
     }
 
     void IAppHost.Navigate(string pageId) => Navigate(pageId);
+
+    public IBusyScope BeginBusy(string text) => Busy.Begin(text);
 
     /// <summary>Only the administrator gets an auto-push timer — everyone else just pulls (see
     /// StartTimers/_configPullRepeatTimer above). Safe to call any time (role switch, or right
@@ -868,7 +963,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (minutes <= 0) return; // 0 = auto-push disabled — see footnote in NetworkSyncView
 
         _configPushTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-        _configPushTimer.Tick += (_, _) => PushConfigNow();
+        _configPushTimer.Tick += async (_, _) => await PushConfigNowAsync();
         _configPushTimer.Start();
     }
 
@@ -890,7 +985,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     ///
     /// Только администратор: полный экспорт другим ролям запрещён намеренно (там же). Для них метод
     /// работает как обычный ShowStatus — правка остаётся локальной, ровно как и раньше.</summary>
-    public void PushCatalogChange(string what)
+    public void PushCatalogChange(string what) => _ = PushCatalogChangeAsync(what);
+
+    private async Task PushCatalogChangeAsync(string what)
     {
         if (CurrentRole != "administrator")
         {
@@ -908,8 +1005,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         try
         {
-            CheckForConfigUpdate();
-            ConfigSyncService.Export(_services, root, $"{_services.CurrentUserName} ({RoleLabel})");
+            using var busy = Busy.Begin("Отправка справочника на диск…");
+            await CheckForConfigUpdateAsync();
+            await ConfigSyncService.ExportAsync(_services, root, $"{_services.CurrentUserName} ({RoleLabel})");
             ShowStatus($"{what} · отправлено на сетевой диск", 5000, NotificationCategory.Hierarchy);
         }
         catch (Exception ex)
@@ -928,13 +1026,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// changes weren't reaching other machines, no evidence pointed at the push side at all). Only
     /// notifies on the state TRANSITION (first failure after a success, and recovery after failures)
     /// so a share that's down for an extended stretch doesn't spam one toast per tick.</summary>
-    private void PushConfigNow()
+    private async Task PushConfigNowAsync()
     {
         var root = _services.Cfg.RootPath();
         try
         {
             var exportedBy = $"{_services.CurrentUserName} ({RoleLabel})";
-            ConfigSyncService.Export(_services, root, exportedBy);
+            using (Busy.Begin("Отправка конфига на диск…"))
+                await ConfigSyncService.ExportAsync(_services, root, exportedBy);
             if (_configPushLastFailed)
             {
                 _configPushLastFailed = false;

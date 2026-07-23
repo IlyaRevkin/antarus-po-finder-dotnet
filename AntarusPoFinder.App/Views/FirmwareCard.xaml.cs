@@ -98,13 +98,6 @@ public partial class FirmwareCard : UserControl
         if (result.UploadDate is not null) metaParts.Add(result.UploadDate.Value.ToString("dd.MM.yyyy"));
         MetaLabel.Text = string.Join("  ·  ", metaParts);
 
-        var desc = result.Description ?? "";
-        var truncated = desc.Length > 120;
-        DescLabel.Text = truncated ? desc[..120] + "…" : desc;
-        DescLabel.Visibility = string.IsNullOrEmpty(desc) ? Visibility.Collapsed : Visibility.Visible;
-        DescLabel.Cursor = truncated ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Arrow;
-        DescLabel.ToolTip = truncated ? "Нажмите, чтобы посмотреть полностью" : null;
-
         // Read-only display here — editing tags (and description/launch types together) happens
         // through the single "Теги" button below, not inline, to avoid two competing tag editors
         // on the same card.
@@ -377,13 +370,6 @@ public partial class FirmwareCard : UserControl
     {
         FlashCopyFeedback();
         CopyNameRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void DescLabel_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        var desc = Result.Description ?? "";
-        if (desc.Length <= 120) return;
-        TextViewDialog.Show(Window.GetWindow(this), $"{Result.Name} {Result.VersionRaw}".Trim(), desc);
     }
 
     /// <summary>Visible confirmation right where the operator clicked — a status-bar message alone

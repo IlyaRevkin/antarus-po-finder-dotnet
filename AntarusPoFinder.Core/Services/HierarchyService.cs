@@ -12,6 +12,50 @@ public record SyncFromDiskResult(bool Ok, int Added, int Skipped, List<string> A
 public record UnknownEntry(string Path, string Name, string Type, string Section);
 public record MoveNamedResult(int Moved, List<string> MovedPaths, List<string> Errors);
 
+// ── Двухфазные операции «БД → диск» ───────────────────────────────────────────
+// Каждая операция этого сервиса, которая ходит на сетевой диск, разбита на три отделимых куска:
+// «спросить справочники у БД» → «сходить на диск» → «записать результат в БД». Так сделано ровно
+// затем, чтобы вызывающий (см. MainWindowViewModel) мог выполнить середину — единственную реально
+// медленную часть, потому что диск сетевой и регулярно отвечает через раз, — в фоновом потоке, а
+// обе БД-части оставить на потоке UI. Соединение SQLite здесь одно на всё приложение и НЕ
+// потокобезопасно, поэтому «просто обернуть всё целиком в Task.Run» было бы не оптимизацией, а
+// гонкой: фоновая синхронизация и любой клик пользователя (поиск, открытие страницы) полезли бы в
+// одно соединение одновременно.
+//
+// Однофазные методы (EnsureStructure/ScanUnknownFiles/SyncFwFromDisk) сохранены как обёртки —
+// они и остаются нормальным способом вызова там, где блокировать некого (тесты, консольные пути).
+
+/// <summary>Имена из справочников, которые нужны обходу диска, чтобы отличить «наше» от «чужого».
+/// Снимок: читается из БД один раз перед обходом.</summary>
+public record HierarchyNames(
+    HashSet<string> PoNames, HashSet<string> ParamNames,
+    HashSet<string> PoLeafNames, HashSet<string> ParamLeafNames);
+
+/// <summary>Полный список папок, которые должны существовать на диске, плюс снимок имён для
+/// последующего разбора «неизвестного». Считается по БД, применяется без неё.</summary>
+public record StructurePlan(string Root, List<string> Folders, HierarchyNames Names);
+
+/// <summary>Одна папка контроллера, которую нужно просмотреть на предмет новых версий, вместе с уже
+/// известными БД номерами версий для этой пары подтип/контроллер.</summary>
+public record FwSyncTarget(int SubtypeId, int ControllerId, string GroupName, string SubtypeName,
+    string ControllerName, string ControllerPath, HashSet<string> KnownVersions);
+
+public record FwSyncPlan(List<FwSyncTarget> Targets);
+
+/// <summary>Найденная на диске папка версии, которой ещё нет в БД, со всем, что удалось вычитать
+/// рядом (имя файла прошивки, CHANGELOG.md). Ничего не записывает — запись делает ImportFwCandidates.</summary>
+public record FwDiskCandidate(FwSyncTarget Target, FwVersionNumber Version, string VersionDir,
+    string Filename, ChangelogContent? Changelog)
+{
+    public string Label => SubtypeName == "—"
+        ? $"{Target.GroupName}/{Target.ControllerName}/{Version.Raw}"
+        : $"{Target.GroupName}/{SubtypeName}/{Target.ControllerName}/{Version.Raw}";
+
+    private string SubtypeName => Target.SubtypeName;
+}
+
+public record FwDiskScan(List<FwDiskCandidate> Candidates, int Skipped, List<string> Errors);
+
 /// <summary>Builds/maintains the on-disk folder tree that mirrors the DB hierarchy.
 /// 1:1 port of app/services/hierarchy_service.py.</summary>
 public class HierarchyService
@@ -129,20 +173,69 @@ public class HierarchyService
 
     // ── Ensure structure ──────────────────────────────────────────────────────
 
-    public EnsureStructureResult EnsureStructure(string root)
+    public EnsureStructureResult EnsureStructure(string root) => ApplyStructurePlan(PlanStructure(root));
+
+    /// <summary>БД-фаза: какие папки должны быть на диске. Ни одного обращения к файловой системе —
+    /// её можно вызывать на потоке UI, даже когда сам диск не отвечает.</summary>
+    public StructurePlan PlanStructure(string root)
+    {
+        var folders = new List<string>();
+        var controllers = _db.GetAllControllerModels();
+        var manufacturers = _db.GetParamManufacturers();
+
+        foreach (var g in _db.GetAllEquipmentGroups())
+        {
+            var subtypes = _db.GetSubtypesForGroup(g.Id!.Value);
+            if (subtypes.Count == 0)
+                folders.Add(Path.Combine(root, FolderPo, g.Name));
+
+            foreach (var s in subtypes)
+            {
+                var groupSubPath = s.Name == "—"
+                    ? Path.Combine(root, FolderPo, g.Name)
+                    : Path.Combine(root, FolderPo, g.Name, s.Name);
+                folders.Add(groupSubPath);
+
+                foreach (var ctrl in controllers)
+                {
+                    var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
+                    folders.Add(ctrlPath);
+                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Instructions));
+                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
+                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Modbus));
+                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
+                }
+                folders.Add(Path.Combine(groupSubPath, HierarchyFolders.Opc));
+
+                var paramsGroupSubPath = s.Name == "—"
+                    ? Path.Combine(root, FolderParams, g.Name)
+                    : Path.Combine(root, FolderParams, g.Name, s.Name);
+                foreach (var manufacturer in manufacturers)
+                    folders.Add(Path.Combine(paramsGroupSubPath, manufacturer));
+            }
+        }
+
+        folders.Add(Path.Combine(root, FolderPo, HierarchyFolders.UnknownFw));
+        folders.Add(Path.Combine(root, FolderParams, HierarchyFolders.UnknownParams));
+        folders.Add(Path.Combine(root, FolderConfig));
+
+        return new StructurePlan(root, folders, SnapshotNames());
+    }
+
+    /// <summary>Дисковая фаза: создаёт недостающие папки и уносит нераспознанное в «Неизвестное».
+    /// В БД не ходит вообще — безопасно выполнять в фоновом потоке.</summary>
+    public static EnsureStructureResult ApplyStructurePlan(StructurePlan plan)
     {
         var errors = new List<string>();
         int created = 0;
 
-        void EnsureDir(string path)
+        foreach (var path in plan.Folders)
         {
             try
             {
-                if (!Directory.Exists(path))
-                {
-                    Directory.CreateDirectory(path);
-                    created++;
-                }
+                if (Directory.Exists(path)) continue;
+                Directory.CreateDirectory(path);
+                created++;
             }
             catch (Exception e)
             {
@@ -150,45 +243,7 @@ public class HierarchyService
             }
         }
 
-        var groups = _db.GetAllEquipmentGroups();
-        foreach (var g in groups)
-        {
-            var subtypes = _db.GetSubtypesForGroup(g.Id!.Value);
-            if (subtypes.Count == 0)
-            {
-                EnsureDir(Path.Combine(root, FolderPo, g.Name));
-            }
-            foreach (var s in subtypes)
-            {
-                var groupSubPath = s.Name == "—"
-                    ? Path.Combine(root, FolderPo, g.Name)
-                    : Path.Combine(root, FolderPo, g.Name, s.Name);
-                EnsureDir(groupSubPath);
-
-                foreach (var ctrl in _db.GetAllControllerModels())
-                {
-                    var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
-                    EnsureDir(ctrlPath);
-                    EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.Instructions));
-                    EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
-                    EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.Modbus));
-                    EnsureDir(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
-                }
-                EnsureDir(Path.Combine(groupSubPath, HierarchyFolders.Opc));
-
-                var paramsGroupSubPath = s.Name == "—"
-                    ? Path.Combine(root, FolderParams, g.Name)
-                    : Path.Combine(root, FolderParams, g.Name, s.Name);
-                foreach (var manufacturer in _db.GetParamManufacturers())
-                    EnsureDir(Path.Combine(paramsGroupSubPath, manufacturer));
-            }
-        }
-
-        EnsureDir(Path.Combine(root, FolderPo, HierarchyFolders.UnknownFw));
-        EnsureDir(Path.Combine(root, FolderParams, HierarchyFolders.UnknownParams));
-        EnsureDir(Path.Combine(root, FolderConfig));
-
-        var movedCount = CollectUnknowns(root).Moved;
+        var movedCount = CollectUnknowns(plan.Root, plan.Names).Moved;
 
         return new EnsureStructureResult(errors.Count == 0, created, errors, movedCount);
     }
@@ -222,18 +277,34 @@ public class HierarchyService
         return names;
     }
 
-    public MoveNamedResult CollectUnknowns(string root)
+    /// <summary>БД-фаза для всего, что потом ходит по диску: имена справочников одним снимком.</summary>
+    public HierarchyNames SnapshotNames() => new(
+        KnownPoNames(),
+        KnownParamNames(),
+        new HashSet<string>(_db.GetAllControllerModels().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
+        {
+            HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap,
+            HierarchyFolders.Modbus, HierarchyFolders.Hmi, HierarchyFolders.UnknownFw,
+        },
+        new HashSet<string>(_db.GetParamManufacturers(), StringComparer.OrdinalIgnoreCase)
+        {
+            HierarchyFolders.UnknownParams,
+        });
+
+    public MoveNamedResult CollectUnknowns(string root) => CollectUnknowns(root, SnapshotNames());
+
+    public static MoveNamedResult CollectUnknowns(string root, HierarchyNames names)
     {
         var moved = new List<string>();
         var errors = new List<string>();
 
         var poRoot = Path.Combine(root, FolderPo);
         var poUnknown = Path.Combine(poRoot, HierarchyFolders.UnknownFw);
-        MoveUnrecognizedTopLevel(poRoot, poUnknown, KnownPoNames(), moved, errors);
+        MoveUnrecognizedTopLevel(poRoot, poUnknown, names.PoNames, moved, errors);
 
         var paramsRoot = Path.Combine(root, FolderParams);
         var paramsUnknown = Path.Combine(paramsRoot, HierarchyFolders.UnknownParams);
-        MoveUnrecognizedTopLevel(paramsRoot, paramsUnknown, KnownParamNames(), moved, errors);
+        MoveUnrecognizedTopLevel(paramsRoot, paramsUnknown, names.ParamNames, moved, errors);
 
         return new MoveNamedResult(moved.Count, moved, errors);
     }
@@ -325,25 +396,21 @@ public class HierarchyService
     /// controller/ОПЦ/manufacturer folder (see poLeafNames/paramsLeafNames) — those hold free-form
     /// version-numbered subfolders or files that were never meant to be checked against a fixed name
     /// list, so descending into them would misreport every real firmware version as "unknown".</summary>
-    public List<UnknownEntry> ScanUnknownFiles(string root)
+    public List<UnknownEntry> ScanUnknownFiles(string root) => ScanUnknownFiles(root, SnapshotNames());
+
+    /// <summary>Дисковая фаза скана: имена справочников уже сняты (SnapshotNames), в БД не ходим —
+    /// значит обход сетевого диска можно унести в фоновый поток.</summary>
+    public static List<UnknownEntry> ScanUnknownFiles(string root, HierarchyNames names)
     {
         var result = new List<UnknownEntry>();
 
         var poRoot = Path.Combine(root, FolderPo);
         var poUnknown = Path.Combine(poRoot, HierarchyFolders.UnknownFw);
-        var poLeafNames = new HashSet<string>(_db.GetAllControllerModels().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
-        {
-            HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap, HierarchyFolders.Modbus, HierarchyFolders.Hmi, HierarchyFolders.UnknownFw,
-        };
-        CollectEntriesRecursive(poRoot, poUnknown, KnownPoNames(), poLeafNames, "ПО", result, depth: 0);
+        CollectEntriesRecursive(poRoot, poUnknown, names.PoNames, names.PoLeafNames, "ПО", result, depth: 0);
 
         var paramsRoot = Path.Combine(root, FolderParams);
         var paramsUnknown = Path.Combine(paramsRoot, HierarchyFolders.UnknownParams);
-        var paramsLeafNames = new HashSet<string>(_db.GetParamManufacturers(), StringComparer.OrdinalIgnoreCase)
-        {
-            HierarchyFolders.UnknownParams,
-        };
-        CollectEntriesRecursive(paramsRoot, paramsUnknown, KnownParamNames(), paramsLeafNames, "Параметры", result, depth: 0);
+        CollectEntriesRecursive(paramsRoot, paramsUnknown, names.ParamNames, names.ParamLeafNames, "Параметры", result, depth: 0);
 
         return result;
     }
@@ -372,14 +439,17 @@ public class HierarchyService
 
     // ── Sync fw_versions from disk ────────────────────────────────────────────
 
-    public SyncFromDiskResult SyncFwFromDisk(string root)
-    {
-        var errors = new List<string>();
-        var addedItems = new List<string>();
-        int added = 0, skipped = 0;
+    public SyncFromDiskResult SyncFwFromDisk(string root) => ImportFwCandidates(ScanFwDisk(PlanFwSync(root)));
 
-        var groups = _db.GetAllEquipmentGroups();
-        foreach (var g in groups)
+    /// <summary>БД-фаза: какие папки контроллеров смотреть и какие номера версий там уже известны.
+    /// Известные версии берутся ОДНИМ запросом на пару подтип/контроллер (раньше запрос уходил на
+    /// каждую найденную папку версии) — тот же ответ, но без похода в БД посреди обхода диска.</summary>
+    public FwSyncPlan PlanFwSync(string root)
+    {
+        var targets = new List<FwSyncTarget>();
+        var controllers = _db.GetAllControllerModels();
+
+        foreach (var g in _db.GetAllEquipmentGroups())
         {
             // Every group is guaranteed at least one subtype row (Database.EnsureEveryGroupHasSubtype) —
             // "—" is the placeholder for "no real subtype division", so this no longer needs a
@@ -387,65 +457,108 @@ public class HierarchyService
             foreach (var sub in _db.GetSubtypesForGroup(g.Id!.Value))
             {
                 var groupSubPath = sub.Name == "—" ? Path.Combine(root, FolderPo, g.Name) : Path.Combine(root, FolderPo, g.Name, sub.Name);
-                if (!Directory.Exists(groupSubPath)) continue;
-
-                foreach (var ctrl in _db.GetAllControllerModels())
+                foreach (var ctrl in controllers)
                 {
-                    var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
-                    if (!Directory.Exists(ctrlPath)) continue;
-
-                    foreach (var versionDir in Directory.EnumerateDirectories(ctrlPath))
-                    {
-                        var versionName = Path.GetFileName(versionDir);
-                        var parsed = FwVersionNumber.Parse(versionName);
-                        if (parsed is null) continue;
-
-                        var exists = _db.GetFwVersions(sub.Id, ctrl.Id, includeArchived: true, includeRolledBack: true)
-                            .Any(v => v.VersionRaw == parsed.Raw);
-                        if (exists) { skipped++; continue; }
-
-                        var label = sub.Name == "—" ? $"{g.Name}/{ctrl.Name}/{parsed.Raw}" : $"{g.Name}/{sub.Name}/{ctrl.Name}/{parsed.Raw}";
-                        try
-                        {
-                            // Имя файла — первый файл в папке, но НЕ служебный CHANGELOG.md: при
-                            // перечислении он часто оказывается первым по алфавиту, и строка
-                            // получала filename="CHANGELOG.md" вместо самой прошивки.
-                            var filename = Directory.EnumerateFiles(versionDir)
-                                .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
-                            // Описание и типы пуска берём из CHANGELOG.md, который положила туда
-                            // загрузившая машина — заглушка остаётся только там, где файла нет.
-                            var changelog = ChangelogFile.TryRead(versionDir);
-                            _db.AddFwVersion(new Domain.FwVersionRecord
-                            {
-                                SubtypeId = sub.Id!.Value,
-                                ControllerId = ctrl.Id!.Value,
-                                EqPrefix = parsed.EqPrefix,
-                                SubPrefix = parsed.SubPrefix,
-                                HwVersion = parsed.HwVersion,
-                                SwVersion = parsed.SwVersion,
-                                DtStr = parsed.DtStr,
-                                VersionRaw = parsed.Raw,
-                                Filename = filename is null ? "" : Path.GetFileName(filename),
-                                DiskPath = versionDir,
-                                Description = string.IsNullOrWhiteSpace(changelog?.Description)
-                                    ? ChangelogFile.DiskSyncPlaceholder
-                                    : changelog!.Description,
-                                Changelog = changelog?.Description ?? "",
-                                LaunchTypes = changelog?.LaunchTypes ?? new List<string>(),
-                                Status = "active",
-                            });
-                            added++;
-                            addedItems.Add(label);
-                        }
-                        catch (Exception e)
-                        {
-                            errors.Add($"{label}: {e.Message}");
-                        }
-                    }
+                    var known = new HashSet<string>(
+                        _db.GetFwVersions(sub.Id, ctrl.Id, includeArchived: true, includeRolledBack: true).Select(v => v.VersionRaw),
+                        StringComparer.Ordinal);
+                    targets.Add(new FwSyncTarget(sub.Id!.Value, ctrl.Id!.Value, g.Name, sub.Name, ctrl.Name,
+                        Path.Combine(groupSubPath, ctrl.Name), known));
                 }
             }
         }
 
-        return new SyncFromDiskResult(errors.Count == 0, added, skipped, addedItems, errors);
+        return new FwSyncPlan(targets);
+    }
+
+    /// <summary>Дисковая фаза: обход папок версий и чтение CHANGELOG.md. Ничего не пишет и в БД не
+    /// ходит — это та самая часть, которая на сетевом диске занимает секунды-минуты и должна идти
+    /// в фоновом потоке.</summary>
+    public static FwDiskScan ScanFwDisk(FwSyncPlan plan)
+    {
+        var candidates = new List<FwDiskCandidate>();
+        var errors = new List<string>();
+        int skipped = 0;
+
+        foreach (var target in plan.Targets)
+        {
+            if (!Directory.Exists(target.ControllerPath)) continue;
+
+            IEnumerable<string> versionDirs;
+            try { versionDirs = Directory.EnumerateDirectories(target.ControllerPath).ToList(); }
+            catch (Exception e) { errors.Add($"{target.ControllerPath}: {e.Message}"); continue; }
+
+            foreach (var versionDir in versionDirs)
+            {
+                var parsed = FwVersionNumber.Parse(Path.GetFileName(versionDir));
+                if (parsed is null) continue;
+                if (target.KnownVersions.Contains(parsed.Raw)) { skipped++; continue; }
+
+                string filename = "";
+                ChangelogContent? changelog = null;
+                try
+                {
+                    // Имя файла — первый файл в папке, но НЕ служебный CHANGELOG.md: при
+                    // перечислении он часто оказывается первым по алфавиту, и строка
+                    // получала filename="CHANGELOG.md" вместо самой прошивки.
+                    var found = Directory.EnumerateFiles(versionDir)
+                        .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
+                    filename = found is null ? "" : Path.GetFileName(found);
+                    // Описание и типы пуска берём из CHANGELOG.md, который положила туда
+                    // загрузившая машина — заглушка остаётся только там, где файла нет.
+                    changelog = ChangelogFile.TryRead(versionDir);
+                }
+                catch (Exception e)
+                {
+                    errors.Add($"{versionDir}: {e.Message}");
+                }
+
+                candidates.Add(new FwDiskCandidate(target, parsed, versionDir, filename, changelog));
+            }
+        }
+
+        return new FwDiskScan(candidates, skipped, errors);
+    }
+
+    /// <summary>БД-фаза: заводит записи по тому, что нашёл обход диска.</summary>
+    public SyncFromDiskResult ImportFwCandidates(FwDiskScan scan)
+    {
+        var errors = new List<string>(scan.Errors);
+        var addedItems = new List<string>();
+        int added = 0;
+
+        foreach (var c in scan.Candidates)
+        {
+            try
+            {
+                _db.AddFwVersion(new Domain.FwVersionRecord
+                {
+                    SubtypeId = c.Target.SubtypeId,
+                    ControllerId = c.Target.ControllerId,
+                    EqPrefix = c.Version.EqPrefix,
+                    SubPrefix = c.Version.SubPrefix,
+                    HwVersion = c.Version.HwVersion,
+                    SwVersion = c.Version.SwVersion,
+                    DtStr = c.Version.DtStr,
+                    VersionRaw = c.Version.Raw,
+                    Filename = c.Filename,
+                    DiskPath = c.VersionDir,
+                    Description = string.IsNullOrWhiteSpace(c.Changelog?.Description)
+                        ? ChangelogFile.DiskSyncPlaceholder
+                        : c.Changelog!.Description,
+                    Changelog = c.Changelog?.Description ?? "",
+                    LaunchTypes = c.Changelog?.LaunchTypes ?? new List<string>(),
+                    Status = "active",
+                });
+                added++;
+                addedItems.Add(c.Label);
+            }
+            catch (Exception e)
+            {
+                errors.Add($"{c.Label}: {e.Message}");
+            }
+        }
+
+        return new SyncFromDiskResult(errors.Count == 0, added, scan.Skipped, addedItems, errors);
     }
 }

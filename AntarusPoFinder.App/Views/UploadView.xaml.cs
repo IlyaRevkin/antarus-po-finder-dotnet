@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -593,7 +594,11 @@ public partial class UploadView : UserControl
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
-    private void Upload_Click(object sender, RoutedEventArgs e)
+    /// <summary>Асинхронная: копирование прошивки и вложений на сетевой диск (единственная долгая
+    /// часть загрузки — гигабайты по общей шаре) идёт в фоновом потоке, обе БД-фазы остаются здесь,
+    /// на потоке интерфейса (см. FirmwareUploadService.Prepare/CopyFiles/Register). Раньше окно
+    /// стояло колом всё время копирования, без единого признака, что что-то происходит.</summary>
+    private async void Upload_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_srcPath))
         {
@@ -613,27 +618,54 @@ public partial class UploadView : UserControl
         }
         var request = BuildUploadRequest();
         var shortcuts = new Services.ShortcutCreator();
-        var result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request, shortcuts);
+
+        // Подготовка (БД + проверки) — на потоке интерфейса; на диск здесь ещё ничего не пишется,
+        // поэтому оба подтверждения ниже спрашиваются ДО начала копирования, как и раньше.
+        var (plan, failure) = FirmwareUploadService.Prepare(_services.Db, _services.Hierarchy, request);
 
         // Two checks used to pop a Yes/No MessageBox mid-transaction and either continue in place or
         // abort — the service can't show UI, so it hands back NeedsConfirmation instead and expects
         // the SAME request re-submitted with the matching Confirm* flag once the user agrees (see
         // FirmwareUploadService's doc comment). Looping here reproduces the exact original sequence:
         // unknown-extension prompt first (if any), then the destination-exists prompt (if any).
-        while (result.Outcome == FirmwareUploadOutcome.NeedsConfirmation)
+        while (plan is null && failure!.Outcome == FirmwareUploadOutcome.NeedsConfirmation)
         {
-            var title = result.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension
+            var title = failure.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension
                 ? "Неизвестное расширение" : "Версия существует";
-            var reply = AppMessageBox.Show(result.ConfirmationMessage ?? "", title,
+            var reply = AppMessageBox.Show(failure.ConfirmationMessage ?? "", title,
                 MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
             if (reply != MessageBoxResult.Yes) return;
 
-            if (result.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension)
+            if (failure.ConfirmationKind == FirmwareConfirmationKind.UnknownExtension)
                 request.ConfirmUnknownExtension = true;
             else
                 request.ConfirmOverwriteExisting = true;
 
-            result = FirmwareUploadService.Upload(_services.Db, _services.Hierarchy, request, shortcuts);
+            (plan, failure) = FirmwareUploadService.Prepare(_services.Db, _services.Hierarchy, request);
+        }
+
+        FirmwareUploadResult result;
+        if (plan is null)
+        {
+            result = failure!;
+        }
+        else
+        {
+            UploadBtn.IsEnabled = false;
+            try
+            {
+                FirmwareUploadCopyResult copy;
+                using (_host.BeginBusy($"Загрузка на диск: {plan.Version.Raw}"))
+                    copy = await Task.Run(() => FirmwareUploadService.CopyFiles(plan));
+
+                result = copy.IoErrorMessage is not null
+                    ? FirmwareUploadResult.IoFailure(copy.IoErrorMessage)
+                    : FirmwareUploadService.Register(_services.Db, _services.Hierarchy, plan, copy, shortcuts);
+            }
+            finally
+            {
+                UploadBtn.IsEnabled = true;
+            }
         }
 
         switch (result.Outcome)

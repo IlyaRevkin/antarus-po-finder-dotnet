@@ -15,8 +15,9 @@
                  видно только по тому, есть ли пункт в меню «Ещё» — то есть «есть ли LFS» приходилось
                  выяснять, открыв меню и не найдя там строки. -->
             <TextBlock x:Name="FilesLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
-            <TextBlock x:Name="DescLabel" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" Margin="0,4,0,0"
-                       MouseLeftButtonUp="DescLabel_Click"/>
+            <!-- Описания версии на карточке больше нет: у него не было предела по смыслу (несколько
+                 строк changelog'а на КАЖДОЙ карточке выдачи), а прочитать его можно там, где оно
+                 и осмысленно — «Ещё» → «История версий», где видно ещё и чем версии отличаются. -->
             <views:TagBubbleEditor x:Name="TagsView" Margin="0,4,0,0"/>
 
             <Grid Margin="0,8,0,0">

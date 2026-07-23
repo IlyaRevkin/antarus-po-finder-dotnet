@@ -5,10 +5,22 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Infrastructure;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Services;
+
+/// <summary>Прочитанный и разобранный общий конфиг с сетевого диска — результат дисковой фазы,
+/// который дальше разбирают уже против локальной БД (см. ConfigSyncService.CheckForUpdateAsync).</summary>
+public record SharedConfigSnapshot(string Path, JsonObject RootNode, HierarchyExportData Hierarchy)
+{
+    public string ExportedAt => RootNode["exported_at"]?.GetValue<string>() ?? "";
+    public string ExportedBy => RootNode["exported_by"]?.GetValue<string>() ?? "?";
+}
+
+internal record SharedConfigRead(SharedConfigSnapshot? Snapshot, string? Error);
 
 public record ConfigUpdateInfo(string ConfigPath, string ExportedAt, string ExportedBy, int SettingsChanged, ImportCounts Diff);
 public record ConfigApplyResult(int SettingsApplied, ImportCounts Counts, string ExportedAt, string ExportedBy);
@@ -74,33 +86,60 @@ public static class ConfigSyncService
     /// the caller can surface it (e.g. status bar) without blocking the app on it.</summary>
     public static ConfigUpdateInfo? CheckForUpdate(AppServices services, out string? error)
     {
-        error = null;
+        var read = ReadShared(services.Cfg.RootPath());
+        error = read.Error;
+        if (read.Snapshot is null) return null;
+
+        try { return Analyze(services, read.Snapshot); }
+        catch (Exception e) { error = e.Message; return null; }
+    }
+
+    /// <summary>Та же проверка, но чтение файла с сетевого диска (единственная её медленная часть)
+    /// уходит в фоновый поток, а разбор диффа против БД остаётся на вызывающем — то есть на потоке
+    /// UI. Так фоновый тик синхронизации перестал вешать окно на всё время, пока диск отвечает
+    /// (см. MainWindowViewModel.CheckForConfigUpdateAsync и комментарий про одно SQLite-соединение
+    /// в HierarchyService).</summary>
+    public static async Task<(ConfigUpdateInfo? Info, string? Error, SharedConfigSnapshot? Snapshot)> CheckForUpdateAsync(AppServices services)
+    {
+        var root = services.Cfg.RootPath();
+        var read = await Task.Run(() => ReadShared(root));
+        if (read.Snapshot is null) return (null, read.Error, null);
+
+        try { return (Analyze(services, read.Snapshot), null, read.Snapshot); }
+        catch (Exception e) { return (null, e.Message, null); }
+    }
+
+    /// <summary>Дисковая фаза: прочитать и разобрать общий конфиг. В БД не ходит.</summary>
+    private static SharedConfigRead ReadShared(string root)
+    {
         try
         {
-            var root = services.Cfg.RootPath();
-            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return null;
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return new SharedConfigRead(null, null);
 
             var path = ConfigPathFor(root);
-            if (!File.Exists(path)) return null;
+            if (!File.Exists(path)) return new SharedConfigRead(null, null);
 
             var (rootNode, hierarchyData) = Parse(path);
-            services.Cfg.SetConfigLastCheckedAt(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"));
-            var exportedAt = rootNode["exported_at"]?.GetValue<string>() ?? "";
-            if (string.IsNullOrEmpty(exportedAt) || string.CompareOrdinal(exportedAt, services.Cfg.ConfigLastSyncedAt()) <= 0)
-                return null;
-
-            var exportedBy = rootNode["exported_by"]?.GetValue<string>() ?? "?";
-            var settingsChanged = CountSettingsChanges(services, rootNode);
-            var diff = services.Db.PreviewImportHierarchyData(hierarchyData);
-            if (settingsChanged == 0 && diff.TotalChanges == 0) return null;
-
-            return new ConfigUpdateInfo(path, exportedAt, exportedBy, settingsChanged, diff);
+            return new SharedConfigRead(new SharedConfigSnapshot(path, rootNode, hierarchyData), null);
         }
         catch (Exception e)
         {
-            error = e.Message;
-            return null;
+            return new SharedConfigRead(null, e.Message);
         }
+    }
+
+    /// <summary>БД-фаза: есть ли в прочитанном снимке что-то новое для этой машины.</summary>
+    private static ConfigUpdateInfo? Analyze(AppServices services, SharedConfigSnapshot snap)
+    {
+        services.Cfg.SetConfigLastCheckedAt(DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"));
+        if (string.IsNullOrEmpty(snap.ExportedAt) || string.CompareOrdinal(snap.ExportedAt, services.Cfg.ConfigLastSyncedAt()) <= 0)
+            return null;
+
+        var settingsChanged = CountSettingsChanges(services, snap.RootNode);
+        var diff = services.Db.PreviewImportHierarchyData(snap.Hierarchy);
+        if (settingsChanged == 0 && diff.TotalChanges == 0) return null;
+
+        return new ConfigUpdateInfo(snap.Path, snap.ExportedAt, snap.ExportedBy, settingsChanged, diff);
     }
 
     /// <summary>Applies the shared config for real — used by both the manual Import button and the
@@ -109,19 +148,56 @@ public static class ConfigSyncService
     public static ConfigApplyResult Apply(AppServices services, string configPath, string currentRoot)
     {
         var (rootNode, hierarchyData) = Parse(configPath);
-        var oldRoot = rootNode["source_root_path"]?.GetValue<string>() ?? "";
-        var exportedAt = rootNode["exported_at"]?.GetValue<string>() ?? "?";
-        var exportedBy = rootNode["exported_by"]?.GetValue<string>() ?? "?";
+        var snap = new SharedConfigSnapshot(configPath, rootNode, hierarchyData);
+
+        var (settingsApplied, counts) = ApplyToDatabase(services, snap, currentRoot);
+        services.Hierarchy.SyncFwFromDisk(currentRoot);
+
+        var exportedAt = Watermark(snap);
+        services.Cfg.SetConfigLastSyncedAt(exportedAt);
+
+        return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
+    }
+
+    /// <summary>То же применение, но досмотр диска (SyncFwFromDisk — обход всех папок версий на
+    /// сетевом диске, самая долгая часть всей синхронизации) выполняется в фоновом потоке. Обе
+    /// БД-части остаются на вызывающем потоке: одно SQLite-соединение на приложение, гонки с UI не
+    /// нужны (см. HierarchyService, блок про двухфазные операции).</summary>
+    public static async Task<ConfigApplyResult> ApplyAsync(AppServices services, SharedConfigSnapshot snap, string currentRoot)
+    {
+        var (settingsApplied, counts) = ApplyToDatabase(services, snap, currentRoot);
+
+        var plan = services.Hierarchy.PlanFwSync(currentRoot);
+        var scan = await Task.Run(() => HierarchyService.ScanFwDisk(plan));
+        services.Hierarchy.ImportFwCandidates(scan);
+
+        var exportedAt = Watermark(snap);
+        services.Cfg.SetConfigLastSyncedAt(exportedAt);
+
+        return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
+    }
+
+    /// <summary>Отметка «до какого экспорта эта машина уже дотянулась». У файла без exported_at её
+    /// нет — пишем "?", как и до разбиения на фазы, чтобы watermark не оказался пустой строкой,
+    /// которая сравнивается «меньше всего на свете» и заставляла бы пересинхронизироваться вечно.</summary>
+    private static string Watermark(SharedConfigSnapshot snap) =>
+        string.IsNullOrEmpty(snap.ExportedAt) ? "?" : snap.ExportedAt;
+
+    /// <summary>Читает уже разобранный снимок в локальную БД: настройки, справочники, переезд путей.
+    /// Быстро (локальный SQLite) — на диск здесь не ходят вообще.</summary>
+    private static (int SettingsApplied, ImportCounts Counts) ApplyToDatabase(AppServices services, SharedConfigSnapshot snap, string currentRoot)
+    {
+        var oldRoot = snap.RootNode["source_root_path"]?.GetValue<string>() ?? "";
 
         int settingsApplied = 0;
-        foreach (var kv in rootNode)
+        foreach (var kv in snap.RootNode)
         {
             if (!IsSetting(kv)) continue;
             services.Cfg.Set(kv.Key, kv.Value?.GetValue<string>() ?? "");
             settingsApplied++;
         }
 
-        var counts = services.Db.ImportHierarchyData(hierarchyData);
+        var counts = services.Db.ImportHierarchyData(snap.Hierarchy);
 
         // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
         // EXISTING fw_versions/param_files rows via a plain UPDATE. Running it first (as an earlier
@@ -133,10 +209,7 @@ public static class ConfigSyncService
         if (!string.IsNullOrEmpty(oldRoot) && oldRoot != currentRoot)
             services.Db.RemapFwPaths(oldRoot, currentRoot);
 
-        services.Hierarchy.SyncFwFromDisk(currentRoot);
-        services.Cfg.SetConfigLastSyncedAt(exportedAt);
-
-        return new ConfigApplyResult(settingsApplied, counts, exportedAt, exportedBy);
+        return (settingsApplied, counts);
     }
 
     /// <summary>Writes the shared config file — used by the manual "Отправить сейчас"/"Экспорт на
@@ -145,11 +218,31 @@ public static class ConfigSyncService
     /// tick).</summary>
     public static ConfigExportResult Export(AppServices services, string root, string exportedBy)
     {
+        var prepared = PrepareExport(services, root, exportedBy);
+        WriteExport(prepared);
+        FinishExport(services, prepared);
+        return prepared.Result;
+    }
+
+    /// <summary>То же самое, но запись файла на сетевой диск идёт в фоновом потоке — сбор данных из
+    /// БД и отметка «отправлено» остаются на вызывающем потоке.</summary>
+    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy)
+    {
+        var prepared = PrepareExport(services, root, exportedBy);
+        await Task.Run(() => WriteExport(prepared));
+        FinishExport(services, prepared);
+        return prepared.Result;
+    }
+
+    private record PreparedExport(string ExportPath, byte[] Bytes, ConfigExportResult Result);
+
+    /// <summary>БД-фаза экспорта: собрать снимок и зашифровать его в память.</summary>
+    private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy)
+    {
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             throw new DirectoryNotFoundException("Сетевой диск недоступен.");
 
         var configDir = Path.Combine(root, "Конфиг");
-        Directory.CreateDirectory(configDir);
 
         var exportedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
         var payload = new JsonObject
@@ -186,16 +279,26 @@ public static class ConfigSyncService
         }
 
         var exportPath = Path.Combine(configDir, "po_finder_config.json");
-        FileSystemHelpers.UnprotectForOwnWrite(exportPath);
-        File.WriteAllBytes(exportPath, ConfigFileCrypto.Encrypt(payload.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
-        FileSystemHelpers.ProtectFromExternalEdits(exportPath);
+        var bytes = ConfigFileCrypto.Encrypt(payload.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
-        // We're by definition current with what we just wrote — otherwise this same machine's own
-        // pull check would immediately offer to "update" from the file it just exported.
-        services.Cfg.SetConfigLastSyncedAt(exportedAt);
-        services.Cfg.SetConfigLastPushedAt(exportedAt);
+        return new PreparedExport(exportPath, bytes, new ConfigExportResult(exportedAt, exportedBy, hierarchy));
+    }
 
-        return new ConfigExportResult(exportedAt, exportedBy, hierarchy);
+    /// <summary>Дисковая фаза экспорта: записать готовые байты. В БД не ходит.</summary>
+    private static void WriteExport(PreparedExport prepared)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(prepared.ExportPath)!);
+        FileSystemHelpers.UnprotectForOwnWrite(prepared.ExportPath);
+        File.WriteAllBytes(prepared.ExportPath, prepared.Bytes);
+        FileSystemHelpers.ProtectFromExternalEdits(prepared.ExportPath);
+    }
+
+    /// <summary>We're by definition current with what we just wrote — otherwise this same machine's
+    /// own pull check would immediately offer to "update" from the file it just exported.</summary>
+    private static void FinishExport(AppServices services, PreparedExport prepared)
+    {
+        services.Cfg.SetConfigLastSyncedAt(prepared.Result.ExportedAt);
+        services.Cfg.SetConfigLastPushedAt(prepared.Result.ExportedAt);
     }
 
     /// <summary>Lets a non-administrator contribute their own AD-login roster entry to the shared

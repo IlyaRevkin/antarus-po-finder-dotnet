@@ -138,7 +138,53 @@ public class FirmwareUploadResult
 
     internal static FirmwareUploadResult ValidationFailure(string message) => Fail(message);
     internal static FirmwareUploadResult Confirmation(FirmwareConfirmationKind kind, string message) => Confirm(kind, message);
-    internal static FirmwareUploadResult IoFailure(string message) => Io(message);
+    /// <summary>Публичный, в отличие от остальных фабрик: при пофазной загрузке провал копирования
+    /// возвращает FirmwareUploadCopyResult.IoErrorMessage, и превращает его в общий результат уже
+    /// вызывающий (см. UploadView.Upload_Click).</summary>
+    public static FirmwareUploadResult IoFailure(string message) => Io(message);
+}
+
+/// <summary>Всё, что нужно знать копированию файлов, — посчитано заранее по БД (номер версии, пути
+/// назначения, автор). Существует ради того, чтобы дисковая фаза загрузки (FirmwareUploadService.
+/// CopyFiles) не обращалась к БД и её можно было выполнять в фоновом потоке: соединение SQLite
+/// одно на приложение и не потокобезопасно, поэтому обе БД-фазы остаются на потоке UI.</summary>
+public class FirmwareUploadPlan
+{
+    public FirmwareUploadRequest Request { get; init; } = null!;
+    public string Root { get; init; } = "";
+    public FwVersionNumber Version { get; init; } = null!;
+    public int SwVersion { get; init; }
+    public int HwVersion { get; init; }
+    public bool IsOpc { get; init; }
+    public string RequestNum { get; init; } = "";
+    public string CabinetSn { get; init; } = "";
+    public string Description { get; init; } = "";
+    public List<string> LaunchTypes { get; init; } = new();
+
+    /// <summary>Источник — папка (копируем содержимое) или один файл (копируем с новым именем).</summary>
+    public bool SourceIsDirectory { get; init; }
+
+    public string DestinationFolder { get; init; } = "";
+    public string IoMapFolder { get; init; } = "";
+    public string InstructionsFolder { get; init; } = "";
+    public string ModbusMapFolder { get; init; } = "";
+    public string HmiFolder { get; init; } = "";
+
+    public int? AuthorId { get; init; }
+}
+
+/// <summary>Что получилось у дисковой фазы: имя файла, куда легли вложения и какие мелочи не
+/// удались. IoErrorMessage не null означает, что не скопировалась сама прошивка — записи в БД в
+/// этом случае не будет (как и раньше, см. FirmwareUploadOutcome.IoError).</summary>
+public class FirmwareUploadCopyResult
+{
+    public string DestinationFilename { get; init; } = "";
+    public string IoMapStored { get; init; } = "";
+    public string InstructionsStored { get; init; } = "";
+    public string ModbusMapStored { get; init; } = "";
+    public string HmiStored { get; init; } = "";
+    public List<string> Warnings { get; init; } = new();
+    public string? IoErrorMessage { get; init; }
 }
 
 /// <summary>Result of PSL/KINCO controller autodetection — see FirmwareUploadService.AutodetectFromPsl/
@@ -162,26 +208,44 @@ public record FirmwareAutodetectResult(ControllerModification? Modification, str
 /// FirmwareUploadRequest.ConfirmUnknownExtension/ConfirmOverwriteExisting.</summary>
 public static class FirmwareUploadService
 {
+    /// <summary>Полная загрузка одним вызовом: подготовка (БД) → копирование (диск) → запись (БД).
+    /// Ровно то, что делал этот метод до разбиения на фазы, и остаётся нормальным способом вызова
+    /// там, где не нужно держать интерфейс живым (тесты, любой не-UI код).</summary>
     public static FirmwareUploadResult Upload(Database db, HierarchyService hierarchy, FirmwareUploadRequest request,
         IShortcutCreator? shortcuts = null)
     {
+        var (plan, failure) = Prepare(db, hierarchy, request);
+        if (plan is null) return failure!;
+
+        var copy = CopyFiles(plan);
+        if (copy.IoErrorMessage is not null) return FirmwareUploadResult.IoFailure(copy.IoErrorMessage);
+
+        return Register(db, hierarchy, plan, copy, shortcuts);
+    }
+
+    /// <summary>Фаза 1 (БД + проверки): валидация формы, номер версии, куда всё ляжет. Возвращает
+    /// либо план, либо готовый отказ/запрос подтверждения — тогда план null. Копирования здесь нет,
+    /// то есть до подтверждений на диск ничего не пишется, как и раньше.</summary>
+    public static (FirmwareUploadPlan? Plan, FirmwareUploadResult? Failure) Prepare(
+        Database db, HierarchyService hierarchy, FirmwareUploadRequest request)
+    {
         if (string.IsNullOrEmpty(request.SourcePath))
-            return FirmwareUploadResult.ValidationFailure("Выберите файл прошивки.");
+            return (null, FirmwareUploadResult.ValidationFailure("Выберите файл прошивки."));
 
         if (request.Group is null || request.Subtype is null || request.Modification is null)
-            return FirmwareUploadResult.ValidationFailure("Укажите тип шкафа, подтип и контроллер.");
+            return (null, FirmwareUploadResult.ValidationFailure("Укажите тип шкафа, подтип и контроллер."));
 
         var launchTypes = request.LaunchTypes ?? new List<string>();
         if (launchTypes.Count == 0)
-            return FirmwareUploadResult.ValidationFailure("Выберите хотя бы один тип пуска.");
+            return (null, FirmwareUploadResult.ValidationFailure("Выберите хотя бы один тип пуска."));
 
         var desc = (request.Description ?? "").Trim();
         if (string.IsNullOrEmpty(desc))
-            return FirmwareUploadResult.ValidationFailure("Укажите описание изменений в этой версии.");
+            return (null, FirmwareUploadResult.ValidationFailure("Укажите описание изменений в этой версии."));
 
         var root = request.RootPath;
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
-            return FirmwareUploadResult.ValidationFailure("Сетевой диск недоступен. Проверьте настройки.");
+            return (null, FirmwareUploadResult.ValidationFailure("Сетевой диск недоступен. Проверьте настройки."));
 
         var group = request.Group;
         var subOption = request.Subtype;
@@ -194,8 +258,8 @@ public static class FirmwareUploadService
             var allowed = new HashSet<string>(db.GetAllowedExtensions().Select(x => x.ToLowerInvariant()));
             if (allowed.Count > 0 && !allowed.Contains(ext) && !request.ConfirmUnknownExtension)
             {
-                return FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.UnknownExtension,
-                    $"Расширение «.{ext}» не входит в список разрешённых (Настройки → Иерархия → Разрешённые расширения).\nТочно загрузить этот файл?");
+                return (null, FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.UnknownExtension,
+                    $"Расширение «.{ext}» не входит в список разрешённых (Настройки → Иерархия → Разрешённые расширения).\nТочно загрузить этот файл?"));
             }
         }
 
@@ -226,53 +290,85 @@ public static class FirmwareUploadService
 
         if (Directory.Exists(dstFolder) && !request.ConfirmOverwriteExisting)
         {
-            return FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.OverwriteExisting,
-                $"Папка {fwv.Raw} уже существует.\nПерезаписать?");
+            return (null, FirmwareUploadResult.Confirmation(FirmwareConfirmationKind.OverwriteExisting,
+                $"Папка {fwv.Raw} уже существует.\nПерезаписать?"));
         }
 
+        // Автор заводится здесь, а не после копирования: это последнее обращение к БД перед долгой
+        // дисковой фазой, и после него CopyFiles можно спокойно уносить в фоновый поток.
+        var user = db.GetOrCreateUser(request.AuthorUserName, request.AuthorUserName);
+
+        var plan = new FirmwareUploadPlan
+        {
+            Request = request,
+            Root = root,
+            Version = fwv,
+            SwVersion = swInt,
+            HwVersion = hwInt,
+            IsOpc = isOpc,
+            RequestNum = reqNum,
+            CabinetSn = cabinetSn,
+            Description = desc,
+            LaunchTypes = launchTypes,
+            SourceIsDirectory = isDir,
+            DestinationFolder = dstFolder,
+            IoMapFolder = hierarchy.IoMapPath(root, group.Name, subOption.Name, mod.ControllerName),
+            InstructionsFolder = hierarchy.InstrPath(root, group.Name, subOption.Name, mod.ControllerName),
+            ModbusMapFolder = hierarchy.ModbusMapPath(root, group.Name, subOption.Name, mod.ControllerName),
+            HmiFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName),
+            AuthorId = user.Id,
+        };
+        return (plan, null);
+    }
+
+    /// <summary>Фаза 2 (только диск): копирует прошивку и вложения на сетевой диск, пишет
+    /// CHANGELOG.md. В БД не ходит ни разу — вызывающий может выполнить её в фоновом потоке, чтобы
+    /// окно не висело всё время копирования (см. UploadView.Upload_Click).</summary>
+    public static FirmwareUploadCopyResult CopyFiles(FirmwareUploadPlan plan)
+    {
+        var request = plan.Request;
+        var warnings = new List<string>();
         string dstName;
+
         try
         {
-            Directory.CreateDirectory(dstFolder);
-            if (isDir)
+            Directory.CreateDirectory(plan.DestinationFolder);
+            if (plan.SourceIsDirectory)
             {
-                CopyDirectoryContents(request.SourcePath, dstFolder);
+                CopyDirectoryContents(request.SourcePath, plan.DestinationFolder);
                 dstName = Path.GetFileName(request.SourcePath.TrimEnd(Path.DirectorySeparatorChar));
             }
             else
             {
                 var ext = Path.GetExtension(request.SourcePath);
-                dstName = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
-                File.Copy(request.SourcePath, Path.Combine(dstFolder, dstName), overwrite: true);
+                dstName = FirmwareNaming.BuildFirmwareFilename(plan.Version, ext, plan.RequestNum, plan.CabinetSn);
+                File.Copy(request.SourcePath, Path.Combine(plan.DestinationFolder, dstName), overwrite: true);
             }
         }
         catch (Exception ex)
         {
-            return FirmwareUploadResult.IoFailure(ex.Message);
+            return new FirmwareUploadCopyResult { IoErrorMessage = ex.Message };
         }
 
-        var user = db.GetOrCreateUser(request.AuthorUserName, request.AuthorUserName);
-
-        var warnings = new List<string>();
-        try { ChangelogFile.Write(dstFolder, fwv, launchTypes, desc); }
+        try { ChangelogFile.Write(plan.DestinationFolder, plan.Version, plan.LaunchTypes, plan.Description); }
         catch (Exception ex) { warnings.Add($"CHANGELOG.md: {ex.Message}"); }
 
         string ioMapStored = "";
         if (!string.IsNullOrEmpty(request.IoMapSourcePath))
         {
-            try { ioMapStored = FileSystemHelpers.CopyFileOrFolderShallow(request.IoMapSourcePath, hierarchy.IoMapPath(root, group.Name, subOption.Name, mod.ControllerName)); }
+            try { ioMapStored = FileSystemHelpers.CopyFileOrFolderShallow(request.IoMapSourcePath, plan.IoMapFolder); }
             catch (Exception ex) { warnings.Add($"Карта ВВ: {ex.Message}"); }
         }
         string instrStored = "";
         if (!string.IsNullOrEmpty(request.InstructionsSourcePath))
         {
-            try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(request.InstructionsSourcePath, hierarchy.InstrPath(root, group.Name, subOption.Name, mod.ControllerName)); }
+            try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(request.InstructionsSourcePath, plan.InstructionsFolder); }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
         string modbusStored = "";
         if (!string.IsNullOrEmpty(request.ModbusMapSourcePath))
         {
-            try { modbusStored = FileSystemHelpers.CopyFileOrFolderShallow(request.ModbusMapSourcePath, hierarchy.ModbusMapPath(root, group.Name, subOption.Name, mod.ControllerName)); }
+            try { modbusStored = FileSystemHelpers.CopyFileOrFolderShallow(request.ModbusMapSourcePath, plan.ModbusMapFolder); }
             catch (Exception ex) { warnings.Add($"Карта modbus: {ex.Message}"); }
         }
         string hmiStored = "";
@@ -284,11 +380,32 @@ public static class FirmwareUploadService
                 // on why the HMI folder is versioned per-upload instead of flat/overwritten. Сам
                 // копир вынесен в FirmwareAttachmentsService, чтобы «доложить HMI к уже загруженной
                 // версии» клало проект ровно туда же и так же, что и загрузка новой версии.
-                var hmiRootFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName);
-                hmiStored = FirmwareAttachmentsService.CopyHmiProject(hmiRootFolder, fwv.Raw, request.HmiSourcePath);
+                hmiStored = FirmwareAttachmentsService.CopyHmiProject(plan.HmiFolder, plan.Version.Raw, request.HmiSourcePath);
             }
             catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
         }
+
+        return new FirmwareUploadCopyResult
+        {
+            DestinationFilename = dstName,
+            IoMapStored = ioMapStored,
+            InstructionsStored = instrStored,
+            ModbusMapStored = modbusStored,
+            HmiStored = hmiStored,
+            Warnings = warnings,
+        };
+    }
+
+    /// <summary>Фаза 3 (БД): записывает версию, закрывает резерв, заводит записи дополнительным
+    /// подтипам. Файлы к этому моменту уже лежат на диске.</summary>
+    public static FirmwareUploadResult Register(Database db, HierarchyService hierarchy, FirmwareUploadPlan plan,
+        FirmwareUploadCopyResult copy, IShortcutCreator? shortcuts = null)
+    {
+        var request = plan.Request;
+        var group = request.Group!;
+        var subOption = request.Subtype!;
+        var mod = request.Modification!;
+        var warnings = new List<string>(copy.Warnings);
 
         // Group/subtype/controller no longer go into the filename itself (see FirmwareNaming.
         // BuildFirmwareFilename) — added here as ordinary tags instead, so a search for "НГР" or
@@ -305,25 +422,25 @@ public static class FirmwareUploadService
             ControllerId = mod.ControllerId,
             EqPrefix = group.Prefix,
             SubPrefix = subOption.Prefix,
-            HwVersion = hwInt,
-            SwVersion = swInt,
-            DtStr = fwv.DtStr,
-            VersionRaw = fwv.Raw,
-            Filename = dstName,
-            DiskPath = dstFolder,
-            Description = desc,
-            Changelog = desc,
-            LaunchTypes = launchTypes,
-            IoMapPath = ioMapStored,
-            InstructionsPath = instrStored,
-            ModbusMapPath = modbusStored,
-            HmiPath = hmiStored,
+            HwVersion = plan.HwVersion,
+            SwVersion = plan.SwVersion,
+            DtStr = plan.Version.DtStr,
+            VersionRaw = plan.Version.Raw,
+            Filename = copy.DestinationFilename,
+            DiskPath = plan.DestinationFolder,
+            Description = plan.Description,
+            Changelog = plan.Description,
+            LaunchTypes = plan.LaunchTypes,
+            IoMapPath = copy.IoMapStored,
+            InstructionsPath = copy.InstructionsStored,
+            ModbusMapPath = copy.ModbusMapStored,
+            HmiPath = copy.HmiStored,
             ExecutableHint = request.ExecutableHint ?? "",
             HmiExecutableHint = request.HmiEnabled ? request.HmiExecutableHint ?? "" : "",
-            IsOpc = isOpc,
-            RequestNum = reqNum,
-            CabinetSn = cabinetSn,
-            AuthorId = user.Id,
+            IsOpc = plan.IsOpc,
+            RequestNum = plan.RequestNum,
+            CabinetSn = plan.CabinetSn,
+            AuthorId = plan.AuthorId,
             Status = "active",
             Tags = string.Join(' ', tags),
         };
@@ -331,10 +448,10 @@ public static class FirmwareUploadService
         var newFwId = db.AddFwVersion(record);
         record.Id = newFwId;
 
-        if (reservation is not null && newFwId > 0)
-            db.FulfillReservation(reservation.Id!.Value, newFwId);
+        if (request.Reservation is not null && newFwId > 0)
+            db.FulfillReservation(request.Reservation.Id!.Value, newFwId);
 
-        var extraIds = LinkToExtraSubtypes(db, hierarchy, request, record, dstFolder, isOpc, warnings, shortcuts);
+        var extraIds = LinkToExtraSubtypes(db, hierarchy, request, record, plan.DestinationFolder, plan.IsOpc, warnings, shortcuts);
 
         return new FirmwareUploadResult
         {
@@ -343,8 +460,8 @@ public static class FirmwareUploadService
             ExtraFwVersionIds = extraIds,
             FwVersionId = newFwId,
             Record = record,
-            DestinationFolder = dstFolder,
-            DestinationFilename = dstName,
+            DestinationFolder = plan.DestinationFolder,
+            DestinationFilename = copy.DestinationFilename,
         };
     }
 
