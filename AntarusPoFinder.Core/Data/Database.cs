@@ -457,6 +457,7 @@ public partial class Database : IDisposable
         ResetAppStartMinimizedDefaultOnce();
         SeedDefaultAdminPasswordHash();
         MigratePlaintextPasswordsToHashesOnce();
+        AddNewDefaultManufacturersOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -531,6 +532,22 @@ public partial class Database : IDisposable
         if (GetSetting(doneFlag) == "true") return;
 
         SetSetting("app_start_minimized", "false");
+        SetSetting(doneFlag, "true");
+    }
+
+    /// <summary>Разово добавляет производителей ПЧ/УПП, появившихся в дефолтах позже (Innovert,
+    /// Instart, Chint), в уже существующие БД — сид (SeedManufacturers) применяется только к НОВОЙ
+    /// БД, поэтому для установленных копий нужен явный разовый проход. Через AddParamManufacturer,
+    /// чтобы производитель попал и в flat_list_state как «живой» (обычное добавление, синхронизируется
+    /// как если бы его добавил пользователь). Одноразовый флаг: если позже кто-то осознанно удалит
+    /// такого производителя, миграция не воскресит его повторно.</summary>
+    private void AddNewDefaultManufacturersOnce()
+    {
+        const string doneFlag = "migration_manufacturers_innovert_instart_chint_done";
+        if (GetSetting(doneFlag) == "true") return;
+
+        foreach (var m in new[] { "Innovert", "Instart", "Chint" })
+            AddParamManufacturer(m);
         SetSetting(doneFlag, "true");
     }
 

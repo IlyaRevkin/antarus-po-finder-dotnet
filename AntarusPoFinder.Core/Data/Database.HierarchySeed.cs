@@ -53,7 +53,7 @@ public partial class Database
             });
         }
 
-        var manufacturers = new[] { "VEDS", "HERTZ", "DANFOSS", "ABB", "SIEMENS", "АЭП" };
+        var manufacturers = new[] { "VEDS", "HERTZ", "DANFOSS", "ABB", "SIEMENS", "АЭП", "Innovert", "Instart", "Chint" };
         for (int i = 0; i < manufacturers.Length; i++)
         {
             var m = manufacturers[i];
