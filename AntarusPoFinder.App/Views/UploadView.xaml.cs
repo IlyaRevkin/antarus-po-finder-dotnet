@@ -66,7 +66,8 @@ public partial class UploadView : UserControl
         _hmiPicker = new FilePickerRow(OnHmiPathPicked, ClearHmi,
             fileDialogTitle: "Выбрать файл HMI-проекта",
             fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
-            folderDialogTitle: "Выбрать папку HMI-проекта");
+            folderDialogTitle: "Выбрать папку HMI-проекта",
+            combineMultiple: paths => StageMultiple(paths, "HMI-проекта"));
 
         Loaded += (_, _) => ReloadCombos();
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
@@ -371,9 +372,12 @@ public partial class UploadView : UserControl
         {
             Title = "Выбрать файл прошивки",
             Filter = "Файлы прошивок (*.psl;*.lfs;*.kpr;*.kpj;*.dpj)|*.psl;*.lfs;*.kpr;*.kpj;*.dpj|Все файлы (*.*)|*.*",
+            // Проект, у которого исполняемый файл и его файлы просто лежат рядом, а не в общей папке,
+            // раньше нельзя было выбрать иначе как создав папку руками в проводнике.
+            Multiselect = true,
         };
-        if (dlg.ShowDialog() == true)
-            OnFileDropped(dlg.FileName);
+        if (dlg.ShowDialog() != true) return;
+        OnFileDropped(dlg.FileNames.Length > 1 ? StageMultiple(dlg.FileNames, "прошивки") : dlg.FileName);
     }
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e)
@@ -392,7 +396,40 @@ public partial class UploadView : UserControl
     private void DropZone_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
-            OnFileDropped(paths[0]);
+            OnFileDropped(paths.Length > 1 ? StageMultiple(paths, "прошивки") : paths[0]);
+    }
+
+    // ── Перетаскивание нескольких файлов сразу ────────────────────────────────
+
+    /// <summary>Временные папки, собранные из наборов перетащенных файлов — удаляются после успешной
+    /// загрузки и при очистке формы (см. DropStagingService).</summary>
+    private readonly List<string> _stagedPaths = new();
+
+    /// <summary>Несколько файлов складываются в одну временную папку, и дальше это обычная «папка»:
+    /// те же проверки, тот же выбор исполняемого файла, то же копирование целиком. Раньше из набора
+    /// молча брался первый файл, остальные пропадали без сообщения.</summary>
+    private string StageMultiple(string[] paths, string contextLabel)
+    {
+        try
+        {
+            var staged = DropStagingService.Stage(paths);
+            _stagedPaths.Add(staged);
+            _host.ShowStatus($"Выбрано файлов для {contextLabel}: {paths.Length} — будут загружены вместе, одной папкой.",
+                category: NotificationCategory.FirmwareAndParams);
+            return staged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AppMessageBox.Show($"Не удалось подготовить выбранные файлы: {ex.Message}", "Загрузка",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return paths[0];
+        }
+    }
+
+    private void CleanupStaged()
+    {
+        foreach (var path in _stagedPaths) DropStagingService.Cleanup(path);
+        _stagedPaths.Clear();
     }
 
     private void OnFileDropped(string path)
@@ -417,7 +454,16 @@ public partial class UploadView : UserControl
         {
             _executableHint = PromptExecutableHint(path, MainExecutableExts, "прошивки");
             if (!string.IsNullOrEmpty(_executableHint))
+            {
                 StatusLabel.Text += $"  —  исполняемый: {_executableHint}";
+                // Папка (в т.ч. собранная из набора перетащенных файлов) с .psl внутри — контроллер
+                // определяется по содержимому ровно так же, как у одиночного файла; раньше выбор папки
+                // отключал автоопределение целиком, хотя нужный файл уже был известен.
+                var hintPath = Path.Combine(path, _executableHint);
+                if (string.Equals(Path.GetExtension(hintPath), ".psl", StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(hintPath))
+                    TryPslAutodetect(hintPath);
+            }
         }
 
         UpdatePreview();
@@ -502,7 +548,7 @@ public partial class UploadView : UserControl
     private void ModbusMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _modbusPicker.BrowseFolder();
     private void ModbusMapClear_Click(object sender, RoutedEventArgs e) => _modbusPicker.Clear();
 
-    private const string HmiPathPlaceholder = "Перетащите файл или папку HMI-проекта сюда\nили нажмите для выбора";
+    private const string HmiPathPlaceholder = "Перетащите файл, папку или несколько файлов HMI-проекта сюда\nили нажмите для выбора";
 
     private void HmiCheck_Toggled(object sender, RoutedEventArgs e)
     {
@@ -653,11 +699,14 @@ public partial class UploadView : UserControl
 
     private void ResetForm()
     {
+        // Файлы уже скопированы на диск (или оператор нажал «Очистить данные») — временные папки,
+        // собранные из наборов перетащенных файлов, больше не нужны.
+        CleanupStaged();
         _srcPath = null;
         _autoDetectedModId = null;
         _executableHint = null;
         _hmiExecutableHint = null;
-        DropZoneLabel.Text = "Перетащите файл или папку сюда\n\nили нажмите для выбора";
+        DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
         _extraSubtypes.Clear();
         UpdateExtraSubtypesLabel();
         GroupCombo.SelectedIndex = -1;

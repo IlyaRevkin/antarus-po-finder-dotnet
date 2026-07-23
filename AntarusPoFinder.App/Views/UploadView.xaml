@@ -31,7 +31,7 @@
 
                 <Border x:Name="DropZone" Style="{StaticResource DropZoneBorder}" Height="130" Cursor="Hand"
                         AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
-                    <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл или папку сюда&#x0a;&#x0a;или нажмите для выбора"
+                    <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл, папку или несколько файлов сюда&#x0a;&#x0a;или нажмите для выбора"
                                Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
@@ -62,7 +62,7 @@
                 <StackPanel x:Name="HmiSection" Margin="0,6,0,0" Visibility="Collapsed">
                     <Border x:Name="HmiDropZone" Style="{StaticResource DropZoneBorder}" Height="70" Cursor="Hand"
                             AllowDrop="True" Drop="HmiDropZone_Drop" DragOver="HmiDropZone_DragOver" MouseLeftButtonUp="HmiDropZone_Click">
-                        <TextBlock x:Name="HmiPathLabel" Text="Перетащите файл или папку HMI-проекта сюда&#x0a;или нажмите для выбора"
+                        <TextBlock x:Name="HmiPathLabel" Text="Перетащите файл, папку или несколько файлов HMI-проекта сюда&#x0a;или нажмите для выбора"
                                    Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
