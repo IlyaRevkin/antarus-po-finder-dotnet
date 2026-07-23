@@ -20,6 +20,18 @@ public record SharedConfigSnapshot(string Path, JsonObject RootNode, HierarchyEx
 {
     public string ExportedAt => RootNode["exported_at"]?.GetValue<string>() ?? "";
     public string ExportedBy => RootNode["exported_by"]?.GetValue<string>() ?? "?";
+
+    /// <summary>«Эталонная синхронизация» (см. NetworkSyncView — кнопка «Сделать это состояние
+    /// эталонным для всех» и ConfigSyncService.PrepareExport) — true, когда снимок собран
+    /// authoritative-экспортом администратора: тогда Apply/ApplyAsync передают этот флаг в
+    /// Database.ImportHierarchyData, и для восьми справочных сущностей (типы шкафов, подтипы,
+    /// контроллеры, модификации, производители, теги, оба списка расширений) применяется полная
+    /// замена — локальное отсутствует во входящем снимке значит «удалить» (с FK-предохранителем),
+    /// а не «просто ещё не видели». Читается как computed-свойство из RootNode, а не отдельное
+    /// поле записи — так Apply(configPath) (у которого нет отдельно сконструированного снимка с
+    /// Authoritative-полем) получает то же значение автоматически, без изменения сигнатуры.
+    /// Строковое "true"/"false", как и schema_version ниже — экономит отдельный JsonValue-тип.</summary>
+    public bool Authoritative => RootNode["authoritative"]?.GetValue<string>() == "true";
 }
 
 internal record SharedConfigRead(SharedConfigSnapshot? Snapshot, string? Error);
@@ -48,7 +60,7 @@ public static class ConfigSyncService
         "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
         "allowed_extensions", "allowed_extensions_hmi", "fw_version_reservations", "fw_versions", "param_files", "app_users",
-        "flat_list_state", "schema_version",
+        "flat_list_state", "schema_version", "authoritative",
     };
 
     /// <summary>Версия формата общего конфига — сегодня меняется только вместе с реальной сменой
@@ -199,7 +211,7 @@ public static class ConfigSyncService
         // снимки строго новее последнего применённого этой машиной маркера.
 
         var settingsChanged = CountSettingsChanges(services, snap.RootNode);
-        var diff = services.Db.PreviewImportHierarchyData(snap.Hierarchy);
+        var diff = services.Db.PreviewImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         var incomingSchema = ParseSchemaVersion(snap.RootNode);
         var criticalSchemaMismatch = incomingSchema > 0 && incomingSchema != CurrentSchemaVersion;
@@ -303,7 +315,7 @@ public static class ConfigSyncService
             settingsApplied++;
         }
 
-        var counts = services.Db.ImportHierarchyData(snap.Hierarchy);
+        var counts = services.Db.ImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
         // EXISTING fw_versions/param_files rows via a plain UPDATE. Running it first (as an earlier
@@ -325,25 +337,31 @@ public static class ConfigSyncService
     /// отправляется (см. Database.SyncPendingChange), которые лягут в журнал маркера ревизии (см.
     /// BumpRevisionMarkerCas) и покажутся в плашке «Поступили изменения» на принимающих машинах.
     /// Null (по умолчанию — все существующие вызовы) означает «обычный полный экспорт без списка
-    /// конкретных изменений», журнал получает одну общую запись.</summary>
-    public static ConfigExportResult Export(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null)
+    /// конкретных изменений», журнал получает одну общую запись.
+    ///
+    /// <paramref name="authoritative"/> — «Эталонная синхронизация» (см. NetworkSyncView, кнопка
+    /// «Сделать это состояние эталонным для всех»): false для всех существующих вызовов (обычная
+    /// отправка «Отправить сейчас»/автоотправка), true только когда администратор явно подтвердил
+    /// полную замену справочника у всех получателей — см. SharedConfigSnapshot.Authoritative и
+    /// Database.ImportHierarchyData(authoritative) о том, что именно это меняет на приёме.</summary>
+    public static ConfigExportResult Export(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false)
     {
-        var prepared = PrepareExport(services, root, exportedBy);
+        var prepared = PrepareExport(services, root, exportedBy, authoritative);
         WriteExport(prepared);
-        BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions);
+        BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions, authoritative);
         FinishExport(services, prepared);
         return prepared.Result;
     }
 
     /// <summary>То же самое, но запись файла на сетевой диск (и обновление маркера ревизии) идёт в
     /// фоновом потоке — сбор данных из БД и отметка «отправлено» остаются на вызывающем потоке.</summary>
-    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null)
+    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false)
     {
-        var prepared = PrepareExport(services, root, exportedBy);
+        var prepared = PrepareExport(services, root, exportedBy, authoritative);
         await Task.Run(() =>
         {
             WriteExport(prepared);
-            BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions);
+            BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions, authoritative);
         });
         FinishExport(services, prepared);
         return prepared.Result;
@@ -359,12 +377,16 @@ public static class ConfigSyncService
     /// полностью. Если три попытки подряд расходятся с чужой записью — сдаёмся молча: сам конфиг уже
     /// корректно записан, revision может остаться на одну «отправку» позади реальности до следующего
     /// экспорта с этой же машины (следующий Export снова попытается поднять её).</summary>
-    private static void BumpRevisionMarkerCas(string root, string exportedBy, IEnumerable<string>? changeDescriptions)
+    private static void BumpRevisionMarkerCas(string root, string exportedBy, IEnumerable<string>? changeDescriptions, bool authoritative = false)
     {
         var transport = TransportFactory(root);
         var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
-        var descriptions = (changeDescriptions ?? new[] { "Полная синхронизация справочника" }).ToList();
-        if (descriptions.Count == 0) descriptions.Add("Полная синхронизация справочника");
+        // Эталонная синхронизация получает свою узнаваемую запись в журнале маркера — оператор на
+        // принимающей машине видит в плашке «Поступили изменения» не общее «Полная синхронизация
+        // справочника», а явное предупреждение, что произошла именно полная замена.
+        var defaultDescription = authoritative ? $"Эталонная синхронизация от {exportedBy}" : "Полная синхронизация справочника";
+        var descriptions = (changeDescriptions ?? new[] { defaultDescription }).ToList();
+        if (descriptions.Count == 0) descriptions.Add(defaultDescription);
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -403,7 +425,7 @@ public static class ConfigSyncService
     private record PreparedExport(string Root, string ExportPath, byte[] Bytes, ConfigExportResult Result);
 
     /// <summary>БД-фаза экспорта: собрать снимок и зашифровать его в память.</summary>
-    private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy)
+    private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy, bool authoritative = false)
     {
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             throw new DirectoryNotFoundException("Сетевой диск недоступен.");
@@ -424,6 +446,10 @@ public static class ConfigSyncService
             // Формат общего конфига (см. CurrentSchemaVersion) — сверяется на приёме (Analyze), не
             // блокирует применение, только даёт основание для «критического» уведомления (п.5).
             ["schema_version"] = CurrentSchemaVersion.ToString(),
+            // Эталонная синхронизация (см. SharedConfigSnapshot.Authoritative выше) — строковое
+            // "true"/"false" по тому же формату, что schema_version, а не JSON-булево значение: та же
+            // экономия отдельного JsonValue-типа поля, читается через тот же GetValue<string>().
+            ["authoritative"] = authoritative ? "true" : "false",
         };
         // SkipSettingsKeys is per-machine-only data (passwords, this machine's own disk paths,
         // AD-login-gate timers, inspection auto-cleanup schedule, etc. — see that field's doc).

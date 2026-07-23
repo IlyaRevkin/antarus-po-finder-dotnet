@@ -192,16 +192,32 @@ public class ImportCounts
     public int ControllersSkippedDelete { get; set; }
     public int ModificationsAdded { get; set; }
     public int ModificationsUpdated { get; set; }
+    /// <summary>Модификация контроллера, удалённая на выгружавшей машине — зеркалится только
+    /// эталонной синхронизацией (authoritative=true), см. ImportHierarchyDataCore. В обычной
+    /// синхронизации модификации остаются upsert-only, как и всегда.</summary>
+    public int ModificationsRemoved { get; set; }
+    /// <summary>Модификация, которую эталонный снимок хотел бы удалить, но под тем же контроллером
+    /// с тем же hw_version на этой машине ещё жива локальная прошивка/резерв — оставлена (мягкий
+    /// FK-предохранитель, см. ImportHierarchyDataCore).</summary>
+    public int ModificationsSkippedDelete { get; set; }
     public int ManufacturersAdded { get; set; }
     public int ManufacturersRemoved { get; set; }
+    /// <summary>Производитель, которого эталонный снимок хотел бы удалить, но им ещё помечен
+    /// локальный файл параметров — оставлен (см. MirrorFlatListDeletions/CollectUsedManufacturers).</summary>
+    public int ManufacturersSkippedDelete { get; set; }
     public int TagsAdded { get; set; }
     public int TagsRemoved { get; set; }
+    /// <summary>Тег, которого эталонный снимок хотел бы удалить, но им ещё помечена локальная
+    /// прошивка/файл параметров — оставлен (см. MirrorFlatListDeletions/CollectUsedTagWords).</summary>
+    public int TagsSkippedDelete { get; set; }
     public int ExtensionsAdded { get; set; }
     public int ExtensionsRemoved { get; set; }
+    public int ExtensionsSkippedDelete { get; set; }
     /// <summary>Тот же счётчик, что ExtensionsAdded/Removed выше, но для независимого списка
     /// расширений HMI-проектов (allowed_extensions_hmi).</summary>
     public int ExtensionsHmiAdded { get; set; }
     public int ExtensionsHmiRemoved { get; set; }
+    public int ExtensionsHmiSkippedDelete { get; set; }
     public int ReservationsAdded { get; set; }
     public int ReservationsUpdated { get; set; }
     public int FwVersions { get; set; }
@@ -223,7 +239,7 @@ public class ImportCounts
 
     public int TotalChanges =>
         GroupsAdded + GroupsUpdated + GroupsRemoved + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
-        ModificationsAdded + ModificationsUpdated + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
+        ModificationsAdded + ModificationsUpdated + ModificationsRemoved + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
         AppUsersAdded + AppUsersUpdated;

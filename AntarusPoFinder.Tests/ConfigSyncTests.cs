@@ -543,4 +543,189 @@ public class ConfigSyncTests
         cmd.Parameters.AddWithValue("@id", subtypeId);
         cmd.ExecuteNonQuery();
     }
+
+    // ── Эталонная синхронизация (authoritative) — ImportHierarchyData(authoritative: true) ──────
+    //
+    // Сценарий из задачи: мусорная запись справочника завелась на машине B, а машина A (в этих
+    // тестах — «эталон») её никогда не видела вовсе — не «удалила», а именно никогда не имела.
+    // Обычная синхронизация не может её убрать: надгробить-то нечего (запись никогда не существовала
+    // там, откуда мог бы прийти tombstone). Ниже — ровно тот случай, через тег (у тегов/производителей/
+    // расширений нет sync_id и обычно они не удаляются зеркалом вообще — см. ImportFlatList).
+
+    /// <summary>Эталонный снимок удаляет у получателя справочную запись, которой в снимке нет —
+    /// даже если она никогда не существовала у отправителя (не «была и удалена», а «никогда не
+    /// была»), именно тот пробел, который обычная синхронизация закрыть не может.</summary>
+    [Fact]
+    public void ImportHierarchyData_Authoritative_RemovesLocalTagAbsentFromSnapshot()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            dbB.AddTag("Е2Е-ЭТАЛОН-МУСОРНЫЙ-ТЕГ"); // A никогда о нём не знала — не «удалён», а «не было»
+            Assert.Contains("Е2Е-ЭТАЛОН-МУСОРНЫЙ-ТЕГ", dbB.GetAllTags());
+
+            var exported = dbA.ExportHierarchyData();
+            Assert.DoesNotContain("Е2Е-ЭТАЛОН-МУСОРНЫЙ-ТЕГ", exported.Tags!);
+
+            var preview = dbB.PreviewImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(1, preview.TagsRemoved);
+            // Preview must not have written anything.
+            Assert.Contains("Е2Е-ЭТАЛОН-МУСОРНЫЙ-ТЕГ", dbB.GetAllTags());
+
+            var counts = dbB.ImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(1, counts.TagsRemoved);
+            Assert.DoesNotContain("Е2Е-ЭТАЛОН-МУСОРНЫЙ-ТЕГ", dbB.GetAllTags());
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    /// <summary>Регресс-защита: тот же самый ровно снимок, но БЕЗ authoritative — текущее аддитивное
+    /// поведение (ImportFlatList) не должно измениться ни на йоту. Лишний тег, о котором отправитель
+    /// просто ничего не знает, обязан остаться — это и есть разница между «обычным» и «эталонным»
+    /// снимком, которую весь этот механизм и вводит.</summary>
+    [Fact]
+    public void ImportHierarchyData_NonAuthoritative_KeepsLocalTagAbsentFromSnapshot()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            dbB.AddTag("Е2Е-ОБЫЧНЫЙ-МУСОРНЫЙ-ТЕГ");
+            var exported = dbA.ExportHierarchyData();
+            Assert.DoesNotContain("Е2Е-ОБЫЧНЫЙ-МУСОРНЫЙ-ТЕГ", exported.Tags!);
+
+            // authoritative по умолчанию false — все существующие вызовы (без параметра) идут этим путём.
+            var counts = dbB.ImportHierarchyData(exported);
+            Assert.Equal(0, counts.TagsRemoved);
+            Assert.Contains("Е2Е-ОБЫЧНЫЙ-МУСОРНЫЙ-ТЕГ", dbB.GetAllTags());
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    /// <summary>Критическое ограничение задачи: эталон касается ТОЛЬКО справочника. Прошивки/файлы
+    /// параметров получателя, отсутствующие у «эталона» (потому что тот их никогда не загружал),
+    /// обязаны остаться нетронутыми и полностью незамеченными — не только не удалиться, но даже не
+    /// попасть ни в один из счётчиков FwVersions*/ParamFiles.</summary>
+    [Fact]
+    public void ImportHierarchyData_Authoritative_DoesNotTouchLocalFwVersionsOrParamFiles()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+            var subtypeB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "УПД");
+            var mod = dbB.GetAllModifications().First(m => m.ControllerName == "SMH4");
+            dbB.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtypeB.Id!.Value,
+                ControllerId = mod.ControllerId,
+                EqPrefix = groupB.Prefix,
+                SubPrefix = subtypeB.Prefix,
+                HwVersion = mod.HwVersion,
+                SwVersion = 1,
+                DtStr = "20260722_0000",
+                VersionRaw = "9.9.9.1.20260722_0000",
+                Filename = "authoritative_test.psl",
+                DiskPath = "",
+                Description = "локальная прошивка только на этой машине",
+                Status = "active",
+            });
+
+            var groupParamsB = dbB.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+            var subtypeParamsB = dbB.GetSubtypesForGroup(groupParamsB.Id!.Value).First(s => s.Name == "ХП");
+            dbB.AddParamFile(new ParamFile
+            {
+                SubtypeId = subtypeParamsB.Id!.Value,
+                Manufacturer = "Danfoss",
+                Filename = "authoritative_test.dcfx",
+                DiskPath = "x",
+                Description = "локальный файл параметров только на этой машине",
+                UploadDate = "2026-07-22 10:00:00",
+            });
+
+            var fwCountBefore = dbB.GetAllFwVersionsWithNames(includeArchived: true).Count;
+            var paramCountBefore = dbB.GetParamFiles().Count;
+
+            var exported = dbA.ExportHierarchyData(); // A: свежая база, ни одной прошивки/файла параметров
+            Assert.Empty(exported.FwVersions);
+            Assert.Empty(exported.ParamFiles);
+
+            var counts = dbB.ImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(0, counts.FwVersions);
+            Assert.Equal(0, counts.FwVersionsRemoved);
+            Assert.Equal(0, counts.ParamFiles);
+
+            Assert.Equal(fwCountBefore, dbB.GetAllFwVersionsWithNames(includeArchived: true).Count);
+            Assert.Equal(paramCountBefore, dbB.GetParamFiles().Count);
+            Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == "9.9.9.1.20260722_0000");
+            Assert.Contains(dbB.GetParamFiles(), f => f.Filename == "authoritative_test.dcfx");
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    /// <summary>FK-предохранитель эталонной синхронизации: производитель, отсутствующий в снимке
+    /// «эталона», НЕ удаляется, если получатель им ещё помечает локальный файл параметров — тот же
+    /// паттерн, что SubtypesSkippedDelete/ControllersSkippedDelete выше, только «мягкий» (текстовое
+    /// совпадение, а не физический FK — см. Database.CollectUsedManufacturers).</summary>
+    [Fact]
+    public void ImportHierarchyData_Authoritative_SkipsManufacturerStillUsedByLocalParamFile()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            dbB.AddParamManufacturer("Е2Е-ИСПОЛЬЗУЕМЫЙ-ПРОИЗВОДИТЕЛЬ");
+            var groupB = dbB.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+            var subtypeB = dbB.GetSubtypesForGroup(groupB.Id!.Value).First(s => s.Name == "ХП");
+            dbB.AddParamFile(new ParamFile
+            {
+                SubtypeId = subtypeB.Id!.Value,
+                Manufacturer = "Е2Е-ИСПОЛЬЗУЕМЫЙ-ПРОИЗВОДИТЕЛЬ",
+                Filename = "used_manufacturer.dcfx",
+                DiskPath = "x",
+                Description = "",
+                UploadDate = "2026-07-22 10:00:00",
+            });
+
+            var exported = dbA.ExportHierarchyData(); // A никогда не знала об этом производителе
+            Assert.DoesNotContain(exported.ParamManufacturers!, m => m.Name == "Е2Е-ИСПОЛЬЗУЕМЫЙ-ПРОИЗВОДИТЕЛЬ");
+
+            var preview = dbB.PreviewImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(0, preview.ManufacturersRemoved);
+            Assert.Equal(1, preview.ManufacturersSkippedDelete);
+            Assert.Contains("Е2Е-ИСПОЛЬЗУЕМЫЙ-ПРОИЗВОДИТЕЛЬ", dbB.GetParamManufacturers());
+
+            var counts = dbB.ImportHierarchyData(exported, authoritative: true);
+            Assert.Equal(0, counts.ManufacturersRemoved);
+            Assert.Equal(1, counts.ManufacturersSkippedDelete);
+            Assert.Contains("Е2Е-ИСПОЛЬЗУЕМЫЙ-ПРОИЗВОДИТЕЛЬ", dbB.GetParamManufacturers());
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
 }

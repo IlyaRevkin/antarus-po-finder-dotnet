@@ -256,4 +256,66 @@ public partial class NetworkSyncView : UserControl
             AppMessageBox.Show($"Не удалось отправить конфиг:\n{ex.Message}", "Отправка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
+
+    /// <summary>«Сделать это состояние эталонным для всех» — в отличие от обычной PushNow_Click
+    /// (аддитивная отправка: получатели только дополняют свой справочник), authoritative-экспорт
+    /// говорит получателям при следующем их Apply() ПОЛНОСТЬЮ заменить восемь справочных сущностей
+    /// (типы шкафов/подтипы/контроллеры/модификации/производители/теги/оба списка расширений) —
+    /// удалить у себя всё, чего нет в этом снимке (см. Database.ImportHierarchyData(authoritative),
+    /// FK-предохранитель там же). Прошивки/параметры/резервы/пользователей это НЕ касается вообще —
+    /// см. SkipKeys/ImportHierarchyDataCore. Необратимая для чужих машин операция — поэтому жёсткий
+    /// YesNo с явным перечислением последствий и MessageBoxResult.No по умолчанию, а не молчаливое
+    /// расширение обычной кнопки «Отправить сейчас».
+    ///
+    /// Точное число записей, которые уедут как удаление НА КАЖДОЙ ИЗ чужих машин, здесь показать
+    /// нельзя — эта машина не видит их локальные БД (только сама сравнивает свой справочник с
+    /// собой, что тривиально даёт ноль). Поэтому результат ниже — то же самое «что отправлено»,
+    /// что и у обычной отправки, плюс текстовое напоминание о последствиях у получателей.</summary>
+    private async void PushAuthoritative_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск недоступен.", "Эталонная синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirm = AppMessageBox.Show(
+            "Эта операция сделает справочник ЭТОЙ машины эталоном для ВСЕХ остальных компьютеров.\n\n" +
+            "При следующей синхронизации на каждом другом компьютере будут УДАЛЕНЫ записи справочника " +
+            "(типы шкафов, подтипы, контроллеры, модификации, производители ПЧ/УПП, теги, разрешённые " +
+            "расширения), которых нет на этой машине прямо сейчас. Запись, которую там ещё использует " +
+            "локальная прошивка или файл параметров, будет сохранена и пропущена — данные не теряются.\n\n" +
+            "Прошивки, файлы параметров, резервы номеров и пользователи НЕ затрагиваются — удаляются " +
+            "только записи справочника.\n\nПродолжить?",
+            "Эталонная синхронизация", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        PushAuthoritativeButton.IsEnabled = false;
+        try
+        {
+            var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
+            ConfigExportResult result;
+            using (_host.BeginBusy("Отправка эталонного справочника на диск…"))
+                result = await ConfigSyncService.ExportAsync(_services, root, exportedBy, authoritative: true);
+
+            LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
+            AppMessageBox.Show(
+                $"Эталонный снимок отправлен на диск ({result.ExportedAt}).\n\n" +
+                $"Типов шкафов: {result.Hierarchy.EquipmentGroups.Count}, Подтипов: {result.Hierarchy.EquipmentSubtypes.Count}\n" +
+                $"Контроллеров: {result.Hierarchy.ControllerModels.Count}, Модификаций: {result.Hierarchy.ControllerModifications.Count}\n" +
+                $"Производителей: {result.Hierarchy.ParamManufacturers?.Count ?? 0}, Тегов: {result.Hierarchy.Tags?.Count ?? 0}\n\n" +
+                "На остальных компьютерах записи справочника, которых нет в этом списке, удалятся при их следующей синхронизации с диском.",
+                "Эталонная синхронизация отправлена", MessageBoxButton.OK, MessageBoxImage.Information);
+            _host.ShowStatus("Эталонный справочник отправлен на диск", category: NotificationCategory.Sync);
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось отправить эталонный справочник:\n{ex.Message}", "Эталонная синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            PushAuthoritativeButton.IsEnabled = true;
+        }
+    }
 }

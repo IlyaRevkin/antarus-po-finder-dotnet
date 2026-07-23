@@ -156,27 +156,44 @@ public partial class Database
 
     /// <summary>Computes what an import WOULD do without writing anything — powers the config-update
     /// banner's "Подробно" view so the operator can see who changed what before committing.</summary>
-    public ImportCounts PreviewImportHierarchyData(HierarchyExportData data) => ImportHierarchyDataCore(data, apply: false);
+    public ImportCounts PreviewImportHierarchyData(HierarchyExportData data, bool authoritative = false) => ImportHierarchyDataCore(data, apply: false, authoritative);
 
     /// <summary>Applies the import for real. Catalog tables (groups/subtypes/controllers/
     /// modifications) are matched by SyncId first (falls back to name for older exports/first
     /// contact) and updated IN PLACE — deleting and re-inserting a "renamed" row would silently
     /// orphan or (with foreign_keys=ON) outright fail against any locally-uploaded firmware under
-    /// it. Subtypes and controllers ALSO get their deletion mirrored (see the two dedicated blocks
-    /// below, each guarded by "nothing local still references this row") — without that, a row
-    /// deleted on one machine would resurrect the moment any sync partner (or a stale JSON on a
-    /// shared drive) still listed it; this is exactly what kept bringing the FORTUS controller back.
-    /// Groups and modifications don't have this guard yet — deleting one is rarer in practice and
-    /// was judged lower priority; if either starts resurrecting the same way, apply the identical
-    /// pattern. Tags/allowed_extensions/manufacturers have no FK reference at all (they're copied
-    /// into fw_versions.tags/param_files.tags as plain text) so those are safe to fully mirror —
-    /// anything missing locally is added, anything absent from the incoming set is removed.
-    /// fw_versions/param_files themselves stay additive-only, as before — each install may have
-    /// uploads the exporting machine never saw. fw_versions is the one exception within that: an
-    /// explicit deletion (Database.TombstoneFwVersion) DOES mirror, via a deleted_at tombstone kept on
-    /// the row instead of a bare DELETE — see the dedicated block below for why absence alone can't
-    /// mean "delete it" here the way it does for subtypes/controllers above.</summary>
-    public ImportCounts ImportHierarchyData(HierarchyExportData data) => ImportHierarchyDataCore(data, apply: true);
+    /// it. Groups/subtypes/controllers ALSO get their deletion mirrored UNCONDITIONALLY (see the
+    /// three dedicated blocks below, each guarded by "nothing local still references this row") —
+    /// without that, a row deleted on one machine would resurrect the moment any sync partner (or a
+    /// stale JSON on a shared drive) still listed it; this is exactly what kept bringing the FORTUS
+    /// controller back. This already means an absent row is removed even if the receiving machine
+    /// had it and the exporting one never did — i.e. these three are effectively always "authoritative"
+    /// for their own table, regardless of the <paramref name="authoritative"/> flag below.
+    ///
+    /// Everything else historically stayed additive-only against plain absence (see
+    /// <paramref name="authoritative"/> below for what changes that): modifications had no deletion
+    /// mirror at all (nothing literally FK-references a modification row — fw_versions/reservations
+    /// match a modification by VALUE, controller_id+hw_version, not by id — so a stray one just sat
+    /// there forever), and tags/allowed_extensions/manufacturers use the LWW timestamp scheme in
+    /// ImportFlatList (a name absent from an incoming snapshot means "the other side doesn't know
+    /// about it yet", not "delete it" — see that method's own doc for why blind mirroring there used
+    /// to eat freshly-added entries). fw_versions/param_files themselves stay additive-only always —
+    /// each install may have uploads the exporting machine never saw. fw_versions is the one
+    /// exception within that: an explicit deletion (Database.TombstoneFwVersion) DOES mirror, via a
+    /// deleted_at tombstone kept on the row instead of a bare DELETE — see the dedicated block below.
+    ///
+    /// <paramref name="authoritative"/> (Эталонная синхронизация) — true when the incoming snapshot
+    /// was pushed via NetworkSyncView's "Сделать это состояние эталонным для всех" (see
+    /// ConfigSyncService.PrepareExport/SharedConfigSnapshot.Authoritative). Extends the SAME
+    /// full-mirror-with-FK-guard treatment groups/subtypes/controllers already always get to the
+    /// remaining catalog entities — controller_modifications, param_manufacturers, tags,
+    /// allowed_extensions, allowed_extensions_hmi — for exactly this one import. This is what closes
+    /// the gap those three tables didn't have: a junk catalog row that originated on some OTHER
+    /// machine, which the "authoritative" machine never had in the first place, has nothing to
+    /// tombstone against — plain absence from the admin's snapshot is the only signal there ever is.
+    /// When false (the default — every existing caller), behavior is byte-for-byte what it was
+    /// before this parameter existed.</summary>
+    public ImportCounts ImportHierarchyData(HierarchyExportData data, bool authoritative = false) => ImportHierarchyDataCore(data, apply: true, authoritative);
 
     /// <summary>Согласует один плоский список-справочник (производители/теги/расширения) по
     /// отметкам времени из flat_list_state вместо прежнего слепого зеркала (см. Database.FlatLists.cs
@@ -239,7 +256,62 @@ public partial class Database
         }
     }
 
-    private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply)
+    /// <summary>Эталонная синхронизация (authoritative=true) — дополнительный проход поверх
+    /// ImportFlatList: удаляет локальную запись плоского списка, которой нет во входящем ПОЛНОМ
+    /// снимке вообще (ни живой, ни с отметкой удаления) — см. вызов в ImportHierarchyDataCore для
+    /// того, почему обычный ImportFlatList намеренно этого не делает. isUsedLocally — необязательный
+    /// «мягкий» предохранитель (null — не нужен, как у allowed_extensions).</summary>
+    private void MirrorFlatListDeletions(Func<List<string>> getLocalNames, Action<string> removeLocal,
+        IEnumerable<string> incomingNames, Func<string, bool>? isUsedLocally, bool apply,
+        Action countRemoved, Action countSkipped)
+    {
+        var incoming = new HashSet<string>(incomingNames.Select(n => n.Trim()).Where(n => n.Length > 0), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in getLocalNames())
+        {
+            if (incoming.Contains(name)) continue;
+            if (isUsedLocally is not null && isUsedLocally(name))
+            {
+                countSkipped();
+                continue;
+            }
+
+            countRemoved();
+            if (apply) removeLocal(name);
+        }
+    }
+
+    /// <summary>Слова-теги, ещё встречающиеся в fw_versions.tags/param_files.tags этой машины —
+    /// «мягкий» FK-предохранитель для MirrorFlatListDeletions(тегов): удалить справочную запись тега,
+    /// пока прошивка/файл параметров с этим тегом ещё локально существует, значит молча потерять то,
+    /// чем он был помечен — DeleteTag сам по себе БЫ вычистил тег из этих строк (см. ReplaceTagInColumn
+    /// в Database.Tags.cs), а цель эталонной синхронизации — не трогать данные вовсе, только справочник.</summary>
+    private HashSet<string> CollectUsedTagWords()
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Collect(string table)
+        {
+            using var r = ExecuteReader($"SELECT tags FROM {table} WHERE tags IS NOT NULL AND tags != ''");
+            while (r.Read())
+                foreach (var w in Services.TagString.Parse(r.GetString(0)))
+                    used.Add(w);
+        }
+        Collect("fw_versions");
+        Collect("param_files");
+        return used;
+    }
+
+    /// <summary>Тот же предохранитель, что CollectUsedTagWords, только для производителей ПЧ/УПП —
+    /// param_files.manufacturer хранит точное имя строкой, без разбора на слова.</summary>
+    private HashSet<string> CollectUsedManufacturers()
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var r = ExecuteReader("SELECT DISTINCT manufacturer FROM param_files WHERE manufacturer IS NOT NULL AND manufacturer != ''");
+        while (r.Read())
+            used.Add(r.GetString(0));
+        return used;
+    }
+
+    private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply, bool authoritative = false)
     {
         var counts = new ImportCounts();
         // Captured ONCE per import pass, not per-row — every row that successfully reconciles in
@@ -656,6 +728,44 @@ public partial class Database
             }
         }
 
+        // ── Модификации контроллеров, удалённые на выгружавшей машине — эталонная синхронизация
+        //    (authoritative) ТОЛЬКО. В обычной синхронизации это единственный из справочников выше,
+        //    у которого до сих пор нет зеркалирования удаления вообще (см. класс-док
+        //    ImportHierarchyData) — не по недосмотру, а потому что ничем локально не ссылается на
+        //    модификацию по id: fw_versions/fw_version_reservations хранят hw_version как обычное
+        //    число и сверяются с controller_id+hw_version по ЗНАЧЕНИЮ, а не по строке FK на эту
+        //    таблицу. Поэтому предохранитель ниже — «мягкий», того же духа, что и у подтипов/
+        //    контроллеров: не удаляем модификацию, если под тем же контроллером с тем же hw_version
+        //    у получателя ещё жива локальная прошивка/резерв — иначе они молча потеряют своё
+        //    единственное текстовое описание/название железа.
+        if (authoritative)
+        {
+            var incomingModSyncIds = new HashSet<string>(
+                data.ControllerModifications.Where(m => !string.IsNullOrEmpty(m.SyncId)).Select(m => m.SyncId));
+            var localMods = new List<(int Id, string SyncId, int ControllerId, int HwVersion)>();
+            using (var r = ExecuteReader("SELECT id, sync_id, controller_id, hw_version FROM controller_modifications WHERE sync_id IS NOT NULL AND sync_id != ''"))
+                while (r.Read())
+                    localMods.Add((r.GetInt32(0), r.GetString(1), r.GetInt32(2), r.GetInt32(3)));
+
+            foreach (var (id, syncId, ctrlId, hw) in localMods)
+            {
+                if (incomingModSyncIds.Contains(syncId)) continue;
+
+                var referenced = ExecuteScalar("""
+                    SELECT 1 WHERE EXISTS(SELECT 1 FROM fw_versions WHERE controller_id=@c AND hw_version=@h)
+                       OR EXISTS(SELECT 1 FROM fw_version_reservations WHERE controller_id=@c AND hw_version=@h)
+                    """, cmd => { cmd.Parameters.AddWithValue("@c", ctrlId); cmd.Parameters.AddWithValue("@h", hw); }) is not null;
+                if (referenced)
+                {
+                    counts.ModificationsSkippedDelete++;
+                    continue;
+                }
+
+                counts.ModificationsRemoved++;
+                if (apply) ExecuteNonQuery("DELETE FROM controller_modifications WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+            }
+        }
+
         // ── Плоские списки-справочники: производители ПЧ/УПП, теги, разрешённые расширения ────
         //    Раньше каждый из трёх синхронизировался «зеркалом»: чего нет во входящем наборе — то
         //    удаляется локально. Без отметок времени это «выигрывает тот, кто последним нажал
@@ -683,6 +793,38 @@ public partial class Database
             data.AllowedExtensionsHmi ?? new(),
             data.FlatListState, apply, GetAllowedExtensionsHmi, AddAllowedExtensionHmi, RemoveAllowedExtensionHmi,
             () => counts.ExtensionsHmiAdded++, () => counts.ExtensionsHmiRemoved++);
+
+        // ── Эталонная синхронизация (authoritative) ТОЛЬКО — второй, дополнительный проход поверх
+        //    четырёх ImportFlatList выше. Тот уже применил всё, что входящая сторона знает как
+        //    добавленное/удалённое (по отметке времени) — но сознательно НЕ трогает имя, у которого
+        //    нет отметки вовсе ни на одной стороне: «отсутствие имени у собеседника означает лишь то,
+        //    что он о нём не знает, а не то, что его удалили» (см. док самого ImportFlatList). Для
+        //    эталонного снимка это неверно по определению: администратор прислал ПОЛНЫЙ список,
+        //    отсутствие в нём означает «не должно существовать больше нигде» — тот самый пробел из
+        //    задачи («мусорная запись завелась на чужой машине, эталонная её никогда не видела,
+        //    поэтому надгробия для неё нет и быть не может»). isUsedLocally — «мягкий» предохранитель
+        //    того же духа, что у модификаций выше: тег/производитель — не физический FK, а текст в
+        //    fw_versions.tags/param_files.manufacturer/tags, поэтому проверяем текстовое совпадение,
+        //    а не EXISTS по внешнему ключу. allowed_extensions/allowed_extensions_hmi ни на что не
+        //    ссылаются (это просто список допустимых расширений при загрузке, не привязанный к уже
+        //    загруженным файлам) — для них предохранитель не нужен.
+        if (authoritative)
+        {
+            var usedTags = CollectUsedTagWords();
+            MirrorFlatListDeletions(GetAllTags, DeleteTag, data.Tags ?? new(), usedTags.Contains,
+                apply, () => counts.TagsRemoved++, () => counts.TagsSkippedDelete++);
+
+            var usedManufacturers = CollectUsedManufacturers();
+            MirrorFlatListDeletions(GetParamManufacturers, DeleteParamManufacturer,
+                (data.ParamManufacturers ?? new()).Select(m => m.Name), usedManufacturers.Contains,
+                apply, () => counts.ManufacturersRemoved++, () => counts.ManufacturersSkippedDelete++);
+
+            MirrorFlatListDeletions(GetAllowedExtensions, RemoveAllowedExtension, data.AllowedExtensions ?? new(), null,
+                apply, () => counts.ExtensionsRemoved++, () => counts.ExtensionsSkippedDelete++);
+
+            MirrorFlatListDeletions(GetAllowedExtensionsHmi, RemoveAllowedExtensionHmi, data.AllowedExtensionsHmi ?? new(), null,
+                apply, () => counts.ExtensionsHmiRemoved++, () => counts.ExtensionsHmiSkippedDelete++);
+        }
 
         // ── Reservations (natural key = subtype+controller+hw_version+version_raw; status only
         //    ever advances reserved → fulfilled/cancelled, never the other way, so a local reservation

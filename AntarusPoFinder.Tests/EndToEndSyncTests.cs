@@ -260,6 +260,42 @@ public class EndToEndSyncTests
         Assert.DoesNotContain(dbB.GetAllEquipmentGroups(), g => g.Name == "Е2Е-МУСОРНЫЙ-ТИП");
     }
 
+    /// <summary>Полный путь эталонной синхронизации (Export(authoritative:true) → CheckForUpdate →
+    /// Apply), а не прямой вызов Database.ImportHierarchyData — проверяет ровно то, что
+    /// ConfigSyncTests не может: JSON-флаг "authoritative" реально доезжает через шифрование/
+    /// сериализацию до SharedConfigSnapshot.Authoritative на стороне получателя, и changelog
+    /// маркера ревизии получает узнаваемую запись «Эталонная синхронизация от …» — то, что покажет
+    /// плашка «Поступили изменения» на других машинах (см. ConfigSyncService.BumpRevisionMarkerCas).
+    /// B здесь заводит мусорный тег совершенно САМ, A о нём никогда не знала — не «удалила», а
+    /// «никогда не было»: обычная синхронизация такое принципиально не может убрать (нечего
+    /// надгробить), это и есть тот пробел из задачи, который эталонная синхронизация закрывает.</summary>
+    [Fact]
+    public async System.Threading.Tasks.Task AuthoritativeExport_RemovesExtraLocalCatalogEntry_OnOtherMachine_AndRecordsChangelog()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        var dbB = m.DbB;
+
+        dbB.AddTag("Е2Е-ЭТАЛОН-ПОЛНЫЙ-ПУТЬ-МУСОР");
+        Assert.Contains("Е2Е-ЭТАЛОН-ПОЛНЫЙ-ПУТЬ-МУСОР", dbB.GetAllTags());
+
+        ConfigSyncService.Export(m.SvcA, root, "profileA", authoritative: true);
+
+        var transport = new FileShareTransport(root);
+        var marker = await transport.ReadRevisionAsync();
+        Assert.NotNull(marker);
+        Assert.Contains(marker!.Changes, c => c.Description == "Эталонная синхронизация от profileA");
+
+        var update = ConfigSyncService.CheckForUpdate(m.SvcB, out var err);
+        Assert.True(err is null, err);
+        Assert.NotNull(update);
+
+        var applied = ConfigSyncService.Apply(m.SvcB, update!.ConfigPath, root);
+        Assert.True(applied.Counts.TagsRemoved >= 1);
+        Assert.DoesNotContain("Е2Е-ЭТАЛОН-ПОЛНЫЙ-ПУТЬ-МУСОР", dbB.GetAllTags());
+    }
+
     private static void UpdateModificationDescription(string dbPath, int modificationId, string description)
     {
         // There's no in-app rename UI for this yet — opens a second raw connection to the same
