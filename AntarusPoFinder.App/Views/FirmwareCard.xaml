@@ -24,7 +24,21 @@
                 <Button Grid.Column="1" x:Name="CopyButton" Content="Копировать" Style="{StaticResource SecondaryButton}" Click="Copy_Click"/>
             </Grid>
 
+            <!-- Состояние локальной копии: раньше на её месте была кнопка «Синхронизировать»,
+                 теперь копия подтягивается сама (SearchView.AutoSyncMissing), а карточка просто
+                 показывает, что с ней происходит. Ручная синхронизация осталась в меню «Ещё». -->
+            <TextBlock x:Name="SyncStatusLabel" Style="{StaticResource MutedText}" Margin="0,6,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed"/>
+
             <WrapPanel x:Name="ActionsPanel" Margin="0,8,0,0"/>
+
+            <Popup x:Name="MorePopup" StaysOpen="False" AllowsTransparency="True"
+                   Placement="Bottom" HorizontalOffset="0" VerticalOffset="2">
+                <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                        BorderThickness="1" CornerRadius="6" Padding="6">
+                    <StackPanel x:Name="MorePanel" MinWidth="230"/>
+                </Border>
+            </Popup>
         </StackPanel>
     </Border>
 </UserControl>

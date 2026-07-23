@@ -8,9 +8,11 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Threading.Tasks;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
@@ -117,6 +119,9 @@ public partial class SearchView : UserControl
         var query = SearchInput.Text.Trim();
         if (string.IsNullOrEmpty(query)) return;
 
+        // Новая выдача — карточки прошлой сейчас будут выброшены, значит незавершённая
+        // автосинхронизация по ним больше не актуальна (см. AutoSyncMissingAsync).
+        _searchGeneration++;
         StatusLabel.Text = "Поиск…";
         ResultsPanel.Children.Clear();
         EmptyLabel.Visibility = Visibility.Collapsed;
@@ -145,21 +150,34 @@ public partial class SearchView : UserControl
         StatusLabel.Text = $"Найдено: {results.Count}";
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
+        var autoSync = _services.Cfg.SearchAutoSync();
+        var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
 
         foreach (var result in results)
         {
-            var hasLocal = HasLocal(result);
-            var hasAnyLocal = HasAnyLocal(result);
             var subtypeName = _subtypesById.TryGetValue(result.SubtypeId, out var sub) ? sub.Name : "";
-            var hasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0;
-            var hasHmi = HasHmiTarget(result);
-            var hasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null;
+            var (hasLfs, hasPsl) = ScanLoaderFiles(result);
+            var flags = new FirmwareCardFlags
+            {
+                HasLocal = HasLocal(result),
+                HasAnyLocal = HasAnyLocal(result),
+                HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
+                HasHmi = HasHmiTarget(result),
+                HasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null,
+                HasLfs = hasLfs,
+                HasPsl = hasPsl,
+                CanEditTags = canEditTags,
+                AutoSync = autoSync,
+            };
 
             var card = new FirmwareCard();
-            card.Configure(result, hasLocal, hasAnyLocal, hasParams, hasHmi, hasMap, canEditTags);
+            card.Configure(result, flags);
             card.OpenFolderRequested += (s, _) => OpenFirmwareFolder(((FirmwareCard)s!).Result);
             card.OpenPlcRequested += (s, _) => OpenPlc(((FirmwareCard)s!).Result);
             card.OpenHmiRequested += (s, _) => OpenHmi(((FirmwareCard)s!).Result);
+            card.OpenLfsRequested += (s, _) => OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.LfsExtension, "LFS");
+            card.OpenPslRequested += (s, _) => OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.PslExtension, "PSL");
+            card.LoaderRequested += (s, _) => OpenLoader(((FirmwareCard)s!).Result);
             card.DownloadRequested += (s, _) => DownloadFirmware(((FirmwareCard)s!).Result);
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
@@ -169,10 +187,71 @@ public partial class SearchView : UserControl
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
+
+            if (autoSync && !flags.HasLocal) pendingSync.Add((card, result));
         }
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+        {
             ShowNoResults(query, NoResultsHint);
+            return;
+        }
+
+        if (pendingSync.Count > 0) _ = AutoSyncMissingAsync(pendingSync, _searchGeneration);
+    }
+
+    // ── Автосинхронизация локальных копий ─────────────────────────────────
+    // Раньше на каждой карточке без локальной копии была кнопка «Синхронизировать»/«Обновить», и
+    // наладчик жал её вручную по одной. Теперь найденное подтягивается само, а кнопка осталась
+    // только в меню «Ещё» — как запасной вариант (автосинхронизация выключена / упала с ошибкой).
+
+    /// <summary>Сколько версий тянуть автоматически за одну выдачу. Потолок нужен: широкий запрос
+    /// может найти десятки версий, и качать их все с сетевого диска — не то, чего оператор просил,
+    /// нажав «Найти». Что не влезло — видно в статусе, молча не отбрасывается.</summary>
+    private const int AutoSyncMaxPerSearch = 10;
+
+    /// <summary>Номер текущей выдачи. Автосинхронизация асинхронная и может пережить сам поиск
+    /// (переключили режим, ввели другой запрос, фоновый тик синхронизации перерисовал результаты) —
+    /// карточки к этому моменту уже другие, поэтому устаревший прогон просто прекращается.</summary>
+    private int _searchGeneration;
+
+    private async Task AutoSyncMissingAsync(List<(FirmwareCard Card, HierarchyResult Result)> pending, int generation)
+    {
+        var skipped = pending.Count - AutoSyncMaxPerSearch;
+        if (skipped > 0)
+        {
+            foreach (var (card, _) in pending.Skip(AutoSyncMaxPerSearch))
+                card.SetSyncStatus("Локальной копии нет. Автосинхронизация за раз тянет не больше " +
+                    $"{AutoSyncMaxPerSearch} версий — «Ещё» → «Обновить локальную копию с диска».", "WarningBrush");
+            StatusLabel.Text += $"  ·  автосинхронизация: {AutoSyncMaxPerSearch} из {pending.Count}, остальные — вручную";
+            pending = pending.Take(AutoSyncMaxPerSearch).ToList();
+        }
+
+        // Последовательно, а не параллельно: сетевой диск компании и так регулярно отваливается
+        // (см. NetworkPathHelper), десяток одновременных копирований делу не поможет.
+        foreach (var (card, result) in pending)
+        {
+            if (generation != _searchGeneration) return;
+            if (string.IsNullOrEmpty(result.FirmwareDir) || !Directory.Exists(result.FirmwareDir))
+            {
+                card.SetSyncStatus($"Папка версии не найдена на диске: {result.FirmwareDir}", "WarningBrush");
+                continue;
+            }
+
+            card.SetSyncStatus("Синхронизация с диском…");
+            try
+            {
+                var dst = await Task.Run(() => FirmwareSync.CopyToLocal(result));
+                if (generation != _searchGeneration) return;
+                card.SetSyncStatus($"✓ Локальная копия обновлена: {dst}", "SuccessBrush");
+            }
+            catch (Exception ex)
+            {
+                if (generation != _searchGeneration) return;
+                card.SetSyncStatus($"Не удалось синхронизировать: {ex.Message}. " +
+                    "Повторить — «Ещё» → «Обновить локальную копию с диска».", "ErrorBrush");
+            }
+        }
     }
 
     private void PerformParamsSearch(string query)
@@ -561,6 +640,53 @@ public partial class SearchView : UserControl
             return;
         }
         Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+    }
+
+    /// <summary>Есть ли рядом с версией собранный .lfs и исходный .psl. Одним проходом по первой же
+    /// папке-кандидату, где вообще что-то нашлось: отдельные поиски на каждое расширение удваивали
+    /// бы обход дерева на КАЖДЫЙ результат поиска, а это часто сетевой диск.</summary>
+    private static (bool HasLfs, bool HasPsl) ScanLoaderFiles(HierarchyResult result)
+    {
+        foreach (var dir in CandidateFolders(result))
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
+            bool lfs = false, psl = false;
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    var ext = Path.GetExtension(file);
+                    if (string.Equals(ext, LoaderFiles.LfsExtension, StringComparison.OrdinalIgnoreCase)) lfs = true;
+                    else if (string.Equals(ext, LoaderFiles.PslExtension, StringComparison.OrdinalIgnoreCase)) psl = true;
+                    if (lfs && psl) break;
+                }
+            }
+            catch (Exception) { /* недоступная папка — просто «не нашли», см. LoaderFiles.Find */ }
+            if (lfs || psl) return (lfs, psl);
+        }
+        return (false, false);
+    }
+
+    private void OpenLoaderFile(HierarchyResult result, string extension, string label)
+    {
+        var path = LoaderFiles.FindIn(CandidateFolders(result), extension);
+        if (path is null)
+        {
+            AppMessageBox.Show($"Файл {label} не найден ни в локальной копии, ни в папке версии на диске.",
+                $"Открыть файл {label}", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        TryOpen(path);
+    }
+
+    /// <summary>Загрузка в контроллер через лоадер. Подставляет найденный .lfs — заливается именно
+    /// он; если его нет, диалог открывается с пустым полем, и оператор выбирает файл сам (лоадера
+    /// всё равно пока нет — см. LoaderDialog).</summary>
+    private void OpenLoader(HierarchyResult result)
+    {
+        var source = LoaderFiles.FindIn(CandidateFolders(result), LoaderFiles.LfsExtension) ?? "";
+        LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg,
+            $"{result.Name} {result.VersionRaw}".Trim(), source);
     }
 
     private void DownloadFirmware(HierarchyResult result)

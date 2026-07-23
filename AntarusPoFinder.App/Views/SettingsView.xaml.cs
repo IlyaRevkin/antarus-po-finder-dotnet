@@ -439,9 +439,33 @@ public partial class SettingsView : UserControl
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
 
+        SearchAutoSyncCheck.IsChecked = _services.Cfg.SearchAutoSync();
+        LoaderExePathInput.Text = _services.Cfg.LoaderExePath();
+
         LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
         LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
         RefreshLayoutFallbackGrid();
+    }
+
+    // ── Поиск и лоадер ─────────────────────────────────────────────────────
+
+    private void SearchAutoSync_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetSearchAutoSync(SearchAutoSyncCheck.IsChecked == true);
+
+    private void BrowseLoaderExe_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Исполняемый файл лоадера",
+            Filter = "Программы (*.exe)|*.exe|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() == true) LoaderExePathInput.Text = dlg.FileName;
+    }
+
+    private void SaveLoaderExePath_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetLoaderExePath(LoaderExePathInput.Text.Trim());
+        _host.ShowStatus("Путь к лоадеру сохранён");
     }
 
     // ── Раскладка клавиатуры (обучение подсказки поиска) ────────────────────

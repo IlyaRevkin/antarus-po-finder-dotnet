@@ -26,6 +26,10 @@ public class ConfigService
     public static readonly string LocalFw = Path.Combine(AppData, "firmware");
     public static readonly string LocalTemplates = Path.Combine(AppData, "templates");
 
+    /// <summary>Рабочие области лоадера (см. AntarusPoFinder.Core.Loader.LoaderWorkspace) — сборка и
+    /// загрузка идут ЛОКАЛЬНО здесь, а не на сетевом диске: приложение не клиент-серверное.</summary>
+    public static readonly string LocalLoader = Path.Combine(AppData, "loader");
+
     /// <summary>Тип пуска — fixed set. Первые четыре пришли из Python-версии (LAUNCH_TYPES); пятый
     /// (<see cref="LaunchTypeNone"/>) добавлен потому, что часть шкафов вообще не имеет типа пуска, а
     /// поле обязательное — раньше в таком случае приходилось ставить заведомо неверную галочку.
@@ -76,6 +80,11 @@ public class ConfigService
         ["ad_require_login"] = "false",
         ["ad_require_login_default_days"] = "14",
         ["ad_last_login"] = "",
+        ["search_auto_sync"] = "true",
+        ["loader_exe_path"] = "",
+        ["loader_format_default"] = "false",
+        ["loader_update_kernel_default"] = "false",
+        ["loader_last_target"] = "",
     };
 
     private readonly Database _db;
@@ -86,6 +95,7 @@ public class ConfigService
         Directory.CreateDirectory(AppData);
         Directory.CreateDirectory(LocalFw);
         Directory.CreateDirectory(LocalTemplates);
+        Directory.CreateDirectory(LocalLoader);
     }
 
     public string Get(string key) => _db.GetSetting(key, Defaults.GetValueOrDefault(key, ""));
@@ -121,6 +131,31 @@ public class ConfigService
     public int LayoutFallbackThreshold() =>
         int.TryParse(Get("layout_fallback_threshold"), out var v) && v > 0 ? v : Data.Database.LayoutFallbackDecisionThreshold;
     public void SetLayoutFallbackThreshold(int value) => Set("layout_fallback_threshold", Math.Max(1, value).ToString());
+
+    /// <summary>Автоматически подтягивать найденные поиском прошивки в локальный кэш, вместо кнопки
+    /// «Синхронизировать» на каждой карточке (см. SearchView.AutoSyncMissing). Настройка личная,
+    /// per-machine: локальный кэш — свойство конкретного ноутбука наладчика, а не орг-политика.</summary>
+    public bool SearchAutoSync() => Get("search_auto_sync").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetSearchAutoSync(bool value) => Set("search_auto_sync", value ? "true" : "false");
+
+    /// <summary>Путь к исполняемому файлу лоадера. Пока не используется для реального запуска —
+    /// интеграции нет, — но уже сохраняется и показывается в диалоге загрузки, чтобы коллеге,
+    /// подключающему настоящий лоадер, не пришлось заново придумывать, где брать этот путь.
+    /// См. AntarusPoFinder.Core.Loader.FirmwareLoaderFactory.</summary>
+    public string LoaderExePath() => Get("loader_exe_path");
+    public void SetLoaderExePath(string path) => Set("loader_exe_path", path.Trim());
+
+    /// <summary>Значения галочек «Форматировать» / «Обновить ядро», предлагаемые при следующем
+    /// открытии диалога лоадера — оператор обычно грузит однотипные шкафы подряд.</summary>
+    public bool LoaderFormatDefault() => Get("loader_format_default").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetLoaderFormatDefault(bool value) => Set("loader_format_default", value ? "true" : "false");
+
+    public bool LoaderUpdateKernelDefault() => Get("loader_update_kernel_default").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetLoaderUpdateKernelDefault(bool value) => Set("loader_update_kernel_default", value ? "true" : "false");
+
+    /// <summary>Последний введённый порт/адрес контроллера — подставляется в диалог лоадера.</summary>
+    public string LoaderLastTarget() => Get("loader_last_target");
+    public void SetLoaderLastTarget(string target) => Set("loader_last_target", target.Trim());
 
     /// <summary>Папка осмотра (фото/сканы). Defaults to LocalFw if not set.</summary>
     public string InspectionFolder()

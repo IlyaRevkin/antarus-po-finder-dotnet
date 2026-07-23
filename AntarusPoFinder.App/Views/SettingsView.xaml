@@ -196,6 +196,27 @@
                         <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"/>
                     </Grid>
 
+                    <TextBlock Text="ПОИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="SearchAutoSyncCheck" Content="Автоматически подтягивать найденные прошивки в локальную копию" Margin="0,0,0,8"
+                              Checked="SearchAutoSync_Changed" Unchecked="SearchAutoSync_Changed"/>
+                    <TextBlock Text="Найденные поиском версии, которых ещё нет на этом компьютере, копируются с диска сами — отдельную кнопку «Синхронизировать» на карточке жать не нужно (она осталась в меню «Ещё» на случай ошибки). За одну выдачу тянется не больше 10 версий, остальные — вручную."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="ЛОАДЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Загрузка прошивки в контроллер («Загрузить в ПЛК» в результатах поиска). Сейчас подключена заготовка: диалог, параметры, прогресс и лог работают, реальной загрузки не происходит. Сборка и загрузка выполняются на этом компьютере, на диск попадает только готовый результат."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="LoaderExePathInput" Height="34" Margin="0,0,8,0"
+                                 ToolTip="Путь к исполняемому файлу лоадера — понадобится, когда интеграция будет подключена"/>
+                        <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseLoaderExe_Click"/>
+                        <Button Grid.Column="2" Content="Сохранить" Click="SaveLoaderExePath_Click"/>
+                    </Grid>
+
                     <TextBlock Text="РАСКЛАДКА КЛАВИАТУРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <CheckBox x:Name="LayoutFallbackCheck" Content="Подсказывать, если запрос похож на набранный не в той раскладке клавиатуры" Margin="0,0,0,8" Checked="LayoutFallback_Changed" Unchecked="LayoutFallback_Changed"/>
                     <TextBlock Text="Если запрос ничего не находит как введён, но находит после смены раскладки — поиск спросит один раз, это ли имелось в виду. Ответы запоминаются по точному тексту запроса: после нескольких одинаковых ответов подряд вопрос для этого запроса перестаёт появляться (он либо всегда подставляется, либо больше не пробуется)." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>

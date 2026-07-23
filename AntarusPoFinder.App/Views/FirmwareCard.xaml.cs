@@ -7,8 +7,37 @@ using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
-/// <summary>One search-result card. Port of app/ui/widgets/firmware_card.py — button visibility
-/// rules are reproduced exactly (see SearchView, which computes the has*/flags per result).</summary>
+/// <summary>Что именно есть у этой конкретной записи — считает SearchView (он один знает про диск,
+/// локальный кэш и БД), карточка только рисует. Отдельным типом, а не десятком bool-аргументов:
+/// параметров стало столько, что позиционный вызов перестал читаться.</summary>
+public sealed record FirmwareCardFlags
+{
+    /// <summary>Локально лежит ИМЕННО эта версия.</summary>
+    public bool HasLocal { get; init; }
+
+    /// <summary>Локально лежит хоть какая-то версия этой прошивки (тогда речь про обновление, а не
+    /// про первую загрузку — влияет только на текст статуса).</summary>
+    public bool HasAnyLocal { get; init; }
+
+    public bool HasParams { get; init; }
+    public bool HasHmi { get; init; }
+    public bool HasMap { get; init; }
+
+    /// <summary>Нашёлся .lfs / .psl — кнопки открытия этих файлов показываются только тогда, когда
+    /// открывать реально есть что.</summary>
+    public bool HasLfs { get; init; }
+    public bool HasPsl { get; init; }
+
+    public bool CanEditTags { get; init; }
+
+    /// <summary>Включена ли автосинхронизация локальной копии (Настройки → Общие). От неё зависит
+    /// только начальный текст статуса — пункт ручной синхронизации в меню есть всегда.</summary>
+    public bool AutoSync { get; init; }
+}
+
+/// <summary>One search-result card. Кнопок стало слишком много для одного ряда, поэтому основными
+/// остались только те, ради которых карточку открывают (открыть ПЛК/HMI, параметры, инструкции,
+/// загрузка в контроллер), а остальное убрано в меню «Ещё» — см. Configure.</summary>
 public partial class FirmwareCard : UserControl
 {
     public HierarchyResult Result { get; private set; } = null!;
@@ -19,7 +48,13 @@ public partial class FirmwareCard : UserControl
     /// расширениям); карточка про эти варианты не знает и рисует по одной кнопке на каждый.</summary>
     public event EventHandler? OpenPlcRequested;
     public event EventHandler? OpenHmiRequested;
+    public event EventHandler? OpenLfsRequested;
+    public event EventHandler? OpenPslRequested;
+    /// <summary>Ручная синхронизация локальной копии с диском — раньше была основной кнопкой
+    /// «Синхронизировать»/«Обновить», теперь запасной вариант в меню (обычно копия подтягивается
+    /// сама, см. SearchView.AutoSyncMissing).</summary>
     public event EventHandler? DownloadRequested;
+    public event EventHandler? LoaderRequested;
     public event EventHandler? MapRequested;
     public event EventHandler? ModbusMapRequested;
     public event EventHandler? ParamsRequested;
@@ -33,8 +68,7 @@ public partial class FirmwareCard : UserControl
         InitializeComponent();
     }
 
-    public void Configure(HierarchyResult result, bool hasLocal, bool hasAnyLocal, bool hasParams, bool hasHmi, bool hasMap,
-        bool canEditTags = false)
+    public void Configure(HierarchyResult result, FirmwareCardFlags flags)
     {
         Result = result;
 
@@ -68,16 +102,17 @@ public partial class FirmwareCard : UserControl
         SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
 
         ActionsPanel.Children.Clear();
+        MorePanel.Children.Clear();
 
-        // Порядок кнопок: сначала «Открыть прошивку ПЛК», СРАЗУ за ней «Открыть HMI проект» —
-        // две кнопки открытия самого ПО стоят рядом, а не разнесены через полсписка (раньше
-        // HMI-кнопка была последней, после Инструкций).
+        // ── Основной ряд: только то, ради чего карточку открывают ──────────
+        // Порядок: сначала «Открыть прошивку ПЛК», СРАЗУ за ней «Открыть HMI проект» — две кнопки
+        // открытия самого ПО стоят рядом, а не разнесены через полсписка.
         var plcBtn = MakeActionButton("Открыть прошивку ПЛК", (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
         if (!string.IsNullOrEmpty(result.ExecutableHint))
             plcBtn.ToolTip = $"Исполняемый файл: {result.ExecutableHint}";
         ActionsPanel.Children.Add(plcBtn);
 
-        if (hasHmi)
+        if (flags.HasHmi)
         {
             var hmiBtn = MakeActionButton("Открыть HMI проект", (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty));
             if (!string.IsNullOrEmpty(result.HmiExecutableHint))
@@ -85,31 +120,76 @@ public partial class FirmwareCard : UserControl
             ActionsPanel.Children.Add(hmiBtn);
         }
 
-        ActionsPanel.Children.Add(MakeActionButton("Открыть папку с файлом", (_, _) => OpenFolderRequested?.Invoke(this, EventArgs.Empty)));
-
-        if (!hasLocal)
-        {
-            var label = hasAnyLocal ? "Обновить" : "Синхронизировать";
-            ActionsPanel.Children.Add(MakeActionButton(label, (_, _) => DownloadRequested?.Invoke(this, EventArgs.Empty)));
-        }
-
-        if (!string.IsNullOrEmpty(result.IoMapPath) || hasMap)
-            ActionsPanel.Children.Add(MakeActionButton("Карта in/out", (_, _) => MapRequested?.Invoke(this, EventArgs.Empty)));
-
-        if (!string.IsNullOrEmpty(result.ModbusMapPath))
-            ActionsPanel.Children.Add(MakeActionButton("Карта modbus", (_, _) => ModbusMapRequested?.Invoke(this, EventArgs.Empty)));
-
-        if (hasParams)
+        if (flags.HasParams)
             ActionsPanel.Children.Add(MakeActionButton("Параметры", (_, _) => ParamsRequested?.Invoke(this, EventArgs.Empty)));
 
         if (!string.IsNullOrEmpty(result.InstructionsPath))
             ActionsPanel.Children.Add(MakeActionButton("Инструкции", (_, _) => InstructionsRequested?.Invoke(this, EventArgs.Empty)));
 
-        ActionsPanel.Children.Add(MakeActionButton("История", (_, _) => HistoryRequested?.Invoke(this, EventArgs.Empty)));
+        var loaderBtn = MakeActionButton("Загрузить в ПЛК", (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
+        loaderBtn.ToolTip = "Загрузка в контроллер через лоадер: параметры, прогресс и лог";
+        ActionsPanel.Children.Add(loaderBtn);
 
-        if (canEditTags)
-            ActionsPanel.Children.Add(MakeActionButton("Теги", (_, _) => TagsEditRequested?.Invoke(this, EventArgs.Empty)));
+        // ── Меню «Ещё»: всё остальное ─────────────────────────────────────
+        AddMenuItem("Открыть папку с файлом", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
+        if (flags.HasLfs)
+            AddMenuItem("Открыть файл LFS", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
+                "Скомпилированный файл, который заливается в контроллер");
+        if (flags.HasPsl)
+            AddMenuItem("Открыть файл PSL", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
+                "Исходный проект SMLogix");
+        if (!string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap)
+            AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty));
+        if (!string.IsNullOrEmpty(result.ModbusMapPath))
+            AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty));
+        AddMenuItem("История", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
+        if (flags.CanEditTags)
+            AddMenuItem("Теги", () => TagsEditRequested?.Invoke(this, EventArgs.Empty));
+        AddMenuItem("Обновить локальную копию с диска", () => DownloadRequested?.Invoke(this, EventArgs.Empty),
+            "Скопировать версию с сетевого диска заново — если автосинхронизация выключена или не удалась");
+
+        var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
+        moreBtn.ToolTip = "Папка с файлами, LFS/PSL, карты, история, теги, синхронизация";
+        ActionsPanel.Children.Add(moreBtn);
+        MorePopup.PlacementTarget = moreBtn;
+
+        ShowInitialSyncStatus(flags);
     }
+
+    // ── Статус локальной копии ────────────────────────────────────────────
+
+    private void ShowInitialSyncStatus(FirmwareCardFlags flags)
+    {
+        if (flags.HasLocal)
+        {
+            SetSyncStatus(null);
+            return;
+        }
+        if (flags.AutoSync)
+        {
+            SetSyncStatus(flags.HasAnyLocal
+                ? "Локальная копия устарела — обновляем…"
+                : "Локальной копии нет — синхронизируем…");
+            return;
+        }
+        SetSyncStatus("Локальной копии нет. Автосинхронизация выключена — «Ещё» → «Обновить локальную копию с диска».",
+            "WarningBrush");
+    }
+
+    /// <summary>text = null — скрыть строку статуса. brushKey — ключ темы (никаких hex-цветов).</summary>
+    public void SetSyncStatus(string? text, string brushKey = "TextMutedBrush")
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            SyncStatusLabel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        SyncStatusLabel.Text = text;
+        SyncStatusLabel.SetResourceReference(ForegroundProperty, brushKey);
+        SyncStatusLabel.Visibility = Visibility.Visible;
+    }
+
+    // ── Кнопки/меню ───────────────────────────────────────────────────────
 
     private Button MakeActionButton(string text, RoutedEventHandler onClick)
     {
@@ -122,6 +202,27 @@ public partial class FirmwareCard : UserControl
         btn.Click += onClick;
         return btn;
     }
+
+    private void AddMenuItem(string text, Action action, string? tooltip = null)
+    {
+        var btn = new Button
+        {
+            Content = text,
+            Style = (Style)FindResource("SecondaryButton"),
+            Margin = new Thickness(0, 0, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            ToolTip = tooltip,
+        };
+        btn.Click += (_, _) =>
+        {
+            MorePopup.IsOpen = false;
+            action();
+        };
+        MorePanel.Children.Add(btn);
+    }
+
+    private void ToggleMore() => MorePopup.IsOpen = !MorePopup.IsOpen;
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {

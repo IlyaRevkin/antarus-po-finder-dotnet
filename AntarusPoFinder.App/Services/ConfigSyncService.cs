@@ -60,6 +60,8 @@ public static class ConfigSyncService
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
         "layout_fallback_enabled", "layout_fallback_threshold",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
+        "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
+        "loader_last_target",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");
