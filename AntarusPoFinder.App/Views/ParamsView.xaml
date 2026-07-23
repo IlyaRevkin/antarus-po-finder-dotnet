@@ -46,66 +46,58 @@
                          layouts). This page has the full width to itself so it wasn't observed to overflow
                          here, but keeping both rows on the same resilient pattern — not just the same
                          pixel numbers — is the point, since they're explicitly kept in sync. -->
-                    <!-- Первая колонка — 110, как и у всех строк ниже («Ещё подтипы:»/«Файл:»/«Описание:»),
+                    <!-- Первая колонка — 110, как и у всех строк ниже («Подтип(ы):»/«Файл:»/«Описание:»),
                          а не Auto: левый край GroupCombo должен начинаться там же, где начинаются
                          поля ниже. С Auto ширина подписи «Тип шкафа:» подгонялась под текст и левый
                          край комбобоксов уезжал левее/правее полей ниже — комбобоксы и поля визуально
-                         не выравнивались по x. -->
+                         не выравнивались по x. Подтип раньше стоял тут же отдельным ComboBox — теперь
+                         единый чек-комбобокс (см. ниже), ему нужна вся ширина строки. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
-                            <ColumnDefinition Width="150*" MinWidth="70" MaxWidth="150"/>
+                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
                             <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="130*" MinWidth="60" MaxWidth="130"/>
-                            <ColumnDefinition Width="16"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="170*" MinWidth="70" MaxWidth="170"/>
+                            <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Тип шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
                                   DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
-                        <TextBlock Grid.Column="3" Text="Подтип:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="SubCombo" Grid.Column="4" Height="34" DisplayMemberPath="Label"
-                                  SelectionChanged="SubCombo_SelectionChanged"/>
-                        <TextBlock Grid.Column="6" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox x:Name="ManufCombo" Grid.Column="7" Height="34"/>
+                        <TextBlock Grid.Column="3" Text="Производитель:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="ManufCombo" Grid.Column="4" Height="34"/>
                     </Grid>
 
-                    <!-- Один и тот же файл параметров часто подходит нескольким подтипам шкафа.
-                         Основной подтип (комбобокс выше) определяет папку, куда файл реально
-                         копируется; здесь выбираются ДОПОЛНИТЕЛЬНЫЕ — им заводится своя запись, а в
-                         их папку кладётся ярлык на тот же файл, без дублирования на диске. Та же
-                         пара «подпись слева 110 + содержимое», что у строк «Файл:»/«Описание:» ниже —
-                         иначе ряд визуально выпадал бы из карточки. Сам выбор — чекбоксы прямо в
-                         выпадающем списке (SubtypeMultiSelect), без отдельного модального окна. -->
+                    <!-- Основной И дополнительные подтипы — один чек-комбобокс (SubtypeMultiSelect,
+                         тот же контрол, что и в UploadView): первый отмеченный становится основным и
+                         определяет папку, куда файл реально копируется на диск; остальные отмеченные —
+                         дополнительные, им заводится своя запись, а в их папку кладётся ярлык на тот
+                         же файл, без дублирования на диске. Та же пара «подпись слева 110 +
+                         содержимое», что у строк «Файл:»/«Описание:» ниже. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Ещё подтипы:" VerticalAlignment="Center" Margin="0,0,8,0"
-                                   ToolTip="Подтипы шкафов, которым подходит этот же файл параметров — файл не дублируется, в их папки кладётся ярлык."/>
-                        <views:SubtypeMultiSelect Grid.Column="1" x:Name="ExtraSubtypesSelect" Height="34"/>
+                        <TextBlock Grid.Column="0" Text="Подтип(ы):" VerticalAlignment="Center" Margin="0,0,8,0"
+                                   ToolTip="Первый отмеченный — основной: файл копируется в его папку. Остальные отмеченные — дополнительные, файл не дублируется, в их папки кладётся ярлык."/>
+                        <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34"/>
                     </Grid>
 
-                    <!-- Кнопка выбора файла и drag&amp;drop-зона merged into one row instead of two
-                         separate-looking rows stacked on top of each other — the drop zone itself now
-                         also shows the picked filename (DropZoneLabel doubles as what FileLabel used
-                         to be, they were always kept in sync anyway, see SetFile). -->
+                    <!-- Клик по самой drag&amp;drop-зоне выбирает файл — та же логика, что в
+                         UploadView.DropZone_Click, вместо отдельной кнопки «Выбрать файл…» рядом:
+                         одно и то же действие («выбрать файл») не нуждалось в двух разных способах
+                         запуска на одной строке. -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Файл:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <Border Grid.Column="1" Style="{StaticResource DropZoneBorder}" Height="46" Margin="0,0,8,0"
-                                AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver">
-                            <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл сюда, или нажмите «Выбрать файл…»" Style="{StaticResource MutedText}"
+                        <Border Grid.Column="1" Style="{StaticResource DropZoneBorder}" Height="46" Cursor="Hand"
+                                AllowDrop="True" Drop="DropZone_Drop" DragOver="DropZone_DragOver" MouseLeftButtonUp="DropZone_Click">
+                            <TextBlock x:Name="DropZoneLabel" Text="Перетащите файл сюда, или нажмите для выбора" Style="{StaticResource MutedText}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         </Border>
-                        <Button Grid.Column="2" Content="Выбрать файл…" Style="{StaticResource CompactSecondaryButton}" VerticalAlignment="Center" Click="BrowseFile_Click"/>
                     </Grid>
 
                     <Grid>

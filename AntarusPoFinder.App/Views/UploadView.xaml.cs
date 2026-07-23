@@ -38,17 +38,27 @@ public partial class UploadView : UserControl
     private readonly FilePickerRow _modbusPicker;
     private readonly FilePickerRow _hmiPicker;
 
-    private record SubtypeOption(string Label, EquipmentSubType Subtype);
     private record ReservationOption(string Label, FwVersionReservation? Reservation);
 
     /// <summary>See SearchView.OnboardingTarget for why this exists — same reasoning.</summary>
     public FrameworkElement? OnboardingTarget(string key) => key switch
     {
         "dropzone" => DropZone,
-        "opc" => VersionOptionsPanel,
+        "opc" => ExpandOpcSectionAndReturnTarget(),
         "reserve" => ReserveVersionBtn,
         _ => null,
     };
+
+    /// <summary>"ОПЦИИ ВЕРСИИ" свёрнут по умолчанию (см. UploadView.xaml, VersionOptionsExpander) —
+    /// OnboardingOverlay пропускает шаг, если у цели ActualWidth==0 (см. OnboardingOverlay.ShowStep),
+    /// а свёрнутая панель именно так себя и ведёт. Разворачиваем перед показом шага и форсируем
+    /// layout, чтобы ActualWidth уже был посчитан к моменту, когда overlay его прочитает.</summary>
+    private FrameworkElement ExpandOpcSectionAndReturnTarget()
+    {
+        VersionOptionsExpander.IsExpanded = true;
+        VersionOptionsExpander.UpdateLayout();
+        return VersionOptionsPanel;
+    }
 
     public UploadView(AppServices services, IAppHost host)
     {
@@ -107,69 +117,42 @@ public partial class UploadView : UserControl
         OnCtrlChanged();
     }
 
+    /// <summary>Наполняет единый чек-комбобокс подтипов (SubtypesSelect) под текущую группу —
+    /// раньше это были два отдельных вызова (ComboBox SubCombo для основного + SetItems с
+    /// исключённым основным для ExtraSubtypesSelect), теперь один SetItems на полный список
+    /// подтипов группы. Текущая отметка (основной + дополнительные) сохраняется через SetItems'
+    /// собственную фильтрацию по валидности ID — подтипы другой группы никогда не совпадут по ID
+    /// с подтипами новой (ID глобально уникален), так что смена группы естественно вычищает
+    /// то, что стало неприменимо, без отдельного явного сброса.</summary>
     private void PopulateSubtypes()
     {
-        var prevSubId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
         if (GroupCombo.SelectedItem is not EquipmentGroup group)
         {
-            SubCombo.ItemsSource = null;
+            SubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
+            RefreshReservationPicker();
             UpdatePreview();
-            RefreshExtraSubtypeCandidates();
             return;
         }
 
         var subtypes = _services.Db.GetSubtypesForGroup(group.Id!.Value);
-        var options = subtypes
-            .Select(s => new SubtypeOption(s.Name == "—" ? s.FolderName : $"{s.FolderName} ({s.Name})", s))
-            .ToList();
-        SubCombo.ItemsSource = options;
-        SubCombo.SelectedIndex = prevSubId is not null
-            ? Math.Max(0, options.FindIndex(o => o.Subtype.Id == prevSubId))
-            : -1;
+        SubtypesSelect.SetItems(subtypes);
 
         RefreshReservationPicker();
         UpdatePreview();
-        // Если SelectedIndex выше не поменялся по значению (напр. остался -1 при первой отрисовке
-        // страницы) — SelectionChanged не сработает, и на каскад из SubCombo_SelectionChanged
-        // рассчитывать нельзя. Пересобираем кандидатов явно.
-        RefreshExtraSubtypeCandidates();
     }
 
-    // ── Дополнительные подтипы ────────────────────────────────────────────────
+    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
 
-    /// <summary>Пересобирает список кандидатов «Ещё подтипы» под текущую группу/основной подтип —
-    /// вызывается и при смене типа шкафа, и при смене основного подтипа (см. PopulateSubtypes и
-    /// SubCombo_SelectionChanged). Уже отмеченные кандидаты, которые остаются валидными (не совпали
-    /// с новым основным подтипом), сохраняются — теряется только то, что реально стало неприменимо.</summary>
-    private void RefreshExtraSubtypeCandidates()
-    {
-        if (GroupCombo.SelectedItem is not EquipmentGroup group)
-        {
-            ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
-            return;
-        }
-        var mainId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
-        var candidates = _services.Db.GetSubtypesForGroup(group.Id!.Value)
-            .Where(s => s.Id is not null && s.Id != mainId)
-            .ToList();
-        var keepIds = ExtraSubtypesSelect.Selected.Where(s => s.Id is not null).Select(s => s.Id!.Value);
-        ExtraSubtypesSelect.SetItems(candidates, keepIds);
-    }
-
-    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        // Подтипы принадлежат группе — при смене типа шкафа ранее выбранные дополнительные подтипы
-        // относятся уже к другой группе и молча уехали бы не туда. Сброс — пустой список кандидатов
-        // прямо сейчас; PopulateSubtypes() ниже пересоберёт кандидатов под новую группу.
-        ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
-        PopulateSubtypes();
-    }
-    private void SubCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>Тот же каскад, что раньше висел на SubCombo_SelectionChanged: смена основного
+    /// подтипа (в т.ч. когда пользователь снял старый основной и им автоматически стал следующий
+    /// отмеченный — см. SubtypeMultiSelect.Check_Toggled) должна пересчитать резерв и превью пути,
+    /// которые от основного подтипа и зависят.</summary>
+    private void SubtypesSelect_SelectionChanged(object? sender, EventArgs e)
     {
         RefreshReservationPicker();
         UpdatePreview();
-        RefreshExtraSubtypeCandidates();
     }
+
     private void CtrlCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => OnCtrlChanged();
 
     private void OnCtrlChanged()
@@ -199,14 +182,14 @@ public partial class UploadView : UserControl
     /// which calls UpdatePreview — but UpdatePreview must never call back into this method).</summary>
     private void RefreshReservationPicker()
     {
-        if (SubCombo.SelectedItem is not SubtypeOption subOption || CtrlCombo.SelectedItem is not ControllerModification mod)
+        if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype || CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             ReservationPanel.Visibility = Visibility.Collapsed;
             ReservationCombo.ItemsSource = null;
             return;
         }
 
-        var reservations = _services.Db.GetActiveReservations(subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
+        var reservations = _services.Db.GetActiveReservations(subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
         if (reservations.Count == 0)
         {
             ReservationPanel.Visibility = Visibility.Collapsed;
@@ -228,7 +211,7 @@ public partial class UploadView : UserControl
     private void ReserveVersion_Click(object sender, RoutedEventArgs e)
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group ||
-            SubCombo.SelectedItem is not SubtypeOption subOption ||
+            SubtypesSelect.MainSubtype is not EquipmentSubType subtype ||
             CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             AppMessageBox.Show("Укажите тип шкафа, подтип и контроллер.", "Резерв номера", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -253,11 +236,11 @@ public partial class UploadView : UserControl
         }
 
         var reservation = _services.Db.ReserveNextVersion(
-            subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
-            group.Prefix, subOption.Subtype.Prefix, _services.CurrentUserName, IncludeDateCheck.IsChecked == true, ttlHours);
+            subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
+            group.Prefix, subtype.Prefix, _services.CurrentUserName, IncludeDateCheck.IsChecked == true, ttlHours);
         var fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
 
-        var subDisplay = subOption.Subtype.Name == "—" ? "" : subOption.Subtype.Name;
+        var subDisplay = subtype.Name == "—" ? "" : subtype.Name;
         var groupSub = string.Join("-", new[] { group.Name, subDisplay }.Where(p => !string.IsNullOrEmpty(p)));
         var label = string.Join("_", new[] { groupSub, mod.ControllerName, fwv.Raw }.Where(p => !string.IsNullOrEmpty(p)));
 
@@ -310,10 +293,10 @@ public partial class UploadView : UserControl
     private void OfferCarryOver()
     {
         if (!string.IsNullOrEmpty(IoMapInput.Text) || !string.IsNullOrEmpty(InstructionsInput.Text) || !string.IsNullOrEmpty(ModbusMapInput.Text)) return;
-        if (SubCombo.SelectedItem is not SubtypeOption subOption) return;
+        if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype) return;
         if (CtrlCombo.SelectedItem is not ControllerModification mod) return;
 
-        var prev = _services.Db.GetLastActiveFwVersion(subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
+        var prev = _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
         if (prev is null) return;
         if (string.IsNullOrEmpty(prev.IoMapPath) && string.IsNullOrEmpty(prev.InstructionsPath) && string.IsNullOrEmpty(prev.ModbusMapPath)) return;
 
@@ -333,7 +316,7 @@ public partial class UploadView : UserControl
     private void UpdatePreview()
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group ||
-            SubCombo.SelectedItem is not SubtypeOption subOption ||
+            SubtypesSelect.MainSubtype is not EquipmentSubType subtype ||
             CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             PreviewLabel.Text = "—";
@@ -345,15 +328,15 @@ public partial class UploadView : UserControl
         var fwv = reservation is not null ? FwVersionNumber.Parse(reservation.VersionRaw) : null;
         if (fwv is null)
         {
-            int swInt = _services.Db.GetNextSwVersion(subOption.Subtype.Id!.Value, mod.ControllerId, hwInt);
-            fwv = FwVersionNumber.Build(group.Prefix, subOption.Subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
+            int swInt = _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
+            fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
         }
 
         bool isOpc = IsOpc;
         string ctrlFolder = isOpc ? "ОПЦ" : mod.ControllerName;
         string ext = string.IsNullOrEmpty(_srcPath) || Directory.Exists(_srcPath) ? ".psl" : Path.GetExtension(_srcPath);
 
-        var subDisplay = subOption.Subtype.Name == "—" ? "" : subOption.Subtype.Name;
+        var subDisplay = subtype.Name == "—" ? "" : subtype.Name;
         var pathStr = string.Join(" / ", new[] { "ПО", group.Name, subDisplay, ctrlFolder, fwv.Raw }.Where(p => !string.IsNullOrEmpty(p)));
 
         string reqNum = OpcReqNumCheck.IsChecked == true ? FirmwareUploadService.Format5Digits(ReqNumInput.Text) : "";
@@ -703,7 +686,6 @@ public partial class UploadView : UserControl
     private FirmwareUploadRequest BuildUploadRequest()
     {
         var group = GroupCombo.SelectedItem as EquipmentGroup;
-        var subOption = SubCombo.SelectedItem as SubtypeOption;
         var mod = CtrlCombo.SelectedItem as ControllerModification;
         var launchTypes = _launchChecks.Selected;
 
@@ -711,8 +693,8 @@ public partial class UploadView : UserControl
         {
             SourcePath = _srcPath ?? "",
             Group = group,
-            Subtype = subOption?.Subtype,
-            ExtraSubtypes = ExtraSubtypesSelect.Selected,
+            Subtype = SubtypesSelect.MainSubtype,
+            ExtraSubtypes = SubtypesSelect.ExtraSubtypes,
             Modification = mod,
             LaunchTypes = launchTypes,
             Description = DescInput.Text.Trim(),
@@ -745,7 +727,7 @@ public partial class UploadView : UserControl
         _executableHint = null;
         _hmiExecutableHint = null;
         DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
-        ExtraSubtypesSelect.ClearAll();
+        SubtypesSelect.ClearAll();
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
         OpcReqNumCheck.IsChecked = false;
@@ -772,12 +754,12 @@ public partial class UploadView : UserControl
 
     private void Rollback_Click(object sender, RoutedEventArgs e)
     {
-        if (SubCombo.SelectedItem is not SubtypeOption subOption || CtrlCombo.SelectedItem is not ControllerModification mod)
+        if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype || CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             AppMessageBox.Show("Выберите тип шкафа, подтип и контроллер.", "Откат", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        var last = _services.Db.GetLastActiveFwVersion(subOption.Subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
+        var last = _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion);
         if (last is null)
         {
             AppMessageBox.Show("Нет активных версий для отката.", "Откат", MessageBoxButton.OK, MessageBoxImage.Information);

@@ -118,118 +118,129 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <!-- Тип/Подтип/Контроллер side by side, one row — values here are always short
+                        <!-- Тип шкафа + Контроллер side by side, one row — values here are always short
                              (НГР, ХП, SMH4…), so stretching each combo across the whole form width like
-                             a free-text field wasted most of a wide column on empty space three rows in
-                             a row. Fixed-ish widths (150/130/170) instead of "*" give back that height
-                             for the rest of the form, same nested-grid-in-a-row technique ДОП. ФАЙЛЫ
-                             below already uses for Карта in/out + Карта modbus. -->
-                        <!-- Combo columns are proportional (star) with a Min/MaxWidth floor+ceiling, not a
-                             fixed pixel Width — this row lives in the narrower right column of a two-
-                             column page (left column is the 340px drop-zone/preview), so a fixed 150/130/
-                             170 (matching ParamsView's own copy of this row, which has the FULL page width
-                             to work with) doesn't fit here except when the window is maximized: CtrlCombo
-                             rendered up to ~250px past the window's right edge in windowed mode, incl. at
-                             the app's own MinWidth=1100 (verified live). Star sizing lets WPF shrink all
-                             three columns together instead of letting them overflow uncompressed the way
-                             fixed/Auto columns do; MaxWidth keeps them at the original 150/130/170 size
-                             whenever there's enough room (maximized, or ParamsView's wider layout). -->
+                             a free-text field wasted most of a wide column on empty space. Подтип раньше
+                             стоял тут же третьей короткой колонкой (обычный ComboBox) — теперь это
+                             отдельная строка ниже с единым чек-комбобоксом (SubtypesSelect), где
+                             одновременно выбираются и основной, и дополнительные подтипы, так что для
+                             него нужна вся ширина, а не треть строки. -->
+                        <!-- Комбо-колонки — proportional (star) с Min/MaxWidth, не фиксированный
+                             пиксельный Width — эта строка живёт в узкой правой колонке двухколоночной
+                             страницы (левая — 340px drop-zone/preview), фиксированная ширина переполняла
+                             бы окно в неразвёрнутом виде (см. ParamsView, где та же строка шире — там
+                             вся ширина страницы). Star-размер даёт WPF сжимать обе колонки вместе вместо
+                             переполнения, MaxWidth не даёт им раздуться шире исходного вида, когда места
+                             достаточно. -->
                         <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="150*" MinWidth="70" MaxWidth="150"/>
+                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
                                 <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="130*" MinWidth="60" MaxWidth="130"/>
-                                <ColumnDefinition Width="16"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="170*" MinWidth="70" MaxWidth="170"/>
+                                <ColumnDefinition Width="*" MinWidth="90" MaxWidth="220"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="Тип шкафа *:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="Тип шкафа (группа оборудования):&#x0a;  НГР — насосная группа&#x0a;  ПЖ — пожарное водоснабжение&#x0a;  ТГР — тепловая группа"/>
                             <ComboBox x:Name="GroupCombo" Grid.Column="1" Height="34"
                                       DisplayMemberPath="Name" SelectionChanged="GroupCombo_SelectionChanged"/>
-                            <TextBlock Grid.Column="3" Text="Подтип *:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                            <ComboBox x:Name="SubCombo" Grid.Column="4" Height="34"
-                                      DisplayMemberPath="Label" SelectionChanged="SubCombo_SelectionChanged"/>
-                            <TextBlock Grid.Column="6" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                            <TextBlock Grid.Column="3" Text="Контроллер *:" VerticalAlignment="Center" Margin="0,0,6,0"
                                        ToolTip="PIXEL2 DI/DO/AI/AO указаны в описании модификации"/>
-                            <ComboBox x:Name="CtrlCombo" Grid.Column="7" Height="34"
+                            <ComboBox x:Name="CtrlCombo" Grid.Column="4" Height="34"
                                       DisplayMemberPath="DisplayName" SelectionChanged="CtrlCombo_SelectionChanged"/>
                         </Grid>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" x:Name="CtrlDescLabel" Text="" Style="{StaticResource MutedText}"
                                    FontSize="11" Margin="0,2,0,6" TextWrapping="Wrap"/>
 
-                        <!-- Одна и та же прошивка часто подходит нескольким подтипам шкафа. Основной
-                             подтип (комбобокс выше) задаёт номер версии, папку на диске и резерв
-                             номера; здесь выбираются ДОПОЛНИТЕЛЬНЫЕ — им заводится своя запись, а на
-                             диск кладётся ярлык на ту же папку версии, без дублирования файлов. Сам
-                             выбор — чекбоксы прямо в выпадающем списке (SubtypeMultiSelect), без
-                             отдельного модального окна. -->
+                        <!-- Основной И дополнительные подтипы — теперь ОДИН чек-комбобокс
+                             (SubtypeMultiSelect): первый отмеченный становится основным (задаёт номер
+                             версии, папку на диске и резерв — как раньше отдельный ComboBox SubCombo),
+                             остальные отмеченные — дополнительные (им заводится своя запись, а на диск
+                             кладётся ярлык на ту же папку версии, без дублирования файлов). Раньше это
+                             были два разных виджета в двух разных строках; см. SubtypesSelect_
+                             SelectionChanged ниже — тот же каскад (резерв/превью пути), что раньше
+                             висел на SubCombo_SelectionChanged. -->
                         <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Ещё подтипы:" VerticalAlignment="Center" Margin="0,0,6,0"
-                                       ToolTip="Подтипы шкафов, которым подходит эта же прошивка — файлы не дублируются, в их папки кладётся ярлык."/>
-                            <views:SubtypeMultiSelect Grid.Column="1" x:Name="ExtraSubtypesSelect" Height="34"/>
+                            <TextBlock Grid.Column="0" Text="Подтип(ы) *:" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       ToolTip="Первый отмеченный — основной: задаёт папку на диске, номер версии и резерв. Остальные отмеченные — дополнительные: файл не дублируется, в их папки кладётся ярлык."/>
+                            <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34" SelectionChanged="SubtypesSelect_SelectionChanged"/>
                         </Grid>
 
-                        <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа
-                             раньше шли отдельными строками без общего заголовка, визуально не отличаясь
-                             от соседних обязательных полей ("Тип пуска" и т.п.) — не сразу читалось, что
-                             это именно необязательные ПЕРЕКЛЮЧАТЕЛИ поведения, а не поля для заполнения.
-                             Общий заголовок + все три чекбокса в одной строке (Round 43). -->
-                        <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,4,0,6"/>
-                        <!-- WrapPanel, not a horizontal StackPanel — at the app's own MinWidth this row's
-                             three checkboxes are wider than the available column (the right column of
-                             UploadView's two-column page, further narrowed by the ScrollViewer's own
-                             vertical scrollbar), and a horizontal StackPanel doesn't clip gracefully: it
-                             just gets cut off by the ScrollViewer (HorizontalScrollBarVisibility is
-                             Disabled here, no horizontal scroll to reach the rest), rendering "ОПЦ SN" as
-                             an unreadable/unclickable sliver ("O") at min window width (verified live).
-                             WrapPanel wraps the third checkbox onto its own line only when space is
-                             actually short — identical single-line look at every width this was already
-                             tested at. -->
-                        <WrapPanel x:Name="VersionOptionsPanel" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
-                            <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
-                                      Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
-                                      ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
-                            <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
-                                      Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
-                                      ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
-                            <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
-                                      Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
-                                      ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
-                        </WrapPanel>
+                        <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа —
+                             используются далеко не в каждой загрузке, но раньше занимали три строки
+                             высоты всегда, даже когда все три чекбокса выключены. Свёрнуты в Expander
+                             по умолчанию (SectionExpander, см. Styles.xaml — обычный WPF Expander не
+                             использован по той же причине, что и у SidebarExpanderHeader: чужеродный
+                             светлый хром на тёмной теме) — раскрывается кликом по заголовку, когда
+                             реально нужен нестандартный шкаф или отключение штампа даты в номере. -->
+                        <Expander x:Name="VersionOptionsExpander" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                                  Style="{StaticResource SectionExpander}" Margin="0,4,0,6">
+                            <Expander.Header>
+                                <TextBlock Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold"/>
+                            </Expander.Header>
+                            <StackPanel>
+                                <!-- WrapPanel, not a horizontal StackPanel — at the app's own MinWidth this
+                                     row's three checkboxes are wider than the available column (the right
+                                     column of UploadView's two-column page, further narrowed by the
+                                     ScrollViewer's own vertical scrollbar), and a horizontal StackPanel
+                                     doesn't clip gracefully: it just gets cut off by the ScrollViewer
+                                     (HorizontalScrollBarVisibility is Disabled here, no horizontal scroll to
+                                     reach the rest), rendering "ОПЦ SN" as an unreadable/unclickable sliver
+                                     ("O") at min window width (verified live). WrapPanel wraps the third
+                                     checkbox onto its own line only when space is actually short. -->
+                                <WrapPanel x:Name="VersionOptionsPanel" Orientation="Horizontal" Margin="0,0,0,6">
+                                    <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
+                                              Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
+                                              ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
+                                    <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
+                                              Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
+                                              ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
+                                    <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
+                                              Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
+                                              ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                                </WrapPanel>
 
-                        <TextBlock Grid.Row="5" Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,6" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="5" Grid.Column="1" x:Name="ReqNumInput" Height="34" Margin="0,0,0,6"
-                                 Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
+                                    <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
+                                             Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
+                                </Grid>
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,6" Visibility="Collapsed"/>
-                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
-                                 Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
+                                    <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
+                                             Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
+                                </Grid>
+                            </StackPanel>
+                        </Expander>
 
                         <!-- Отдельный заголовок вместо инлайновой подписи слева — тот же паттерн, что
                              у "ОПЦИИ ВЕРСИИ" выше и у "ДОП. ФАЙЛЫ"/"МЕТАДАННЫЕ" по всей странице, вместо
                              ряда с подписью в левой узкой колонке, как было — Тип пуска обязателен и
                              концептуально другого рода поле (не переключатель поведения формы, а сама
                              загружаемая метаданные), стоило визуально отделить от блока опций выше. -->
-                        <TextBlock Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
+                        <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Text="ТИП ПУСКА *" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,6,0,6"/>
                         <!-- Раньше это был отдельный горизонтальный StackPanel ВНЕ этой сетки, из-за
                              чего чекбоксы типа пуска висели по своим правилам отступов и не
                              переносились на узком окне (тот же класс бага, что уже чинили у «ОПЦИИ
                              ВЕРСИИ»). Теперь — такой же WrapPanel в такой же ячейке сетки с теми же
                              Margin, что у VersionOptionsPanel выше. -->
-                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
+                        <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
                     </Grid>
 
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>

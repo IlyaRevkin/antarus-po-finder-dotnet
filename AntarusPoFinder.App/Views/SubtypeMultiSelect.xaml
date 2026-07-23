@@ -6,7 +6,11 @@
          отмечает несколько и не закрывается по клику на чекбокс. Popup вместо настоящего ComboBox —
          у ComboBox закрытие по выбору пункта встроено в шаблон и не отключается без полной замены
          шаблона; Popup даёт то же самое (тень, позиционирование под полем), но открытием/закрытием
-         управляем сами. -->
+         управляем сами.
+
+         Единственное поле выбора подтипов и в UploadView, и в ParamsView — первый отмеченный
+         (по порядку клика) считается основным, остальные дополнительными (см. SubtypeMultiSelect.
+         xaml.cs — MainSubtype/ExtraSubtypes/_checkOrder). -->
     <Grid x:Name="RootGrid">
         <Border x:Name="MainBorder" Background="{DynamicResource BgInputBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                 BorderThickness="1" CornerRadius="6" Cursor="Hand" MouseLeftButtonUp="MainBorder_MouseLeftButtonUp">
@@ -27,7 +31,7 @@
                StaysOpen="False" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide"
                Width="{Binding ElementName=MainBorder, Path=ActualWidth}">
             <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
-                    BorderThickness="1" CornerRadius="6" Margin="0,4,0,0" MaxHeight="260">
+                    BorderThickness="1" CornerRadius="6" Margin="0,4,0,0" MaxHeight="280">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,4">
                     <StackPanel x:Name="ItemsPanel" Margin="4,0"/>
                 </ScrollViewer>

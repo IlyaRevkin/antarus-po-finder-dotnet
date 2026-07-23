@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -17,8 +18,6 @@ public partial class ParamsView : UserControl
     private readonly AppServices _services;
     private readonly IAppHost _host;
     private string? _srcPath;
-
-    private record SubtypeOption(string Label, EquipmentSubType Subtype);
 
     private class ParamFileRow
     {
@@ -84,55 +83,29 @@ public partial class ParamsView : UserControl
         if (expanding) ReloadTable();
     }
 
+    /// <summary>Наполняет единый чек-комбобокс подтипов (SubtypesSelect) под текущую группу — как и
+    /// в UploadView, раньше это был отдельный ComboBox (основной подтип) плюс SetItems с исключённым
+    /// основным для второго контрола, теперь один SetItems на полный список. Текущая отметка
+    /// сохраняется по валидности ID (см. SubtypeMultiSelect.SetItems), кроме первой отрисовки
+    /// страницы — там ничего ещё не отмечено, и первый подтип группы отмечается основным сразу,
+    /// чтобы форма была готова к загрузке без лишнего клика (тот же смысл, что раньше был у
+    /// SubCombo.SelectedIndex = 0).</summary>
     private void PopulateSubtypes()
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group)
         {
-            SubCombo.ItemsSource = null;
+            SubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
             return;
         }
         var subtypes = _services.Db.GetSubtypesForGroup(group.Id!.Value);
-        var options = subtypes.Select(s => new SubtypeOption(s.Name == "—" ? group.Name : s.Name, s)).ToList();
-        SubCombo.ItemsSource = options;
-        if (options.Count > 0) SubCombo.SelectedIndex = 0;
-        // Если у группы всего один подтип (SelectedIndex остаётся 0->0, SelectionChanged может не
-        // сработать) или подтипов вообще нет — на SubCombo_SelectionChanged в этих случаях
-        // рассчитывать нельзя, пересобираем кандидатов явно.
-        RefreshExtraSubtypeCandidates();
+        var currentOrder = SubtypesSelect.Selected.Where(s => s.Id is not null).Select(s => s.Id!.Value).ToList();
+        var preselect = currentOrder.Count == 0 && subtypes.Count > 0 && subtypes[0].Id is not null
+            ? new System.Collections.Generic.List<int> { subtypes[0].Id!.Value }
+            : currentOrder;
+        SubtypesSelect.SetItems(subtypes, preselect);
     }
 
-    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        // Подтипы принадлежат группе — при смене типа шкафа ранее выбранные дополнительные подтипы
-        // относятся уже к другой группе и молча уехали бы не туда. Сброс — пустой список кандидатов
-        // прямо сейчас; PopulateSubtypes() ниже сама пересоберёт кандидатов под новую группу (через
-        // SubCombo_SelectionChanged, который сработает при выборе подтипа по умолчанию).
-        ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
-        PopulateSubtypes();
-    }
-
-    private void SubCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshExtraSubtypeCandidates();
-
-    // ── Дополнительные подтипы ────────────────────────────────────────────────
-
-    /// <summary>Пересобирает список кандидатов «Ещё подтипы» под текущую группу/основной подтип —
-    /// вызывается и при смене типа шкафа, и при смене основного подтипа (см. PopulateSubtypes и
-    /// SubCombo_SelectionChanged). Уже отмеченные кандидаты, которые остаются валидными (не совпали
-    /// с новым основным подтипом), сохраняются — теряется только то, что реально стало неприменимо.</summary>
-    private void RefreshExtraSubtypeCandidates()
-    {
-        if (GroupCombo.SelectedItem is not EquipmentGroup group)
-        {
-            ExtraSubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
-            return;
-        }
-        var mainId = (SubCombo.SelectedItem as SubtypeOption)?.Subtype.Id;
-        var candidates = _services.Db.GetSubtypesForGroup(group.Id!.Value)
-            .Where(s => s.Id is not null && s.Id != mainId)
-            .ToList();
-        var keepIds = ExtraSubtypesSelect.Selected.Where(s => s.Id is not null).Select(s => s.Id!.Value);
-        ExtraSubtypesSelect.SetItems(candidates, keepIds);
-    }
+    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
 
     private void BrowseFile_Click(object sender, RoutedEventArgs e)
     {
@@ -140,6 +113,10 @@ public partial class ParamsView : UserControl
         if (dlg.ShowDialog() == true)
             SetFile(dlg.FileName);
     }
+
+    /// <summary>Клик по самой drag&amp;drop-зоне — то же самое, что нажать кнопку выбора файла (её
+    /// саму убрали, см. XAML) — тот же приём, что DropZone_Click в UploadView.</summary>
+    private void DropZone_Click(object sender, MouseButtonEventArgs e) => BrowseFile_Click(sender, e);
 
     private void SetFile(string path)
     {
@@ -168,9 +145,9 @@ public partial class ParamsView : UserControl
             AppMessageBox.Show("Выберите файл параметров.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (SubCombo.SelectedItem is not SubtypeOption subOption)
+        if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype)
         {
-            AppMessageBox.Show("Выберите подтип шкафа.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppMessageBox.Show("Выберите хотя бы один подтип шкафа.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         var manuf = (ManufCombo.SelectedItem as string)?.Trim();
@@ -187,7 +164,7 @@ public partial class ParamsView : UserControl
         }
         if (GroupCombo.SelectedItem is not EquipmentGroup group) return;
 
-        var dstFolder = _services.Hierarchy.ParamsPath(root, group.Name, subOption.Subtype.Name, manuf);
+        var dstFolder = _services.Hierarchy.ParamsPath(root, group.Name, subtype.Name, manuf);
         var srcPath = _srcPath;
         try
         {
@@ -211,7 +188,7 @@ public partial class ParamsView : UserControl
 
         var record = new ParamFile
         {
-            SubtypeId = subOption.Subtype.Id,
+            SubtypeId = subtype.Id,
             Manufacturer = manuf,
             Filename = Path.GetFileName(_srcPath),
             DiskPath = dstFolder,
@@ -221,7 +198,7 @@ public partial class ParamsView : UserControl
         _services.Db.AddParamFile(record);
 
         var link = ParamFileLinkService.LinkToExtraSubtypes(_services.Db, _services.Hierarchy, root,
-            group, subOption.Subtype, record, ExtraSubtypesSelect.Selected, new Services.ShortcutCreator());
+            group, subtype, record, SubtypesSelect.ExtraSubtypes, new Services.ShortcutCreator());
 
         _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}", category: NotificationCategory.FirmwareAndParams);
         if (link.CreatedIds.Count > 0 || link.Warnings.Count > 0)
@@ -236,8 +213,10 @@ public partial class ParamsView : UserControl
 
         DescInput.Text = "";
         _srcPath = null;
-        ExtraSubtypesSelect.ClearAll();
-        DropZoneLabel.Text = "Перетащите файл сюда, или нажмите «Выбрать файл…»";
+        // Основной подтип оставляем как есть — как правило дальше грузят следующий файл в тот же
+        // шкаф/подтип; дополнительные почти всегда другие или их вовсе нет у следующего файла.
+        SubtypesSelect.ClearExtras();
+        DropZoneLabel.Text = "Перетащите файл сюда, или нажмите для выбора";
 
         ReloadTable();
     }

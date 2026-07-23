@@ -239,6 +239,53 @@
         </Setter>
     </Style>
 
+    <!-- Свёрнутый по умолчанию блок необязательных полей на форме (напр. "ОПЦИИ ВЕРСИИ" в
+         UploadView) — тот же чеврон-паттерн, что у SidebarExpanderHeader выше и по той же причине
+         (обычный WPF Expander со стандартным хромом смотрелся бы светлым инородным пятном на тёмной
+         теме), но уже полноценный Expander с раскрывающимся Content, а не просто заголовок-кнопка. -->
+    <Style x:Key="SectionExpander" TargetType="Expander">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <StackPanel>
+                        <ToggleButton x:Name="HeaderSite" Cursor="Hand" Background="Transparent" BorderThickness="0"
+                                      HorizontalContentAlignment="Left" Padding="0,4"
+                                      IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border Background="Transparent">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock x:Name="Chevron" Text="&#8250;" FontSize="12" Width="14"
+                                                       VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
+                                            <ContentPresenter VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter TargetName="Chevron" Property="Text" Value="&#8964;"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Chevron" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                            <ContentPresenter ContentSource="Header"/>
+                        </ToggleButton>
+                        <ContentPresenter x:Name="ExpandSite" Visibility="Collapsed" Margin="0,6,0,0"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Round "dock" icon button for the Быстрый доступ strip above the page content (see
          MainWindow.xaml) — a plain circle with the shortcut's own icon centered in it. -->
     <Style x:Key="QuickAppBubbleButton" TargetType="Button">
