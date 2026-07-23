@@ -16,11 +16,19 @@ public partial class Database
         return result;
     }
 
-    public void AddParamManufacturer(string name) =>
+    /// <summary>Отметка в flat_list_state — чтобы добавленный здесь производитель не был стёрт
+    /// импортом конфига с машины, которая о нём ещё не знает (см. Database.FlatLists.cs).</summary>
+    public void AddParamManufacturer(string name)
+    {
         ExecuteNonQuery("INSERT OR IGNORE INTO param_manufacturers(name) VALUES(@n)", cmd => cmd.Parameters.AddWithValue("@n", name));
+        MarkFlatListAlive(FlatKindManufacturer, name);
+    }
 
-    public void DeleteParamManufacturer(string name) =>
+    public void DeleteParamManufacturer(string name)
+    {
         ExecuteNonQuery("DELETE FROM param_manufacturers WHERE name=@n", cmd => cmd.Parameters.AddWithValue("@n", name));
+        MarkFlatListDeleted(FlatKindManufacturer, name);
+    }
 
     // ── Param Files ───────────────────────────────────────────────────────────
 
@@ -108,9 +116,13 @@ public partial class Database
         ext = ext.Trim().ToLowerInvariant().TrimStart('.');
         if (string.IsNullOrEmpty(ext)) return;
         ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions(ext) VALUES(@e)", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListAlive(FlatKindExtension, ext);
     }
 
-    public void RemoveAllowedExtension(string ext) =>
-        ExecuteNonQuery("DELETE FROM allowed_extensions WHERE ext=@e",
-            cmd => cmd.Parameters.AddWithValue("@e", ext.Trim().ToLowerInvariant().TrimStart('.')));
+    public void RemoveAllowedExtension(string ext)
+    {
+        ext = ext.Trim().ToLowerInvariant().TrimStart('.');
+        ExecuteNonQuery("DELETE FROM allowed_extensions WHERE ext=@e", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListDeleted(FlatKindExtension, ext);
+    }
 }

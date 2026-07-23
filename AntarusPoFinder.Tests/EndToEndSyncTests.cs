@@ -105,7 +105,7 @@ public class EndToEndSyncTests
         Assert.Equal(1, ticketsSent);
 
         var update = ConfigSyncService.CheckForUpdate(svcB, out var checkErr);
-        Assert.Null(checkErr);
+        Assert.True(checkErr is null, checkErr);
         Assert.NotNull(update);
         Assert.True(update!.Diff.TotalChanges > 0);
 
@@ -148,7 +148,7 @@ public class EndToEndSyncTests
         System.Threading.Thread.Sleep(1100);
         var exportB = ConfigSyncService.Export(svcB, root, "profileB");
         var updateForA = ConfigSyncService.CheckForUpdate(svcA, out var checkErrA);
-        Assert.Null(checkErrA);
+        Assert.True(checkErrA is null, checkErrA);
         Assert.NotNull(updateForA);
         ConfigSyncService.Apply(svcA, updateForA!.ConfigPath, root);
 
@@ -319,7 +319,7 @@ public class EndToEndSyncTests
         // deleted it, exactly the "B ещё не синхронизировался" starting point from the report.
         ConfigSyncService.Export(svcA, root, "profileA");
         var firstUpdate = ConfigSyncService.CheckForUpdate(svcB, out var firstErr);
-        Assert.Null(firstErr);
+        Assert.True(firstErr is null, firstErr);
         Assert.NotNull(firstUpdate);
         ConfigSyncService.Apply(svcB, firstUpdate!.ConfigPath, root);
         Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == versionRaw);
@@ -339,7 +339,7 @@ public class EndToEndSyncTests
         System.Threading.Thread.Sleep(1100); // exported_at second-resolution, see the other tests above
         ConfigSyncService.Export(svcA, root, "profileA");
         var update2 = ConfigSyncService.CheckForUpdate(svcB, out var err2);
-        Assert.Null(err2);
+        Assert.True(err2 is null, err2);
         Assert.NotNull(update2);
         var applyResult2 = ConfigSyncService.Apply(svcB, update2!.ConfigPath, root);
         Assert.True(applyResult2.Counts.FwVersionsRemoved >= 1);

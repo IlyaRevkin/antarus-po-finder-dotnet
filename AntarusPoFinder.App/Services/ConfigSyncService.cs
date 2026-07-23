@@ -29,7 +29,17 @@ public static class ConfigSyncService
         "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
         "allowed_extensions", "fw_version_reservations", "fw_versions", "param_files", "app_users",
+        "flat_list_state",
     };
+
+    /// <summary>Настройка — это всегда скалярное значение; массивы и объекты в корне файла — это
+    /// выгрузка иерархии, которая читается отдельно (см. SkipKeys выше). Список имён приходится
+    /// дополнять руками при каждом новом разделе выгрузки, и забытое имя раньше означало не мягкий
+    /// промах, а исключение GetValue&lt;string&gt;() на всю проверку обновлений («The node must be of
+    /// type 'JsonValue'») — то есть баннер обновления молча ломался целиком. Проверка по типу узла
+    /// закрывает этот класс ошибок независимо от полноты списка.</summary>
+    private static bool IsSetting(KeyValuePair<string, JsonNode?> kv) =>
+        kv.Value is null or JsonValue && !SkipKeys.Contains(kv.Key) && !SkipSettingsKeys.Contains(kv.Key);
 
     /// <summary>Every plain setting key lives on either Настройки → Общие or Настройки → Быстрый
     /// доступ, and per the operator's decision both of those tabs are configured per-machine only —
@@ -104,7 +114,7 @@ public static class ConfigSyncService
         int settingsApplied = 0;
         foreach (var kv in rootNode)
         {
-            if (SkipKeys.Contains(kv.Key) || SkipSettingsKeys.Contains(kv.Key)) continue;
+            if (!IsSetting(kv)) continue;
             services.Cfg.Set(kv.Key, kv.Value?.GetValue<string>() ?? "");
             settingsApplied++;
         }
@@ -240,7 +250,7 @@ public static class ConfigSyncService
         var changed = 0;
         foreach (var kv in rootNode)
         {
-            if (SkipKeys.Contains(kv.Key) || SkipSettingsKeys.Contains(kv.Key)) continue;
+            if (!IsSetting(kv)) continue;
             var incoming = kv.Value?.GetValue<string>() ?? "";
             if (services.Cfg.Get(kv.Key) != incoming) changed++;
         }

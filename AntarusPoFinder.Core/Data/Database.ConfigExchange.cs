@@ -55,6 +55,9 @@ public partial class Database
 
         data.Tags = GetAllTags();
         data.AllowedExtensions = GetAllowedExtensions();
+        data.FlatListState = GetFlatListState()
+            .Select(s => new ExportedFlatListState { Kind = s.Kind, Name = s.Name, DeletedAt = s.DeletedAt, RevivedAt = s.RevivedAt })
+            .ToList();
 
         using (var r = ExecuteReader("""
             SELECT res.hw_version, res.version_raw, res.status, res.reserved_by, res.reserved_at,
@@ -161,6 +164,67 @@ public partial class Database
     /// the row instead of a bare DELETE — see the dedicated block below for why absence alone can't
     /// mean "delete it" here the way it does for subtypes/controllers above.</summary>
     public ImportCounts ImportHierarchyData(HierarchyExportData data) => ImportHierarchyDataCore(data, apply: true);
+
+    /// <summary>Согласует один плоский список-справочник (производители/теги/расширения) по
+    /// отметкам времени из flat_list_state вместо прежнего слепого зеркала (см. Database.FlatLists.cs
+    /// о том, почему зеркало теряло только что добавленные записи).
+    ///
+    /// Правила ровно два:
+    ///   • по каждому имени, о котором у входящей стороны есть отметка СВЕЖЕЕ нашей, применяем её
+    ///     состояние — добавляем или удаляем имя и запоминаем чужие отметки как свои;
+    ///   • имя, встреченное в списке, но без отметок ни у кого, просто добавляем, если его нет —
+    ///     кроме случая, когда локально оно осознанно удалено (локальная отметка это помнит).
+    /// Обратного правила «чего нет в чужом списке — удалить» больше нет: отсутствие имени у
+    /// собеседника означает лишь то, что он о нём не знает, а не то, что его удалили.
+    ///
+    /// addLocal/removeLocal — сырые операции над самой таблицей списка. Публичные Add*/Delete*
+    /// сами проставляют отметку «сейчас», поэтому чужие отметки записываются ПОСЛЕ вызова, затирая
+    /// её; иначе применённое чужое удаление выглядело бы как наше собственное, только что
+    /// сделанное, и поехало бы обратно уже как более свежее событие.</summary>
+    private void ImportFlatList(string kind, IEnumerable<string> incomingNames, List<ExportedFlatListState>? incomingState,
+        bool apply, Func<List<string>> getLocalNames, Action<string> addLocal, Action<string> removeLocal,
+        Action countAdded, Action countRemoved)
+    {
+        var localNames = new HashSet<string>(getLocalNames(), StringComparer.OrdinalIgnoreCase);
+        var localState = GetFlatListState()
+            .Where(s => s.Kind == kind)
+            .ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase);
+
+        var states = (incomingState ?? new()).Where(s => s.Kind == kind).ToList();
+        foreach (var s in states)
+        {
+            var name = s.Name.Trim();
+            if (name.Length == 0) continue;
+
+            var incomingLast = string.CompareOrdinal(s.RevivedAt, s.DeletedAt) >= 0 ? s.RevivedAt : s.DeletedAt;
+            var localLast = localState.TryGetValue(name, out var local) ? local.LastEventAt : "";
+            if (string.CompareOrdinal(incomingLast, localLast) <= 0) continue;
+
+            var incomingAlive = string.CompareOrdinal(s.RevivedAt, s.DeletedAt) >= 0;
+            if (incomingAlive && !localNames.Contains(name))
+            {
+                countAdded();
+                if (apply) { addLocal(name); localNames.Add(name); }
+            }
+            else if (!incomingAlive && localNames.Contains(name))
+            {
+                countRemoved();
+                if (apply) { removeLocal(name); localNames.Remove(name); }
+            }
+            if (apply) SetFlatListState(kind, name, s.DeletedAt, s.RevivedAt);
+        }
+
+        var withState = new HashSet<string>(states.Select(s => s.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in incomingNames)
+        {
+            var name = raw.Trim();
+            if (name.Length == 0 || withState.Contains(name) || localNames.Contains(name)) continue;
+            if (localState.TryGetValue(name, out var known) && !known.IsAlive) continue;
+
+            countAdded();
+            if (apply) { addLocal(name); localNames.Add(name); }
+        }
+    }
 
     private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply)
     {
@@ -549,68 +613,28 @@ public partial class Database
             }
         }
 
-        // ── Manufacturers (name-keyed, no FK-by-id references it — safe full mirror, same
-        //    add-and-remove reasoning as tags/extensions below: a manufacturer deleted on the
-        //    exporting machine used to never disappear locally, since this only ever inserted). ─
-        var incomingManufacturers = data.ParamManufacturers ?? new();
-        foreach (var m in incomingManufacturers)
-        {
-            var exists = ExecuteScalar("SELECT sort_order FROM param_manufacturers WHERE name=@n", cmd => cmd.Parameters.AddWithValue("@n", m.Name));
-            if (exists is null)
-            {
-                counts.ManufacturersAdded++;
-                if (apply)
-                    ExecuteNonQuery("INSERT INTO param_manufacturers(name,sort_order) VALUES(@n,@s)", cmd =>
-                    {
-                        cmd.Parameters.AddWithValue("@n", m.Name); cmd.Parameters.AddWithValue("@s", m.SortOrder);
-                    });
-            }
-        }
-        if (data.ParamManufacturers is not null)
-        {
-            var incomingNames = new HashSet<string>(incomingManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-            foreach (var localName in GetParamManufacturers())
-                if (!incomingNames.Contains(localName))
-                {
-                    counts.ManufacturersRemoved++;
-                    if (apply) DeleteParamManufacturer(localName);
-                }
-        }
+        // ── Плоские списки-справочники: производители ПЧ/УПП, теги, разрешённые расширения ────
+        //    Раньше каждый из трёх синхронизировался «зеркалом»: чего нет во входящем наборе — то
+        //    удаляется локально. Без отметок времени это «выигрывает тот, кто последним нажал
+        //    импорт», и оно съедало только что добавленные записи, стоило любой машине выгрузить
+        //    свой конфиг, не забрав перед этим чужой (подробный разбор — Database.FlatLists.cs).
+        //    Теперь удаление и возврат — события с отметкой времени, побеждает более позднее.
+        ImportFlatList(Database.FlatKindManufacturer,
+            (data.ParamManufacturers ?? new()).Select(m => m.Name),
+            data.FlatListState, apply, GetParamManufacturers,
+            name => ExecuteNonQuery("INSERT OR IGNORE INTO param_manufacturers(name) VALUES(@n)", cmd => cmd.Parameters.AddWithValue("@n", name)),
+            DeleteParamManufacturer,
+            () => counts.ManufacturersAdded++, () => counts.ManufacturersRemoved++);
 
-        // ── Tags (name-keyed, full mirror — safe: only referenced as free text, never by id).
-        //    The "remove locally-extra" half only runs when the source JSON actually HAD this
-        //    field — an export written by an older app version simply omits the key, which
-        //    deserializes as null (see HierarchyExportData), vs. a present-but-empty array meaning
-        //    the source genuinely has zero tags. Mirroring a null field would wipe every local tag
-        //    just because the exporting machine hadn't been upgraded yet. ────────────────────────
-        var localTags = new HashSet<string>(GetAllTags(), StringComparer.OrdinalIgnoreCase);
-        var incomingTags = new HashSet<string>(data.Tags ?? new(), StringComparer.OrdinalIgnoreCase);
-        foreach (var t in incomingTags.Except(localTags, StringComparer.OrdinalIgnoreCase))
-        {
-            counts.TagsAdded++;
-            if (apply) AddTag(t);
-        }
-        if (data.Tags is not null)
-            foreach (var t in localTags.Except(incomingTags, StringComparer.OrdinalIgnoreCase))
-            {
-                counts.TagsRemoved++;
-                if (apply) DeleteTag(t);
-            }
+        ImportFlatList(Database.FlatKindTag,
+            data.Tags ?? new(),
+            data.FlatListState, apply, GetAllTags, AddTag, DeleteTag,
+            () => counts.TagsAdded++, () => counts.TagsRemoved++);
 
-        // ── Allowed extensions (name-keyed, full mirror — same reasoning as tags) ────
-        var localExt = new HashSet<string>(GetAllowedExtensions(), StringComparer.OrdinalIgnoreCase);
-        var incomingExt = new HashSet<string>(data.AllowedExtensions ?? new(), StringComparer.OrdinalIgnoreCase);
-        foreach (var e in incomingExt.Except(localExt, StringComparer.OrdinalIgnoreCase))
-        {
-            counts.ExtensionsAdded++;
-            if (apply) ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions(ext) VALUES(@e)", cmd => cmd.Parameters.AddWithValue("@e", e));
-        }
-        if (data.AllowedExtensions is not null)
-            foreach (var e in localExt.Except(incomingExt, StringComparer.OrdinalIgnoreCase))
-            {
-                counts.ExtensionsRemoved++;
-                if (apply) ExecuteNonQuery("DELETE FROM allowed_extensions WHERE ext=@e COLLATE NOCASE", cmd => cmd.Parameters.AddWithValue("@e", e));
-            }
+        ImportFlatList(Database.FlatKindExtension,
+            data.AllowedExtensions ?? new(),
+            data.FlatListState, apply, GetAllowedExtensions, AddAllowedExtension, RemoveAllowedExtension,
+            () => counts.ExtensionsAdded++, () => counts.ExtensionsRemoved++);
 
         // ── Reservations (natural key = subtype+controller+hw_version+version_raw; status only
         //    ever advances reserved → fulfilled/cancelled, never the other way, so a local reservation

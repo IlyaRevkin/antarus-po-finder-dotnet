@@ -151,6 +151,21 @@ public class HierarchyExportData
     // additive + last-writer-wins-on-role only, see Database.ConfigExchange — nobody is ever
     // removed from the roster via sync).
     [JsonPropertyName("app_users")] public List<ExportedAppUser> AppUsers { get; set; } = new();
+    /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
+    /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой
+    /// версии приложения ключа не содержит, и импорт тогда откатывается на прежнее чисто additive
+    /// поведение вместо того, чтобы считать «раз отметок нет, значит ничего никогда не удаляли».</summary>
+    [JsonPropertyName("flat_list_state")] public List<ExportedFlatListState>? FlatListState { get; set; }
+}
+
+/// <summary>Одна строка flat_list_state в выгрузке. Живым элемент считается, когда RevivedAt не
+/// меньше DeletedAt — сравнение строковое, отметки в ISO-формате (см. Database.NowIso).</summary>
+public class ExportedFlatListState
+{
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    [JsonPropertyName("revived_at")] public string RevivedAt { get; set; } = "";
 }
 
 /// <summary>Per-category added/updated counts — drives both the "Экспортировано/Импортировано"

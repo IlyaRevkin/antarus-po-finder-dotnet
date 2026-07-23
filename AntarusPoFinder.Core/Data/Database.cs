@@ -142,6 +142,17 @@ public partial class Database : IDisposable
                  name TEXT UNIQUE NOT NULL COLLATE NOCASE
              );
 
+             -- Отметки времени удаления/возврата для плоских списков-справочников
+             -- (производители ПЧ/УПП, теги, разрешённые расширения) — см. Database.FlatLists.cs
+             -- о том, почему синхронизация «зеркалом» без них теряла добавленные записи.
+             CREATE TABLE IF NOT EXISTS flat_list_state (
+                 kind       TEXT NOT NULL,
+                 name       TEXT NOT NULL COLLATE NOCASE,
+                 deleted_at TEXT NOT NULL DEFAULT '',
+                 revived_at TEXT NOT NULL DEFAULT '',
+                 PRIMARY KEY (kind, name)
+             );
+
              CREATE TABLE IF NOT EXISTS fw_version_reservations (
                  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                  subtype_id              INTEGER NOT NULL REFERENCES equipment_subtypes(id),

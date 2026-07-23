@@ -23,6 +23,7 @@ public partial class Database
         name = name.Trim();
         if (name.Length == 0) return;
         ExecuteNonQuery("INSERT OR IGNORE INTO tags (name) VALUES (@n)", cmd => cmd.Parameters.AddWithValue("@n", name));
+        MarkFlatListAlive(FlatKindTag, name);
     }
 
     /// <summary>Renames a tag everywhere it's used — the tags table entry, every fw_versions.tags
@@ -36,6 +37,10 @@ public partial class Database
 
         ExecuteNonQuery("UPDATE tags SET name = @n WHERE name = @o COLLATE NOCASE",
             cmd => { cmd.Parameters.AddWithValue("@n", newName); cmd.Parameters.AddWithValue("@o", oldName); });
+        // Переименование = старого больше нет, новый появился — обе отметки нужны, иначе импорт с
+        // машины, ещё не знающей о переименовании, вернёт старое имя обратно.
+        MarkFlatListDeleted(FlatKindTag, oldName);
+        MarkFlatListAlive(FlatKindTag, newName);
         ReplaceTagInColumn("fw_versions", oldName, newName);
         ReplaceTagInColumn("param_files", oldName, newName);
     }
@@ -46,6 +51,7 @@ public partial class Database
     {
         name = name.Trim();
         ExecuteNonQuery("DELETE FROM tags WHERE name = @n COLLATE NOCASE", cmd => cmd.Parameters.AddWithValue("@n", name));
+        MarkFlatListDeleted(FlatKindTag, name);
         ReplaceTagInColumn("fw_versions", name, null);
         ReplaceTagInColumn("param_files", name, null);
     }

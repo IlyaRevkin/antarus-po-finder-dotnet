@@ -152,8 +152,9 @@ public class ConfigSyncTests
             using var dbA = new Database(pathA);
             using var dbB = new Database(pathB);
 
-            // B has a tag that A does not (A's export represents "the current truth" — tags/
-            // extensions are the two categories safe to fully mirror, see Database.ConfigExchange).
+            // Обе машины знают тег, и он проставлен на прошивке у B; затем A его осознанно удаляет —
+            // именно удаление (событие с отметкой времени, см. Database.FlatLists.cs), а не просто
+            // отсутствие имени в чужой выгрузке, и должно доехать до B.
             dbB.AddTag("only_on_b");
             var group = dbB.GetAllEquipmentGroups().First(g => g.Name == "НГР");
             var subtype = dbB.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
@@ -175,7 +176,10 @@ public class ConfigSyncTests
                 Status = "active",
             });
 
-            var exported = dbA.ExportHierarchyData(); // A never had "only_on_b"
+            dbA.AddTag("only_on_b");
+            dbA.DeleteTag("only_on_b");
+
+            var exported = dbA.ExportHierarchyData();
             var counts = dbB.ImportHierarchyData(exported);
             Assert.Equal(1, counts.TagsRemoved);
 
@@ -228,6 +232,52 @@ public class ConfigSyncTests
             var secondPass = dbB.ImportHierarchyData(exported);
             Assert.Equal(0, secondPass.ManufacturersAdded);
             Assert.Equal(0, secondPass.ManufacturersRemoved);
+        }
+        finally
+        {
+            Cleanup(pathA, pathB);
+        }
+    }
+
+    [Fact]
+    public void Import_ConfigFromMachineThatNeverSawIt_KeepsLocallyAddedManufacturer_AndKeepsDeletedOneDeleted()
+    {
+        // Обе половины жалобы пользователя разом — до отметок времени в flat_list_state списки
+        // синхронизировались «зеркалом» (чего нет во входящем наборе — удалить локально), и потому:
+        //   • «добавил производителей ПЧ/УПП, а они не синхронизировались» — их стирал импорт с
+        //     машины, которая о новых именах ещё не знала;
+        //   • «залил новые настройки, а с какого-то компа опять мусорное название» — удалённое имя
+        //     возвращала любая машина, ещё не забравшая конфиг с удалением.
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            // Стартовое общее состояние: обе машины знают «мусорное» имя.
+            dbA.AddParamManufacturer("МУСОРНОЕ");
+            dbB.AddParamManufacturer("МУСОРНОЕ");
+
+            // B наводит порядок: добавляет нужного производителя и убирает мусорный.
+            dbB.AddParamManufacturer("TESTVENDOR");
+            dbB.DeleteParamManufacturer("МУСОРНОЕ");
+
+            // A выгружает свой конфиг, ничего не зная про правки B (снимок сделан раньше них).
+            var staleFromA = dbA.ExportHierarchyData();
+            var counts = dbB.ImportHierarchyData(staleFromA);
+
+            var manufacturersB = dbB.GetParamManufacturers();
+            Assert.Contains("TESTVENDOR", manufacturersB);        // не должен быть стёрт чужим снимком
+            Assert.DoesNotContain("МУСОРНОЕ", manufacturersB); // и не должен воскреснуть
+            Assert.Equal(0, counts.ManufacturersAdded);
+            Assert.Equal(0, counts.ManufacturersRemoved);
+
+            // Встречное направление: теперь A забирает конфиг B и приходит к тому же состоянию.
+            dbA.ImportHierarchyData(dbB.ExportHierarchyData());
+            var manufacturersA = dbA.GetParamManufacturers();
+            Assert.Contains("TESTVENDOR", manufacturersA);
+            Assert.DoesNotContain("МУСОРНОЕ", manufacturersA);
         }
         finally
         {
@@ -450,7 +500,7 @@ public class ConfigSyncTests
             dbA.AddParamFile(new ParamFile
             {
                 SubtypeId = subtypeA.Id!.Value,
-                Manufacturer = "Danfoss",
+                Manufacturer = "TESTVENDOR",
                 Filename = "params_v1.dcfx",
                 DiskPath = @"Z:\Software\Antarus Finder\Параметры\ПЖ\ХП\Danfoss", // machine A's own root
                 Description = "тестовый файл параметров",
