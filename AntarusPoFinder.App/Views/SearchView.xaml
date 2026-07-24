@@ -20,16 +20,23 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBox Grid.Column="0" x:Name="SearchInput" Height="38" Margin="0,0,8,0"
                      VerticalContentAlignment="Center"
                      ToolTip="Введите название шкафа — напр. «НГР КПЧ SMH5» или «ПЖ KINCO»"
                      KeyDown="SearchInput_KeyDown"/>
             <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"/>
-            <Button Grid.Column="2" x:Name="FiltersToggle" Content="Фильтры ▾" Style="{StaticResource SecondaryButton}"
+            <!-- Видна только пока идёт обход второго диска (поиск по схемам) — единственная операция
+                 поиска, которая длится минуты и которую есть смысл прерывать. Свёрнутая кнопка не
+                 занимает места: колонка Auto. -->
+            <Button Grid.Column="2" x:Name="StopSearchButton" Content="Остановить" Visibility="Collapsed"
+                    Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="StopSearch_Click"
+                    ToolTip="Прервать чтение второго диска — уже найденное останется на экране"/>
+            <Button Grid.Column="3" x:Name="FiltersToggle" Content="Фильтры ▾" Style="{StaticResource SecondaryButton}"
                     Height="38" Margin="8,0,0,0" Click="ToggleFilters_Click"
                     ToolTip="Сузить выдачу по типу шкафа, подтипу, контроллеру или типу пуска"/>
-            <Button Grid.Column="3" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
+            <Button Grid.Column="4" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
         </Grid>
 
         <!-- Панель фильтров: свёрнута по умолчанию — кнопок в поиске и так хватает, а фильтры

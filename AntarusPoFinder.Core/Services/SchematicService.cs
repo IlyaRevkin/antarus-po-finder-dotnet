@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -44,6 +45,12 @@ public class SchematicService
         _cache = new();
     }
 
+    /// <summary>Кэш для этого диска уже наполнен — значит, поиск по нему отработает мгновенно,
+    /// обходить диск заново не нужно. Вызывающему это нужно, чтобы решить, показывать ли индикатор
+    /// занятости и кнопку «Остановить»: ради фильтрации готового списка в памяти они только мешают.</summary>
+    public bool IsScanned(string diskPath) =>
+        !string.IsNullOrEmpty(diskPath) && _cachedDiskPath == diskPath;
+
     /// <summary>Прогревает кэш для указанного диска без фильтрации по запросу — тяжёлая часть
     /// (полный обход дерева папок, Directory.EnumerateFiles по SearchOption.AllDirectories) идёт
     /// именно здесь; последующие Matches() для того же diskPath обращаются к уже наполненному кэшу
@@ -51,8 +58,27 @@ public class SchematicService
     /// для того, чтобы вызывающий (SearchView.PerformSchemasSearchAsync) мог обернуть в фоновый поток
     /// именно обход — и не плодить параллельные обходы одного и того же диска, если несколько поисков
     /// подряд целятся в один diskPath, — а сам подбор совпадений по конкретному запросу (Matches, с его
-    /// out-параметрами раскладки-фолбэка) оставить синхронным на потоке интерфейса.</summary>
-    public void EnsureScanned(string diskPath) => Scanned(diskPath);
+    /// out-параметрами раскладки-фолбэка) оставить синхронным на потоке интерфейса.
+    ///
+    /// <paramref name="onFound"/> вызывается на КАЖДЫЙ найденный файл схемы прямо по ходу обхода, на
+    /// том же потоке, где выполняется этот метод (у SearchView — фоновый Task.Run): благодаря этому
+    /// выдачу видно, не дожидаясь конца обхода сетевой шары на сотни гигабайт. Тёплый кэш обработчик
+    /// не зовёт — обходить нечего, вызывающий берёт готовый список через Matches().
+    ///
+    /// <paramref name="ct"/> прерывает обход (кнопка «Остановить»). Прерванный обход кэш НЕ пишет:
+    /// иначе следующий поиск принял бы обрезанный список за полный и «терял» бы половину диска до
+    /// перезапуска программы. То, что успели показать оператору, вызывающий, конечно, оставляет на
+    /// экране — но это его выдача, а не наш кэш.</summary>
+    public void EnsureScanned(string diskPath, CancellationToken ct = default, Action<SchematicHit>? onFound = null)
+    {
+        if (string.IsNullOrEmpty(diskPath) || !Directory.Exists(diskPath)) return;
+        if (_cachedDiskPath == diskPath) return;
+
+        var scanned = Scan(diskPath, ct, onFound);
+        ct.ThrowIfCancellationRequested();
+        _cache = scanned;
+        _cachedDiskPath = diskPath;
+    }
 
     /// <summary>All schematic files found on disk, sorted by cabinet name. Cached per disk path
     /// until InvalidateCache().</summary>
@@ -72,7 +98,7 @@ public class SchematicService
 
     private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord)
     {
-        var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tokens = QueryTokens(query);
         if (tokens.Length == 0) return new();
 
         return Scanned(diskPath)
@@ -82,12 +108,32 @@ public class SchematicService
             .ToList();
     }
 
+    /// <summary>Слова запроса в том же нормализованном виде, в каком с ними сверяется MatchesCore —
+    /// нужны отдельно тому, кто фильтрует выдачу по одному файлу за раз (потоковый обход, см.
+    /// EnsureScanned/HitMatches), а не списком целиком.</summary>
+    public static string[] QueryTokens(string query) =>
+        SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>Подходит ли уже найденный файл под запрос — ровно то же правило, что и в MatchesCore,
+    /// но по одному файлу: так потоковый обход решает, показывать ли файл, не дожидаясь конца.
+    /// Текст для сверки восстанавливается из самого результата (папка-шкаф + имя файла) — для файла
+    /// прямо в корне это даёт имя дважды («НГР-205 НГР-205» вместо «НГР-205»), что на результат не
+    /// влияет ни при поиске подстроки, ни при поиске целого слова.</summary>
+    public static bool HitMatches(SchematicHit hit, IReadOnlyList<string> tokens, bool exactWord)
+    {
+        if (tokens.Count == 0) return false;
+        var text = $"{hit.CabinetName} {System.IO.Path.GetFileNameWithoutExtension(hit.Path)}".ToUpperInvariant();
+        foreach (var token in tokens)
+            if (!TokenMatches(token, text, exactWord)) return false;
+        return true;
+    }
+
     private List<ScannedFile> Scanned(string diskPath)
     {
         if (string.IsNullOrEmpty(diskPath) || !Directory.Exists(diskPath)) return new();
         if (_cachedDiskPath == diskPath) return _cache;
 
-        _cache = Scan(diskPath);
+        _cache = Scan(diskPath, CancellationToken.None, null);
         _cachedDiskPath = diskPath;
         return _cache;
     }
@@ -99,7 +145,7 @@ public class SchematicService
         return WordSplitter.Split(upperField).Any(w => w == token);
     }
 
-    private static List<ScannedFile> Scan(string diskPath)
+    private static List<ScannedFile> Scan(string diskPath, CancellationToken ct, Action<SchematicHit>? onFound)
     {
         var hits = new List<ScannedFile>();
         var rootFull = System.IO.Path.GetFullPath(diskPath)
@@ -108,6 +154,10 @@ public class SchematicService
         {
             foreach (var file in Directory.EnumerateFiles(diskPath, "*", SearchOption.AllDirectories))
             {
+                // Проверка на каждом файле, а не раз в N: сам EnumerateFiles по сетевой шаре может
+                // «задуматься» на папке, но между файлами прерывание отрабатывает сразу.
+                ct.ThrowIfCancellationRequested();
+
                 var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
                 if (!SchematicExtensions.Contains(ext)) continue;
 
@@ -126,6 +176,7 @@ public class SchematicService
                 var matchText = groupedByFolder ? $"{parentName} {fileNameNoExt}" : fileNameNoExt;
 
                 hits.Add(new ScannedFile(cabinetName, matchText.ToUpperInvariant(), file));
+                onFound?.Invoke(new SchematicHit(cabinetName, file));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

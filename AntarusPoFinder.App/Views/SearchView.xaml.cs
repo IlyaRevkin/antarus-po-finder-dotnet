@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
@@ -607,15 +608,72 @@ public partial class SearchView : UserControl
         return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
     }
 
-    /// <summary>Обход второго диска, который выполняет прямо сейчас фоновая задача EnsureScanned —
-    /// null, когда ничего не идёт. Ключ дедупликации — путь диска: пока обход конкретного диска не
-    /// завершился, повторный поиск по Схемам (второй клик «Найти», фоновый RefreshIfActive, смена
-    /// фильтра/режима) ждёт ТУ ЖЕ задачу вместо второго параллельного Directory.EnumerateFiles по тем
-    /// же сотням гигабайт.</summary>
-    private Task? _schemasScanTask;
-    private string? _schemasScanDiskPath;
+    /// <summary>Обход второго диска, идущий прямо сейчас — null, когда ничего не идёт. Обход всегда
+    /// РОВНО ОДИН: он не привязан к запросу (просто читает диск), поэтому повторное «Найти» его не
+    /// дублирует, а только переставляет фильтр выдачи (см. PerformSchemasSearchAsync). Именно на
+    /// дубликатах и росла очередь фоновых операций у оператора: каждое нажатие вешало свой обход и
+    /// свой индикатор занятости, пять нажатий — пять обходов одной и той же сетевой шары.</summary>
+    private SchemasScan? _schemasScan;
+
+    /// <summary>Больше этого числа карточек за один поиск по схемам не рисуем: обход диска сыплет
+    /// совпадения по ходу дела, и на слишком общем запросе («а») их набралось бы столько, что окно
+    /// встало бы на отрисовке — ровно та беда, от которой этот поиск и уводили в фон. Счётчик
+    /// найденного при этом продолжает считать всё (см. SchemasScan.Matched), оператор видит, что
+    /// показано не всё.</summary>
+    private const int MaxSchemaCardsShown = 300;
+
+    /// <summary>Состояние одного обхода второго диска: что уже найдено на диске (Found — все файлы
+    /// схем, независимо от запроса) и по какому запросу это сейчас фильтруется. Found пополняется на
+    /// фоновом потоке обхода, а перечитывается на потоке интерфейса при смене запроса — отсюда Sync.
+    /// Tokens/ExactWord/Generation, наоборот, пишет только поток интерфейса, а читает фоновый: под тем
+    /// же замком, чтобы обход не отфильтровал пачку по половине нового запроса.</summary>
+    private sealed class SchemasScan
+    {
+        public required string DiskPath { get; init; }
+        public required CancellationTokenSource Cts { get; init; }
+        public object Sync { get; } = new();
+
+        /// <summary>Все файлы схем, которые обход уже нашёл — по ним выдача перерисовывается
+        /// мгновенно, когда оператор меняет запрос, не дожидаясь конца обхода.</summary>
+        public List<SchematicHit> Found { get; } = new();
+
+        public string[] Tokens { get; set; } = Array.Empty<string>();
+        public bool ExactWord { get; set; }
+        public string Query { get; set; } = "";
+
+        /// <summary>Поколение поиска, для которого сейчас рисуется выдача — см. _searchGeneration.</summary>
+        public int Generation { get; set; }
+
+        /// <summary>Номер текущего фильтра — растёт на каждую смену запроса у ЖИВОГО обхода
+        /// (RetargetSchemasScan). Совпадения едут на поток интерфейса через Dispatcher, и без этого
+        /// номера уже отправленные в очередь карточки по СТАРОМУ запросу дорисовались бы поверх
+        /// выдачи нового: проверки одного лишь Generation тут мало — при смене запроса обход остаётся
+        /// тем же самым и его Generation тоже становится новым.</summary>
+        public int FilterEpoch { get; set; }
+
+        /// <summary>Сколько совпало и сколько из них реально нарисовано (см. MaxSchemaCardsShown).</summary>
+        public int Matched { get; set; }
+        public int Shown { get; set; }
+    }
 
     private void PerformSchemasSearch(string query) => _ = PerformSchemasSearchAsync(query, _searchGeneration);
+
+    /// <summary>Кнопка «Остановить» — прерывает идущий обход второго диска. Уже показанные карточки
+    /// остаются на экране: оператор жмёт её именно тогда, когда нужное уже нашлось.</summary>
+    private void StopSearch_Click(object sender, RoutedEventArgs e)
+    {
+        var scan = _schemasScan;
+        if (scan is null) return;
+        try { scan.Cts.Cancel(); } catch (ObjectDisposedException) { /* обход уже завершился сам */ }
+        StopSearchButton.IsEnabled = false;
+    }
+
+    private void UpdateStopButton()
+    {
+        var running = _schemasScan is not null;
+        StopSearchButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        StopSearchButton.IsEnabled = running;
+    }
 
     /// <summary>Асинхронная версия поиска по Схемам. Единственная по-настоящему медленная часть —
     /// обход второго диска в SchematicService: сетевая шара бывает под 400 ГБ, и Directory.
@@ -633,7 +691,16 @@ public partial class SearchView : UserControl
     ///
     /// generation — тот же приём, что и в ScanDiskFlagsAsync/AutoSyncMissingAsync: если за время обхода
     /// стартовал новый поиск (другой запрос, режим или фильтр), устаревшая выдача просто не рисуется —
-    /// новая уже отрисована собственным запуском этого же метода.</summary>
+    /// новая уже отрисована собственным запуском этого же метода.
+    ///
+    /// Три вещи, которых здесь раньше не было и по которым пришли жалобы:
+    /// 1. Обход РОВНО ОДИН на диск. Раньше повторное «Найти» дожидалось той же задачи, но заводило свой
+    ///    индикатор занятости — у оператора «росла очередь» ровно из этих ожиданий. Теперь второе
+    ///    нажатие вообще не начинает новую операцию: обход к запросу не привязан, ему просто
+    ///    переставляют фильтр.
+    /// 2. Выдача появляется ПО ХОДУ обхода (onFound), а не после него — 400 ГБ шара читается минутами,
+    ///    и всё это время экран был пуст.
+    /// 3. Обход прерывается кнопкой «Остановить» — увидел нужное, дальше читать диск незачем.</summary>
     private async Task PerformSchemasSearchAsync(string query, int generation)
     {
         var diskPath = _services.Cfg.SecondDiskPath();
@@ -645,39 +712,124 @@ public partial class SearchView : UserControl
             return;
         }
 
-        const string schemaNotFoundHint = "Схема не найдена — проверьте название шкафа или второй диск";
         var exact = ExactWordCheck.IsChecked == true;
+        var tokens = SchematicService.QueryTokens(query);
 
-        using var busy = _host.BeginBusy("Чтение второго диска…");
-
-        // Проверка/присваивание ниже — синхронный код до первого await, выполняется целиком на потоке
-        // интерфейса без прерываний, а SearchView — единственный потребитель SchematicService (одна
-        // страница, живёт в кэше вкладок MainWindowViewModel), поэтому гонки с другим вызовом этого же
-        // метода здесь быть не может — то же рассуждение, что и у _searchGeneration.
-        if (_schemasScanTask is null || _schemasScanDiskPath != diskPath)
+        // Обход этого же диска уже идёт — новый не запускаем (см. п.1 в комментарии выше), а
+        // перенацеливаем текущий на новый запрос: то, что диск успел отдать, перерисовывается сразу,
+        // остальное дорисуется по мере обхода.
+        if (_schemasScan is { } running && running.DiskPath == diskPath)
         {
-            _schemasScanDiskPath = diskPath;
-            _schemasScanTask = Task.Run(() => _services.Schematics.EnsureScanned(diskPath));
-        }
-        var scanTask = _schemasScanTask;
-
-        try { await scanTask; }
-        finally
-        {
-            // Обход этого диска завершён (успешно или с ошибкой) — следующий поиск прогревает кэш
-            // заново своим Task.Run; если диск не поменялся, SchematicService.Scanned() сам увидит
-            // валидный кэш и вернёт его почти мгновенно, так что это не лишний обход с нуля.
-            if (ReferenceEquals(_schemasScanTask, scanTask)) { _schemasScanTask = null; _schemasScanDiskPath = null; }
+            RetargetSchemasScan(running, query, tokens, exact, generation);
+            return;
         }
 
-        // Выдача уже устарела — другой поиск запустился и закончился (или ещё идёт) поверх этого.
-        if (generation != _searchGeneration) return;
+        // Диск уже обойден в этой сессии (обычный случай для второго и следующих поисков) — фильтруем
+        // готовый список в памяти, без фона, индикатора занятости и кнопки «Остановить».
+        if (_services.Schematics.IsScanned(diskPath))
+        {
+            ShowSchemasFromCache(diskPath, query, exact);
+            return;
+        }
 
+        var scan = new SchemasScan
+        {
+            DiskPath = diskPath,
+            Cts = new CancellationTokenSource(),
+            Tokens = tokens,
+            ExactWord = exact,
+            Query = query,
+            Generation = generation,
+        };
+        _schemasScan = scan;
+        UpdateStopButton();
+        StatusLabel.Text = "Чтение второго диска… найдено: 0";
+
+        var cancelled = false;
+        using (_host.BeginBusy("Чтение второго диска…"))
+        {
+            try
+            {
+                await Task.Run(() => _services.Schematics.EnsureScanned(diskPath, scan.Cts.Token,
+                    hit => OnSchemaFileFound(scan, hit)));
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled = true;
+            }
+            finally
+            {
+                if (ReferenceEquals(_schemasScan, scan)) _schemasScan = null;
+                scan.Cts.Dispose();
+                UpdateStopButton();
+            }
+        }
+
+        // Выдача уже устарела — поверх этого поиска запустился другой (сменили режим/запрос так, что
+        // обход стал не нужен). Рисовать итог нечего: экраном владеет тот, другой поиск.
+        if (scan.Generation != _searchGeneration) return;
+
+        if (cancelled)
+        {
+            StatusLabel.Text = scan.Matched > 0
+                ? $"Поиск остановлен — найдено: {ShownOf(scan)}"
+                : "Поиск остановлен — диск прочитан не полностью";
+            if (scan.Matched == 0)
+            {
+                EmptyLabel.Text = "Поиск остановлен до того, как что-то нашлось — нажмите «Найти», чтобы прочитать диск заново";
+                EmptyLabel.Visibility = Visibility.Visible;
+            }
+            return;
+        }
+
+        FinishSchemasScan(scan);
+    }
+
+    private const string SchemaNotFoundHint = "Схема не найдена — проверьте название шкафа или второй диск";
+
+    /// <summary>Сколько найдено и сколько из этого показано — вторая часть появляется, только если
+    /// упёрлись в потолок отрисовки.</summary>
+    private static string ShownOf(SchemasScan scan) =>
+        scan.Matched > scan.Shown ? $"{scan.Matched} (показаны первые {scan.Shown})" : scan.Matched.ToString();
+
+    /// <summary>Оператор нажал «Найти» с другим запросом, пока диск ещё читается. Обход общий и
+    /// продолжается, меняется только то, что из него показывать.</summary>
+    private void RetargetSchemasScan(SchemasScan scan, string query, string[] tokens, bool exact, int generation)
+    {
+        List<SchematicHit> alreadyFound;
+        lock (scan.Sync)
+        {
+            scan.Tokens = tokens;
+            scan.ExactWord = exact;
+            scan.Query = query;
+            scan.Generation = generation;
+            scan.FilterEpoch++;
+            scan.Matched = 0;
+            scan.Shown = 0;
+            alreadyFound = new List<SchematicHit>(scan.Found);
+        }
+
+        ResultsPanel.Children.Clear();
+        foreach (var hit in alreadyFound)
+        {
+            if (!SchematicService.HitMatches(hit, tokens, exact)) continue;
+            AddSchemaCard(scan, hit);
+        }
+        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
+        EmptyLabel.Visibility = scan.Shown > 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (scan.Shown == 0) EmptyLabel.Text = "Диск ещё читается — совпадений пока нет";
+    }
+
+    /// <summary>Диск уже обойден: выдача целиком, сразу и в привычном порядке (по названию шкафа).
+    /// Здесь же — вопрос про раскладку клавиатуры: он имеет смысл только когда точно известно, что по
+    /// набранному не нашлось ничего, а на середине обхода это ещё не известно.</summary>
+    private void ShowSchemasFromCache(string diskPath, string query, bool exact)
+    {
         var hits = _services.Schematics.Matches(diskPath, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
         if (hits.Count == 0)
         {
-            ShowNoResults(query, schemaNotFoundHint);
+            ShowNoResults(query, SchemaNotFoundHint);
             return;
         }
 
@@ -686,7 +838,54 @@ public partial class SearchView : UserControl
             ResultsPanel.Children.Add(MakeSchematicCard(hit));
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
-            ShowNoResults(query, schemaNotFoundHint);
+            ShowNoResults(query, SchemaNotFoundHint);
+    }
+
+    /// <summary>Обход дошёл до конца. Если по набранному не нашлось ничего — только теперь это точно
+    /// известно, и можно предложить ту же выдачу в другой раскладке клавиатуры (кэш уже тёплый, так
+    /// что перепроверка стоит копейки).</summary>
+    private void FinishSchemasScan(SchemasScan scan)
+    {
+        if (scan.Matched == 0)
+        {
+            ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord);
+            return;
+        }
+        StatusLabel.Text = $"Найдено: {ShownOf(scan)}";
+    }
+
+    /// <summary>Обход нашёл очередной файл схемы — вызывается на ФОНОВОМ потоке. Фильтр применяется
+    /// здесь же, под замком (запрос мог смениться прямо сейчас), и на поток интерфейса уходят только
+    /// совпадения: их единицы-десятки, а файлов на диске — сотни тысяч.</summary>
+    private void OnSchemaFileFound(SchemasScan scan, SchematicHit hit)
+    {
+        bool matched;
+        int epoch;
+        lock (scan.Sync)
+        {
+            scan.Found.Add(hit);
+            matched = SchematicService.HitMatches(hit, scan.Tokens, scan.ExactWord);
+            epoch = scan.FilterEpoch;
+        }
+        if (!matched) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            // Пока карточка ехала на поток интерфейса, поиск мог смениться — тогда она уже не наша.
+            if (!ReferenceEquals(_schemasScan, scan) || scan.Generation != _searchGeneration) return;
+            if (scan.FilterEpoch != epoch) return;
+            AddSchemaCard(scan, hit);
+            StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
+        }));
+    }
+
+    private void AddSchemaCard(SchemasScan scan, SchematicHit hit)
+    {
+        scan.Matched++;
+        if (scan.Shown >= MaxSchemaCardsShown) return;
+        scan.Shown++;
+        EmptyLabel.Visibility = Visibility.Collapsed;
+        ResultsPanel.Children.Add(MakeSchematicCard(hit));
     }
 
     // ── Keyboard-layout fallback prompt / learning ──────────────────────────
@@ -809,7 +1008,7 @@ public partial class SearchView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
+        EditFirmwareDialog.ReportChanges(dlg, _host);
         _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }

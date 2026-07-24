@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using AntarusPoFinder.Core.Services;
 using Xunit;
 
@@ -118,5 +120,90 @@ public class SchematicServiceTests : IDisposable
         service.EnsureScanned(_root);
         var all = service.CabinetHits(_root);
         Assert.Equal(6, all.Count); // 2 (ПЖ-101) + 1 (НГР-205) + 1 (КПЧ-9) + 1 (КПЧ-12) + 1 (НАСОС-5)
+    }
+
+    /// <summary>Выдача должна появляться ПО ХОДУ обхода, а не после него: диск на 400 ГБ читается
+    /// минутами, и всё это время экран был пуст. onFound зовётся на каждый найденный файл.</summary>
+    [Fact]
+    public void EnsureScanned_ReportsEveryFileWhileWalking_NotOnlyAtTheEnd()
+    {
+        var streamed = new List<SchematicHit>();
+        new SchematicService().EnsureScanned(_root, CancellationToken.None, h => streamed.Add(h));
+        Assert.Equal(6, streamed.Count);
+        Assert.Contains(streamed, h => h.CabinetName == "НГР-205");
+    }
+
+    /// <summary>Тёплый кэш обходить нечего — обработчик не зовётся вовсе, иначе повторный поиск
+    /// перерисовывал бы выдачу дважды.</summary>
+    [Fact]
+    public void EnsureScanned_WarmCache_DoesNotStreamAgain()
+    {
+        var service = new SchematicService();
+        service.EnsureScanned(_root);
+
+        var streamed = new List<SchematicHit>();
+        service.EnsureScanned(_root, CancellationToken.None, h => streamed.Add(h));
+        Assert.Empty(streamed);
+    }
+
+    /// <summary>Кнопка «Остановить». Прерванный обход НЕ должен запоминаться как полный: иначе
+    /// следующий поиск принял бы обрезанный список за весь диск и «терял» бы половину шкафов до
+    /// перезапуска программы.</summary>
+    [Fact]
+    public void EnsureScanned_Cancelled_ThrowsAndLeavesCacheCold()
+    {
+        var service = new SchematicService();
+        using var cts = new CancellationTokenSource();
+        var streamed = 0;
+
+        Assert.Throws<OperationCanceledException>(() =>
+            service.EnsureScanned(_root, cts.Token, _ => { streamed++; cts.Cancel(); }));
+
+        Assert.Equal(1, streamed);              // прервались сразу после первого же файла
+        Assert.False(service.IsScanned(_root)); // кэш холодный — следующий поиск прочитает диск целиком
+    }
+
+    /// <summary>IsScanned — то, по чему SearchView решает, показывать ли индикатор занятости и кнопку
+    /// «Остановить»: для готового списка в памяти они только мешают.</summary>
+    [Fact]
+    public void IsScanned_FalseBeforeWalk_TrueAfter()
+    {
+        var service = new SchematicService();
+        Assert.False(service.IsScanned(_root));
+        service.EnsureScanned(_root);
+        Assert.True(service.IsScanned(_root));
+    }
+
+    /// <summary>Потоковый фильтр (по одному файлу, HitMatches) обязан давать ровно ту же выдачу, что
+    /// и обычный Matches по готовому списку — иначе «остановил на середине» и «дождался конца» дали бы
+    /// разные результаты по одному и тому же запросу.</summary>
+    [Theory]
+    [InlineData("ПЧ", false)]
+    [InlineData("ПЧ", true)]
+    [InlineData("ПЖ-101", false)]
+    [InlineData("НГР", false)]
+    public void HitMatches_PerFile_AgreesWithMatches_OverWholeList(string query, bool exactWord)
+    {
+        var service = new SchematicService();
+        var tokens = SchematicService.QueryTokens(query);
+
+        var streamed = new List<SchematicHit>();
+        service.EnsureScanned(_root, CancellationToken.None, h =>
+        {
+            if (SchematicService.HitMatches(h, tokens, exactWord)) streamed.Add(h);
+        });
+
+        var byList = service.Matches(_root, query, exactWord);
+        Assert.Equal(byList.Select(h => h.Path).OrderBy(p => p, StringComparer.Ordinal),
+                     streamed.Select(h => h.Path).OrderBy(p => p, StringComparer.Ordinal));
+    }
+
+    /// <summary>Пустой запрос не должен «совпадать со всем»: на середине обхода это залило бы экран
+    /// всеми файлами диска подряд.</summary>
+    [Fact]
+    public void HitMatches_EmptyQuery_MatchesNothing()
+    {
+        var hit = new SchematicHit("НГР-205", Path.Combine(_root, "Территория 2", "НГР-205", "схема.pdf"));
+        Assert.False(SchematicService.HitMatches(hit, SchematicService.QueryTokens(""), exactWord: false));
     }
 }
