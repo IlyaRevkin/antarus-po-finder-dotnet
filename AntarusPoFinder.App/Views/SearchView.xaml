@@ -46,12 +46,22 @@
                 Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                 BorderThickness="1" CornerRadius="6" Padding="10">
             <StackPanel>
+                <!-- Фильтры по расширению — только для режима «Схемы»: у прошивок расширение задаёт
+                     не оператор, а то, что лежит в папке версии. Раньше панель фильтров была одна на
+                     все три режима и в «Схемах» просто ничего не делала («фильтры в схемах же не
+                     работают») — теперь у каждого режима свой набор, а в «Параметрах», где фильтров
+                     нет вовсе, кнопка «Фильтры» не показывается (см. UpdateFiltersButton). -->
+                <StackPanel x:Name="SchemaFiltersPanel" Visibility="Collapsed">
+                    <TextBlock Text="Расширение файла" Style="{StaticResource MutedText}" Margin="0,0,0,4"/>
+                    <WrapPanel x:Name="SchemaExtPanel"/>
+                </StackPanel>
+
                 <!-- Единая ширина колонки (170) на все четыре фильтра — раньше у каждого комбобокса
                      было своё случайное значение (170/170/150/130/230), и ряд выглядел рваным,
                      особенно после переноса на вторую строку в узком окне. Ширина задана на
                      StackPanel-обёртке, а не на самом ComboBox — только так и подпись, и поле
                      растягиваются на одинаковую ширину колонки. -->
-                <WrapPanel>
+                <WrapPanel x:Name="FirmwareFiltersPanel">
                     <StackPanel Width="170" Margin="0,0,12,8">
                         <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}"/>
                         <ComboBox x:Name="FilterGroupCombo" Height="30" DisplayMemberPath="Label"
@@ -72,22 +82,18 @@
                         <ComboBox x:Name="FilterLaunchCombo" Height="30" DisplayMemberPath="Label"
                                   SelectionChanged="Filter_Changed"/>
                     </StackPanel>
-                    <!-- Как и у SecondaryButton, вертикальный Padding (8+8) плюс рамка (1+1) требуют
-                         примерно 34px на содержимое — жёсткий Height="28" (как у соседних
-                         ComboBox-полей ряда) не уменьшал этот padding, а просто обрезал
-                         ContentPresenter, из-за чего надпись "Сбросить фильтры" была видна не целиком.
-                         CompactSecondaryButton — тот же вид кнопки с уменьшенным padding и MinHeight
-                         вместо Height (см. её комментарий в Styles.xaml, сделана ровно для этого
-                         случая: компактный ряд кнопок рядом с невысокими полями) — кнопка становится
-                         на пару пикселей выше соседних комбобоксов, но текст внутри не обрезается. -->
-                    <Button Content="Сбросить фильтры" Style="{StaticResource CompactSecondaryButton}"
-                            VerticalAlignment="Bottom" Margin="0,0,0,8" Click="ResetFilters_Click"/>
                 </WrapPanel>
+                <!-- Кнопка сброса — общая на оба набора и вынесена из WrapPanel прошивок, иначе в
+                     режиме «Схемы» (где этот WrapPanel скрыт целиком) сбросить фильтр расширений было
+                     бы нечем. CompactSecondaryButton, а не SecondaryButton: у последнего вертикальный
+                     padding (8+8) плюс рамка обрезали бы надпись в компактном ряду — см. её
+                     комментарий в Styles.xaml. -->
+                <Button x:Name="ResetFiltersButton" Content="Сбросить фильтры" Style="{StaticResource CompactSecondaryButton}"
+                        HorizontalAlignment="Left" Margin="0,4,0,8" Click="ResetFilters_Click"/>
                 <!-- Поиск по тегу теперь идёт из обычной строки поиска (см. SearchInput) — тег с
                      точным совпадением слова сворачивает выдачу до одной прошивки, см.
                      Database.SearchFwVersions. Отдельного фильтра «Тег» здесь больше нет. -->
-                <TextBlock x:Name="FiltersHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
-                           Text="Фильтры действуют только для поиска по прошивкам. С пустым запросом покажет всё, что подходит под фильтры. Поиск по тегу — прямо в строке поиска (с «Точное совпадение слова» найдёт ровно нужный шкаф)."/>
+                <TextBlock x:Name="FiltersHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 

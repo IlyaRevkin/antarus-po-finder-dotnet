@@ -236,4 +236,39 @@ public class SchematicServiceTests : IDisposable
         var hit = new SchematicHit("НГР-205", Path.Combine(_root, "Территория 2", "НГР-205", "схема.pdf"));
         Assert.False(SchematicService.HitMatches(hit, SchematicService.QueryTokens(""), exactWord: false));
     }
+
+    // ── Фильтр по расширению ──────────────────────────────────────────────
+    // Рядом со схемой в PDF лежит её же исходник в DWG и фотографии шкафа — фильтр нужен, чтобы
+    // выдача по шкафу состояла из того, что нужно прямо сейчас.
+
+    [Fact]
+    public void Matches_ExtensionFilter_KeepsOnlyChosenFormats()
+    {
+        File.WriteAllText(Path.Combine(_root, "Территория 1", "ПЖ-101", "схема.dwg"), "x");
+        var service = new SchematicService();
+
+        var onlyDwg = service.Matches(_root, "ПЖ-101", exactWord: false, allowFallback: false,
+            out _, out _, new[] { ".dwg" });
+        Assert.Equal(Path.Combine(_root, "Территория 1", "ПЖ-101", "схема.dwg"), Assert.Single(onlyDwg).Path);
+
+        var pdfAndDwg = service.Matches(_root, "ПЖ-101", exactWord: false, allowFallback: false,
+            out _, out _, new[] { ".dwg", ".pdf" });
+        Assert.Equal(3, pdfAndDwg.Count);
+    }
+
+    /// <summary>Ничего не отмечено — фильтр не задан, а не «не подходит ничего»: пустая галочная
+    /// группа обязана означать «любое расширение», иначе выдача пропадала бы до первого клика.</summary>
+    [Fact]
+    public void Matches_EmptyExtensionFilter_MeansAnyExtension()
+    {
+        var service = new SchematicService();
+        var all = service.Matches(_root, "ПЖ-101", exactWord: false, allowFallback: false,
+            out _, out _, Array.Empty<string>());
+        Assert.Equal(2, all.Count);
+
+        var hit = new SchematicHit("ПЖ-101", Path.Combine(_root, "Территория 1", "ПЖ-101", "схема.pdf"));
+        Assert.True(SchematicService.HitMatchesExtension(hit, null));
+        Assert.True(SchematicService.HitMatchesExtension(hit, Array.Empty<string>()));
+        Assert.False(SchematicService.HitMatchesExtension(hit, new[] { ".dwg" }));
+    }
 }

@@ -77,6 +77,15 @@ public partial class SearchView : UserControl
 
     private sealed record FilterOption(string Label, int? Id = null, string? Text = null);
 
+    private enum SearchMode { Firmware, Params, Schemas }
+
+    /// <summary>Что сейчас выбрано в трёхпозиционном переключателе. Через null-условные обращения:
+    /// FwModeRadio.IsChecked="True" в XAML поднимает Checked ещё до того, как соседним радиокнопкам
+    /// присвоены поля x:Name (см. AnimateModeThumb).</summary>
+    private SearchMode CurrentMode =>
+        SchemasModeRadio?.IsChecked == true ? SearchMode.Schemas :
+        ParamsModeRadio?.IsChecked == true ? SearchMode.Params : SearchMode.Firmware;
+
     private bool FiltersVisible => FiltersPanel.Visibility == Visibility.Visible;
 
     private void ToggleFilters_Click(object sender, RoutedEventArgs e)
@@ -84,32 +93,114 @@ public partial class SearchView : UserControl
         if (FiltersVisible)
         {
             FiltersPanel.Visibility = Visibility.Collapsed;
-            FiltersToggle.Content = ActiveFilters().IsEmpty ? "Фильтры ▾" : "Фильтры ▾ ●";
+            UpdateFiltersButton();
             return;
         }
 
         ReloadFilterOptions();
         FiltersPanel.Visibility = Visibility.Visible;
-        FiltersToggle.Content = "Фильтры ▴";
+        UpdateFiltersButton();
     }
 
     private void ReloadFilterOptions()
     {
         var groups = _services.Db.GetAllEquipmentGroups();
-        var subtypes = _services.Db.GetAllEquipmentSubtypes();
         var controllers = _services.Db.GetAllControllerModels();
 
         FillFilter(FilterGroupCombo, "Тип шкафа: любой",
             groups.Where(g => g.Id is not null).Select(g => new FilterOption(g.Name, g.Id)));
-        FillFilter(FilterSubtypeCombo, "Подтип: любой",
-            subtypes.Where(s => s.Id is not null && s.Name != "—").Select(s => new FilterOption(s.Name, s.Id)));
+        ReloadSubtypeFilter();
         FillFilter(FilterControllerCombo, "Контроллер: любой",
             controllers.Where(c => c.Id is not null).Select(c => new FilterOption(c.Name, c.Id)));
         FillFilter(FilterLaunchCombo, "Тип пуска: любой",
             ConfigService.LaunchTypes.Select(lt => new FilterOption(lt, null, lt)));
+        BuildSchemaExtensionChecks();
+        ApplyModeToFilters();
     }
 
-    private static void FillFilter(ComboBox combo, string anyLabel, IEnumerable<FilterOption> options)
+    /// <summary>Подтипы — только выбранного типа шкафа. Раньше список был общий на всю базу, и при
+    /// выбранном «ПЖ» в нём предлагались подтипы НГР и всех остальных типов: выбрать такую пару значило
+    /// гарантированно получить пустую выдачу (запись не может одновременно принадлежать типу ПЖ и
+    /// подтипу из НГР). Тип не выбран — показываем все подтипы, как и раньше.</summary>
+    private void ReloadSubtypeFilter()
+    {
+        var groupId = (FilterGroupCombo.SelectedItem as FilterOption)?.Id;
+        var subtypes = groupId is null
+            ? _services.Db.GetAllEquipmentSubtypes()
+            : _services.Db.GetSubtypesForGroup(groupId.Value);
+        FillFilter(FilterSubtypeCombo, "Подтип: любой",
+            subtypes.Where(s => s.Id is not null && s.Name != "—").Select(s => new FilterOption(s.Name, s.Id)));
+    }
+
+    // ── Фильтр по расширению (только «Схемы») ─────────────────────────────
+    // Рядом со схемой в PDF на диске лежит её же исходник в DWG и десяток фотографий шкафа — без
+    // этого фильтра половина выдачи по шкафу состоит не из того, что нужно прямо сейчас.
+
+    /// <summary>Подпись → расширения, которые она включает. Пары (.jpg/.jpeg, .tif/.tiff) — одна
+    /// галочка: для оператора это одно и то же «фотография»/«скан», а не два разных формата.</summary>
+    private static readonly (string Label, string[] Extensions)[] SchemaExtensionOptions =
+    {
+        ("PDF", new[] { ".pdf" }),
+        ("DWG", new[] { ".dwg" }),
+        ("DXF", new[] { ".dxf" }),
+        ("JPG", new[] { ".jpg", ".jpeg" }),
+        ("PNG", new[] { ".png" }),
+        ("TIFF", new[] { ".tif", ".tiff" }),
+        ("BMP", new[] { ".bmp" }),
+    };
+
+    private readonly List<(CheckBox Check, string[] Extensions)> _schemaExtChecks = new();
+
+    private void BuildSchemaExtensionChecks()
+    {
+        if (_schemaExtChecks.Count > 0) return; // набор расширений постоянный — строить заново незачем
+        foreach (var (label, extensions) in SchemaExtensionOptions)
+        {
+            var cb = new CheckBox { Content = label, Margin = new Thickness(0, 0, 14, 6) };
+            cb.Checked += SchemaExtension_Changed;
+            cb.Unchecked += SchemaExtension_Changed;
+            _schemaExtChecks.Add((cb, extensions));
+            SchemaExtPanel.Children.Add(cb);
+        }
+    }
+
+    private void SchemaExtension_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_fillingFilters) return;
+        UpdateFiltersButton();
+        if (CurrentMode == SearchMode.Schemas) PerformSearch();
+    }
+
+    /// <summary>Отмеченные расширения. Пустой набор — фильтр не задан, подходит любое расширение
+    /// (см. SchematicService.HitMatchesExtension).</summary>
+    private HashSet<string> ActiveSchemaExtensions() =>
+        _schemaExtChecks.Where(c => c.Check.IsChecked == true)
+            .SelectMany(c => c.Extensions)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private const string FirmwareFiltersHint =
+        "С пустым запросом покажет всё, что подходит под фильтры. Поиск по тегу — прямо в строке поиска (с «Точное совпадение слова» найдёт ровно нужный шкаф).";
+    private const string SchemaFiltersHint =
+        "Показывать только файлы выбранных форматов. Ничего не отмечено — показываются все.";
+
+    /// <summary>У каждого режима поиска свой набор фильтров: у прошивок — справочники, у схем —
+    /// расширение файла, у параметров фильтров нет вовсе (и кнопка «Фильтры» там не показывается, а
+    /// не висит, ничего не делая — на это и была жалоба).</summary>
+    private void ApplyModeToFilters()
+    {
+        if (FiltersToggle is null) return;
+        var mode = CurrentMode;
+        FirmwareFiltersPanel.Visibility = mode == SearchMode.Firmware ? Visibility.Visible : Visibility.Collapsed;
+        SchemaFiltersPanel.Visibility = mode == SearchMode.Schemas ? Visibility.Visible : Visibility.Collapsed;
+        FiltersHint.Text = mode == SearchMode.Schemas ? SchemaFiltersHint : FirmwareFiltersHint;
+        if (mode == SearchMode.Params) FiltersPanel.Visibility = Visibility.Collapsed;
+        UpdateFiltersButton();
+    }
+
+    /// <summary>Наполнение идёт под флагом _fillingFilters: смена ItemsSource/SelectedIndex поднимает
+    /// SelectionChanged, и без флага перезаполнение подтипов после смены типа шкафа запускало бы
+    /// поиск ещё раз (а по схемам — ещё один обход диска).</summary>
+    private void FillFilter(ComboBox combo, string anyLabel, IEnumerable<FilterOption> options)
     {
         var previous = (combo.SelectedItem as FilterOption)?.Label;
         var items = new List<FilterOption> { new(anyLabel) };
@@ -117,12 +208,29 @@ public partial class SearchView : UserControl
             .Where(o => !string.IsNullOrWhiteSpace(o.Label))
             .GroupBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase).Select(g => g.First())
             .OrderBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase));
-        combo.ItemsSource = items;
-        var restored = previous is null ? 0 : items.FindIndex(o => o.Label == previous);
-        combo.SelectedIndex = restored < 0 ? 0 : restored;
+
+        var wasFilling = _fillingFilters;
+        _fillingFilters = true;
+        try
+        {
+            combo.ItemsSource = items;
+            var restored = previous is null ? 0 : items.FindIndex(o => o.Label == previous);
+            combo.SelectedIndex = restored < 0 ? 0 : restored;
+        }
+        finally { _fillingFilters = wasFilling; }
     }
 
-    private void Filter_Changed(object sender, SelectionChangedEventArgs e) => PerformSearch();
+    /// <summary>true, пока списки фильтров наполняются кодом — SelectionChanged, который при этом
+    /// поднимает сам ComboBox, не должен ни перезапускать поиск, ни пересобирать соседний список.</summary>
+    private bool _fillingFilters;
+
+    private void Filter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingFilters) return;
+        // Сменили тип шкафа — список подтипов обязан сузиться до подтипов этого типа.
+        if (ReferenceEquals(sender, FilterGroupCombo)) ReloadSubtypeFilter();
+        PerformSearch();
+    }
 
     private void ResetFilters_Click(object sender, RoutedEventArgs e)
     {
@@ -133,8 +241,15 @@ public partial class SearchView : UserControl
 
     private void ResetFilterCombos()
     {
-        foreach (var combo in new[] { FilterGroupCombo, FilterSubtypeCombo, FilterControllerCombo, FilterLaunchCombo })
-            if (combo.Items.Count > 0) combo.SelectedIndex = 0;
+        _fillingFilters = true;
+        try
+        {
+            foreach (var combo in new[] { FilterGroupCombo, FilterSubtypeCombo, FilterControllerCombo, FilterLaunchCombo })
+                if (combo.Items.Count > 0) combo.SelectedIndex = 0;
+            foreach (var (check, _) in _schemaExtChecks) check.IsChecked = false;
+        }
+        finally { _fillingFilters = false; }
+        ReloadSubtypeFilter();
     }
 
     /// <summary>Что выбрано в панели фильтров прямо сейчас. Свёрнутая панель фильтры НЕ отменяет —
@@ -151,10 +266,22 @@ public partial class SearchView : UserControl
         };
     }
 
+    /// <summary>Кнопка показывает состояние фильтров ТОГО режима, который сейчас выбран, и вовсе
+    /// исчезает в «Параметрах», где фильтров нет: кнопка, которая открывает пустую панель, — это ровно
+    /// то, на что жаловался оператор («фильтры в схемах же не работают»).</summary>
     private void UpdateFiltersButton()
     {
         if (FiltersToggle is null) return;
-        var active = !ActiveFilters().IsEmpty;
+        var mode = CurrentMode;
+        if (mode == SearchMode.Params)
+        {
+            FiltersToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        FiltersToggle.Visibility = Visibility.Visible;
+        var active = mode == SearchMode.Schemas
+            ? _schemaExtChecks.Any(c => c.Check.IsChecked == true)
+            : !ActiveFilters().IsEmpty;
         FiltersToggle.Content = FiltersVisible ? "Фильтры ▴" : active ? "Фильтры ▾ ●" : "Фильтры ▾";
     }
 
@@ -192,6 +319,7 @@ public partial class SearchView : UserControl
         ResetFilterCombos();
         UpdateFiltersButton();
         ResultsPanel.Children.Clear();
+        ClearSchemaResults();
         StatusLabel.Text = "";
         EmptyLabel.Text = "Введите запрос и нажмите «Найти»";
         EmptyLabel.Visibility = Visibility.Visible;
@@ -204,6 +332,9 @@ public partial class SearchView : UserControl
     private void SearchMode_Changed(object sender, RoutedEventArgs e)
     {
         AnimateModeThumb();
+        // Набор фильтров у каждого режима свой — переставляем его до поиска, чтобы тот уже читал
+        // фильтры нового режима.
+        ApplyModeToFilters();
         if (!string.IsNullOrWhiteSpace(SearchInput.Text)) PerformSearch();
     }
 
@@ -243,6 +374,7 @@ public partial class SearchView : UserControl
         _resultsDirty = false;
         StatusLabel.Text = "Поиск…";
         ResultsPanel.Children.Clear();
+        ClearSchemaResults();
         EmptyLabel.Visibility = Visibility.Collapsed;
 
         if (SchemasModeRadio.IsChecked == true)
@@ -658,12 +790,61 @@ public partial class SearchView : UserControl
         public bool ExactWord { get; set; }
         public string Query { get; set; } = "";
 
+        /// <summary>Фильтр по расширению файла (пустой — любое). Как и Tokens, читается фоновым
+        /// обходом под замком: обход не должен отфильтровать пачку по половине нового фильтра.</summary>
+        public HashSet<string> Extensions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>Поколение поиска, для которого сейчас рисуется выдача — см. _searchGeneration.</summary>
         public int Generation { get; set; }
+    }
 
-        /// <summary>Сколько совпало и сколько из них реально нарисовано (см. MaxSchemaCardsShown).</summary>
-        public int Matched { get; set; }
-        public int Shown { get; set; }
+    // ── Выдача по схемам: что совпало, что нарисовано, «Показать ещё» ──────
+    // Совпадений на широком запросе десятки тысяч, а карточки лежат в невиртуализованном StackPanel,
+    // поэтому рисуется пачка в MaxSchemaCardsShown штук. Раньше на этом всё и заканчивалось: «показаны
+    // первые 300», а как посмотреть остальные — никак. Теперь весь список совпадений остаётся в
+    // памяти, и кнопка внизу дорисовывает следующую пачку.
+
+    private readonly List<SchematicHit> _schemaMatched = new();
+    private int _schemaShown;
+    private Button? _schemaMoreButton;
+
+    private void ClearSchemaResults()
+    {
+        _schemaMatched.Clear();
+        _schemaShown = 0;
+        _schemaMoreButton = null;
+    }
+
+    /// <summary>Кнопка «Показать ещё» всегда последняя в списке и всегда отражает актуальный остаток:
+    /// во время обхода диска совпадения продолжают прибывать, и остаток растёт прямо под ней.</summary>
+    private void SyncSchemaMoreButton()
+    {
+        if (_schemaMoreButton is not null)
+        {
+            ResultsPanel.Children.Remove(_schemaMoreButton);
+            _schemaMoreButton = null;
+        }
+        var rest = _schemaMatched.Count - _schemaShown;
+        if (rest <= 0) return;
+
+        var next = Math.Min(rest, MaxSchemaCardsShown);
+        _schemaMoreButton = new Button
+        {
+            Content = $"Показать ещё {next} (не показано: {rest})",
+            Style = (Style)FindResource("SecondaryButton"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 16),
+        };
+        _schemaMoreButton.Click += (_, _) => ShowMoreSchemaCards();
+        ResultsPanel.Children.Add(_schemaMoreButton);
+    }
+
+    private void ShowMoreSchemaCards()
+    {
+        var upTo = Math.Min(_schemaMatched.Count, _schemaShown + MaxSchemaCardsShown);
+        for (; _schemaShown < upTo; _schemaShown++)
+            ResultsPanel.Children.Insert(_schemaShown, MakeSchematicCard(_schemaMatched[_schemaShown]));
+        SyncSchemaMoreButton();
     }
 
     private void PerformSchemasSearch(string query) => _ = PerformSchemasSearchAsync(query, _searchGeneration);
@@ -724,13 +905,14 @@ public partial class SearchView : UserControl
 
         var exact = ExactWordCheck.IsChecked == true;
         var tokens = SchematicService.QueryTokens(query);
+        var extensions = ActiveSchemaExtensions();
 
         // Обход этого же диска уже идёт — новый не запускаем (см. п.1 в комментарии выше), а
         // перенацеливаем текущий на новый запрос: то, что диск успел отдать, перерисовывается сразу,
         // остальное дорисуется по мере обхода.
         if (_schemasScan is { } running && running.DiskPath == diskPath)
         {
-            RetargetSchemasScan(running, query, tokens, exact, generation);
+            RetargetSchemasScan(running, query, tokens, exact, extensions, generation);
             return;
         }
 
@@ -738,7 +920,7 @@ public partial class SearchView : UserControl
         // готовый список в памяти, без фона, индикатора занятости и кнопки «Остановить».
         if (_services.Schematics.IsScanned(diskPath))
         {
-            ShowSchemasFromCache(diskPath, query, exact);
+            ShowSchemasFromCache(diskPath, query, exact, extensions);
             return;
         }
 
@@ -748,6 +930,7 @@ public partial class SearchView : UserControl
             Cts = new CancellationTokenSource(),
             Tokens = tokens,
             ExactWord = exact,
+            Extensions = extensions,
             Query = query,
             Generation = generation,
         };
@@ -781,10 +964,10 @@ public partial class SearchView : UserControl
 
         if (cancelled)
         {
-            StatusLabel.Text = scan.Matched > 0
-                ? $"Поиск остановлен — найдено: {ShownOf(scan)}"
+            StatusLabel.Text = _schemaMatched.Count > 0
+                ? $"Поиск остановлен — найдено: {ShownOf()}"
                 : "Поиск остановлен — диск прочитан не полностью";
-            if (scan.Matched == 0)
+            if (_schemaMatched.Count == 0)
             {
                 EmptyLabel.Text = "Поиск остановлен до того, как что-то нашлось — нажмите «Найти», чтобы прочитать диск заново";
                 EmptyLabel.Visibility = Visibility.Visible;
@@ -796,24 +979,25 @@ public partial class SearchView : UserControl
     }
 
     private const string SchemaNotFoundHint = "Схема не найдена — проверьте название шкафа или второй диск";
+    private const string SchemaNotFoundFilteredHint = "Схема не найдена — возможно, дело в фильтре по расширению: «Фильтры» → «Сбросить фильтры»";
 
     /// <summary>Сколько найдено и сколько из этого показано — вторая часть появляется, только если
     /// упёрлись в потолок отрисовки.</summary>
-    private static string ShownOf(SchemasScan scan) => SearchResultCap.Describe(scan.Matched, scan.Shown);
+    private string ShownOf() => SearchResultCap.Describe(_schemaMatched.Count, _schemaShown);
 
     /// <summary>Оператор нажал «Найти» с другим запросом, пока диск ещё читается. Обход общий и
     /// продолжается, меняется только то, что из него показывать.</summary>
-    private void RetargetSchemasScan(SchemasScan scan, string query, string[] tokens, bool exact, int generation)
+    private void RetargetSchemasScan(SchemasScan scan, string query, string[] tokens, bool exact,
+        HashSet<string> extensions, int generation)
     {
         List<SchematicHit> alreadyFound;
         lock (scan.Sync)
         {
             scan.Tokens = tokens;
             scan.ExactWord = exact;
+            scan.Extensions = extensions;
             scan.Query = query;
             scan.Generation = generation;
-            scan.Matched = 0;
-            scan.Shown = 0;
             // Накопленное по СТАРОМУ запросу выбрасываем прямо здесь, под тем же замком, под которым
             // меняется сам запрос: иначе пачка, найденная секунду назад, дорисовалась бы поверх
             // выдачи нового запроса. Всё, что подходит под новый, ниже перерисовывается из Found.
@@ -822,36 +1006,40 @@ public partial class SearchView : UserControl
         }
 
         ResultsPanel.Children.Clear();
+        ClearSchemaResults();
         foreach (var hit in alreadyFound)
         {
             if (!SchematicService.HitMatches(hit, tokens, exact)) continue;
-            AddSchemaCard(scan, hit);
+            if (!SchematicService.HitMatchesExtension(hit, extensions)) continue;
+            AddSchemaCard(hit);
         }
-        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
-        EmptyLabel.Visibility = scan.Shown > 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (scan.Shown == 0) EmptyLabel.Text = "Диск ещё читается — совпадений пока нет";
+        SyncSchemaMoreButton();
+        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf()}";
+        EmptyLabel.Visibility = _schemaShown > 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (_schemaShown == 0) EmptyLabel.Text = "Диск ещё читается — совпадений пока нет";
     }
 
     /// <summary>Диск уже обойден: выдача целиком, сразу и в привычном порядке (по названию шкафа).
     /// Здесь же — вопрос про раскладку клавиатуры: он имеет смысл только когда точно известно, что по
     /// набранному не нашлось ничего, а на середине обхода это ещё не известно.</summary>
-    private void ShowSchemasFromCache(string diskPath, string query, bool exact)
+    private void ShowSchemasFromCache(string diskPath, string query, bool exact, HashSet<string> extensions)
     {
         var hits = _services.Schematics.Matches(diskPath, query, exact,
-            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, extensions);
         if (hits.Count == 0)
         {
-            ShowNoResults(query, SchemaNotFoundHint);
+            ShowNoResults(query, extensions.Count > 0 ? SchemaNotFoundFilteredHint : SchemaNotFoundHint);
             return;
         }
 
         // Потолок отрисовки тот же, что и у потоковой выдачи: этот путь рисовал ВСЁ, что нашлось на
         // диске, и на широком запросе («1» по домашней папке — 23 446 совпадений в живом прогоне)
-        // вешал окно на минуты. Сколько нашлось на самом деле — по-прежнему видно в строке состояния.
-        var shown = Math.Min(hits.Count, MaxSchemaCardsShown);
-        StatusLabel.Text = $"Найдено: {SearchResultCap.Describe(hits.Count, shown)}";
-        for (var i = 0; i < shown; i++)
-            ResultsPanel.Children.Add(MakeSchematicCard(hits[i]));
+        // вешал окно на минуты. Остальное дорисовывается кнопкой «Показать ещё».
+        ResultsPanel.Children.Clear();
+        ClearSchemaResults();
+        foreach (var hit in hits) AddSchemaCard(hit);
+        SyncSchemaMoreButton();
+        StatusLabel.Text = $"Найдено: {ShownOf()}";
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
             ShowNoResults(query, SchemaNotFoundHint);
@@ -862,12 +1050,12 @@ public partial class SearchView : UserControl
     /// что перепроверка стоит копейки).</summary>
     private void FinishSchemasScan(SchemasScan scan)
     {
-        if (scan.Matched == 0)
+        if (_schemaMatched.Count == 0)
         {
-            ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord);
+            ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord, scan.Extensions);
             return;
         }
-        StatusLabel.Text = $"Найдено: {ShownOf(scan)}";
+        StatusLabel.Text = $"Найдено: {ShownOf()}";
     }
 
     /// <summary>Обход нашёл очередной файл схемы — вызывается на ФОНОВОМ потоке. Фильтр применяется
@@ -880,6 +1068,7 @@ public partial class SearchView : UserControl
         {
             scan.Found.Add(hit);
             if (!SchematicService.HitMatches(hit, scan.Tokens, scan.ExactWord)) return;
+            if (!SchematicService.HitMatchesExtension(hit, scan.Extensions)) return;
             scan.Pending.Add(hit);
             needFlush = !scan.FlushQueued;
             scan.FlushQueued = true;
@@ -904,17 +1093,21 @@ public partial class SearchView : UserControl
         // Пока пачка ехала на поток интерфейса, поиск мог смениться — тогда она уже не наша.
         if (!ReferenceEquals(_schemasScan, scan) || scan.Generation != _searchGeneration) return;
 
-        foreach (var hit in batch) AddSchemaCard(scan, hit);
-        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
+        foreach (var hit in batch) AddSchemaCard(hit);
+        SyncSchemaMoreButton();
+        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf()}";
     }
 
-    private void AddSchemaCard(SchemasScan scan, SchematicHit hit)
+    /// <summary>Совпадение попадает в общий список ВСЕГДА, а карточка рисуется, только пока не упёрлись
+    /// в потолок — остальное дорисует «Показать ещё» (см. SyncSchemaMoreButton, её вызывает тот, кто
+    /// добавил пачку целиком). Карточка вставляется перед кнопкой, а не в конец списка.</summary>
+    private void AddSchemaCard(SchematicHit hit)
     {
-        scan.Matched++;
-        if (scan.Shown >= MaxSchemaCardsShown) return;
-        scan.Shown++;
+        _schemaMatched.Add(hit);
+        if (_schemaShown >= MaxSchemaCardsShown) return;
         EmptyLabel.Visibility = Visibility.Collapsed;
-        ResultsPanel.Children.Add(MakeSchematicCard(hit));
+        ResultsPanel.Children.Insert(_schemaShown, MakeSchematicCard(hit));
+        _schemaShown++;
     }
 
     // ── Keyboard-layout fallback prompt / learning ──────────────────────────
@@ -958,6 +1151,7 @@ public partial class SearchView : UserControl
     private void ShowNoResults(string query, string hint)
     {
         ResultsPanel.Children.Clear();
+        ClearSchemaResults();
         StatusLabel.Text = $"По запросу «{query}» ничего не найдено";
         EmptyLabel.Text = hint;
         EmptyLabel.Visibility = Visibility.Visible;
@@ -984,6 +1178,12 @@ public partial class SearchView : UserControl
         var openBtn = new Button { Content = "Открыть", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
         openBtn.Click += (_, _) => OpenSchematic(hit);
         actions.Children.Add(openBtn);
+        // Рядом со схемой в папке шкафа обычно лежит остальное по нему же (исходник DWG, фотографии,
+        // спецификация) — открыть папку целиком нужно не реже, чем сам файл.
+        var folderBtn = new Button { Content = "Открыть папку", Style = (Style)FindResource("SecondaryButton") };
+        folderBtn.ToolTip = "Открыть папку, в которой лежит этот файл — с выделенным файлом";
+        folderBtn.Click += (_, _) => OpenSchematicFolder(hit);
+        actions.Children.Add(folderBtn);
         panel.Children.Add(actions);
 
         return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
@@ -997,6 +1197,26 @@ public partial class SearchView : UserControl
             return;
         }
         TryOpen(hit.Path);
+    }
+
+    /// <summary>Проводник с выделенным файлом (/select), а не просто открытая папка: в папке шкафа
+    /// лежит десяток файлов, и найденный в ней ещё надо отыскать глазами. Файла уже нет (диск успел
+    /// измениться с момента обхода) — открываем хотя бы саму папку.</summary>
+    private static void OpenSchematicFolder(SchematicHit hit)
+    {
+        if (File.Exists(hit.Path))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{hit.Path}\"") { UseShellExecute = true });
+                return;
+            }
+            catch (Exception) { /* ниже — обычное открытие папки */ }
+        }
+
+        var folder = Path.GetDirectoryName(hit.Path);
+        if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder)) TryOpen(folder);
+        else AppMessageBox.Show($"Папка не найдена:\n{folder}", "Схема", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void EditParamTags(ParamFile file)

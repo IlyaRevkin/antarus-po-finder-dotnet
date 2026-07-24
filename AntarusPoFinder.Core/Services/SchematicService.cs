@@ -29,8 +29,21 @@ public record SchematicHit(string CabinetName, string Path);
 /// locking.</summary>
 public class SchematicService
 {
-    private static readonly string[] SchematicExtensions =
-        { ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".dwg", ".dxf" };
+    /// <summary>Расширения, которые вообще считаются схемой. Публичные: из этого же списка строится
+    /// фильтр выдачи по расширению («покажи только .dwg», «только .pdf») — на диске рядом со схемой в
+    /// PDF лежит её же исходник в DWG и десяток фотографий, и без фильтра выдача по шкафу состоит
+    /// наполовину не из того, что нужно прямо сейчас.</summary>
+    public static readonly string[] SchematicExtensions =
+        { ".pdf", ".dwg", ".dxf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp" };
+
+    /// <summary>Подходит ли файл под выбранные в фильтре расширения. Пустой набор — фильтр не задан,
+    /// подходит всё (именно так, а не «ничего»: пустой фильтр означает «любое расширение»).</summary>
+    public static bool HitMatchesExtension(SchematicHit hit, IReadOnlyCollection<string>? extensions)
+    {
+        if (extensions is null || extensions.Count == 0) return true;
+        var ext = System.IO.Path.GetExtension(hit.Path).ToLowerInvariant();
+        return extensions.Contains(ext);
+    }
 
     private static readonly Regex WordSplitter = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
 
@@ -89,14 +102,19 @@ public class SchematicService
     /// the query — partial substring by default, whole-word only when <paramref name="exactWord"/>
     /// is set.</summary>
     public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false) =>
-        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex));
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, null));
 
+    /// <param name="extensions">Фильтр по расширению файла (пустой/null — любое). Применяется ВНУТРИ
+    /// подбора, а не поверх готового списка: иначе «ничего не нашлось по набранному» срабатывало бы
+    /// от одного лишь фильтра, и поиск зря переспрашивал бы про раскладку клавиатуры.</param>
     public List<SchematicHit> Matches(string diskPath, string query, bool exactWord,
-        bool allowFallback, out bool usedFallback, out string convertedQuery) =>
-        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex),
+        bool allowFallback, out bool usedFallback, out string convertedQuery,
+        IReadOnlyCollection<string>? extensions = null) =>
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, extensions),
             allowFallback, out usedFallback, out convertedQuery);
 
-    private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord)
+    private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord,
+        IReadOnlyCollection<string>? extensions)
     {
         var tokens = QueryTokens(query);
         if (tokens.Length == 0) return new();
@@ -104,6 +122,7 @@ public class SchematicService
         return Scanned(diskPath)
             .Where(f => tokens.All(t => TokenMatches(t, f.UpperMatchText, exactWord)))
             .Select(f => new SchematicHit(f.CabinetName, f.Path))
+            .Where(h => HitMatchesExtension(h, extensions))
             .OrderBy(h => h.CabinetName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
