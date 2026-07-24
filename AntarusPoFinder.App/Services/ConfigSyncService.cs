@@ -225,7 +225,21 @@ public static class ConfigSyncService
             return null;
         }
 
-        return new ConfigUpdateInfo(snap.Path, snap.ExportedAt, snap.ExportedBy, settingsChanged, diff, snap.Revision, snap.Changes, criticalSchemaMismatch);
+        return new ConfigUpdateInfo(snap.Path, snap.ExportedAt, snap.ExportedBy, settingsChanged, diff,
+            snap.Revision, NewChangesOnly(snap.Changes, LocalWatermarkRevision(services)), criticalSchemaMismatch);
+    }
+
+    /// <summary>Из журнала маркера — только те записи, которых эта машина ещё не видела. Журнал хранит
+    /// последние MaxChangelogEntries записей ЦЕЛИКОМ, поэтому без этого отсева плашка перечисляла бы
+    /// весь журнал заново при каждом изменении конфига, сколько бы записей в нём ни лежало.
+    ///
+    /// Записи без ревизии (Revision = 0) пишет старая версия приложения — их возраст неизвестен, и
+    /// показываются они только машине, которая ещё ни разу ничего отсюда не применяла (watermark = 0):
+    /// иначе после обновления приложения оператор один раз получил бы весь накопленный старый журнал.</summary>
+    private static List<SyncChangeEntry>? NewChangesOnly(List<SyncChangeEntry>? changes, int localRevision)
+    {
+        if (changes is null) return null;
+        return changes.Where(c => c.Revision > localRevision || (c.Revision == 0 && localRevision == 0)).ToList();
     }
 
     private static int ParseSchemaVersion(JsonObject rootNode) =>
@@ -427,11 +441,18 @@ public static class ConfigSyncService
         var transport = TransportFactory(root);
         var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
         // Эталонная синхронизация получает свою узнаваемую запись в журнале маркера — оператор на
-        // принимающей машине видит в плашке «Поступили изменения» не общее «Полная синхронизация
-        // справочника», а явное предупреждение, что произошла именно полная замена.
-        var defaultDescription = authoritative ? $"Эталонная синхронизация от {exportedBy}" : "Полная синхронизация справочника";
-        var descriptions = (changeDescriptions ?? new[] { defaultDescription }).ToList();
-        if (descriptions.Count == 0) descriptions.Add(defaultDescription);
+        // принимающей машине видит в плашке «Поступили изменения» явное предупреждение, что произошла
+        // именно полная замена справочника.
+        //
+        // А вот обычный экспорт БЕЗ конкретных описаний не пишет в журнал ничего. Раньше на его месте
+        // появлялась заглушка «Полная синхронизация справочника», и поскольку экспорт идёт ещё и по
+        // таймеру автоотправки, журнал забивался десятками одинаковых строк ни о чём — ровно то, на
+        // что жаловался оператор: «пишет просто полная синхронизация справочника, и там 5 раз, и потом
+        // ещё 45; это ж явно не то, что было изменено, а если изменений нет — зачем мне уведомление».
+        // Сам конфиг при этом, конечно, отправляется как и прежде: пустой журнал означает лишь «нечего
+        // рассказать», а не «нечего отправлять».
+        var descriptions = (changeDescriptions ?? Enumerable.Empty<string>()).ToList();
+        if (authoritative) descriptions.Insert(0, $"Эталонная синхронизация от {exportedBy}");
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -440,7 +461,10 @@ public static class ConfigSyncService
             catch { current = null; }
 
             var nextRevision = (current?.Revision ?? 0) + 1;
-            var newEntries = descriptions.Select(d => new SyncChangeEntry { Ts = now, Author = exportedBy, Type = "catalog", Description = d });
+            var newEntries = descriptions.Select(d => new SyncChangeEntry
+            {
+                Ts = now, Author = exportedBy, Type = "catalog", Description = d, Revision = nextRevision,
+            });
             var changes = newEntries.Concat(current?.Changes ?? new List<SyncChangeEntry>()).Take(MaxChangelogEntries).ToList();
             var marker = new SyncRevisionMarker { Revision = nextRevision, ExportedAt = now, ExportedBy = exportedBy, Changes = changes };
 

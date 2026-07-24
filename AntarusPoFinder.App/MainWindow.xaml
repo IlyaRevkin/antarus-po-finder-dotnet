@@ -137,10 +137,15 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{Binding IncomingChangesBannerText}" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
-                <Button Grid.Column="1" Content="Скрыть" Style="{StaticResource SecondaryButton}"
+                <!-- Полный список изменений: в саму плашку влезают только первые несколько, а
+                     посмотреть остальные раньше было негде вовсе. -->
+                <Button Grid.Column="1" Content="Показать" Margin="12,0,8,0"
+                        Command="{Binding ShowIncomingChangesDetailsCommand}"/>
+                <Button Grid.Column="2" Content="Скрыть" Style="{StaticResource SecondaryButton}"
                         Command="{Binding DismissIncomingChangesBannerCommand}"/>
             </Grid>
         </Border>

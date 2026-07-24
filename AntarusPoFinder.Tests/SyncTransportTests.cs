@@ -75,6 +75,57 @@ public class SyncTransportTests
         finally { ResetTransportFactory(); }
     }
 
+    [Fact]
+    public async Task Export_WithoutDescriptions_WritesNothingToChangelog()
+    {
+        // Экспорт идёт и по таймеру автоотправки, и вслед за применением чужого конфига — если бы
+        // каждый такой проход оставлял в журнале заглушку «Полная синхронизация справочника»,
+        // принимающая машина получала бы плашку с десятками одинаковых строк ни о чём. Сам конфиг
+        // при этом отправляется как обычно, пустой журнал означает лишь «нечего рассказать».
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        try
+        {
+            ConfigSyncService.Export(m.SvcA, root, "profileA");
+            ConfigSyncService.Export(m.SvcA, root, "profileA");
+
+            var marker = (await new FileShareTransport(root).ReadRevisionAsync())!;
+            Assert.Equal(2, marker.Revision);
+            Assert.Empty(marker.Changes);
+        }
+        finally { ResetTransportFactory(); }
+    }
+
+    [Fact]
+    public void CheckForUpdate_ReportsOnlyChangesNewerThanThisMachineAlreadyApplied()
+    {
+        // Журнал в маркере хранит последние 50 записей ЦЕЛИКОМ — то есть машина, уже применившая
+        // первые из них, увидит их в маркере снова. Отсев по ревизии записи и есть то, что делает
+        // плашку списком «что нового для МЕНЯ», а не пересказом всего журнала на каждом тике.
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        try
+        {
+            m.DbA.AddTag("первыйтег");
+            ConfigSyncService.Export(m.SvcA, root, "profileA", new[] { "добавлен тег первыйтег" });
+
+            var first = ConfigSyncService.CheckForUpdate(m.SvcB, out _);
+            Assert.NotNull(first);
+            Assert.Contains(first!.Changes!, c => c.Description == "добавлен тег первыйтег");
+            ConfigSyncService.Apply(m.SvcB, first.ConfigPath, root);
+
+            m.DbA.AddTag("второйтег");
+            ConfigSyncService.Export(m.SvcA, root, "profileA", new[] { "добавлен тег второйтег" });
+
+            var second = ConfigSyncService.CheckForUpdate(m.SvcB, out _);
+            Assert.NotNull(second);
+            Assert.Equal(new[] { "добавлен тег второйтег" }, second!.Changes!.Select(c => c.Description));
+        }
+        finally { ResetTransportFactory(); }
+    }
+
     /// <summary>Тестовый транспорт-обёртка, считающая обращения к дорогой части (сам конфиг) —
     /// доказывает, что ReadShared действительно не читает и не разбирает po_finder_config.json,
     /// пока маркер не показал рост ревизии (Задача 2/3).</summary>

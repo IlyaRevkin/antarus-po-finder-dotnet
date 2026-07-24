@@ -838,9 +838,18 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     {
         if (info.Changes is { Count: > 0 } changes && _services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.Sync))
         {
-            var preview = string.Join("; ", changes.Take(5).Select(c => c.Description));
-            var more = changes.Count > 5 ? $" и ещё {changes.Count - 5}" : "";
-            IncomingChangesBannerText = $"Поступили изменения с общего диска ({changes.Count}): {preview}{more}";
+            // Повторы схлопываются: одна и та же правка справочника попадает в журнал столько раз,
+            // сколько экспортов её унесло, и перечислять её пять раз подряд бессмысленно.
+            var unique = changes
+                .GroupBy(c => c.Description, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.Count() > 1 ? $"{g.Key} (×{g.Count()})" : g.Key)
+                .ToList();
+            var preview = string.Join("; ", unique.Take(3));
+            var more = unique.Count > 3 ? $" и ещё {unique.Count - 3}" : "";
+            IncomingChangesBannerText = $"Поступили изменения с общего диска ({unique.Count}): {preview}{more}";
+            // Полный список — по кнопке «Показать»: раньше в плашку влезало пять описаний, а остальные
+            // существовали только числом «и ещё 45», посмотреть их было негде вообще.
+            _incomingChangesDetails = string.Join(Environment.NewLine, changes.Select(FormatChangeEntry));
             IncomingChangesBannerVisible = true;
             AddNotification(IncomingChangesBannerText, NotificationCategory.Sync, reopen: () => IncomingChangesBannerVisible = true);
             ScheduleBannerAutoHide(() => IncomingChangesBannerVisible = false);
@@ -850,6 +859,23 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             ShowStatus("Критическое расхождение версии схемы общего конфига — применено принудительно. Проверьте, что у всех коллег установлена одна версия приложения.",
                 15000, NotificationCategory.Sync);
     }
+
+    /// <summary>Полный список поступивших изменений — то, что показывает кнопка «Показать» на плашке.
+    /// Хранится строкой, а не коллекцией: показывается он одним читаемым текстом (см. TextViewDialog).</summary>
+    private string _incomingChangesDetails = "";
+
+    private static string FormatChangeEntry(SyncChangeEntry c)
+    {
+        var when = c.Ts.Length >= 16 ? c.Ts[..16].Replace('T', ' ') : c.Ts;
+        var who = string.IsNullOrWhiteSpace(c.Author) ? "" : $"  ·  {c.Author}";
+        return $"{when}{who}\n    {c.Description}";
+    }
+
+    [RelayCommand]
+    private void ShowIncomingChangesDetails() =>
+        Views.TextViewDialog.Show(System.Windows.Application.Current?.MainWindow,
+            "Поступившие изменения",
+            string.IsNullOrEmpty(_incomingChangesDetails) ? "Список изменений пуст." : _incomingChangesDetails);
 
     [RelayCommand]
     private void DismissIncomingChangesBanner() => IncomingChangesBannerVisible = false;
