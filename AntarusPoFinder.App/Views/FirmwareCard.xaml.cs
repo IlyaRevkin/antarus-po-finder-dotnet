@@ -37,6 +37,11 @@ public sealed record FirmwareCardFlags
     /// папка либо файл без расширения: тогда кнопка без скобок, пустые скобки хуже.</summary>
     public string? PlcOpenExtension { get; init; }
 
+    /// <summary>То же самое для кнопки «Открыть HMI проект» — расширение файла панели, который реально
+    /// откроется (считает HmiOpenResolver при обходе диска). null — обход не дошёл, панели нет, или
+    /// откроется папка проекта: тогда кнопка без расширения.</summary>
+    public string? HmiOpenExtension { get; init; }
+
     /// <summary>Подключён настоящий лоадер (IFirmwareLoaderBackend.IsAvailable). Пока в приложении
     /// только заготовка (всегда false) — «Загрузить в ПЛК» становится ОСНОВНОЙ кнопкой лишь когда
     /// лоадер реально подключён И рядом есть .lfs; иначе основная кнопка — «Открыть прошивку ПЛК».</summary>
@@ -170,7 +175,7 @@ public partial class FirmwareCard : UserControl
             // нет, см. FirmwareUploadService). Тогда честнее сразу сказать, от какой именно версии
             // проект, а не делать вид, что он собран вместе с этой.
             var hmiFrom = HmiSourceVersion(result);
-            var hmiBtn = MakeActionButton(hmiFrom is null ? "Открыть HMI проект" : $"Открыть HMI проект (от {hmiFrom})",
+            var hmiBtn = MakeActionButton($"Открыть HMI проект{HmiButtonSuffix(flags.HmiOpenExtension, hmiFrom)}",
                 (_, _) => OpenHmiRequested?.Invoke(this, EventArgs.Empty));
             var hmiTips = new List<string>();
             if (hmiFrom is not null) hmiTips.Add($"HMI-проект от версии {hmiFrom} — в этой версии панель не обновляли");
@@ -249,6 +254,18 @@ public partial class FirmwareCard : UserControl
     }
 
     private bool _syncStatusShown;
+
+    /// <summary>Хвост подписи кнопки панели: расширение того, что откроется, и от какой версии взят
+    /// проект, если он унаследован. Оба факта важны, поэтому в одних скобках через запятую —
+    /// «Открыть HMI проект (.dpj, от 2.1.041)», а не двумя парами скобок подряд. Пустых скобок не
+    /// бывает: нечего сказать — суффикса нет вовсе.</summary>
+    private static string HmiButtonSuffix(string? ext, string? fromVersion) => (ext, fromVersion) switch
+    {
+        (null, null) => "",
+        (not null, null) => $" ({ext})",
+        (null, not null) => $" (от {fromVersion})",
+        _ => $" ({ext}, от {fromVersion})",
+    };
 
     private static string? PrimaryOpenTooltip(HierarchyResult result, FirmwareCardFlags flags, string? openExt)
     {

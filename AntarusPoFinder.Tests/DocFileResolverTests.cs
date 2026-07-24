@@ -64,6 +64,30 @@ public class DocFileResolverTests
     }
 
     [Fact]
+    public void NewerFileInSharedFolder_BeatsOlderStoredFile()
+    {
+        using var root = new TempRoot();
+        // Файл, приложенный когда-то к версии, ЕСТЬ — но в общей папке карта с тех пор обновилась.
+        // «Всегда открывать последний актуальный файл» означает именно её.
+        var stored = Touch(root.Path, "версия/карта-2024.xlsx", new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var shared = Path.Combine(root.Path, "Карта ВВ");
+        var newest = Touch(shared, "карта-2026.xlsx", new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(newest, DocFileResolver.Resolve(stored, shared));
+    }
+
+    [Fact]
+    public void OlderFileInSharedFolder_DoesNotBeatNewerStoredFile()
+    {
+        using var root = new TempRoot();
+        var stored = Touch(root.Path, "версия/карта-2026.xlsx", new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+        var shared = Path.Combine(root.Path, "Карта ВВ");
+        Touch(shared, "карта-2020.xlsx", new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(stored, DocFileResolver.Resolve(stored, shared));
+    }
+
+    [Fact]
     public void EmptySharedFolder_ResolvesToNull()
     {
         using var root = new TempRoot();

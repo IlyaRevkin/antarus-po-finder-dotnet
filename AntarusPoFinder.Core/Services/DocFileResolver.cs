@@ -16,18 +16,40 @@ namespace AntarusPoFinder.Core.Services;
 /// Ходит на диск (в т.ч. на сетевой) — звать из фонового потока или по клику, не из отрисовки.</summary>
 public static class DocFileResolver
 {
-    /// <summary>Порядок: сохранённый у версии путь, если он указывает на существующий файл; если это
-    /// папка — самый свежий файл в ней; иначе — общая папка документа рядом с папкой контроллера,
-    /// снова самый свежий файл. null — открывать нечего (папки нет или она пуста), тогда и пункта в
-    /// меню карточки быть не должно.</summary>
+    /// <summary>Самый свежий из двух кандидатов: сохранённого у версии пути (файл; если это папка —
+    /// самый свежий файл в ней) и общей папки документа рядом с папкой контроллера. Побеждает тот, что
+    /// новее по времени изменения — «всегда открывать последний актуальный файл» из требования: путь,
+    /// записанный к версии год назад, не должен перебивать карту, обновлённую в общей папке на прошлой
+    /// неделе. null — открывать нечего (файла нет, папки нет или она пуста), тогда и пункта в меню
+    /// карточки быть не должно.</summary>
     public static string? Resolve(string? storedPath, string? sharedFolder)
     {
-        if (!string.IsNullOrEmpty(storedPath))
+        var stored = StoredCandidate(storedPath);
+        var shared = LatestFileIn(sharedFolder);
+        if (stored is null) return shared;
+        if (shared is null) return stored;
+        return WrittenAt(shared) > WrittenAt(stored) ? shared : stored;
+    }
+
+    private static string? StoredCandidate(string? storedPath)
+    {
+        if (string.IsNullOrEmpty(storedPath)) return null;
+        if (File.Exists(storedPath)) return storedPath;
+        return Directory.Exists(storedPath) ? LatestFileIn(storedPath) : null;
+    }
+
+    /// <summary>Недоступный файл (шара отвалилась между обходом и сравнением) считается самым старым —
+    /// сравнение не должно падать из-за одного пути.</summary>
+    private static DateTime WrittenAt(string path)
+    {
+        try
         {
-            if (File.Exists(storedPath)) return storedPath;
-            if (Directory.Exists(storedPath) && LatestFileIn(storedPath) is { } inStored) return inStored;
+            return File.GetLastWriteTimeUtc(path);
         }
-        return string.IsNullOrEmpty(sharedFolder) ? null : LatestFileIn(sharedFolder);
+        catch (Exception)
+        {
+            return DateTime.MinValue;
+        }
     }
 
     /// <summary>Самый свежий по времени изменения файл во всём дереве папки, или null — папка пуста,

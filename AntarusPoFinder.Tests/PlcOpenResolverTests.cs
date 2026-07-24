@@ -10,6 +10,17 @@ namespace AntarusPoFinder.Tests;
 /// должны — раньше карточка угадывала расширение отдельно и умела только .psl/.lfs.</summary>
 public class PlcOpenResolverTests
 {
+    [Fact]
+    public void ExtensionOf_Folder_IsNull_EvenWhenNameHasDots()
+    {
+        using var root = new TempRoot();
+        var versionFolder = Path.Combine(root.Path, "2.1.041");
+        Directory.CreateDirectory(versionFolder);
+
+        // Иначе кнопка получила бы подпись «(.041)» — имя папки версии целиком из точек.
+        Assert.Null(PlcOpenResolver.ExtensionOf(versionFolder));
+    }
+
     private static string Touch(string root, params string[] parts)
     {
         var path = Path.Combine(root, Path.Combine(parts));

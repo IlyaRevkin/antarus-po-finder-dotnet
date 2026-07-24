@@ -363,7 +363,8 @@ public partial class SearchView : UserControl
     // рисуются сразу, а этот обход идёт следом в фоне и дорисовывает их по мере готовности.
 
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
-        bool HasIoMap, bool HasInstructions, bool HasModbus, string? PlcOpenExtension);
+        bool HasIoMap, bool HasInstructions, bool HasModbus,
+        string? PlcOpenExtension, string? HmiOpenExtension);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -402,7 +403,10 @@ public partial class SearchView : UserControl
         // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
         // разойтись с тем, что откроется, и работает для ЛЮБОГО проекта, не только .psl/.lfs.
         var plcExt = PlcOpenResolver.ResolveExtension(PlcSources(result));
-        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt);
+        // То же самое для панели: расширение считает HmiOpenResolver, он же потом и открывает (OpenHmi).
+        // Только когда панель вообще есть — иначе это лишний обход папок ради подписи несуществующей кнопки.
+        var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result)) : null;
+        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt, hmiExt);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -414,6 +418,17 @@ public partial class SearchView : UserControl
         FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), result.FirmwareDir ?? "" },
         ExecutableHint = result.ExecutableHint,
         NetworkFolder = result.FirmwareDir,
+    };
+
+    /// <summary>Источники файла панели для HmiOpenResolver — зеркально PlcSources.
+    /// Ходит на диск (FindSiblingFolder) — вызывать из фонового обхода или по клику, не в отрисовке.</summary>
+    private static HmiOpenSources HmiSources(HierarchyResult result) => new()
+    {
+        HmiPath = result.HmiPath,
+        SiblingHmiFolder = FindSiblingFolder(result, "HMI"),
+        ExecutableHint = result.HmiExecutableHint,
+        CandidateFolders = CandidateFolders(result).ToList(),
+        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), result.FirmwareDir ?? "" },
     };
 
     /// <summary>Самый свежий актуальный файл документа (карта ВВ / инструкция / карта Modbus) —
@@ -445,6 +460,7 @@ public partial class SearchView : UserControl
                 HasInstructions = scan.HasInstructions,
                 HasModbus = scan.HasModbus,
                 PlcOpenExtension = scan.PlcOpenExtension,
+                HmiOpenExtension = scan.HmiOpenExtension,
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
@@ -823,17 +839,8 @@ public partial class SearchView : UserControl
             Path.GetExtension(f).ToLowerInvariant() is var ext && ext != ".md" && ext != ".txt" && ext != ".log");
     }
 
-    private static string? FindFilteredIn(string dir, string[] exts) =>
-        Directory.Exists(dir)
-            ? Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
-                .FirstOrDefault(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            : null;
-
-    private static string? FindFiltered(HierarchyResult result, string[] exts)
-    {
-        var localDir = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name));
-        return FindFilteredIn(localDir, exts) ?? FindFilteredIn(result.FirmwareDir, exts);
-    }
+    // Детект «первый файл с нужным расширением в дереве папки» переехал в PlcOpenResolver.
+    // FindByExtensions — им пользуются оба резолвера (ПЛК и панель), здесь дубля больше нет.
 
     private static string? FindSiblingFolder(HierarchyResult result, string folderName)
     {
@@ -875,16 +882,6 @@ public partial class SearchView : UserControl
         if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
     }
 
-    /// <summary>Файл, на который указывает подсказка исполняемого файла, в первой же папке, где он
-    /// реально есть. Null — если подсказки нет или файл не найден нигде.</summary>
-    private static string? ResolveHintedFile(HierarchyResult result, string? hint)
-    {
-        if (ExecutableHintResolver.Normalize(hint) is null) return null;
-        foreach (var dir in CandidateFolders(result))
-            if (ExecutableHintResolver.Resolve(dir, hint) is { } resolved) return resolved;
-        return null;
-    }
-
     private static string? ResolveOpenTarget(HierarchyResult result)
     {
         foreach (var dir in CandidateFolders(result))
@@ -915,21 +912,24 @@ public partial class SearchView : UserControl
         TryOpen(target);
     }
 
-    /// <summary>Зеркально OpenPlc: отдельная папка HMI-проекта (чекбокс «Добавить HMI-проект» при
-    /// загрузке) → явно указанный файл панели внутри папки версии → старый детект по расширениям.</summary>
+    /// <summary>Зеркально OpenPlc: решение «что откроется» живёт в HmiOpenResolver (отдельная папка
+    /// HMI-проекта → явно указанный файл панели внутри папки версии → детект по расширениям), он же
+    /// посчитал расширение для подписи кнопки при обходе диска — разойтись они не могут.</summary>
     private void OpenHmi(HierarchyResult result)
     {
+        if (HmiOpenResolver.Resolve(HmiSources(result)) is { } target)
+        {
+            TryOpen(target);
+            return;
+        }
+        // Два разных «не найдено»: у версии записан путь к отдельному проекту панели, но на диске его
+        // нет — это про конкретный путь; иначе панель просто не нашлась рядом с версией.
         if (!string.IsNullOrEmpty(result.HmiPath))
-        {
-            OpenHmiProject(result);
-            return;
-        }
-        if (ResolveHintedFile(result, result.HmiExecutableHint) is { } hinted)
-        {
-            TryOpen(hinted);
-            return;
-        }
-        OpenFiltered(result, KincoHmiExts, "HMI");
+            AppMessageBox.Show($"HMI-проект не найден.\nПуть: {result.HmiPath}", "HMI-проект",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        else
+            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.",
+                "Открыть HMI", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void OpenFirmwareFolder(HierarchyResult result)
@@ -945,18 +945,6 @@ public partial class SearchView : UserControl
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
         else
             Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{target}\"") { UseShellExecute = true });
-    }
-
-    private void OpenFiltered(HierarchyResult result, string[] exts, string label)
-    {
-        var target = FindFiltered(result, exts);
-        if (target is null)
-        {
-            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.", $"Открыть {label}",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
     }
 
     private void OpenLoaderFile(HierarchyResult result, string extension, string label)
@@ -1060,26 +1048,6 @@ public partial class SearchView : UserControl
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        TryOpen(path);
-    }
-
-    /// <summary>Отдельно загруженный HMI-проект (чекбокс «Добавить HMI-проект» в загрузке). Если это
-    /// папка и оператор указал, какой файл внутри исполняемый (HmiExecutableHint), открывается сразу
-    /// он, а не просто папка. Вызывается только из OpenHmi — см. порядок вариантов там.</summary>
-    private void OpenHmiProject(HierarchyResult result)
-    {
-        var path = result.HmiPath;
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
-            path = FindSiblingFolder(result, "HMI") ?? path;
-
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
-        {
-            AppMessageBox.Show($"HMI-проект не найден.\nПуть: {result.HmiPath}", "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        var hmiExe = ExecutableHintResolver.Resolve(path, result.HmiExecutableHint);
-        if (hmiExe is not null) { TryOpen(hmiExe); return; }
         TryOpen(path);
     }
 

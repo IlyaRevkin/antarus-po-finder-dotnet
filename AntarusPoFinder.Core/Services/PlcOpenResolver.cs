@@ -86,6 +86,11 @@ public static class PlcOpenResolver
     public static string? ExtensionOf(string? path)
     {
         if (string.IsNullOrEmpty(path)) return null;
+        // Откроется ПАПКА — расширения нет, даже если в её имени есть точки. Проверка обязательна:
+        // имена папок здесь как раз из точек и состоят («2.1.041_hmi», папка версии на диске), и
+        // Path.GetExtension честно вернул бы для них «.041_hmi» — на кнопке получилось бы
+        // «Открыть HMI проект (.041_hmi)». Поймано тестом, а не глазами.
+        if (Directory.Exists(path)) return null;
         var ext = Path.GetExtension(path);
         return string.IsNullOrEmpty(ext) ? null : ext.ToLowerInvariant();
     }
@@ -93,7 +98,10 @@ public static class PlcOpenResolver
     /// <summary>Расширение того, что откроет кнопка — Resolve + ExtensionOf одним вызовом.</summary>
     public static string? ResolveExtension(PlcOpenSources src) => ExtensionOf(Resolve(src));
 
-    private static string? FindByExtensions(IEnumerable<string> dirs, string[] exts)
+    /// <summary>Первый файл с одним из расширений во всём дереве первой же доступной папки. Общий для
+    /// ПЛК и панели (см. HmiOpenResolver) — детект по расширениям у них одинаковый, разные только
+    /// наборы расширений и порядок вариантов вокруг.</summary>
+    public static string? FindByExtensions(IEnumerable<string> dirs, string[] exts)
     {
         foreach (var dir in dirs)
         {
