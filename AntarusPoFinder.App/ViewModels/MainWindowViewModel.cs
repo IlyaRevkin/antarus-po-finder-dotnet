@@ -45,6 +45,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private bool _configPushLastFailed;
     private bool _fwAutoUpdateLastFailed;
     private bool _appUpdateCheckLastFailed;
+    private Version? _lastNotifiedUpdateVersion;
 
     /// <summary>Тик синхронизации теперь асинхронный, значит следующий может прийти, пока предыдущий
     /// ещё ждёт сетевой диск (диск отвечает медленнее, чем sync_interval_min). Раньше такого быть не
@@ -534,17 +535,35 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             }
             await InstallUpdate();
         }
-        else if (notifyEnabled)
+        else
         {
-            UpdateBannerText = $"Доступна новая версия {latest.Version} (текущая {AppUpdateService.CurrentVersion}). Источник: {result.SourceLabel}.";
-            UpdateBannerVisible = true;
-            AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
-            // Единственная плашка, которая НЕ прячется сама: у всех остальных текст — уведомление о
-            // том, что уже случилось, а здесь на плашке живёт кнопка «Установить», и автоскрытие
-            // уносило вместе с текстом единственный способ начать установку. Сюда попадают только
-            // те, кто осознанно выключил автообновление у себя в Настройках (по умолчанию оно
-            // теперь включено — см. ConfigService.Defaults["app_auto_update"]), и для них эта
-            // плашка по-прежнему единственная дорога к новой версии.
+            // Запись в историю уведомлений — БЕЗУСЛОВНО, в т.ч. при выключенной категории
+            // «Обновления приложения». Раньше выключенная категория вместе с выключенным
+            // автообновлением означала, что найденная новая версия молча выбрасывалась: ветка
+            // `else if (notifyEnabled)` не делала вообще ничего, и приложение оставалось на старой
+            // версии без единого следа где бы то ни было. Галочка категории глушит всплывающую
+            // плашку — это её работа, — но не должна делать существование новой версии
+            // ненаблюдаемым: историю пользователь открывает сам, когда идёт разбираться.
+            var text = $"Доступна новая версия {latest.Version} (текущая {AppUpdateService.CurrentVersion}). Источник: {result.SourceLabel}.";
+            // Дедупликация по версии: проверка повторяется каждые 30 минут, и без этого одна и та же
+            // версия сыпала бы в историю по записи за полчаса, пока её не поставят.
+            if (_lastNotifiedUpdateVersion != latest.Version)
+            {
+                _lastNotifiedUpdateVersion = latest.Version;
+                AddNotification(text, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
+            }
+
+            if (notifyEnabled)
+            {
+                UpdateBannerText = text;
+                UpdateBannerVisible = true;
+                // Единственная плашка, которая НЕ прячется сама: у всех остальных текст — уведомление
+                // о том, что уже случилось, а здесь на плашке живёт кнопка «Установить», и автоскрытие
+                // уносило вместе с текстом единственный способ начать установку. Сюда попадают только
+                // те, кто осознанно выключил автообновление у себя в Настройках (по умолчанию оно
+                // теперь включено — см. ConfigService.Defaults["app_auto_update"]), и для них эта
+                // плашка по-прежнему единственная дорога к новой версии.
+            }
         }
     }
 
