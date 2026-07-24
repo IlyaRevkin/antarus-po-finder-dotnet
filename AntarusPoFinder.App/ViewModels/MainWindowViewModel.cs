@@ -761,10 +761,17 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [RelayCommand]
     private void DismissUnknownItemsBanner() => UnknownItemsBannerVisible = false;
 
+    /// <summary>Реальные данные поиска изменились (применён общий конфиг, обновлены прошивки) — метим
+    /// выдачу устаревшей и, если вкладка активна, тут же перезапускаем. Пометка нужна, чтобы обычный
+    /// возврат на вкладку выдачу НЕ трогал (см. SearchView.RefreshIfActive), а вот после настоящих
+    /// правок она всё же обновилась.</summary>
     private void RefreshSearchIfActive()
     {
         if (_pageCache.TryGetValue("search", out var page) && page is SearchView searchView)
+        {
+            searchView.MarkResultsDirty();
             searchView.RefreshIfActive();
+        }
     }
 
     // ── Shared config sync (Настройки → Общие → Экспорт/Импорт) ─────────────
@@ -1173,6 +1180,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     void IAppHost.Navigate(string pageId) => Navigate(pageId);
+
+    void IAppHost.InvalidateSearchResults()
+    {
+        if (_pageCache.TryGetValue("search", out var page) && page is SearchView searchView)
+            searchView.MarkResultsDirty();
+    }
 
     public IBusyScope BeginBusy(string text) => Busy.Begin(text);
 

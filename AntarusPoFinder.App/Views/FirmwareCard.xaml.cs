@@ -21,7 +21,26 @@ public sealed record FirmwareCardFlags
 
     public bool HasParams { get; init; }
     public bool HasHmi { get; init; }
-    public bool HasMap { get; init; }
+
+    /// <summary>Есть РЕАЛЬНЫЙ файл карты ВВ / инструкции / карты Modbus — проверено обходом диска, а не
+    /// просто заполненным путём в БД (тот мог указывать на версию, где файла уже нет — отсюда была
+    /// жалоба «кнопка есть, а открывать нечего»). Считается в фоне (SearchView.ScanVersionFolder): до
+    /// конца обхода все три false, пункты появляются в «Ещё» по мере готовности. Открывается всегда
+    /// самый свежий файл в общей папке документа, а не путь конкретной версии.</summary>
+    public bool HasIoMap { get; init; }
+    public bool HasInstructions { get; init; }
+    public bool HasModbus { get; init; }
+
+    /// <summary>Расширение файла, который реально откроет «Открыть прошивку ПЛК» — считает
+    /// PlcOpenResolver при обходе диска, тот же резолвер и открывает. Пишется на кнопке в скобках для
+    /// ЛЮБОГО проекта, не только .psl/.lfs. null — обход ещё не дошёл до этой карточки, откроется
+    /// папка либо файл без расширения: тогда кнопка без скобок, пустые скобки хуже.</summary>
+    public string? PlcOpenExtension { get; init; }
+
+    /// <summary>Подключён настоящий лоадер (IFirmwareLoaderBackend.IsAvailable). Пока в приложении
+    /// только заготовка (всегда false) — «Загрузить в ПЛК» становится ОСНОВНОЙ кнопкой лишь когда
+    /// лоадер реально подключён И рядом есть .lfs; иначе основная кнопка — «Открыть прошивку ПЛК».</summary>
+    public bool LoaderConnected { get; init; }
 
     /// <summary>Нашёлся .lfs / .psl.</summary>
     public bool HasLfs { get; init; }
@@ -48,10 +67,6 @@ public sealed record FirmwareCardFlags
 /// загрузка в контроллер), а остальное убрано в меню «Ещё» — см. Configure.</summary>
 public partial class FirmwareCard : UserControl
 {
-    /// <summary>Что открывает основная кнопка карточки: скомпилированный .lfs (приоритет), исходный
-    /// .psl, либо — если ни того, ни другого рядом нет — старый общий детект «чем открыть».</summary>
-    private enum PrimaryFile { None, Lfs, Psl }
-
     public HierarchyResult Result { get; private set; } = null!;
 
     public event EventHandler? OpenFolderRequested;
@@ -119,43 +134,35 @@ public partial class FirmwareCard : UserControl
         ActionsPanel.Children.Clear();
         MorePanel.Children.Clear();
 
-        // ── Основной ряд: открыть → посмотреть → залить ────────────────────
-        // Порядок соответствует тому, как карточкой пользуются: сначала открыть проект, потом
-        // сопутствующее (панель, параметры), последней — заливка в контроллер. Всё остальное —
-        // в меню «Ещё», сгруппированное по смыслу.
-        //
-        // ── Какой файл открывает первая кнопка ────────────────────────────
-        // Расширение теперь всегда написано в скобках прямо на кнопке, а второй файл (если он есть)
-        // лежит в «Ещё» — раньше по кнопке «Открыть прошивку ПЛК» было не понять, что откроется, и
-        // есть ли вообще LFS/PSL у этой версии. Приоритет у LFS: это файл, который заливают в
-        // контроллер; PSL — исходник, его открывают, когда нужно править. Если файла всего один,
-        // основной кнопкой идёт он, а в «Ещё» второй остаётся неактивным пунктом с причиной
-        // (пустое место в меню неотличимо от «я не туда посмотрел»).
-        var primary = flags.HasLfs ? PrimaryFile.Lfs : flags.HasPsl ? PrimaryFile.Psl : PrimaryFile.None;
+        // ── Основной ряд ───────────────────────────────────────────────────
+        // Первой кнопкой — либо «Загрузить в ПЛК», либо «Открыть прошивку ПЛК», но не обе сразу:
+        //   • «Загрузить в ПЛК (.lfs)» показывается ТОЛЬКО когда подключён настоящий лоадер И рядом
+        //     есть .lfs (в контроллер заливают именно скомпилированный файл). Тогда «открыть» уходит
+        //     в «Ещё».
+        //   • во всех остальных случаях — «Открыть прошивку ПЛК (.ext)»: расширение файла, который
+        //     реально откроется, пишется прямо на кнопке, и не только для .psl/.lfs, а для любого
+        //     проекта — считает его тот же PlcOpenResolver, который потом и открывает.
+        // Дальше — HMI-проект и параметры отдельными кнопками, если есть. Всё прочее (второй файл
+        // пары, открыть проект при заливке, папка, документация, история) — в «Ещё».
+        var openExt = flags.PlcOpenExtension;
+        var showLoad = flags.LoaderConnected && flags.HasLfs;
 
-        var plcLabel = primary switch
+        if (showLoad)
         {
-            PrimaryFile.Lfs => "Открыть прошивку (LFS)",
-            PrimaryFile.Psl => "Открыть проект (PSL)",
-            _ => "Открыть прошивку ПЛК",
-        };
-        var plcBtn = MakeActionButton(plcLabel, (_, _) =>
+            var loadBtn = MakeActionButton("Загрузить в ПЛК (.lfs)",
+                (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
+            loadBtn.ToolTip = "Загрузка в контроллер через подключённый лоадер: найденный .lfs " +
+                              "подставится сам, дальше — параметры, прогресс и лог";
+            ActionsPanel.Children.Add(loadBtn);
+        }
+        else
         {
-            switch (primary)
-            {
-                case PrimaryFile.Lfs: OpenLfsRequested?.Invoke(this, EventArgs.Empty); break;
-                case PrimaryFile.Psl: OpenPslRequested?.Invoke(this, EventArgs.Empty); break;
-                default: OpenPlcRequested?.Invoke(this, EventArgs.Empty); break;
-            }
-        });
-        plcBtn.ToolTip = primary switch
-        {
-            PrimaryFile.Lfs => "Скомпилированный файл .lfs — тот, что заливается в контроллер" +
-                               (flags.HasPsl ? ". Исходник .psl — в «Ещё»" : ""),
-            PrimaryFile.Psl => "Исходный проект SMLogix (.psl) — скомпилированного .lfs рядом нет",
-            _ => !string.IsNullOrEmpty(result.ExecutableHint) ? $"Исполняемый файл: {result.ExecutableHint}" : null,
-        };
-        ActionsPanel.Children.Add(plcBtn);
+            var plcBtn = MakeActionButton(
+                openExt is null ? "Открыть прошивку ПЛК" : $"Открыть прошивку ПЛК ({openExt})",
+                (_, _) => OpenPlcRequested?.Invoke(this, EventArgs.Empty));
+            plcBtn.ToolTip = PrimaryOpenTooltip(result, flags, openExt);
+            ActionsPanel.Children.Add(plcBtn);
+        }
 
         if (flags.HasHmi)
         {
@@ -175,47 +182,50 @@ public partial class FirmwareCard : UserControl
         if (flags.HasParams)
             ActionsPanel.Children.Add(MakeActionButton("Параметры", (_, _) => ParamsRequested?.Invoke(this, EventArgs.Empty)));
 
-        var loaderBtn = MakeActionButton(flags.HasLfs ? "Загрузить в ПЛК (LFS)" : "Загрузить в ПЛК",
-            (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
-        loaderBtn.ToolTip = flags.HasLfs
-            ? "Загрузка в контроллер через лоадер: найденный .lfs подставится сам, дальше — параметры, прогресс и лог"
-            : "Загрузка в контроллер через лоадер. Рядом с версией нет .lfs — файл придётся выбрать вручную в диалоге";
-        ActionsPanel.Children.Add(loaderBtn);
-
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
-        // В меню — ВТОРОЙ файл пары, тот, что не попал на основную кнопку. Пункт добавляется, только
-        // если файл реально есть — серый неактивный пункт для несуществующего файла только загромождал
-        // меню (у KINCO и т.п. .lfs/.psl не бывает в принципе, у остальных версий второй файл часто
-        // просто не выкладывали — оба случая одинаково не про что жать).
+        // Когда основная кнопка — «Загрузить», «открыть прошивку» остаётся доступной здесь.
+        if (showLoad)
+            AddMenuItem(openExt is null ? "Открыть прошивку ПЛК" : $"Открыть прошивку ПЛК ({openExt})",
+                () => OpenPlcRequested?.Invoke(this, EventArgs.Empty),
+                "Открыть проект/файл для просмотра, без заливки в контроллер");
+        // Второй файл пары Segnetics — тот, что не открывается основной кнопкой. Пункт добавляется,
+        // только если файл реально есть (у KINCO и т.п. .lfs/.psl не бывает вовсе).
         if (flags.IsSegnetics)
         {
-            if (primary != PrimaryFile.Psl && flags.HasPsl)
+            if (flags.HasPsl && openExt != ".psl")
                 AddMenuItem("Открыть проект (PSL)", () => OpenPslRequested?.Invoke(this, EventArgs.Empty),
                     "Исходный проект SMLogix — открывают, когда нужно править");
-            if (primary != PrimaryFile.Lfs && flags.HasLfs)
+            if (flags.HasLfs && openExt != ".lfs")
                 AddMenuItem("Открыть прошивку (LFS)", () => OpenLfsRequested?.Invoke(this, EventArgs.Empty),
                     "Скомпилированный файл, который заливается в контроллер");
         }
+        // Заливка в ПЛК — запасной доступ, когда она не вынесена в основной ряд (лоадер ещё не
+        // подключён), но .lfs рядом есть: сейчас это заготовка, но пусть остаётся достижимой.
+        if (!showLoad && flags.HasLfs)
+            AddMenuItem("Загрузить в ПЛК", () => LoaderRequested?.Invoke(this, EventArgs.Empty),
+                "Загрузка в контроллер через лоадер. Настоящий лоадер ещё не подключён — сейчас это заготовка.");
         AddMenuItem("Обновить локальную копию с диска", () => DownloadRequested?.Invoke(this, EventArgs.Empty),
             "Скопировать версию с сетевого диска заново — если автосинхронизация выключена или не удалась");
 
-        // Тот же принцип: пункта нет вовсе, если приложенного файла нет — не серая недоступная строка.
-        // Раздел целиком пропускается, если нечего показать — иначе «ДОКУМЕНТАЦИЯ» висела бы пустым
-        // заголовком без единого пункта под ним.
-        var hasIoMap = !string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap;
-        var hasModbus = !string.IsNullOrEmpty(result.ModbusMapPath);
-        var hasInstructions = !string.IsNullOrEmpty(result.InstructionsPath);
-        if (hasIoMap || hasModbus || hasInstructions)
+        // Пункт есть, только когда РЕАЛЬНО есть что открыть (флаг посчитан обходом диска, а не по
+        // заполненному пути в БД — раньше кнопка «Карта in/out» висела и при пустой папке, отсюда была
+        // жалоба «зачем она, файла же нет»). Клик всегда открывает самый свежий файл документа, а не
+        // путь конкретной версии (см. SearchView.OpenMap/OpenInstructions/OpenModbusMap). Раздел целиком
+        // пропускается, если показывать нечего — иначе «ДОКУМЕНТАЦИЯ» висела бы пустым заголовком.
+        if (flags.HasIoMap || flags.HasModbus || flags.HasInstructions)
         {
             AddMenuHeader("Документация");
-            if (hasIoMap)
-                AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty));
-            if (hasModbus)
-                AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty));
-            if (hasInstructions)
-                AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty));
+            if (flags.HasIoMap)
+                AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty),
+                    "Открывается самый свежий файл карты ВВ");
+            if (flags.HasModbus)
+                AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty),
+                    "Открывается самый свежий файл карты Modbus");
+            if (flags.HasInstructions)
+                AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
+                    "Открывается самый свежий файл инструкции");
         }
 
         AddMenuHeader("Версия");
@@ -239,6 +249,15 @@ public partial class FirmwareCard : UserControl
     }
 
     private bool _syncStatusShown;
+
+    private static string? PrimaryOpenTooltip(HierarchyResult result, FirmwareCardFlags flags, string? openExt)
+    {
+        if (openExt == ".psl")
+            return "Исходный проект SMLogix (.psl)" + (flags.HasLfs ? ". Скомпилированный .lfs — в «Ещё»" : "");
+        if (openExt == ".lfs")
+            return "Скомпилированный файл .lfs — открывается лоадером";
+        return !string.IsNullOrEmpty(result.ExecutableHint) ? $"Исполняемый файл: {result.ExecutableHint}" : null;
+    }
 
     /// <summary>Номер версии, к которой был приложен HMI-проект, если это НЕ текущая версия. Папка
     /// проекта называется «{номер версии}_hmi» (см. FirmwareAttachmentsService.CopyHmiProject) —
@@ -284,9 +303,9 @@ public partial class FirmwareCard : UserControl
         }
         if (flags.HasHmi) parts.Add(HmiSourceVersion(result) is { } from ? $"HMI ✓ (от {from})" : "HMI ✓");
         if (flags.HasParams) parts.Add("параметры ✓");
-        if (!string.IsNullOrEmpty(result.IoMapPath) || flags.HasMap) parts.Add("карта ВВ ✓");
-        if (!string.IsNullOrEmpty(result.ModbusMapPath)) parts.Add("карта modbus ✓");
-        if (!string.IsNullOrEmpty(result.InstructionsPath)) parts.Add("инструкция ✓");
+        if (flags.HasIoMap) parts.Add("карта ВВ ✓");
+        if (flags.HasModbus) parts.Add("карта modbus ✓");
+        if (flags.HasInstructions) parts.Add("инструкция ✓");
         // Ни одного файла-спутника — строка не нужна вовсе, пустое «Файлы:» только занимает место.
         FilesLabel.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FilesLabel.Text = "Файлы: " + string.Join(" · ", parts);

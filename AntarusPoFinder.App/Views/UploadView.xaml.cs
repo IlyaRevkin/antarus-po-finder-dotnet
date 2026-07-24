@@ -904,6 +904,9 @@ public partial class UploadView : UserControl
                 // We just wrote files to the disk — refresh the footer file count now instead of
                 // letting it sit stale until the next periodic RunSync tick.
                 _host.RefreshDiskStatus();
+                // Выдача поиска кэшируется между заходами на вкладку — иначе оператор вернулся бы на
+                // «Поиск» и не увидел только что загруженное; помечаем её устаревшей явно.
+                _host.InvalidateSearchResults();
 
                 var msg = $"Прошивка загружена:\n{result.DestinationFolder}";
                 // Дополнительные подтипы легко потерять из виду: файлов у них на диске нет (только
@@ -1009,6 +1012,7 @@ public partial class UploadView : UserControl
 
         _services.Db.RollbackFwVersion(last.Id!.Value);
         UpdatePreview();
+        _host.InvalidateSearchResults();
         _host.ShowStatus($"Откатано: {last.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
     }
 }

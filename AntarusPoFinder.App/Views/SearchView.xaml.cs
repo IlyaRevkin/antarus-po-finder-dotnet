@@ -38,7 +38,8 @@ public partial class SearchView : UserControl
     private string? _lastLayoutFallbackResolvedKey;
     private bool _lastLayoutFallbackResolvedYes;
 
-    private static readonly string[] KincoPlcExts = { ".kpr", ".kpj", ".kpro", ".cpj", ".prj" };
+    // Расширения программы ПЛК переехали в PlcOpenResolver (там же, где решается, что открывать);
+    // здесь остались только расширения панели — по ним карточка понимает, что HMI вообще есть.
     private static readonly string[] KincoHmiExts = { ".dpj", ".emt", ".emtp", ".emsln" };
 
     /// <summary>Exposes specific named controls to OnboardingOverlay (MainWindow.ShowOnboarding) —
@@ -157,14 +158,28 @@ public partial class SearchView : UserControl
 
     private void Search_Click(object sender, RoutedEventArgs e) => PerformSearch();
 
-    /// <summary>Re-runs the last query so results (rollback status, tags, etc.) don't go stale —
-    /// the page instance is cached across navigation, so switching away and back would otherwise
-    /// keep showing whatever was on screen before other tabs changed the data.</summary>
+    /// <summary>Показанная выдача устарела — при следующем заходе на вкладку (или прямо сейчас, если
+    /// вкладка активна) её нужно перезапустить. false — выдача на экране актуальна, обычный возврат на
+    /// вкладку её не трогает. Изначально true: показывать ещё нечего, первый заход и так не ищет.</summary>
+    private bool _resultsDirty = true;
+
+    /// <summary>Пометить выдачу устаревшей. Вызывается ТОЛЬКО на реальных изменениях данных (см.
+    /// MainWindowViewModel.RefreshSearchIfActive — применён общий конфиг/обновление прошивок — и
+    /// IAppHost.InvalidateSearchResults — загрузка/откат прошивки). Локальные правки внутри самой
+    /// страницы (EditTags, DownloadFirmware) перезапускают поиск напрямую и в пометке не нуждаются.</summary>
+    public void MarkResultsDirty() => _resultsDirty = true;
+
+    /// <summary>Re-runs the last query so results (rollback status, tags, etc.) don't go stale — the
+    /// page instance is cached across navigation. Но перезапуск теперь только когда выдачу реально
+    /// пометили устаревшей (MarkResultsDirty): обычный возврат на вкладку (глянул Настройки/Схемы и
+    /// вернулся) НЕ гоняет поиск и диск заново — сохраняются карточки, прокрутка, не «улетает»
+    /// повторный запрос (жалоба пользователя), и второй диск на 400 ГБ не обходится по новой.</summary>
     public void RefreshIfActive()
     {
-        // Выдача бывает и без запроса — одними фильтрами; её тоже нужно освежать.
-        if (!string.IsNullOrWhiteSpace(SearchInput.Text) || !ActiveFilters().IsEmpty)
-            PerformSearch();
+        // Выдача бывает и без запроса — одними фильтрами.
+        if (string.IsNullOrWhiteSpace(SearchInput.Text) && ActiveFilters().IsEmpty) return;
+        if (!_resultsDirty) return;
+        PerformSearch();
     }
 
     private void ResetSearch_Click(object sender, RoutedEventArgs e)
@@ -221,6 +236,9 @@ public partial class SearchView : UserControl
         // Новая выдача — карточки прошлой сейчас будут выброшены, значит незавершённая
         // автосинхронизация по ним больше не актуальна (см. AutoSyncMissingAsync).
         _searchGeneration++;
+        // Сейчас перерисуем — то, что окажется на экране, актуально; дальнейшие возвраты на вкладку
+        // не будут перезапускать поиск, пока данные снова не пометят устаревшими (MarkResultsDirty).
+        _resultsDirty = false;
         StatusLabel.Text = "Поиск…";
         ResultsPanel.Children.Clear();
         EmptyLabel.Visibility = Visibility.Collapsed;
@@ -271,6 +289,10 @@ public partial class SearchView : UserControl
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
+        // Подключён ли настоящий лоадер — сейчас всегда false (в приложении только заготовка,
+        // StubFirmwareLoaderBackend.IsAvailable = false), поэтому «Загрузить в ПЛК» станет основной
+        // кнопкой карточки лишь когда лоадер реально допилят. Считаем один раз на всю выдачу.
+        var loaderConnected = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath()).IsAvailable;
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
 
         foreach (var result in results)
@@ -288,6 +310,7 @@ public partial class SearchView : UserControl
                 HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
+                LoaderConnected = loaderConnected,
                 DiskScanPending = true,
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
@@ -339,7 +362,8 @@ public partial class SearchView : UserControl
     // папка живёт на сетевом диске компании, который регулярно отвечает через раз. Поэтому карточки
     // рисуются сразу, а этот обход идёт следом в фоне и дорисовывает их по мере готовности.
 
-    private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi, bool HasMap);
+    private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
+        bool HasIoMap, bool HasInstructions, bool HasModbus, string? PlcOpenExtension);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -368,9 +392,35 @@ public partial class SearchView : UserControl
         var hasHmi = !string.IsNullOrEmpty(result.HmiPath)
             || ExecutableHintResolver.Normalize(result.HmiExecutableHint) is not null
             || hmiFile;
-        var hasMap = string.IsNullOrEmpty(result.IoMapPath) && FindSiblingFolder(result, "Карта ВВ") is not null;
-        return new DiskScan(lfs, psl, hasHmi, hasMap);
+        // Карта ВВ / инструкция / карта Modbus — есть, только если реально найден файл (путь версии,
+        // указывающий на существующий файл, ЛИБО непустая общая папка документа), а не просто
+        // заполненное поле в БД. Тот же резолвер потом открывает самый свежий файл (см. OpenMap и др.).
+        var hasIoMap = ResolveDocFile(result, result.IoMapPath, "Карта ВВ") is not null;
+        var hasInstructions = ResolveDocFile(result, result.InstructionsPath, "Инструкция") is not null;
+        var hasModbus = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus") is not null;
+        // Расширение того файла, который реально откроет «Открыть прошивку ПЛК» — считается тем же
+        // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
+        // разойтись с тем, что откроется, и работает для ЛЮБОГО проекта, не только .psl/.lfs.
+        var plcExt = PlcOpenResolver.ResolveExtension(PlcSources(result));
+        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt);
     }
+
+    /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
+    /// разницу между наборами.</summary>
+    private static PlcOpenSources PlcSources(HierarchyResult result) => new()
+    {
+        CandidateFolders = CandidateFolders(result).ToList(),
+        VersionFolders = VersionFolders(result).ToList(),
+        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), result.FirmwareDir ?? "" },
+        ExecutableHint = result.ExecutableHint,
+        NetworkFolder = result.FirmwareDir,
+    };
+
+    /// <summary>Самый свежий актуальный файл документа (карта ВВ / инструкция / карта Modbus) —
+    /// общая папка документа рядом с папкой контроллера, см. DocFileResolver.
+    /// Ходит на диск — вызывать из фонового потока (ScanVersionFolder) или по клику, не в отрисовке.</summary>
+    private static string? ResolveDocFile(HierarchyResult result, string? storedPath, string sharedFolderName) =>
+        DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, sharedFolderName));
 
     /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
     /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
@@ -391,7 +441,10 @@ public partial class SearchView : UserControl
                 HasLfs = scan.HasLfs,
                 HasPsl = scan.HasPsl,
                 HasHmi = scan.HasHmi,
-                HasMap = scan.HasMap,
+                HasIoMap = scan.HasIoMap,
+                HasInstructions = scan.HasInstructions,
+                HasModbus = scan.HasModbus,
+                PlcOpenExtension = scan.PlcOpenExtension,
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
@@ -849,26 +902,17 @@ public partial class SearchView : UserControl
     /// иначе «первый подходящий файл в папке» может открыть файл панели вместо программы ПЛК.</summary>
     private void OpenPlc(HierarchyResult result)
     {
-        if (ResolveHintedFile(result, result.ExecutableHint) is { } hinted)
+        // Что именно откроется — решает PlcOpenResolver, тот же, что посчитал расширение для подписи
+        // кнопки при обходе диска. Держать эти два решения в одном месте обязательно: разойдись они —
+        // на кнопке было бы написано одно расширение, а открывался бы другой файл.
+        var target = PlcOpenResolver.Resolve(PlcSources(result));
+        if (target is null)
         {
-            TryOpen(hinted);
+            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.", "Открыть",
+                MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        // Проект Segnetics: рядом лежат .psl (исходник SMLogix) и .lfs (скомпилированный файл для
-        // заливки). Открывать надо именно .psl — .lfs не открывается ничем, кроме лоадера, а общая
-        // эвристика «первый непонятный файл в папке» вполне могла взять его и молча открыть блокнот
-        // (карточка теперь и называет эту кнопку «Открыть проект PSL», когда исходник найден).
-        if (LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.PslExtension) is { } psl)
-        {
-            TryOpen(psl);
-            return;
-        }
-        if (FindFiltered(result, KincoHmiExts) is not null && FindFiltered(result, KincoPlcExts) is not null)
-        {
-            OpenFiltered(result, KincoPlcExts, "ПЛК");
-            return;
-        }
-        OpenFirmware(result);
+        TryOpen(target);
     }
 
     /// <summary>Зеркально OpenPlc: отдельная папка HMI-проекта (чекбокс «Добавить HMI-проект» при
@@ -886,18 +930,6 @@ public partial class SearchView : UserControl
             return;
         }
         OpenFiltered(result, KincoHmiExts, "HMI");
-    }
-
-    private void OpenFirmware(HierarchyResult result)
-    {
-        var target = ResolveOpenTarget(result);
-        if (target is null)
-        {
-            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.", "Открыть",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
     }
 
     private void OpenFirmwareFolder(HierarchyResult result)
@@ -987,11 +1019,8 @@ public partial class SearchView : UserControl
 
     private void OpenMap(HierarchyResult result)
     {
-        var path = result.IoMapPath;
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
-            path = FindSiblingFolder(result, "Карта ВВ") ?? path;
-
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+        var path = ResolveDocFile(result, result.IoMapPath, "Карта ВВ");
+        if (path is null)
         {
             AppMessageBox.Show($"Файл карты не найден.\nПуть: {result.IoMapPath}", "Карта in/out", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -1001,11 +1030,8 @@ public partial class SearchView : UserControl
 
     private void OpenModbusMap(HierarchyResult result)
     {
-        var path = result.ModbusMapPath;
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
-            path = FindSiblingFolder(result, "Карта Modbus") ?? path;
-
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+        var path = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus");
+        if (path is null)
         {
             AppMessageBox.Show($"Файл карты Modbus не найден.\nПуть: {result.ModbusMapPath}", "Карта modbus", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -1028,11 +1054,8 @@ public partial class SearchView : UserControl
 
     private void OpenInstructions(HierarchyResult result)
     {
-        var path = result.InstructionsPath;
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
-            path = FindSiblingFolder(result, "Инструкция") ?? path;
-
-        if (string.IsNullOrEmpty(path) || !(File.Exists(path) || Directory.Exists(path)))
+        var path = ResolveDocFile(result, result.InstructionsPath, "Инструкция");
+        if (path is null)
         {
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
