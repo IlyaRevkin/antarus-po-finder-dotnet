@@ -1235,62 +1235,39 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     /// <summary>Изменение ОБЩЕГО справочника (тип/подтип шкафа, контроллер, производитель ПЧ/УПП,
-    /// тег, расширение) уезжает на сетевой диск сразу, а не ждёт таймера автоотправки.
+    /// тег, расширение) кладётся в накопитель и ждёт кнопки «Отправить всё» на плашке — само по себе
+    /// на сетевой диск оно не уезжает.
     ///
-    /// Почему это понадобилось: приём чужого конфига включён у всех и по умолчанию (sync_interval_min
-    /// = 5 мин), а ОТПРАВКА — только у администратора и по умолчанию ВЫКЛЮЧЕНА
-    /// (config_push_interval_min = 0, см. ConfigService). То есть добавленный производитель ПЧ/УПП
-    /// физически не мог доехать до коллег, пока администратор отдельно не зайдёт на страницу
-    /// «Сетевые диски» и не нажмёт «Отправить сейчас» — а он про это не знал и справедливо считал,
-    /// что синхронизация сломана («добавил производителей — у коллеги их нет»). Правки merge-логики
-    /// (Database.FlatLists) этого не лечили: отправлять было нечего.
+    /// Раньше администратору отправка делалась прямо здесь, сразу после правки. Это решало исходную
+    /// проблему («добавил производителя — у коллег его нет»: приём чужого конфига включён у всех по
+    /// умолчанию, а отправка — только у администратора и по умолчанию выключена,
+    /// config_push_interval_min = 0), но заодно лишало его контроля: добавил несколько
+    /// производителей — каждый улетел отдельным экспортом, а плашка со списком того, что отправлено,
+    /// пропадала практически сразу, потому что накопитель тут же очищался. Отправить пачкой,
+    /// посмотреть перед отправкой, что именно уйдёт, или передумать было нечем.
     ///
-    /// Порядок «сначала забрать, потом отдать» обязателен: Export перезаписывает ВЕСЬ общий снимок,
-    /// и отдать свой, не забрав перед этим чужой, — известный способ затереть чужие правки (см.
-    /// ConfigSyncService.PushAppUsersOnly). CheckForConfigUpdate — ровно то же, что делает
-    /// периодический таймер приёма, так что дороже обычного тика это не стоит.
+    /// Теперь исходная проблема закрыта плашкой-накопителем (RefreshPendingChangesBanner): она видна
+    /// всегда, пока в очереди что-то есть, переживает перезапуск приложения (очередь в БД) и прямо
+    /// называет число неотправленных изменений — не заметить её и «не знать про отправку» уже нельзя.
+    /// Сама отправка — SendPendingChangesNow, там же и порядок «сначала забрать, потом отдать».
     ///
-    /// Только администратор: полный экспорт другим ролям запрещён намеренно (там же). Для них метод
-    /// работает как обычный ShowStatus — правка остаётся локальной, ровно как и раньше.</summary>
+    /// Автоотправка по таймеру (PushConfigNowAsync), если администратор её включил, по-прежнему
+    /// уносит накопленное сама — эта настройка не менялась.</summary>
     public void PushCatalogChange(string what) => _ = PushCatalogChangeAsync(what);
 
-    private async Task PushCatalogChangeAsync(string what)
+    private Task PushCatalogChangeAsync(string what)
     {
-        // Задача 4 (отправитель): любое изменение справочника сначала попадает в локальный
-        // накопитель (Database.SyncPendingChange) — не только ради счётчика на плашке, но и как
-        // источник записи в журнал маркера ревизии ниже (ExportAsync(changeDescriptions:)), даже
-        // если отправка произойдёт прямо сейчас (администратор). Для остальных ролей это ЕДИНСТВЕННЫЙ
-        // след изменения — см. класс-doc метода ниже за тем, почему их правки дальше не уезжают.
+        // Накопитель (Database.SyncPendingChange) — и счётчик на плашке, и источник описаний для
+        // журнала маркера ревизии при отправке (ExportAsync(changeDescriptions:)).
         _services.Db.AddSyncPendingChange("catalog", what, _services.CurrentUserName);
         RefreshPendingChangesBanner();
 
-        if (CurrentRole != "administrator")
-        {
-            ShowStatus(what, category: NotificationCategory.Hierarchy);
-            return;
-        }
-
-        var root = _services.Cfg.RootPath();
-        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root))
-        {
-            ShowStatus($"{what}. На сетевой диск не отправлено — диск недоступен, у коллег изменение не появится",
-                10000, NotificationCategory.Hierarchy);
-            return;
-        }
-
-        try
-        {
-            using var busy = Busy.Begin("Отправка справочника на диск…");
-            await CheckForConfigUpdateAsync();
-            var descriptions = _services.Db.GetSyncPendingChanges().Select(c => c.Description).ToList();
-            await ConfigSyncService.ExportAsync(_services, root, $"{_services.CurrentUserName} ({RoleLabel})", descriptions);
-            RefreshPendingChangesBanner();
-            ShowStatus($"{what} · отправлено на сетевой диск", 5000, NotificationCategory.Hierarchy);
-        }
-        catch (Exception ex)
-        {
-            ShowStatus($"{what}. Не удалось отправить на сетевой диск: {ex.Message}", 12000, NotificationCategory.Hierarchy);
-        }
+        // Полный экспорт разрешён только администратору (см. SendPendingChangesNow) — остальным
+        // ролям обещать отправку нельзя, у них правка так и останется локальной.
+        ShowStatus(CurrentRole == "administrator"
+            ? $"{what}. Чтобы изменение увидели коллеги — «Отправить всё» на плашке сверху"
+            : what, category: NotificationCategory.Hierarchy);
+        return Task.CompletedTask;
     }
 
     /// <summary>Runs silently on SUCCESS — no status-bar toast — same reasoning as
