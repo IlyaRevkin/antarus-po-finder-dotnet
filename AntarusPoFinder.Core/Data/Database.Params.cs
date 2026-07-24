@@ -71,23 +71,49 @@ public partial class Database
                 cmd.Parameters.AddWithValue(name, value);
         });
         while (reader.Read())
+            result.Add(ReadParamFile(reader));
+        return result;
+    }
+
+    private static ParamFile ReadParamFile(Microsoft.Data.Sqlite.SqliteDataReader reader) => new()
+    {
+        Id = GetInt(reader, "id"),
+        SubtypeId = GetIntOrNull(reader, "subtype_id"),
+        Manufacturer = GetString(reader, "manufacturer"),
+        Filename = GetString(reader, "filename"),
+        DiskPath = GetString(reader, "disk_path"),
+        Description = GetString(reader, "description"),
+        UploadDate = GetString(reader, "upload_date"),
+        Archived = GetBool(reader, "archived"),
+        Tags = GetString(reader, "tags"),
+        SubtypeName = GetString(reader, "subtype_name"),
+        FolderName = GetString(reader, "folder_name"),
+        GroupName = GetString(reader, "group_name"),
+    };
+
+    /// <summary>Все записи, стоящие за ОДНИМ и тем же файлом на диске — по одной на каждый подтип, к
+    /// которому файл привязан (см. ParamFileLinkService: копии заводятся с тем же disk_path, файл
+    /// физически лежит один раз). Именно этот набор правит диалог «Подтипы» у уже загруженного файла.
+    /// Архивные (удалённые) записи не возвращаются — иначе снятый когда-то подтип считался бы
+    /// привязанным до сих пор.</summary>
+    public List<ParamFile> GetParamFilesSharingFile(string diskPath, string filename)
+    {
+        var result = new List<ParamFile>();
+        if (string.IsNullOrWhiteSpace(diskPath) || string.IsNullOrWhiteSpace(filename)) return result;
+        using var reader = ExecuteReader("""
+            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
+            FROM param_files pf
+            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
+            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+            WHERE pf.archived = 0 AND pf.disk_path = @d AND pf.filename = @f
+            ORDER BY pf.id
+            """, cmd =>
         {
-            result.Add(new ParamFile
-            {
-                Id = GetInt(reader, "id"),
-                SubtypeId = GetIntOrNull(reader, "subtype_id"),
-                Manufacturer = GetString(reader, "manufacturer"),
-                Filename = GetString(reader, "filename"),
-                DiskPath = GetString(reader, "disk_path"),
-                Description = GetString(reader, "description"),
-                UploadDate = GetString(reader, "upload_date"),
-                Archived = GetBool(reader, "archived"),
-                Tags = GetString(reader, "tags"),
-                SubtypeName = GetString(reader, "subtype_name"),
-                FolderName = GetString(reader, "folder_name"),
-                GroupName = GetString(reader, "group_name"),
-            });
-        }
+            cmd.Parameters.AddWithValue("@d", diskPath);
+            cmd.Parameters.AddWithValue("@f", filename);
+        });
+        while (reader.Read())
+            result.Add(ReadParamFile(reader));
         return result;
     }
 

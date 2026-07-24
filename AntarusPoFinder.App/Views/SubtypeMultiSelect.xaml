@@ -32,9 +32,20 @@
                Width="{Binding ElementName=MainBorder, Path=ActualWidth}">
             <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                     BorderThickness="1" CornerRadius="6" Margin="0,4,0,0" MaxHeight="280">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,4">
-                    <StackPanel x:Name="ItemsPanel" Margin="4,0"/>
-                </ScrollViewer>
+                <DockPanel Margin="0,4">
+                    <!-- Список по умолчанию показывает подтипы выбранного типа шкафа (иначе выбор
+                         типа ничего не означал бы), а эта галочка открывает подтипы остальных типов —
+                         для файлов, которые подходят сразу нескольким типам шкафа (параметры ПЧ/УПП).
+                         Скрыта там, где список и так в пределах одного типа (см. RebuildItems). -->
+                    <StackPanel DockPanel.Dock="Top">
+                        <CheckBox x:Name="AllGroupsCheck" Visibility="Collapsed" Margin="8,2,8,6"
+                                  Content="Показать подтипы других типов шкафов"
+                                  Checked="AllGroups_Toggled" Unchecked="AllGroups_Toggled"/>
+                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ItemsPanel" Margin="4,0"/>
+                    </ScrollViewer>
+                </DockPanel>
             </Border>
         </Popup>
     </Grid>

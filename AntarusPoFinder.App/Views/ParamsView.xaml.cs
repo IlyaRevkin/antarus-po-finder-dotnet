@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -19,9 +20,14 @@ public partial class ParamsView : UserControl
     private readonly IAppHost _host;
     private string? _srcPath;
 
+    /// <summary>Все подтипы справочника вместе с именем своего типа шкафа — пул кандидатов и для
+    /// чек-комбобокса загрузки, и для диалога правки подтипов у уже загруженного файла.</summary>
+    private List<ParamFileLinkService.SubtypeTarget> _subtypeTargets = new();
+
     private class ParamFileRow
     {
         public int Id { get; init; }
+        public int? SubtypeId { get; init; }
         public string Filename { get; init; } = "";
         public string GroupSubtypeDisplay { get; init; } = "";
         public string Manufacturer { get; init; } = "";
@@ -30,6 +36,11 @@ public partial class ParamsView : UserControl
         public string DateOnly { get; init; } = "";
         public string Description { get; init; } = "";
         public string DiskPath { get; init; } = "";
+
+        /// <summary>Исходная запись целиком — диалогу правки подтипов нужны поля, которых в таблице
+        /// нет (дата загрузки в полном виде, описание), а перечитывать её из БД по Id ради этого
+        /// незачем: список только что оттуда и прочитан.</summary>
+        public ParamFile Source { get; init; } = new();
     }
 
     public ParamsView(AppServices services, IAppHost host)
@@ -53,6 +64,18 @@ public partial class ParamsView : UserControl
 
         var groups = _services.Db.GetAllEquipmentGroups();
         var manufs = _services.Db.GetParamManufacturers();
+
+        // Подтипы — из ВСЕХ типов шкафа сразу, а не только из выбранного: один файл параметров
+        // частотника подходит нескольким типам (у прошивки ПЛК так не бывает, поэтому в «Загрузке ПО»
+        // список остался в пределах группы). Показывается при этом всё равно выбранный тип — сужением
+        // (SetGroupFilter), а не пересборкой списка, иначе отметка подтипа другого типа терялась бы
+        // при первом же переключении «Тип шкафа». Остальные типы открывает галочка внутри списка.
+        var groupNames = groups.ToDictionary(g => g.Id ?? 0, g => g.Name);
+        _subtypeTargets = _services.Db.GetAllEquipmentSubtypes()
+            .Where(s => s.Id is not null)
+            .Select(s => new ParamFileLinkService.SubtypeTarget(s,
+                groupNames.TryGetValue(s.GroupId, out var name) ? name : ""))
+            .ToList();
 
         // Ничего не выбирается автоматически при первом открытии страницы (-1), как и в
         // UploadView.ReloadCombos — молчаливый выбор первого типа/подтипа/производителя делал
@@ -91,6 +114,7 @@ public partial class ParamsView : UserControl
         var rowActionsVisibility = expanding ? Visibility.Visible : Visibility.Collapsed;
         OpenFolderBtn.Visibility = rowActionsVisibility;
         EditTagsBtn.Visibility = rowActionsVisibility;
+        EditSubtypesBtn.Visibility = rowActionsVisibility;
         DeleteRowBtn.Visibility = rowActionsVisibility;
         if (expanding) ReloadTable();
     }
@@ -104,16 +128,18 @@ public partial class ParamsView : UserControl
     /// выбрано, как и у GroupCombo/ManufCombo (см. PopulateCombos), оператор выбирает подтип явно.</summary>
     private void PopulateSubtypes()
     {
-        if (GroupCombo.SelectedItem is not EquipmentGroup group)
-        {
-            SubtypesSelect.SetItems(Enumerable.Empty<EquipmentSubType>());
-            return;
-        }
-        var subtypes = _services.Db.GetSubtypesForGroup(group.Id!.Value);
-        SubtypesSelect.SetItems(subtypes);
+        SubtypesSelect.SetItems(_subtypeTargets.Select(t => t.Subtype),
+            groupNamesBySubtypeId: _subtypeTargets.ToDictionary(t => t.Id, t => t.GroupName));
+        ApplySubtypeGroupFilter();
     }
 
-    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => PopulateSubtypes();
+    /// <summary>Сужает список подтипов до выбранного типа шкафа — сам набор кандидатов при этом не
+    /// меняется, поэтому уже отмеченные подтипы других типов остаются отмеченными и видимыми
+    /// (см. SubtypeMultiSelect.SetGroupFilter).</summary>
+    private void ApplySubtypeGroupFilter() =>
+        SubtypesSelect.SetGroupFilter((GroupCombo.SelectedItem as EquipmentGroup)?.Id);
+
+    private void GroupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplySubtypeGroupFilter();
 
     private void BrowseFile_Click(object sender, RoutedEventArgs e)
     {
@@ -170,9 +196,13 @@ public partial class ParamsView : UserControl
             AppMessageBox.Show("Путь к диску не задан. Проверьте Настройки.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (GroupCombo.SelectedItem is not EquipmentGroup group) return;
+        // Тип шкафа берётся у ОСНОВНОГО подтипа, а не из GroupCombo: отмеченным основным может
+        // оказаться подтип другого типа (список охватывает все типы), и тогда файл ушёл бы в папку
+        // чужого типа. GroupCombo — только сужение списка, не адрес на диске.
+        var primaryTarget = _subtypeTargets.FirstOrDefault(t => t.Id == subtype.Id);
+        if (primaryTarget is null) return;
 
-        var dstFolder = _services.Hierarchy.ParamsPath(root, group.Name, subtype.Name, manuf);
+        var dstFolder = _services.Hierarchy.ParamsPath(root, primaryTarget.GroupName, subtype.Name, manuf);
         var srcPath = _srcPath;
         try
         {
@@ -205,8 +235,10 @@ public partial class ParamsView : UserControl
         };
         _services.Db.AddParamFile(record);
 
+        var extraIds = SubtypesSelect.ExtraSubtypes.Select(s => s.Id ?? 0).ToHashSet();
         var link = ParamFileLinkService.LinkToExtraSubtypes(_services.Db, _services.Hierarchy, root,
-            group, subtype, record, SubtypesSelect.ExtraSubtypes, new Services.ShortcutCreator());
+            subtype.Id!.Value, record, _subtypeTargets.Where(t => extraIds.Contains(t.Id)),
+            new Services.ShortcutCreator());
 
         _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}", category: NotificationCategory.FirmwareAndParams);
         if (link.CreatedIds.Count > 0 || link.Warnings.Count > 0)
@@ -254,6 +286,7 @@ public partial class ParamsView : UserControl
         var rows = files.Select(f => new ParamFileRow
         {
             Id = f.Id ?? 0,
+            SubtypeId = f.SubtypeId,
             Filename = f.Filename,
             GroupSubtypeDisplay = string.IsNullOrEmpty(f.SubtypeName) || f.SubtypeName == "—"
                 ? f.GroupName
@@ -263,6 +296,7 @@ public partial class ParamsView : UserControl
             DateOnly = f.UploadDate.Length >= 10 ? f.UploadDate[..10] : f.UploadDate,
             Description = f.Description,
             DiskPath = f.DiskPath,
+            Source = f,
         }).ToList();
 
         FilesGrid.ItemsSource = rows;
@@ -297,6 +331,41 @@ public partial class ParamsView : UserControl
 
         _services.Db.UpdateParamFileTags(row.Id, dlg.ResultTags);
         _host.ShowStatus($"Теги обновлены: {row.Filename}", category: NotificationCategory.FirmwareAndParams);
+        ReloadTable();
+    }
+
+    /// <summary>Правка набора подтипов у уже загруженного файла — те же операции, что при загрузке
+    /// (запись + ярлык на общий файл), только применяются к существующей записи.</summary>
+    private void EditSubtypes_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilesGrid.SelectedItem is not ParamFileRow row)
+        {
+            AppMessageBox.Show("Выберите строку.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (row.SubtypeId is null || string.IsNullOrWhiteSpace(row.DiskPath))
+        {
+            AppMessageBox.Show("У этой записи нет подтипа или папки на диске — привязывать нечего.",
+                "Подтипы", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var dlg = new EditParamSubtypesDialog(_services, row.Source, row.Filename) { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        var result = dlg.Result;
+        if (result is not null)
+        {
+            var parts = new List<string>();
+            if (result.Added.Count > 0) parts.Add("добавлено: " + string.Join(", ", result.Added));
+            if (result.Removed.Count > 0) parts.Add("убрано: " + string.Join(", ", result.Removed));
+            if (parts.Count > 0)
+                _host.ShowStatus($"Подтипы файла {row.Filename} — {string.Join("; ", parts)}",
+                    category: NotificationCategory.FirmwareAndParams);
+            if (result.Warnings.Count > 0)
+                AppMessageBox.Show(string.Join("\n", result.Warnings), "Предупреждения",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         ReloadTable();
     }
 

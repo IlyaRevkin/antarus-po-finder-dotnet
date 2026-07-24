@@ -29,6 +29,16 @@ public partial class SubtypeMultiSelect : UserControl
     private readonly Dictionary<int, string> _labels = new();
     private List<EquipmentSubType> _candidates = new();
 
+    /// <summary>Имя типа шкафа по ID подтипа — задаётся только там, где список охватывает несколько
+    /// типов (параметры ПЧ/УПП, см. ParamsView): у прошивок подтипы всегда из одной группы, и префикс
+    /// «тип / » в подписи был бы шумом. Null-словарь = режим одной группы, как было раньше.</summary>
+    private Dictionary<int, string>? _groupNames;
+
+    /// <summary>Тип шкафа, выбранный в форме: его подтипы показываются в списке. Null — показывать
+    /// все. Отмеченные подтипы других типов показываются ВСЕГДА (иначе галочка стояла бы там, где её
+    /// не видно), остальные — по галочке «показать все типы» в шапке списка.</summary>
+    private int? _filterGroupId;
+
     /// <summary>Порядок отметки чекбоксов — [0], если есть, это ID основного подтипа. Пополняется/
     /// уменьшается по мере кликов (см. Check_Toggled), переживает пересборку списка кандидатов
     /// (SetItems сохраняет то, что осталось валидным).</summary>
@@ -76,27 +86,77 @@ public partial class SubtypeMultiSelect : UserControl
     /// невалидным для новых кандидатов (напр. после смены группы старые ID из другой группы просто
     /// не совпадут ни с одним новым кандидатом и молча отсеются — ID подтипов уникальны глобально).
     /// Пустой список кандидатов выключает поле целиком: выбирать не из чего.</summary>
-    public void SetItems(IEnumerable<EquipmentSubType> candidates, IEnumerable<int>? preselectedIdsInOrder = null)
+    public void SetItems(IEnumerable<EquipmentSubType> candidates, IEnumerable<int>? preselectedIdsInOrder = null,
+        IReadOnlyDictionary<int, string>? groupNamesBySubtypeId = null)
     {
         _candidates = candidates.Where(s => s.Id is not null).ToList();
+        _groupNames = groupNamesBySubtypeId is null
+            ? null
+            : new Dictionary<int, string>(groupNamesBySubtypeId);
         var validIds = new HashSet<int>(_candidates.Select(s => s.Id!.Value));
 
         var preserved = (preselectedIdsInOrder ?? _checkOrder).Where(validIds.Contains).Distinct().ToList();
         _checkOrder.Clear();
         _checkOrder.AddRange(preserved);
 
+        RebuildItems();
+    }
+
+    /// <summary>Ограничивает список подтипами одного типа шкафа — вместо того чтобы вызывать SetItems
+    /// заново на каждую смену типа. Разница принципиальная: SetItems сбрасывает отметки, не попавшие
+    /// в новый список, а здесь набор кандидатов не меняется, поэтому отмеченный подтип другого типа
+    /// шкафа остаётся отмеченным (и видимым — см. RebuildItems). Нужно там, где один файл привязан
+    /// сразу к нескольким типам шкафа (параметры ПЧ/УПП).</summary>
+    public void SetGroupFilter(int? groupId)
+    {
+        if (_filterGroupId == groupId) return;
+        _filterGroupId = groupId;
+        RebuildItems();
+    }
+
+    /// <summary>Пересборка списка сама может снять галочку «все типы» — без этого флага её событие
+    /// Unchecked вызвало бы пересборку повторно и вдобавок открыло бы popup (см. AllGroups_Toggled).</summary>
+    private bool _rebuilding;
+
+    private void RebuildItems()
+    {
+        if (_rebuilding) return;
+        _rebuilding = true;
+        try { RebuildItemsCore(); }
+        finally { _rebuilding = false; }
+    }
+
+    private void RebuildItemsCore()
+    {
         ItemsPopup.IsOpen = false;
         ItemsPanel.Children.Clear();
         _checks.Clear();
         _labels.Clear();
 
+        // Галочка «все типы» имеет смысл только когда список вообще охватывает несколько типов и
+        // сейчас сужен до одного — иначе показывать нечего сверх уже показанного.
+        var crossGroup = _groupNames is not null && _filterGroupId is not null
+            && _candidates.Any(s => s.GroupId != _filterGroupId);
+        AllGroupsCheck.Visibility = crossGroup ? Visibility.Visible : Visibility.Collapsed;
+        if (!crossGroup) AllGroupsCheck.IsChecked = false;
+
+        var showAll = _filterGroupId is null || AllGroupsCheck.IsChecked == true;
+        var visible = _candidates
+            .Where(s => showAll || s.GroupId == _filterGroupId || _checkOrder.Contains(s.Id!.Value))
+            .ToList();
+
         IsEnabled = _candidates.Count > 0;
         MainBorder.Opacity = IsEnabled ? 1.0 : 0.5;
 
-        foreach (var subtype in _candidates)
+        foreach (var subtype in visible)
         {
             var id = subtype.Id!.Value;
             var label = subtype.Name == "—" ? subtype.FolderName : $"{subtype.FolderName} ({subtype.Name})";
+            // Подтип чужого типа шкафа подписан своим типом: без этого «ХП» из другого типа в списке
+            // выглядел бы как подтип текущего, и отличить их было бы нечем.
+            if (_groupNames is not null && subtype.GroupId != _filterGroupId
+                && _groupNames.TryGetValue(id, out var groupName) && !string.IsNullOrEmpty(groupName))
+                label = $"{groupName} / {label}";
             _labels[id] = label;
 
             var cb = new CheckBox
@@ -115,6 +175,15 @@ public partial class SubtypeMultiSelect : UserControl
 
         RefreshLabels();
         UpdateSummary();
+    }
+
+    private void AllGroups_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_rebuilding) return;
+        // Список пересобирается, но popup при этом закрывается (RebuildItems) — открываем обратно:
+        // пользователь только что щёлкнул галочку ВНУТРИ него, чтобы увидеть остальные подтипы.
+        RebuildItems();
+        ItemsPopup.IsOpen = true;
     }
 
     /// <summary>Снять ВСЕ отметки, не трогая сам список кандидатов (кнопка «Очистить данные» и

@@ -237,8 +237,9 @@ public class ExtraSubtypesLinkTests : IDisposable
         _db.AddParamFile(primary);
         var shortcuts = new FakeShortcuts();
 
-        var link = ParamFileLinkService.LinkToExtraSubtypes(_db, _hierarchy, Root, group, subtypes[0], primary,
-            new[] { subtypes[1], subtypes[2], subtypes[0] }, shortcuts);
+        var link = ParamFileLinkService.LinkToExtraSubtypes(_db, _hierarchy, Root, subtypes[0].Id!.Value, primary,
+            new[] { subtypes[1], subtypes[2], subtypes[0] }
+                .Select(s => new ParamFileLinkService.SubtypeTarget(s, group.Name)), shortcuts);
 
         Assert.Equal(2, link.CreatedIds.Count);
         Assert.Empty(link.Warnings);
@@ -275,8 +276,9 @@ public class ExtraSubtypesLinkTests : IDisposable
         };
         _db.AddParamFile(primary);
 
-        var link = ParamFileLinkService.LinkToExtraSubtypes(_db, _hierarchy, Root, group, subtypes[0], primary,
-            new[] { subtypes[1] }, new FakeShortcuts { Throw = new IOException("сеть недоступна") });
+        var link = ParamFileLinkService.LinkToExtraSubtypes(_db, _hierarchy, Root, subtypes[0].Id!.Value, primary,
+            new[] { new ParamFileLinkService.SubtypeTarget(subtypes[1], group.Name) },
+            new FakeShortcuts { Throw = new IOException("сеть недоступна") });
 
         Assert.Single(link.CreatedIds);
         Assert.Contains(link.Warnings, w => w.Contains(subtypes[1].Name));

@@ -141,6 +141,10 @@
                         <Button x:Name="ShowAllButton" Content="Все загруженные" Click="ShowAllButton_Click"/>
                         <Button x:Name="OpenFolderBtn" Content="Открыть папку" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenFolder_Click" Visibility="Collapsed"/>
                         <Button x:Name="EditTagsBtn" Content="Теги" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="EditTags_Click" Visibility="Collapsed"/>
+                        <!-- Набор подтипов у уже загруженного файла: раньше он задавался только в
+                             момент загрузки, ошибся — оставалось перезаливать (та же история, что у
+                             прошивок, см. EditFirmwareDialog → «ПОДТИПЫ ШКАФОВ»). -->
+                        <Button x:Name="EditSubtypesBtn" Content="Подтипы" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="EditSubtypes_Click" Visibility="Collapsed"/>
                         <Button x:Name="DeleteRowBtn" Content="Удалить запись" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="DeleteRow_Click" Visibility="Collapsed"/>
                         <TextBlock x:Name="CountLabel" Text="Записей: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     </StackPanel>

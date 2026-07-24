@@ -525,7 +525,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             UpdateBannerText = $"Доступна новая версия {latest.Version} (текущая {AppUpdateService.CurrentVersion}). Источник: {result.SourceLabel}.";
             UpdateBannerVisible = true;
             AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
-            ScheduleBannerAutoHide(() => UpdateBannerVisible = false);
+            // Единственная плашка, которая НЕ прячется сама: у всех остальных текст — уведомление о
+            // том, что уже случилось, а здесь на плашке живёт кнопка «Установить», и автоскрытие
+            // уносило вместе с текстом единственный способ начать установку. Автообновление по
+            // умолчанию выключено, так что для пользователя, который не заходит в Настройки, это
+            // была единственная дорога к новой версии — и она закрывалась сама через несколько секунд.
         }
     }
 
