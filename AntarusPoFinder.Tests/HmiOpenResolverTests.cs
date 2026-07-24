@@ -19,15 +19,30 @@ public class HmiOpenResolverTests
     }
 
     [Fact]
-    public void SeparateProjectFolder_WithoutHint_OpensFolderItself_NoExtensionOnButton()
+    public void SeparateProjectFolder_SingleProjectFile_OpensThatFile()
+    {
+        using var root = new TempRoot();
+        var hmi = Path.Combine(root.Path, "2.1.041_hmi");
+        var panel = Touch(hmi, "panel.dpj");
+        Touch(hmi, @"Driver\readme.txt");  // не проект панели — на однозначность не влияет
+
+        var src = new HmiOpenSources { HmiPath = hmi };
+        Assert.Equal(panel, HmiOpenResolver.Resolve(src));
+        Assert.Equal(".dpj", HmiOpenResolver.ResolveExtension(src));
+    }
+
+    [Fact]
+    public void SeparateProjectFolder_TwoProjectFiles_OpensFolder_NoExtensionOnButton()
     {
         using var root = new TempRoot();
         var hmi = Path.Combine(root.Path, "2.1.041_hmi");
         Touch(hmi, "panel.dpj");
+        Touch(hmi, "panel-backup.dpj");
 
+        // Выбор неоднозначен — открываем папку, пусть оператор выберет сам. Расширения на кнопке при
+        // этом быть не должно: имя папки версии из точек, «(.041_hmi)» было бы враньём.
         var src = new HmiOpenSources { HmiPath = hmi };
         Assert.Equal(hmi, HmiOpenResolver.Resolve(src));
-        // Открывается папка — расширения на кнопке быть не должно, пустые скобки хуже отсутствия.
         Assert.Null(HmiOpenResolver.ResolveExtension(src));
     }
 
@@ -49,9 +64,10 @@ public class HmiOpenResolverTests
     {
         using var root = new TempRoot();
         var sibling = Path.Combine(root.Path, "HMI");
-        Touch(sibling, "panel.dpj");
+        var panel = Touch(sibling, "panel.dpj");
 
-        Assert.Equal(sibling, HmiOpenResolver.Resolve(new HmiOpenSources
+        // Файл панели в общей папке один — открываем его (см. SingleProjectFile), а не саму папку.
+        Assert.Equal(panel, HmiOpenResolver.Resolve(new HmiOpenSources
         {
             HmiPath = Path.Combine(root.Path, "нет такой папки_hmi"),
             SiblingHmiFolder = sibling,

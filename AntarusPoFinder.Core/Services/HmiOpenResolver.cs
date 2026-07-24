@@ -47,7 +47,15 @@ public static class HmiOpenResolver
                 : null;
             // Путь в записи есть, но на диске нет ни его, ни общей папки — это «не найдено», и
             // подменять его детектом по расширениям нельзя: открылся бы файл другого проекта.
-            return folder is null ? null : ExecutableHintResolver.Resolve(folder, src.ExecutableHint) ?? folder;
+            if (folder is null) return null;
+            if (ExecutableHintResolver.Resolve(folder, src.ExecutableHint) is { } hintedInProject) return hintedInProject;
+            // Подсказки нет, но в папке проекта ровно один файл панели — открывать надо его, а не
+            // папку: оператору всё равно оставалось сделать по ней двойной клик, а на кнопке при этом
+            // не было расширения. Ровно один — значит выбор однозначен; больше одного (или ноль) —
+            // открываем папку, пусть оператор выберет сам.
+            if (ExecutableHintResolver.AutoDetect(folder, PlcOpenResolver.HmiExtensions) is { } onlyProjectFile)
+                return Path.Combine(folder, onlyProjectFile);
+            return folder;
         }
 
         // 2. Панель лежит в папке самой версии, и оператор указал, какой файл в ней — панельный.
