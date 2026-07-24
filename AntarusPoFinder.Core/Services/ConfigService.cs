@@ -68,7 +68,16 @@ public class ConfigService
         ["sync_interval_min"] = "5",
         ["quick_apps"] = "[]",
         ["app_update_path"] = "",
-        ["app_auto_update"] = "false",
+        // Раньше "false" — и это была настоящая причина жалобы «фикс не работает»: транспорт
+        // обновления полностью исправен (релиз виден, .sha256 сходится, установка проходит), но
+        // при выключенном автообновлении единственной дорогой к новой версии была плашка с кнопкой
+        // «Установить». Наладчик, который не заходит в Настройки и не приглядывается к плашкам,
+        // оставался на своей сборке неделями и смотрел на давно исправленные баги. Значение по
+        // умолчанию — только для установок, где ключ вообще ни разу не сохраняли: если кто-то
+        // осознанно выключил автообновление у себя, в settings лежит явное "false", и оно здесь
+        // не перебивается (в отличие от app_start_minimized, которому потребовался разовый сброс
+        // уже сохранённых значений — см. Database.ResetAppStartMinimizedDefaultOnce).
+        ["app_auto_update"] = "true",
         ["fw_auto_update_dirs"] = "[]",
         ["config_last_synced_at"] = "",
         ["scan_resolution_dpi"] = "200",
@@ -127,8 +136,9 @@ public class ConfigService
     public string AppUpdatePath() => Get("app_update_path");
     public void SetAppUpdatePath(string path) => Set("app_update_path", path);
 
-    /// <summary>Если включено — найденное при запуске обновление ставится без подтверждения.
-    /// Если выключено — показывается плашка с кнопкой «Обновить», которую нажимает пользователь.</summary>
+    /// <summary>Если включено (по умолчанию) — найденное при запуске обновление ставится без
+    /// подтверждения. Если выключено — показывается плашка с кнопкой «Обновить», которую нажимает
+    /// пользователь.</summary>
     public bool AppAutoUpdate() => Get("app_auto_update").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetAppAutoUpdate(bool value) => Set("app_auto_update", value ? "true" : "false");
 

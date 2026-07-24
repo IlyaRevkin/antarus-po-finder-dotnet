@@ -44,6 +44,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private List<UnknownEntry> _pendingUnknownItems = new();
     private bool _configPushLastFailed;
     private bool _fwAutoUpdateLastFailed;
+    private bool _appUpdateCheckLastFailed;
 
     /// <summary>Тик синхронизации теперь асинхронный, значит следующий может прийти, пока предыдущий
     /// ещё ждёт сетевой диск (диск отвечает медленнее, чем sync_interval_min). Раньше такого быть не
@@ -498,12 +499,25 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.AppUpdatePath());
         }
-        catch
+        catch (Exception ex)
         {
-            // Фоновая проверка при запуске — сеть/GitHub недоступны? Просто тихо пропускаем,
-            // пользователь всегда может проверить вручную в Настройках.
+            // Здесь стоял голый `catch { return; }` с обоснованием «пользователь всегда может
+            // проверить вручную в Настройках» — на практике это означало, что сломавшаяся проверка
+            // (GitHub недоступен из заводской сети, прокси режет TLS, сетевая папка обновлений
+            // отвалилась) не оставляла ВООБЩЕ никакого следа: ни плашки, ни записи в истории. Никто
+            // не ходит проверять вручную то, о поломке чего ему не сообщили, — приложение просто
+            // тихо оставалось на старой версии сколько угодно долго. Правило то же, что у
+            // PushConfigNow и автообновления прошивок: сообщаем один раз на переходе в «не
+            // работает», а не на каждом тике раз в 30 минут.
+            if (!_appUpdateCheckLastFailed)
+            {
+                _appUpdateCheckLastFailed = true;
+                AddNotification($"Проверка обновлений приложения не удалась: {AppUpdateService.DescribeError(ex)}",
+                    NotificationCategory.AppUpdates);
+            }
             return;
         }
+        _appUpdateCheckLastFailed = false;
 
         if (result.Releases.Count == 0) return;
         var latest = result.Releases[0];
@@ -527,9 +541,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
             // Единственная плашка, которая НЕ прячется сама: у всех остальных текст — уведомление о
             // том, что уже случилось, а здесь на плашке живёт кнопка «Установить», и автоскрытие
-            // уносило вместе с текстом единственный способ начать установку. Автообновление по
-            // умолчанию выключено, так что для пользователя, который не заходит в Настройки, это
-            // была единственная дорога к новой версии — и она закрывалась сама через несколько секунд.
+            // уносило вместе с текстом единственный способ начать установку. Сюда попадают только
+            // те, кто осознанно выключил автообновление у себя в Настройках (по умолчанию оно
+            // теперь включено — см. ConfigService.Defaults["app_auto_update"]), и для них эта
+            // плашка по-прежнему единственная дорога к новой версии.
         }
     }
 
