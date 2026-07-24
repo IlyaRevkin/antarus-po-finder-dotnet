@@ -1001,6 +1001,11 @@ public partial class SearchView : UserControl
 
         if (cancelled)
         {
+            // Последняя пачка совпадений могла не успеть доехать до потока интерфейса: заявка на
+            // отрисовку ставится с фоновым приоритетом, а обход к этому моменту уже закончился и
+            // обнулил _schemasScan — FlushSchemaCards такую пачку отбрасывает как чужую. Прерванный
+            // обход кэша не пишет, перерисовать выдачу неоткуда, поэтому дочерпываем пачку сами.
+            DrainPendingSchemaCards(scan);
             StatusLabel.Text = _schemaMatched.Count > 0
                 ? $"Поиск остановлен — найдено: {ShownOf()}"
                 : "Поиск остановлен — диск прочитан не полностью";
@@ -1082,17 +1087,38 @@ public partial class SearchView : UserControl
             ShowNoResults(query, SchemaNotFoundHint);
     }
 
-    /// <summary>Обход дошёл до конца. Если по набранному не нашлось ничего — только теперь это точно
-    /// известно, и можно предложить ту же выдачу в другой раскладке клавиатуры (кэш уже тёплый, так
-    /// что перепроверка стоит копейки).</summary>
-    private void FinishSchemasScan(SchemasScan scan)
+    /// <summary>Обход дошёл до конца — выдача перерисовывается из прогретого кэша целиком.
+    ///
+    /// Раньше здесь только переписывался текст статуса поверх того, что успела нарисовать потоковая
+    /// выдача, и этому нельзя было верить по двум причинам. Во-первых, пачка, найденная в самом конце
+    /// обхода, до потока интерфейса не доезжала (заявка фонового приоритета против уже обнулённого
+    /// _schemasScan) — живой прогон показал 108 карточек и «Найдено: 108» там, где на диске лежали 352
+    /// подходящих файла. Во-вторых, потоковая выдача идёт в порядке обхода папок, а не по названию
+    /// шкафа, как везде в программе. Перерисовка стоит копейки: кэш уже в памяти, а карточек всё
+    /// равно не больше потолка отрисовки.
+    ///
+    /// Заодно только теперь точно известно, что по набранному не нашлось ничего, — и можно предложить
+    /// ту же выдачу в другой раскладке клавиатуры.</summary>
+    private void FinishSchemasScan(SchemasScan scan) =>
+        ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord, scan.Extensions);
+
+    /// <summary>Дорисовать пачку совпадений, которую обход накопил, но не успел отдать интерфейсу.
+    /// В отличие от FlushSchemaCards не сверяется с _schemasScan: вызывается уже ПОСЛЕ того, как обход
+    /// снял себя с этого поля, и пачка всё ещё наша.</summary>
+    private void DrainPendingSchemaCards(SchemasScan scan)
     {
-        if (_schemaMatched.Count == 0)
+        List<SchematicHit> batch;
+        lock (scan.Sync)
         {
-            ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord, scan.Extensions);
-            return;
+            scan.FlushQueued = false;
+            if (scan.Pending.Count == 0) return;
+            batch = new List<SchematicHit>(scan.Pending);
+            scan.Pending.Clear();
         }
-        StatusLabel.Text = $"Найдено: {ShownOf()}";
+        if (scan.Generation != _searchGeneration) return;
+
+        foreach (var hit in batch) AddSchemaCard(hit);
+        SyncSchemaMoreButton();
     }
 
     /// <summary>Обход нашёл очередной файл схемы — вызывается на ФОНОВОМ потоке. Фильтр применяется
