@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.App.Services;
@@ -619,8 +620,9 @@ public partial class SearchView : UserControl
     /// совпадения по ходу дела, и на слишком общем запросе («а») их набралось бы столько, что окно
     /// встало бы на отрисовке — ровно та беда, от которой этот поиск и уводили в фон. Счётчик
     /// найденного при этом продолжает считать всё (см. SchemasScan.Matched), оператор видит, что
-    /// показано не всё.</summary>
-    private const int MaxSchemaCardsShown = 300;
+    /// показано не всё. Тот же потолок действует и на выдачу из прогретого кэша — см.
+    /// SearchResultCap.</summary>
+    private const int MaxSchemaCardsShown = SearchResultCap.MaxCards;
 
     /// <summary>Состояние одного обхода второго диска: что уже найдено на диске (Found — все файлы
     /// схем, независимо от запроса) и по какому запросу это сейчас фильтруется. Found пополняется на
@@ -637,19 +639,27 @@ public partial class SearchView : UserControl
         /// мгновенно, когда оператор меняет запрос, не дожидаясь конца обхода.</summary>
         public List<SchematicHit> Found { get; } = new();
 
+        /// <summary>Совпадения, найденные обходом, но ещё не доехавшие до экрана. Обход отдаёт файлы
+        /// пачками по несколько тысяч в секунду, и отдельная отправка КАЖДОГО совпадения на поток
+        /// интерфейса (Dispatcher.BeginInvoke) заваливала очередь этого потока настолько, что окно
+        /// переставало отвечать — то есть потоковая выдача добивалась ровно обратного тому, ради
+        /// чего делалась. Теперь совпадения копятся здесь, а на поток интерфейса уходит ОДНА заявка
+        /// на отрисовку всего накопленного (см. FlushQueued/FlushSchemaCards).
+        ///
+        /// Всё, что здесь лежит, всегда подходит под ТЕКУЩИЙ запрос: совпадение проверяется под тем
+        /// же замком, что и смена запроса, а сама смена (RetargetSchemasScan) очередь очищает.</summary>
+        public List<SchematicHit> Pending { get; } = new();
+
+        /// <summary>Заявка на отрисовку уже стоит в очереди потока интерфейса — вторую ставить не
+        /// нужно, она заберёт и то, что добавится до её выполнения.</summary>
+        public bool FlushQueued { get; set; }
+
         public string[] Tokens { get; set; } = Array.Empty<string>();
         public bool ExactWord { get; set; }
         public string Query { get; set; } = "";
 
         /// <summary>Поколение поиска, для которого сейчас рисуется выдача — см. _searchGeneration.</summary>
         public int Generation { get; set; }
-
-        /// <summary>Номер текущего фильтра — растёт на каждую смену запроса у ЖИВОГО обхода
-        /// (RetargetSchemasScan). Совпадения едут на поток интерфейса через Dispatcher, и без этого
-        /// номера уже отправленные в очередь карточки по СТАРОМУ запросу дорисовались бы поверх
-        /// выдачи нового: проверки одного лишь Generation тут мало — при смене запроса обход остаётся
-        /// тем же самым и его Generation тоже становится новым.</summary>
-        public int FilterEpoch { get; set; }
 
         /// <summary>Сколько совпало и сколько из них реально нарисовано (см. MaxSchemaCardsShown).</summary>
         public int Matched { get; set; }
@@ -789,8 +799,7 @@ public partial class SearchView : UserControl
 
     /// <summary>Сколько найдено и сколько из этого показано — вторая часть появляется, только если
     /// упёрлись в потолок отрисовки.</summary>
-    private static string ShownOf(SchemasScan scan) =>
-        scan.Matched > scan.Shown ? $"{scan.Matched} (показаны первые {scan.Shown})" : scan.Matched.ToString();
+    private static string ShownOf(SchemasScan scan) => SearchResultCap.Describe(scan.Matched, scan.Shown);
 
     /// <summary>Оператор нажал «Найти» с другим запросом, пока диск ещё читается. Обход общий и
     /// продолжается, меняется только то, что из него показывать.</summary>
@@ -803,9 +812,12 @@ public partial class SearchView : UserControl
             scan.ExactWord = exact;
             scan.Query = query;
             scan.Generation = generation;
-            scan.FilterEpoch++;
             scan.Matched = 0;
             scan.Shown = 0;
+            // Накопленное по СТАРОМУ запросу выбрасываем прямо здесь, под тем же замком, под которым
+            // меняется сам запрос: иначе пачка, найденная секунду назад, дорисовалась бы поверх
+            // выдачи нового запроса. Всё, что подходит под новый, ниже перерисовывается из Found.
+            scan.Pending.Clear();
             alreadyFound = new List<SchematicHit>(scan.Found);
         }
 
@@ -833,9 +845,13 @@ public partial class SearchView : UserControl
             return;
         }
 
-        StatusLabel.Text = $"Найдено: {hits.Count}";
-        foreach (var hit in hits)
-            ResultsPanel.Children.Add(MakeSchematicCard(hit));
+        // Потолок отрисовки тот же, что и у потоковой выдачи: этот путь рисовал ВСЁ, что нашлось на
+        // диске, и на широком запросе («1» по домашней папке — 23 446 совпадений в живом прогоне)
+        // вешал окно на минуты. Сколько нашлось на самом деле — по-прежнему видно в строке состояния.
+        var shown = Math.Min(hits.Count, MaxSchemaCardsShown);
+        StatusLabel.Text = $"Найдено: {SearchResultCap.Describe(hits.Count, shown)}";
+        for (var i = 0; i < shown; i++)
+            ResultsPanel.Children.Add(MakeSchematicCard(hits[i]));
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
             ShowNoResults(query, SchemaNotFoundHint);
@@ -859,24 +875,37 @@ public partial class SearchView : UserControl
     /// совпадения: их единицы-десятки, а файлов на диске — сотни тысяч.</summary>
     private void OnSchemaFileFound(SchemasScan scan, SchematicHit hit)
     {
-        bool matched;
-        int epoch;
+        bool needFlush;
         lock (scan.Sync)
         {
             scan.Found.Add(hit);
-            matched = SchematicService.HitMatches(hit, scan.Tokens, scan.ExactWord);
-            epoch = scan.FilterEpoch;
+            if (!SchematicService.HitMatches(hit, scan.Tokens, scan.ExactWord)) return;
+            scan.Pending.Add(hit);
+            needFlush = !scan.FlushQueued;
+            scan.FlushQueued = true;
         }
-        if (!matched) return;
+        // Заявка ставится на фоновом приоритете и только одна на пачку: интерфейс сам решит, когда
+        // ему удобно нарисовать накопленное, и не захлебнётся на широком запросе.
+        if (needFlush)
+            Dispatcher.BeginInvoke(new Action(() => FlushSchemaCards(scan)), DispatcherPriority.Background);
+    }
 
-        Dispatcher.BeginInvoke(new Action(() =>
+    /// <summary>Нарисовать всё, что обход нашёл с прошлого раза. На потоке интерфейса.</summary>
+    private void FlushSchemaCards(SchemasScan scan)
+    {
+        List<SchematicHit> batch;
+        lock (scan.Sync)
         {
-            // Пока карточка ехала на поток интерфейса, поиск мог смениться — тогда она уже не наша.
-            if (!ReferenceEquals(_schemasScan, scan) || scan.Generation != _searchGeneration) return;
-            if (scan.FilterEpoch != epoch) return;
-            AddSchemaCard(scan, hit);
-            StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
-        }));
+            scan.FlushQueued = false;
+            if (scan.Pending.Count == 0) return;
+            batch = new List<SchematicHit>(scan.Pending);
+            scan.Pending.Clear();
+        }
+        // Пока пачка ехала на поток интерфейса, поиск мог смениться — тогда она уже не наша.
+        if (!ReferenceEquals(_schemasScan, scan) || scan.Generation != _searchGeneration) return;
+
+        foreach (var hit in batch) AddSchemaCard(scan, hit);
+        StatusLabel.Text = $"Чтение второго диска… найдено: {ShownOf(scan)}";
     }
 
     private void AddSchemaCard(SchemasScan scan, SchematicHit hit)
