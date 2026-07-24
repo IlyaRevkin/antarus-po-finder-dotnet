@@ -429,8 +429,9 @@ public partial class SettingsView : UserControl
         // Пароли хранятся хешированными (см. ConfigService.SetAdminPassword/SetProgrammerPassword) —
         // хеш нельзя развернуть обратно в исходный пароль, поэтому поля больше не подставляют
         // «текущий пароль», как раньше (когда там реально лежал открытый текст). SavePasswords_Click
-        // ниже трактует пустое поле как «не менять» именно из-за этого — иначе первое же открытие
-        // Настроек и нажатие «Сохранить пароли» без единого изменения тихо обнулило бы оба пароля.
+        // ниже трактует пустое поле АДМИНИСТРАТОРА как «не менять» именно из-за этого — иначе первое
+        // же открытие Настроек и нажатие «Сохранить пароли» без единого изменения тихо обнулило бы
+        // его пароль. Пустое поле ПРОГРАММИСТА трактуется иначе — как «очистить» (см. её комментарий).
         AdminPwdInput.Password = "";
         ProgPwdInput.Password = "";
 
@@ -676,36 +677,27 @@ public partial class SettingsView : UserControl
         RollbackFirmwareBtn.Visibility = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
-    /// развернуть обратно), поэтому пустое поле здесь трактуется как «не менять этот пароль», а не
-    /// «очистить его» — иначе открыть Настройки и нажать «Сохранить пароли», не тронув оба поля,
-    /// тихо обнулило бы пароль администратора до пустой строки (для программиста пустой пароль —
-    /// уже осмысленное состояние «не задан», но для администратора пустой пароль означает «войти
-    /// может кто угодно», а это не то, что должно происходить по умолчанию от простого открытия
-    /// вкладки). Известное ограничение такого решения: этой кнопкой больше нельзя вернуть пароль
-    /// программиста обратно в «не задан» пустым полем — для этого рядом отдельная кнопка «Очистить
-    /// пароль программиста» (см. ClearProgrammerPassword_Click).</summary>
+    /// развернуть обратно). Пустое поле АДМИНИСТРАТОРА трактуется как «не менять этот пароль» —
+    /// иначе открыть Настройки и нажать «Сохранить пароли», не тронув оба поля, тихо обнулило бы
+    /// пароль администратора до пустой строки (единственный аварийный вход при проблемах с AD, его
+    /// нельзя сносить случайно). Пустое поле ПРОГРАММИСТА, наоборот, трактуется как «очистить» —
+    /// раньше для этого была отдельная кнопка «Очистить пароль программиста», её убрали (не нужна
+    /// пользователю), и явное сохранение с пустым полем — единственный оставшийся способ вернуть
+    /// пароль программиста в состояние «не задан» (ConfigService.SetProgrammerPassword("") хранит
+    /// пустую строку как есть, не хешируя её, — VerifyProgrammerPassword трактует это как «пароль не
+    /// требуется», см. её комментарий). Асимметрия между полями — намеренная: у пароля программиста
+    /// нет того же риска «случайно открыть вход кому угодно» одним нажатием, что у администратора,
+    /// потому что нажатие «Сохранить пароли» — явное действие пользователя, а не побочный эффект
+    /// открытия вкладки.</summary>
     private void SavePasswords_Click(object sender, RoutedEventArgs e)
     {
         if (!string.IsNullOrEmpty(AdminPwdInput.Password))
             _services.Cfg.SetAdminPassword(AdminPwdInput.Password);
-        if (!string.IsNullOrEmpty(ProgPwdInput.Password))
-            _services.Cfg.SetProgrammerPassword(ProgPwdInput.Password);
+        _services.Cfg.SetProgrammerPassword(ProgPwdInput.Password);
 
         AdminPwdInput.Password = "";
         ProgPwdInput.Password = "";
         _host.ShowStatus("Пароли сохранены");
-    }
-
-    /// <summary>Единственный способ вернуть пароль программиста в состояние «не задан» — пустое
-    /// поле в SavePasswords_Click означает «не менять», поэтому оттуда это сделать нельзя (см. её
-    /// комментарий). ConfigService.SetProgrammerPassword("") хранит пустую строку как есть, не
-    /// хешируя её, — тот же смысл «пароль не требуется», что и у изначально незаданного пароля
-    /// (см. ConfigService.VerifyProgrammerPassword).</summary>
-    private void ClearProgrammerPassword_Click(object sender, RoutedEventArgs e)
-    {
-        _services.Cfg.SetProgrammerPassword("");
-        ProgPwdInput.Password = "";
-        _host.ShowStatus("Пароль программиста сброшен — роль «Программист» больше не требует пароля");
     }
 
     private void SaveAdGroups_Click(object sender, RoutedEventArgs e)
@@ -779,6 +771,23 @@ public partial class SettingsView : UserControl
     private void UsersFilter_Changed(object sender, TextChangedEventArgs e) => ApplyUsersFilter();
 
     private void RefreshUsers_Click(object sender, RoutedEventArgs e) => LoadUsersTab();
+
+    /// <summary>Быстрый путь к смене роли по образцу двойного клика в других таблицах Настроек
+    /// (Иерархия — HierarchyGrid_MouseDoubleClick). Смена роли — не текстовое поле вроде описания/
+    /// тегов, которое можно один клик и сразу отредактировать: тут нужно ЕЩЁ И выбрать новую роль,
+    /// поэтому двойной клик не меняет роль сам по себе (это было бы неожиданно и рискованно —
+    /// случайный двойной клик реально сменил бы права доступа), а только подставляет текущую роль
+    /// пользователя в UserRoleCombo и сразу раскрывает список — остаётся выбрать новую роль и
+    /// нажать «Сменить роль», без отдельного клика по самому комбобоксу.</summary>
+    private void UsersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!DataGridClickGuard.IsOverDataRow(e)) return;
+        if (UsersGrid.SelectedItem is not UserRow row) return;
+
+        UserRoleCombo.SelectedValue = row.Record.Role;
+        UserRoleCombo.Focus();
+        UserRoleCombo.IsDropDownOpen = true;
+    }
 
     private void SetUserRole_Click(object sender, RoutedEventArgs e)
     {

@@ -82,14 +82,17 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"/>
+                                    <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"
+                                                  ToolTip="Пустое поле при сохранении = не менять текущий пароль администратора."/>
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"/>
+                                    <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"
+                                                  ToolTip="Пустое поле при сохранении = очистить пароль программиста (роль перестанет требовать пароль)."/>
                                 </Grid>
+                                <!-- Отдельной кнопки "Очистить пароль программиста" больше нет — пустое поле пароля
+                                     программиста при сохранении само означает "очистить" (в отличие от поля
+                                     администратора, где пустое = "не менять", см. SavePasswords_Click). -->
                                 <StackPanel Orientation="Horizontal">
                                     <Button Content="Сохранить пароли" Margin="0,0,8,0" Click="SavePasswords_Click"/>
-                                    <Button Content="Очистить пароль программиста" Style="{StaticResource SecondaryButton}" Click="ClearProgrammerPassword_Click"
-                                            ToolTip="Возвращает пароль программиста в состояние «не задан» — вход в эту роль перестанет требовать пароль. Пустое поле выше означает «не менять», поэтому только так можно сбросить пароль."/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -616,7 +619,7 @@
             <TextBox Grid.Row="1" x:Name="UsersFilterInput" Height="34" Margin="0,0,0,10"
                      ToolTip="Фильтр по AD-логину или роли…" TextChanged="UsersFilter_Changed"/>
             <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"
-                      Style="{StaticResource RoomyDataGrid}">
+                      Style="{StaticResource RoomyDataGrid}" MouseDoubleClick="UsersGrid_MouseDoubleClick">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="AD-логин" Binding="{Binding AdLogin}" Width="*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
                     <DataGridTextColumn Header="Роль" Binding="{Binding RoleLabel}" Width="Auto" MinWidth="120" ElementStyle="{StaticResource DataGridCellTextCentered}"/>

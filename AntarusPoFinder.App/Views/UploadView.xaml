@@ -279,12 +279,15 @@
                         <Expander.Header>
                             <!-- Обычной подписи оказалось недостаточно — на живом прогоне пользователь
                                  не понял, что по заголовку можно кликнуть и раздел раскроется (родной
-                                 шеврон SectionExpander мелкий, 12px, см. Styles.xaml — не трогаем).
-                                 Оборачиваем в заметную полосу-Border с крупной стрелкой и явной
-                                 подсказкой "нажмите, чтобы развернуть/свернуть"; текст стрелки/подсказки
-                                 меняется местами в ExtrasExpander_Expanded/Collapsed (UploadView.xaml.cs).
-                                 Курсор-рука для всей полосы уже даёт сам ToggleButton в шаблоне
-                                 SectionExpander — Border ниже её не переопределяет, просто наследует. -->
+                                 шеврон SectionExpander мелкий, 12px). Оборачиваем в заметную полосу-Border
+                                 с крупной стрелкой и явной подсказкой "нажмите, чтобы развернуть/
+                                 свернуть"; текст стрелки/подсказки меняется местами в
+                                 ExtrasExpander_Expanded/Collapsed (UploadView.xaml.cs). Родной шеврон
+                                 SectionExpander скрыт (Visibility="Collapsed" в самом шаблоне, см.
+                                 Styles.xaml) именно из-за этой замены — иначе рисовались бы ДВЕ стрелки
+                                 одновременно (родная мелкая + эта крупная). Курсор-рука для всей полосы
+                                 уже даёт сам ToggleButton в шаблоне SectionExpander — Border ниже её не
+                                 переопределяет, просто наследует. -->
                             <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                                     BorderThickness="1" CornerRadius="4" Padding="10,7">
                                 <StackPanel Orientation="Horizontal">

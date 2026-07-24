@@ -242,7 +242,18 @@
     <!-- Свёрнутый по умолчанию блок необязательных полей на форме (напр. "ОПЦИИ ВЕРСИИ" в
          UploadView) — тот же чеврон-паттерн, что у SidebarExpanderHeader выше и по той же причине
          (обычный WPF Expander со стандартным хромом смотрелся бы светлым инородным пятном на тёмной
-         теме), но уже полноценный Expander с раскрывающимся Content, а не просто заголовок-кнопка. -->
+         теме), но уже полноценный Expander с раскрывающимся Content, а не просто заголовок-кнопка.
+
+         Собственный шеврон (Chevron ниже) скрыт (Visibility="Collapsed") — единственный потребитель
+         этого стиля, ExtrasExpander в UploadView.xaml (проверено grep'ом — других мест, где
+         SectionExpander применяется, в приложении нет), оборачивает Header в свою карточку с
+         крупной стрелкой ▸/▾ и подсказкой "нажмите, чтобы развернуть/свернуть" (пользователь на
+         живом прогоне не заметил мелкий 12px-шеврон и не понимал, что заголовок кликабелен). Без
+         Collapsed обе стрелки рисовались одновременно — путаница "две стрелки разворачивания".
+         Кликабельность заголовка (курсор-рука, переключение IsExpanded) не зависит от видимости
+         самого текста шеврона — она даёт весь ToggleButton целиком, так что скрытие Chevron ничего
+         не ломает. Если у SectionExpander появится другой потребитель без своей стрелки в Header —
+         эту Visibility нужно будет пересмотреть (например, вынести в отдельный ключ стиля). -->
     <Style x:Key="SectionExpander" TargetType="Expander">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
@@ -258,6 +269,7 @@
                                     <Border Background="Transparent">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock x:Name="Chevron" Text="&#8250;" FontSize="12" Width="14"
+                                                       Visibility="Collapsed"
                                                        VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
                                             <ContentPresenter VerticalAlignment="Center"/>
                                         </StackPanel>
@@ -441,7 +453,17 @@
     </Style>
 
     <!-- ListBoxItem — like ComboBoxItem, WPF's default draws these with system chrome (white
-         background regardless of app theme), so it needs a full template. -->
+         background regardless of app theme), so it needs a full template.
+
+         Контраст на выделении (синий AccentBrush-фон + светлый TextOnAccentBrush-текст) — тот же
+         приём, что и у DataGridCell/ComboBoxItem выше: явный IsSelected-триггер переключает и фон
+         строки, и Foreground самого ListBoxItem, а Border.Resources ниже перехватывает implicit-
+         стиль для содержимого, чтобы оно реально унаследовало этот Foreground, а не app-wide
+         TextBrush. Помимо простого TextBlock-контента (строка/DisplayMemberPath — так устроены
+         "Производители ПЧ/УПП" и оба списка "Разрешённые расширения" в Настройки → Иерархия)
+         накрыт и CheckBox-контент (см. UnknownFilesDialog, где строка списка — CheckBox с текстом):
+         у CheckBox своя app-wide Style (Foreground=TextBrush, см. ниже), которая иначе выигрывала бы
+         у унаследованного Foreground точно так же, как обычный TextBlock. -->
     <Style TargetType="ListBoxItem">
         <Setter Property="Padding" Value="8,6"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -449,10 +471,13 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
                     <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
-                        <!-- Same implicit-TextBlock-style precedence bug as PrimaryButton/ComboBoxItem
+                        <!-- Same implicit-style-precedence bug as PrimaryButton/ComboBoxItem/DataGridCell
                              above — see those for the full explanation. -->
                         <Border.Resources>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}"/>
+                            </Style>
+                            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
                                 <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}"/>
                             </Style>
                         </Border.Resources>
