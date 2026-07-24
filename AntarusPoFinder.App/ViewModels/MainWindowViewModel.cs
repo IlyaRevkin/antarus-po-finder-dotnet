@@ -174,7 +174,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         RefreshModerationBadge();
     }
 
-    /// <summary>Keeps the "Модерация тегов" sidebar badge in sync with Settings→Прошивки→Модерация's
+    /// <summary>Keeps the "Модерация прошивок" sidebar badge in sync with Settings→Прошивки→Модерация's
     /// own counter — refreshed on every navigation (cheap COUNT query) so it never goes stale after
     /// moderating a version and switching tabs, without needing a dedicated changed-event. Also
     /// notifies the administrator specifically (not just a passive badge) the moment the count goes

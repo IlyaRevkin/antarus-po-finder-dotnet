@@ -245,10 +245,29 @@ public partial class Database
         return result;
     }
 
+    /// <summary>«Эту версию уже сменила более свежая» — под тем же шкафом/контроллером/hw есть живая
+    /// версия с бо́льшим номером (порядок ровно тот же, что у GetLastActiveFwVersion). Модерации такие
+    /// строки не нужны: размечать теги у версии, которую уже никто не поставит, — работа впустую, и
+    /// именно они забивали список (жалоба «замененные и откаченные в модерации смысла отображать
+    /// нет»; откатанные отсекает условие по status выше).</summary>
+    private static string NotSuperseded(string alias) => $"""
+        NOT EXISTS (
+            SELECT 1 FROM fw_versions newer
+            WHERE newer.subtype_id = {alias}.subtype_id
+              AND newer.controller_id = {alias}.controller_id
+              AND newer.hw_version = {alias}.hw_version
+              AND newer.archived = 0 AND (newer.status IS NULL OR newer.status = 'active')
+              AND {NotDeleted("newer")}
+              AND (newer.sw_version > {alias}.sw_version
+                   OR (newer.sw_version = {alias}.sw_version AND newer.dt_str > {alias}.dt_str))
+        )
+        """;
+
     /// <summary>Non-archived, non-rolled-back versions still awaiting moderation (released = 0) —
-    /// feeds both the Settings→Прошивки→Модерация tab and the sidebar "Модерация тегов" page.
+    /// feeds both the Settings→Прошивки→Модерация tab and the sidebar "Модерация прошивок" page.
     /// A version leaves this list only when a user explicitly confirms "release from moderation"
-    /// (see MarkFwVersionReleased) — adding tags alone no longer moves it out on its own.</summary>
+    /// (see MarkFwVersionReleased) — adding tags alone no longer moves it out on its own.
+    /// Заменённые более свежей версией сюда не попадают вовсе — см. NotSuperseded.</summary>
     public List<FwVersionRecord> GetUnreleasedFwVersionsWithNames()
     {
         var sql = $"""
@@ -258,6 +277,7 @@ public partial class Database
             JOIN equipment_groups   eg ON es.group_id     = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
             WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0 AND {NotDeleted("fv")}
+              AND {NotSuperseded("fv")}
             ORDER BY fv.upload_date DESC
             """;
 
@@ -325,11 +345,15 @@ public partial class Database
         return count is long l && l > 0;
     }
 
+    /// <summary>Ровно то, что покажет GetUnreleasedFwVersionsWithNames — счётчик на бейдже сайдбара и
+    /// на вкладке Настроек обязан совпадать со списком, иначе «Модерация (7)» открывается и показывает
+    /// три строки.</summary>
     public int GetUnreleasedFwVersionsCount()
     {
         var result = ExecuteScalar($"""
-            SELECT COUNT(*) FROM fw_versions
-            WHERE archived = 0 AND (status IS NULL OR status = 'active') AND released = 0 AND {NotDeleted()}
+            SELECT COUNT(*) FROM fw_versions fv
+            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
+              AND {NotDeleted("fv")} AND {NotSuperseded("fv")}
             """);
         return result is long l ? (int)l : 0;
     }
@@ -338,6 +362,23 @@ public partial class Database
     /// confirms the "вывести из модерации и сделать релизной?" prompt.</summary>
     public void MarkFwVersionReleased(int versionId) =>
         ExecuteNonQuery("UPDATE fw_versions SET released = 1 WHERE id = @id", cmd => cmd.Parameters.AddWithValue("@id", versionId));
+
+    /// <summary>Вывести из модерации не одну запись, а ВСЮ прошивку целиком — вместе с записями-
+    /// копиями, которые заведены тем же файлам под другими подтипами шкафа (см.
+    /// FirmwareSubtypeLinkService: файлы общие, disk_path один). Иначе получалось ровно то, на что
+    /// жаловался оператор: отметил в модерации лишний подтип, выпустил версию — и она тут же
+    /// вернулась в модерацию, потому что копия, заведённая прямо в этом же диалоге, осталась
+    /// released = 0. Проверять там нечего: это та же самая прошивка с теми же тегами.</summary>
+    public void MarkFwVersionReleasedWithLinked(int versionId)
+    {
+        MarkFwVersionReleased(versionId);
+        ExecuteNonQuery($"""
+            UPDATE fw_versions SET released = 1
+            WHERE {NotDeleted()} AND disk_path <> ''
+              AND disk_path   = (SELECT disk_path   FROM fw_versions WHERE id = @id)
+              AND version_raw = (SELECT version_raw FROM fw_versions WHERE id = @id)
+            """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
+    }
 
     public List<FwVersionRecord> GetFwVersions(int? subtypeId = null, int? controllerId = null,
         bool includeArchived = false, bool includeRolledBack = false)

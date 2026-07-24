@@ -8,7 +8,7 @@ public static class RolesConfig
     [
         ("search", "Поиск"),
         ("inspection", "Осмотр"),
-        ("newversions", "Модерация тегов"),
+        ("newversions", "Модерация прошивок"),
         ("upload", "Загрузка ПО"),
         ("params", "Параметры ПЧ/УПП"),
         ("network", "Сетевые диски"),

@@ -1525,7 +1525,8 @@ public partial class SettingsView : UserControl
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
             "Модерация", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
-        if (release) _services.Db.MarkFwVersionReleased(v.Id!.Value);
+        // Вместе с записями-копиями под другими подтипами — см. Database.MarkFwVersionReleasedWithLinked.
+        if (release) _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
 
         _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadModerationTab();

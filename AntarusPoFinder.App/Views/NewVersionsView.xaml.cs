@@ -21,9 +21,6 @@ public partial class NewVersionsView : UserControl
         public string Description => Record.Description;
         public string TagsDisplay => string.IsNullOrWhiteSpace(Record.Tags) ? "—" : Record.Tags;
         public string DateOnly => Record.UploadDate.Length >= 10 ? Record.UploadDate[..10] : Record.UploadDate;
-        public bool IsRolledBack => Record.Status == "rolled_back";
-        public bool IsSuperseded { get; init; }
-        public string StatusLabel => IsRolledBack ? "Откатана" : IsSuperseded ? "Заменена" : "Текущая";
     }
 
     public NewVersionsView(AppServices services, IAppHost host)
@@ -36,16 +33,12 @@ public partial class NewVersionsView : UserControl
 
     public void RefreshIfActive() => LoadData();
 
-    private void LoadData()
-    {
-        var data = _services.Db.GetUnreleasedFwVersionsWithNames();
-        RecentGrid.ItemsSource = data.Select(v => new RecentRow
-        {
-            Record = v,
-            IsSuperseded = v.Status != "rolled_back" &&
-                _services.Db.GetLastActiveFwVersion(v.SubtypeId, v.ControllerId, v.HwVersion)?.Id != v.Id,
-        }).ToList();
-    }
+    /// <summary>Откатанные и заменённые более свежей версией сюда больше не приезжают вовсе — их
+    /// отсекает сам запрос (Database.GetUnreleasedFwVersionsWithNames): размечать теги у версии,
+    /// которую уже не поставят, незачем, а список они забивали.</summary>
+    private void LoadData() =>
+        RecentGrid.ItemsSource = _services.Db.GetUnreleasedFwVersionsWithNames()
+            .Select(v => new RecentRow { Record = v }).ToList();
 
     private void EditTagsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -70,8 +63,10 @@ public partial class NewVersionsView : UserControl
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
-            "Модерация тегов", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
-        if (release) _services.Db.MarkFwVersionReleased(v.Id!.Value);
+            "Модерация прошивок", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
+        // Вместе со всеми записями-копиями этой же прошивки под другими подтипами — иначе подтип,
+        // отмеченный только что в этом же диалоге, вернул бы версию в модерацию.
+        if (release) _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
 
         _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadData();

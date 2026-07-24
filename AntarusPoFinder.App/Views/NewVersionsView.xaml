@@ -9,8 +9,11 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Модерация тегов" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
-        <TextBlock Grid.Row="1" Text="Модерация тегов по загруженным версиям прошивок — версии здесь ожидают, чтобы им проставили теги/описание и подтвердили релиз. Двойной клик по строке или кнопка «Добавить тег»."
+        <!-- Название страницы, пункта сайдбара и пункта «Модерация прошивки» в меню «Ещё» карточки
+             поиска специально одно и то же: все три открывают ОДНО И ТО ЖЕ окно (EditFirmwareDialog),
+             и разные имена у одного окна оператора только путали. -->
+        <TextBlock Grid.Row="0" Text="Модерация прошивок" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="1" Text="Загруженные версии ждут здесь, чтобы им проставили теги/описание, при необходимости поправили подтипы шкафов и подтвердили релиз. Двойной клик по строке или кнопка «Открыть». Откатанные и уже заменённые более свежей версией сюда не попадают."
                    Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
         <DataGrid Grid.Row="2" x:Name="RecentGrid" AutoGenerateColumns="False" IsReadOnly="True"
@@ -28,29 +31,18 @@
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*"/>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
-                <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
                 <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="140"/>
+                <!-- Столбца «Статус» здесь больше нет: в списке остались только текущие активные
+                     версии, и он всегда показывал бы одно и то же «Текущая». -->
                 <DataGridTemplateColumn Header="" Width="130">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Button Content="Добавить тег" Style="{StaticResource SecondaryButton}" Padding="10,3"
+                            <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Padding="10,3"
                                     Click="EditTagsButton_Click"/>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
             </DataGrid.Columns>
-            <DataGrid.RowStyle>
-                <Style TargetType="DataGridRow">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
-                            <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding IsSuperseded}" Value="True">
-                            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.RowStyle>
         </DataGrid>
     </Grid>
 </UserControl>

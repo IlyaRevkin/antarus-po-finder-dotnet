@@ -57,7 +57,7 @@ public partial class EditFirmwareDialog : Window
         _services = services;
         _db = services.Db;
         _record = v;
-        TitleLabel.Text = $"Прошивка: {title}";
+        TitleLabel.Text = $"Модерация прошивки: {title}";
         DescriptionInput.Text = v.Description;
         TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
 

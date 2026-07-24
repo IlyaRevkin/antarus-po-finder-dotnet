@@ -17,7 +17,7 @@ public partial class NavItem : ObservableObject
 
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private bool _isActive;
-    /// <summary>Pending-count badge, e.g. unmoderated firmware versions on "Модерация тегов" — 0 hides it.</summary>
+    /// <summary>Pending-count badge, e.g. unmoderated firmware versions on "Модерация прошивок" — 0 hides it.</summary>
     [ObservableProperty] private int _badgeCount;
 
     public NavItem(string pageId, string label, bool isCompact = false)

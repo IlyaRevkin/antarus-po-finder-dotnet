@@ -17,8 +17,9 @@ namespace AntarusPoFinder.Core.Services;
 /// актуально ему, и не считает свою строку устаревшей.</summary>
 public static class FwHistoryStatus
 {
-    // Те же слова, что во вкладке «Модерация тегов» (NewVersionsView.StatusLabel) — одно и то же
-    // состояние версии не должно называться на двух экранах по-разному.
+    // Те же слова, что во вкладке «Прошивки» в Настройках — одно и то же состояние версии не должно
+    // называться на двух экранах по-разному. (В «Модерации прошивок» столбца статуса больше нет:
+    // откатанные и заменённые туда не попадают вовсе, см. Database.GetUnreleasedFwVersionsWithNames.)
     public const string RolledBack = "Откатана";
     public const string Current = "Текущая";
     public const string Superseded = "Заменена";

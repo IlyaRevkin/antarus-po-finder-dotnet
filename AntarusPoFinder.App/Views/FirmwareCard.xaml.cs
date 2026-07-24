@@ -154,7 +154,7 @@ public partial class FirmwareCard : UserControl
 
         if (showLoad)
         {
-            var loadBtn = MakeActionButton("Загрузить в ПЛК (.lfs)",
+            var loadBtn = MakeActionButton("Установить прошивку на ПЛК (.lfs)",
                 (_, _) => LoaderRequested?.Invoke(this, EventArgs.Empty));
             loadBtn.ToolTip = "Загрузка в контроллер через подключённый лоадер: найденный .lfs " +
                               "подставится сам, дальше — параметры, прогресс и лог";
@@ -235,11 +235,14 @@ public partial class FirmwareCard : UserControl
 
         AddMenuHeader("Версия");
         AddMenuItem("История версий", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
+        // То же имя, что у страницы сайдбара и её кнопки: обе точки открывают ОДНО окно
+        // (EditFirmwareDialog), и два разных названия у одного окна оператора только путали.
         if (flags.CanEditTags)
-            AddMenuItem("Теги и описание", () => TagsEditRequested?.Invoke(this, EventArgs.Empty));
+            AddMenuItem("Модерация прошивки", () => TagsEditRequested?.Invoke(this, EventArgs.Empty),
+                "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
-        moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, теги";
+        moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, модерация";
         ActionsPanel.Children.Add(moreBtn);
         MorePopup.PlacementTarget = moreBtn;
 

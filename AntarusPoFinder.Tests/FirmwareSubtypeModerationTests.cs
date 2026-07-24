@@ -284,4 +284,42 @@ public class FirmwareSubtypeModerationTests : IDisposable
 
         Assert.False(Directory.Exists(primary.DiskPath));
     }
+
+    /// <summary>Жалоба оператора: «когда я в модерации добавляю ещё один подтип, мне эта прошивка
+    /// опять на модерацию прилетает». Причина — копия заводилась в том же диалоге, ДО ответа
+    /// «вывести из модерации», то есть у ещё не выпущенной версии, и оставалась released = 0.</summary>
+    [Fact]
+    public void ReleasingFromModeration_AlsoReleasesTheSubtypeCopiesOfTheSameFirmware()
+    {
+        var (group, subtypes, mod) = SeedPj();
+        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
+
+        // Ровно тот порядок, что в окне модерации: сначала отметили подтип, потом подтвердили релиз.
+        Apply(group, mod, primary, subtypes, new[] { subtypes[1] });
+        Assert.Equal(2, _db.GetUnreleasedFwVersionsWithNames().Count);
+
+        _db.MarkFwVersionReleasedWithLinked(primary.Id!.Value);
+
+        Assert.Empty(_db.GetUnreleasedFwVersionsWithNames());
+        Assert.Equal(0, _db.GetUnreleasedFwVersionsCount());
+    }
+
+    /// <summary>«Замененные и откаченные в модерации смысла отображать нет»: как только под тем же
+    /// шкафом/контроллером/hw появилась версия свежее, старая из очереди модерации уходит — размечать
+    /// теги у версии, которую уже никто не поставит, незачем. Счётчик бейджа обязан совпадать со
+    /// списком, иначе «Модерация (2)» открывается и показывает одну строку.</summary>
+    [Fact]
+    public void SupersededVersion_DropsOutOfModerationQueueAndItsCount()
+    {
+        var (group, subtypes, mod) = SeedPj();
+        var older = UploadPrimary(group, subtypes[0], mod).Record!;
+        Assert.Single(_db.GetUnreleasedFwVersionsWithNames());
+
+        var newer = UploadPrimary(group, subtypes[0], mod).Record!;
+        Assert.True(newer.SwVersion > older.SwVersion);
+
+        var queue = _db.GetUnreleasedFwVersionsWithNames();
+        Assert.Equal(newer.Id, Assert.Single(queue).Id);
+        Assert.Equal(1, _db.GetUnreleasedFwVersionsCount());
+    }
 }

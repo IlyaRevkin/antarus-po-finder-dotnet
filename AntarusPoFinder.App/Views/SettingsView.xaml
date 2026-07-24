@@ -404,7 +404,7 @@
 
                 <!-- ═══════════════════════════ МОДЕРАЦИЯ ═══════════════════════════ -->
                 <StackPanel x:Name="ModerationTab" Visibility="Collapsed">
-                    <TextBlock Text="Модерация тегов по загруженным версиям прошивок, ожидающим тегов/описания и подтверждения релиза (см. также «Модерация тегов» в боковом меню)."
+                    <TextBlock Text="Загруженные версии, ожидающие тегов/описания и подтверждения релиза (см. также «Модерация прошивок» в боковом меню). Откатанные и уже заменённые более свежей версией сюда не попадают."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                     <TextBlock x:Name="ModerationCountText" Text="Версии без тегов"
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
