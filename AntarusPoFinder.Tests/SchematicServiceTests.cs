@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Threading;
 using AntarusPoFinder.Core.Services;
 using Xunit;
@@ -196,6 +198,34 @@ public class SchematicServiceTests : IDisposable
         var byList = service.Matches(_root, query, exactWord);
         Assert.Equal(byList.Select(h => h.Path).OrderBy(p => p, StringComparer.Ordinal),
                      streamed.Select(h => h.Path).OrderBy(p => p, StringComparer.Ordinal));
+    }
+
+    /// <summary>Одна папка без прав доступа не имеет права обрывать обход всего диска. Так было с
+    /// EnumerateFiles(SearchOption.AllDirectories): исключение вылетало наружу из общего итератора, и
+    /// половина шкафов молча пропадала из выдачи — «схема есть, а поиск её не находит».</summary>
+    [Fact]
+    public void Scan_UnreadableFolder_IsSkipped_RestOfDiskStillFound()
+    {
+        var denied = Path.Combine(_root, "Территория 1", "ЗАКРЫТАЯ");
+        Directory.CreateDirectory(denied);
+        File.WriteAllText(Path.Combine(denied, "схема.pdf"), "x");
+
+        var rule = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.ListDirectory | FileSystemRights.ReadData, AccessControlType.Deny);
+        var dirInfo = new DirectoryInfo(denied);
+        var acl = dirInfo.GetAccessControl();
+        acl.AddAccessRule(rule);
+        dirInfo.SetAccessControl(acl);
+        try
+        {
+            var hits = new SchematicService().Matches(_root, "ПЖ-101");
+            Assert.Equal(2, hits.Count); // соседние папки прочитаны полностью, обход не оборвался
+        }
+        finally
+        {
+            acl.RemoveAccessRule(rule);
+            dirInfo.SetAccessControl(acl);
+        }
     }
 
     /// <summary>Пустой запрос не должен «совпадать со всем»: на середине обхода это залило бы экран

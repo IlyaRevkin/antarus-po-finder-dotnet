@@ -150,38 +150,65 @@ public class SchematicService
         var hits = new List<ScannedFile>();
         var rootFull = System.IO.Path.GetFullPath(diskPath)
             .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-        try
+
+        // Обход папка за папкой, а не одним EnumerateFiles(SearchOption.AllDirectories): та
+        // перечисляет всё дерево изнутри одним итератором, и первая же папка без прав доступа
+        // («System Volume Information», чужой раздел на сетевой шаре, папка с урезанным ACL)
+        // выбрасывала исключение НАРУЖУ, обрывая обход целиком — молча, с половиной диска в выдаче.
+        // Здесь недоступная папка просто пропускается, остальное дерево дочитывается до конца.
+        var pending = new Stack<string>();
+        pending.Push(diskPath);
+        while (pending.Count > 0)
         {
-            foreach (var file in Directory.EnumerateFiles(diskPath, "*", SearchOption.AllDirectories))
+            ct.ThrowIfCancellationRequested();
+            var dir = pending.Pop();
+
+            try
             {
-                // Проверка на каждом файле, а не раз в N: сам EnumerateFiles по сетевой шаре может
+                foreach (var sub in Directory.EnumerateDirectories(dir)) pending.Push(sub);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue; // и файлы этой папки прочитать не выйдет — идём дальше
+            }
+
+            IEnumerable<string> files;
+            try { files = Directory.EnumerateFiles(dir); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+
+            using var e = files.GetEnumerator();
+            while (true)
+            {
+                // Проверка на каждом файле, а не раз в N: сам обход по сетевой шаре может
                 // «задуматься» на папке, но между файлами прерывание отрабатывает сразу.
                 ct.ThrowIfCancellationRequested();
 
+                // MoveNext — это и есть обращение к файловой системе: сюда прилетает и отвалившаяся
+                // посреди чтения сетевая папка. Такую папку бросаем, диск дочитываем.
+                try { if (!e.MoveNext()) break; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { break; }
+
+                var file = e.Current;
                 var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
                 if (!SchematicExtensions.Contains(ext)) continue;
 
                 var fileNameNoExt = System.IO.Path.GetFileNameWithoutExtension(file).Trim();
-                var parentDir = System.IO.Path.GetDirectoryName(file);
-                var parentName = string.IsNullOrEmpty(parentDir) ? null : System.IO.Path.GetFileName(parentDir).Trim();
+                var parentName = System.IO.Path.GetFileName(
+                    dir.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)).Trim();
 
                 // A file sitting directly under the configured root has no meaningful "cabinet
                 // folder" — only a nested parent folder (any depth) counts as folder-grouping.
                 var groupedByFolder = !string.IsNullOrEmpty(parentName) &&
                     !string.Equals(
-                        parentDir!.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar),
+                        System.IO.Path.GetFullPath(dir).TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar),
                         rootFull, StringComparison.OrdinalIgnoreCase);
 
-                var cabinetName = groupedByFolder ? parentName! : fileNameNoExt;
+                var cabinetName = groupedByFolder ? parentName : fileNameNoExt;
                 var matchText = groupedByFolder ? $"{parentName} {fileNameNoExt}" : fileNameNoExt;
 
                 hits.Add(new ScannedFile(cabinetName, matchText.ToUpperInvariant(), file));
                 onFound?.Invoke(new SchematicHit(cabinetName, file));
             }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Second disk unreachable — treat as empty, same as before.
         }
         return hits.OrderBy(h => h.CabinetName, StringComparer.OrdinalIgnoreCase).ToList();
     }
