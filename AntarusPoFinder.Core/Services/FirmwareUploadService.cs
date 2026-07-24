@@ -518,7 +518,10 @@ public static class FirmwareUploadService
         if (request.Reservation is not null && newFwId > 0)
             db.FulfillReservation(request.Reservation.Id!.Value, newFwId);
 
-        var extraIds = LinkToExtraSubtypes(db, hierarchy, request, record, plan.DestinationFolder, plan.IsOpc, warnings, shortcuts);
+        var extraIds = FirmwareSubtypeLinkService.LinkExtras(db, hierarchy, request.RootPath,
+                request.Group!.Name, request.Modification!.ControllerName, request.Subtype!, record,
+                request.ExtraSubtypes, shortcuts, warnings)
+            .Select(x => x.FwVersionId).ToList();
 
         return new FirmwareUploadResult
         {
@@ -533,85 +536,10 @@ public static class FirmwareUploadService
         };
     }
 
-    /// <summary>Заводит запись fw_versions для каждого дополнительно выбранного подтипа шкафа и
-    /// кладёт в папку его контроллера ярлык на папку версии основного подтипа. Файлы прошивки при
-    /// этом НЕ копируются — disk_path у всех записей один и тот же, поэтому и поиск, и «скачать
-    /// локально», и «открыть папку» работают с настоящими файлами, а не с ярлыком (ярлык нужен тому,
-    /// кто ходит по сетевой папке проводником).
-    ///
-    /// Номер версии тоже общий (он же — имя файла на диске, внутри самой прошивки вписан именно он):
-    /// заводить дополнительным подтипам собственные номера означало бы, что БД показывает один номер,
-    /// а файл называется другим. Побочный эффект — следующая загрузка для такого подтипа считает эту
-    /// версию своей и берёт следующий sw-номер; это осознанно, подтип действительно её получил.</summary>
-    private static List<int> LinkToExtraSubtypes(Database db, HierarchyService hierarchy, FirmwareUploadRequest request,
-        FwVersionRecord primary, string primaryFolder, bool isOpc, List<string> warnings, IShortcutCreator? shortcuts)
-    {
-        var created = new List<int>();
-        var extras = (request.ExtraSubtypes ?? new List<EquipmentSubType>())
-            .Where(s => s.Id is not null && s.Id != request.Subtype!.Id)
-            .GroupBy(s => s.Id!.Value).Select(g => g.First())
-            .ToList();
-        if (extras.Count == 0) return created;
-
-        var group = request.Group!;
-        var mod = request.Modification!;
-
-        foreach (var extra in extras)
-        {
-            var tags = TagString.Parse(primary.Tags);
-            if (extra.Name != "—" && !tags.Contains(extra.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                tags.Add(extra.Name);
-                db.AddTag(extra.Name);
-            }
-
-            var copy = new FwVersionRecord
-            {
-                SubtypeId = extra.Id!.Value,
-                ControllerId = primary.ControllerId,
-                EqPrefix = primary.EqPrefix,
-                SubPrefix = primary.SubPrefix,
-                HwVersion = primary.HwVersion,
-                SwVersion = primary.SwVersion,
-                DtStr = primary.DtStr,
-                VersionRaw = primary.VersionRaw,
-                Filename = primary.Filename,
-                DiskPath = primary.DiskPath,
-                Description = primary.Description,
-                Changelog = primary.Changelog,
-                LaunchTypes = primary.LaunchTypes,
-                IoMapPath = primary.IoMapPath,
-                InstructionsPath = primary.InstructionsPath,
-                ModbusMapPath = primary.ModbusMapPath,
-                HmiPath = primary.HmiPath,
-                ExecutableHint = primary.ExecutableHint,
-                HmiExecutableHint = primary.HmiExecutableHint,
-                IsOpc = primary.IsOpc,
-                RequestNum = primary.RequestNum,
-                CabinetSn = primary.CabinetSn,
-                AuthorId = primary.AuthorId,
-                Status = primary.Status,
-                Tags = TagString.Join(tags),
-            };
-            var id = db.AddFwVersion(copy);
-            if (id > 0) created.Add(id);
-
-            try
-            {
-                var ctrlFolder = hierarchy.ControllerFolder(request.RootPath, group.Name, extra.Name, mod.ControllerName, isOpc);
-                Directory.CreateDirectory(ctrlFolder);
-                shortcuts?.Create(Path.Combine(ctrlFolder, $"{primary.VersionRaw}.lnk"), primaryFolder,
-                    $"Прошивка {primary.VersionRaw} — общая с подтипом {request.Subtype!.Name}");
-            }
-            catch (Exception ex)
-            {
-                // Ярлык — удобство для того, кто смотрит папку проводником; сама запись уже заведена
-                // и в программе прошивка под этим подтипом уже находится.
-                warnings.Add($"Ярлык для подтипа {extra.Name}: {ex.Message}");
-            }
-        }
-        return created;
-    }
+    // Заведение записей и ярлыков для дополнительных подтипов переехало в
+    // FirmwareSubtypeLinkService.LinkExtras — тем же кодом теперь пользуется Модерация, где набор
+    // подтипов у уже загруженной прошивки можно менять (добавить/убрать), а не только задать один раз
+    // при загрузке.
 
     // ── PSL / KINCO auto-detection ────────────────────────────────────────────
 

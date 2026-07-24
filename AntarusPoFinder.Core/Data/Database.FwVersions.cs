@@ -274,6 +274,57 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Все записи ОДНОЙ И ТОЙ ЖЕ прошивки — своя запись на каждый подтип шкафа, которому она
+    /// подходит (см. FirmwareUploadService.LinkToExtraSubtypes: файлы на диске одни, disk_path у всех
+    /// записей общий, в папке «чужого» подтипа лежит только ярлык). Именно по паре disk_path +
+    /// version_raw они и опознаются: номер версии физически вписан внутрь файла прошивки, поэтому у
+    /// копий он общий, а разные версии в одной папке лежать не могут.
+    ///
+    /// Пустой disk_path (запись без файлов на диске) не связывает ничего — иначе «связанными» стали бы
+    /// все такие записи разом.</summary>
+    public List<FwVersionRecord> GetFwVersionsSharingFiles(string diskPath, string versionRaw)
+    {
+        if (string.IsNullOrWhiteSpace(diskPath)) return new();
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader($"""
+            SELECT * FROM fw_versions
+            WHERE disk_path=@d AND version_raw=@v AND archived=0 AND {NotDeleted()}
+            ORDER BY id
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", diskPath);
+            cmd.Parameters.AddWithValue("@v", versionRaw);
+        });
+        while (reader.Read())
+            result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>Ссылается ли на ЭТИ ЖЕ файлы на диске кто-то ещё, кроме указанной записи. Ровно один
+    /// вопрос, но от него зависит сохранность прошивки: у прошивки, привязанной к нескольким подтипам
+    /// шкафов, записей несколько, а папка на диске ОДНА и общая (см. FirmwareSubtypeLinkService).
+    /// Удаление одной такой записи — это удаление ссылки, а не прошивки, и трогать файлы нельзя:
+    /// иначе «убрал лишний подтип» уносило бы саму прошивку у всех — и на этой машине
+    /// (SettingsView.DeleteFirmware_Click), и на всех остальных, куда tombstone доедет
+    /// синхронизацией (ImportHierarchyDataCore, там же удаляются файлы). Файлы удаляются только
+    /// вместе с последней записью, которая на них ссылается.
+    ///
+    /// Архивные записи тоже считаются: они всё ещё указывают на эти файлы, и «архивная» — не повод
+    /// вынести папку из-под неё.</summary>
+    public bool IsDiskPathSharedByOtherVersions(string diskPath, int exceptId)
+    {
+        if (string.IsNullOrWhiteSpace(diskPath)) return false;
+        var count = ExecuteScalar($"""
+            SELECT COUNT(*) FROM fw_versions
+            WHERE disk_path=@d AND id<>@id AND {NotDeleted()}
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", diskPath);
+            cmd.Parameters.AddWithValue("@id", exceptId);
+        });
+        return count is long l && l > 0;
+    }
+
     public int GetUnreleasedFwVersionsCount()
     {
         var result = ExecuteScalar($"""

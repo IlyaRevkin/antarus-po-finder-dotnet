@@ -66,7 +66,7 @@ public partial class NewVersionsView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
+        EditFirmwareDialog.ReportChanges(dlg, _host);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",

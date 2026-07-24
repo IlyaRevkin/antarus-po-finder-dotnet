@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -43,6 +45,11 @@ public partial class EditFirmwareDialog : Window
     /// на диск не влезает в контракт «диалог только собирает значения». Вызывающему остаётся только
     /// показать это пользователю.</summary>
     public FirmwareAttachmentsResult? AttachmentsResult { get; private set; }
+
+    /// <summary>Что изменилось в наборе подтипов шкафов — по той же причине, что и AttachmentsResult,
+    /// применяется прямо здесь (заведение записей и ярлыков на диске), а вызывающему остаётся только
+    /// показать итог. Null, если блок подтипов вообще не показывался.</summary>
+    public FirmwareSubtypeLinkService.ApplyResult? SubtypeLinkResult { get; private set; }
 
     public EditFirmwareDialog(AppServices services, FwVersionRecord v, string title)
     {
@@ -111,11 +118,69 @@ public partial class EditFirmwareDialog : Window
                 InstructionsInput.Text = v.InstructionsPath;
                 HmiInput.Text = v.HmiPath;
                 AttachmentsPanel.Visibility = Visibility.Visible;
+                BuildSubtypeChecks();
             }
         }
     }
 
     private (string GroupName, string SubtypeName, string ControllerName)? _names;
+
+    // ── Подтипы шкафов ────────────────────────────────────────────────────────
+
+    private readonly Dictionary<int, CheckBox> _subtypeChecks = new();
+    private List<EquipmentSubType> _groupSubtypes = new();
+
+    /// <summary>Чекбоксы по всем подтипам ГРУППЫ этой прошивки: отмечены те, под которыми она уже
+    /// заведена. Основной (в чьей папке лежат сами файлы) отмечен и выключен — снять его значило бы
+    /// удалить саму прошивку, а не ссылку на неё, и это делается отдельной кнопкой «Удалить прошивку».
+    /// Блок не показывается вовсе, если у версии нет папки на диске: связывать тогда нечего.</summary>
+    private void BuildSubtypeChecks()
+    {
+        if (_record.Id is null || string.IsNullOrWhiteSpace(_record.DiskPath)) return;
+
+        var subtype = _db.GetAllEquipmentSubtypes().FirstOrDefault(s => s.Id == _record.SubtypeId);
+        if (subtype is null) return;
+
+        _groupSubtypes = _db.GetSubtypesForGroup(subtype.GroupId).Where(s => s.Id is not null).ToList();
+        if (_groupSubtypes.Count <= 1) return; // выбирать не из чего — один подтип в группе
+
+        var linked = FirmwareSubtypeLinkService.CurrentLinks(_db, _record)
+            .Select(l => l.SubtypeId).ToHashSet();
+
+        foreach (var candidate in _groupSubtypes)
+        {
+            var id = candidate.Id!.Value;
+            var isPrimary = id == _record.SubtypeId;
+            var label = candidate.Name == "—" ? candidate.FolderName : $"{candidate.FolderName} ({candidate.Name})";
+            var cb = new CheckBox
+            {
+                Tag = id,
+                Content = isPrimary ? $"{label}  —  основной" : label,
+                FontWeight = isPrimary ? FontWeights.SemiBold : FontWeights.Normal,
+                IsChecked = isPrimary || linked.Contains(id),
+                IsEnabled = !isPrimary,
+                Margin = new Thickness(4),
+                ToolTip = isPrimary
+                    ? "Файлы прошивки лежат в папке этого подтипа — отвязать его нельзя"
+                    : null,
+            };
+            _subtypeChecks[id] = cb;
+            SubtypesCheckPanel.Children.Add(cb);
+        }
+
+        SubtypesPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ApplySubtypeLinks()
+    {
+        if (_subtypeChecks.Count == 0 || _names is null || _record.Id is null) return;
+
+        var desired = _subtypeChecks.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList();
+        var result = FirmwareSubtypeLinkService.Apply(_db, _services.Hierarchy, _services.Cfg.RootPath(),
+            _record, _names.Value.GroupName, _names.Value.ControllerName,
+            _groupSubtypes, desired, new Services.ShortcutCreator());
+        if (result.Changed || result.Warnings.Count > 0) SubtypeLinkResult = result;
+    }
 
     private void IoMapBrowseFile_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFile();
     private void IoMapBrowseFolder_Click(object sender, RoutedEventArgs e) => _ioMapPicker.BrowseFolder();
@@ -189,10 +254,38 @@ public partial class EditFirmwareDialog : Window
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         ApplyAttachments();
+        ApplySubtypeLinks();
         DialogResult = true;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    /// <summary>Всё, что диалог применил сам (доп. файлы и подтипы) — одним вызовом на все четыре
+    /// места, откуда он открывается.</summary>
+    public static void ReportChanges(EditFirmwareDialog dlg, IAppHost host)
+    {
+        ReportAttachments(dlg.AttachmentsResult, host);
+        ReportSubtypes(dlg.SubtypeLinkResult, host);
+    }
+
+    private static void ReportSubtypes(FirmwareSubtypeLinkService.ApplyResult? result, IAppHost host)
+    {
+        if (result is null) return;
+        var parts = new List<string>();
+        if (result.Added.Count > 0) parts.Add("добавлены: " + string.Join(", ", result.Added));
+        if (result.Removed.Count > 0) parts.Add("убраны: " + string.Join(", ", result.Removed));
+        if (parts.Count > 0)
+        {
+            host.ShowStatus("Подтипы прошивки — " + string.Join("; ", parts),
+                category: NotificationCategory.FirmwareAndParams);
+            // Записей прошивок стало больше/меньше — показанная выдача поиска больше не актуальна
+            // (см. IAppHost.InvalidateSearchResults: сама она не перезапускается).
+            host.InvalidateSearchResults();
+        }
+        if (result.Warnings.Count > 0)
+            AppMessageBox.Show(string.Join("\n", result.Warnings), "Подтипы прошивки",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
 
     /// <summary>Общая для всех четырёх мест, откуда открывается этот диалог, реакция на догрузку
     /// доп. файлов: что реально доложено — в статус, что не получилось — отдельным окном (иначе

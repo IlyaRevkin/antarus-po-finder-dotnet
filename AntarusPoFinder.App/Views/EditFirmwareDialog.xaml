@@ -26,6 +26,24 @@
              StackPanel просто обрезался бы без возможности до него добраться. -->
         <WrapPanel x:Name="LaunchTypesPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
 
+        <!-- Набор подтипов шкафа задавался только в момент загрузки (чек-комбобокс «Подтипы» в
+             «Загрузке ПО»): ошибся — и переделать было нечем, кроме повторной заливки. Здесь тот же
+             набор правится у уже загруженной прошивки: отметить подтип — завести ему запись и ярлык,
+             снять — убрать их. Файлы на диске общие и не копируются/не удаляются (см.
+             FirmwareSubtypeLinkService), поэтому основной подтип — тот, в чьей папке лежат сами файлы
+             — отмечен и заблокирован: это не ссылка, а сама прошивка. -->
+        <StackPanel x:Name="SubtypesPanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="ПОДТИПЫ ШКАФОВ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock x:Name="SubtypesHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Text="Каким подтипам подходит эта прошивка. Файлы на диске не дублируются — в папке отмеченного подтипа появляется ярлык, а в поиске прошивка находится и под ним."/>
+            <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                    BorderThickness="1" CornerRadius="6" Padding="8">
+                <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto">
+                    <WrapPanel x:Name="SubtypesCheckPanel"/>
+                </ScrollViewer>
+            </Border>
+        </StackPanel>
+
         <!-- Доп. файлы можно было приложить только в момент загрузки версии: если карту/инструкцию
              прислали позже, оставалось только перезаливать прошивку заново. Поля предзаполнены тем,
              что уже записано у версии; пустое поле = убрать ссылку (файлы на диске не удаляются —

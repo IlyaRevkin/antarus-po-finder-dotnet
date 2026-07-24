@@ -1520,7 +1520,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
+        EditFirmwareDialog.ReportChanges(dlg, _host);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
@@ -1598,7 +1598,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportAttachments(dlg.AttachmentsResult, _host);
+        EditFirmwareDialog.ReportChanges(dlg, _host);
         _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
             : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
             : $"Без изменений: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
@@ -1663,10 +1663,18 @@ public partial class SettingsView : UserControl
         if (v is null) return;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
 
+        // Та же прошивка может быть заведена под несколькими подтипами шкафов — файлы на диске при
+        // этом ОДНИ (см. FirmwareSubtypeLinkService). Тогда это удаление ссылки, а не прошивки:
+        // файлы остаются другим записям, и говорим об этом прямо, чтобы «безвозвратно» не пугало зря.
+        var filesShared = v.Id is not null && _services.Db.IsDiskPathSharedByOtherVersions(v.DiskPath, v.Id.Value);
+
         var confirm = AppMessageBox.Show(
             $"Удалить прошивку «{title}» безвозвратно?\n\n" +
-            "Будут удалены запись в базе и файлы на диске (папка версии" +
-            (string.IsNullOrEmpty(v.HmiPath) ? "" : ", включая приложенный HMI-проект") + ").\n" +
+            (filesShared
+                ? "Файлы на диске останутся: эта же прошивка заведена ещё под другим подтипом шкафа " +
+                  "и лежит на диске одна на всех. Удалится только эта запись.\n"
+                : "Будут удалены запись в базе и файлы на диске (папка версии" +
+                  (string.IsNullOrEmpty(v.HmiPath) ? "" : ", включая приложенный HMI-проект") + ").\n") +
             "Это НЕЛЬЗЯ отменить из приложения (не «Откатить» — история не остаётся).\n\n" +
             "Удаление перенесётся на другие машины при следующей синхронизации конфига (Настройки → " +
             "Сетевые диски) — включая попытку убрать файлы и там. До тех пор, пока хотя бы одна другая " +
@@ -1677,14 +1685,14 @@ public partial class SettingsView : UserControl
         var warnings = new List<string>();
         try
         {
-            if (!string.IsNullOrEmpty(v.DiskPath) && Directory.Exists(v.DiskPath))
+            if (!filesShared && !string.IsNullOrEmpty(v.DiskPath) && Directory.Exists(v.DiskPath))
                 FileSystemHelpers.RmtreeSafe(v.DiskPath);
         }
         catch (Exception ex) { warnings.Add($"Папка версии: {ex.Message}"); }
 
         try
         {
-            if (!string.IsNullOrEmpty(v.HmiPath) && v.HmiPath.Contains(v.VersionRaw, StringComparison.OrdinalIgnoreCase))
+            if (!filesShared && !string.IsNullOrEmpty(v.HmiPath) && v.HmiPath.Contains(v.VersionRaw, StringComparison.OrdinalIgnoreCase))
             {
                 if (Directory.Exists(v.HmiPath)) FileSystemHelpers.RmtreeSafe(v.HmiPath);
                 else if (File.Exists(v.HmiPath)) File.Delete(v.HmiPath);

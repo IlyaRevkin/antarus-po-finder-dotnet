@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -1045,11 +1045,17 @@ public partial class Database
                     counts.FwVersionsRemoved++;
                     if (!apply) continue;
 
-                    try { if (!string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath)) Infrastructure.FileSystemHelpers.RmtreeSafe(localDiskPath); }
+                    // Файлы — только если они больше никому не нужны. Прошивка, привязанная к
+                    // нескольким подтипам шкафов, лежит на диске ОДИН раз, а записей у неё несколько
+                    // (см. FirmwareSubtypeLinkService): отвязка лишнего подтипа приезжает сюда таким
+                    // же tombstone'ом, и без этой проверки она уносила бы саму прошивку у всех.
+                    var filesShared = IsDiskPathSharedByOtherVersions(localDiskPath, id);
+
+                    try { if (!filesShared && !string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath)) Infrastructure.FileSystemHelpers.RmtreeSafe(localDiskPath); }
                     catch { /* best-effort, same as SettingsView.DeleteFirmware_Click */ }
                     try
                     {
-                        if (!string.IsNullOrEmpty(localHmi) && localHmi.Contains(fv.VersionRaw, StringComparison.OrdinalIgnoreCase))
+                        if (!filesShared && !string.IsNullOrEmpty(localHmi) && localHmi.Contains(fv.VersionRaw, StringComparison.OrdinalIgnoreCase))
                         {
                             if (Directory.Exists(localHmi)) Infrastructure.FileSystemHelpers.RmtreeSafe(localHmi);
                             else if (File.Exists(localHmi)) File.Delete(localHmi);
