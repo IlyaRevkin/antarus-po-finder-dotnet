@@ -8,32 +8,35 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
-                <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
-                           Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
-            </StackPanel>
-            <!-- Category on/off + unread-count controls collapsed behind a toggle by default, same
-                 pattern as InspectionView's "⚙ Настройки осмотра" — they used to sit permanently at
-                 the top of this window (a settings block above the actual notification list every
-                 time it opened), crowding the one thing the window is mostly opened for: reading the
-                 history. -->
-            <Button Grid.Column="1" x:Name="CategorySettingsToggle" Content="⚙ Настройки" Style="{StaticResource SecondaryButton}"
-                    VerticalAlignment="Top" Margin="0,0,8,0" Click="CategorySettingsToggle_Click"/>
-            <Button Grid.Column="2" Content="Очистить уведомления" Style="{StaticResource SecondaryButton}"
-                    VerticalAlignment="Top" Click="ClearAll_Click"/>
-        </Grid>
+        <!-- Заголовок с подзаголовком — на всю ширину, отдельной строкой. Раньше он делил строку с
+             кнопками (star-колонка слева, две Auto-кнопки справа): в узком окне (480px) кнопки
+             «⚙ Настройки» + «Очистить уведомления» съедали место, star-колонка сжималась уже самого
+             заголовка, и «История уведомлений» (без переноса/обрезки) вылезал за свою колонку прямо
+             поверх кнопок — та самая жалоба «кнопки перекрывают текст». Теперь заголовок ни с чем по
+             ширине не конкурирует, а кнопки — строкой ниже, прижаты вправо. -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+            <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+        </StackPanel>
 
-        <Border Grid.Row="1" x:Name="CategorySettingsPanel" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Visibility="Collapsed">
+        <!-- Category on/off + unread-count controls collapsed behind a toggle by default, same
+             pattern as InspectionView's "⚙ Настройки осмотра" — they used to sit permanently at
+             the top of this window (a settings block above the actual notification list every
+             time it opened), crowding the one thing the window is mostly opened for: reading the
+             history. -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
+            <Button x:Name="CategorySettingsToggle" Content="⚙ Настройки" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="CategorySettingsToggle_Click"/>
+            <Button Content="Очистить уведомления" Style="{StaticResource SecondaryButton}"
+                    Click="ClearAll_Click"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" x:Name="CategorySettingsPanel" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Visibility="Collapsed">
             <StackPanel>
                 <TextBlock Text="КАТЕГОРИИ УВЕДОМЛЕНИЙ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                 <TextBlock Text="«Показывать» — снятая галка полностью отключает категорию на этом ПК: уведомление не появится нигде, включая эту историю. «Считать непрочитанным» — категория продолжает появляться и попадать в историю, но не увеличивает счётчик на кнопке «Уведомления»."
@@ -51,7 +54,7 @@
             </StackPanel>
         </Border>
 
-        <ListBox Grid.Row="2" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent">
+        <ListBox Grid.Row="3" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Border Padding="0,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
