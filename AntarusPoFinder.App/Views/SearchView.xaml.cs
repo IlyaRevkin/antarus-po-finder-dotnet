@@ -400,8 +400,45 @@ public partial class SearchView : UserControl
     private void RecordUsage(HierarchyResult result)
     {
         if (string.IsNullOrEmpty(_lastUsageKey) || result.FwVersionId <= 0) return;
+        if (!_services.Cfg.UsageConfirmEnabled()) return;
+        if (!ConfirmThisWasTheOne(result)) return;
+
         try { _services.Db.RecordFwUsage(_lastUsageKey, result.FwVersionId); }
         catch { /* статистика — вспомогательная вещь, ронять из-за неё действие оператора нельзя */ }
+    }
+
+    /// <summary>Ответы на «та ли это прошивка» в пределах жизни страницы — повторное нажатие по той
+    /// же версии того же запроса (открыл проект, потом ещё раз) не переспрашивает и не добавляет
+    /// второй голос в обучение.</summary>
+    private readonly Dictionary<(string Query, int Version), bool> _usageAnswers = new();
+
+    /// <summary>Открыть карточку можно и промахнувшись — а засчитанный промах поднимает чужую версию
+    /// в выдаче по этому запросу. Поэтому перед записью спрашиваем, та ли это прошивка, и учимся на
+    /// ответах ровно как подсказка про раскладку (Database.RecordFwUsageConfirmFeedback): несколько
+    /// одинаковых ответов подряд — и вопрос больше не задаётся, а выбор либо засчитывается молча,
+    /// либо не засчитывается вовсе.</summary>
+    private bool ConfirmThisWasTheOne(HierarchyResult result)
+    {
+        var decision = _services.Db.GetFwUsageConfirmDecision();
+        if (decision == UsageConfirmDecision.Never) return false;
+        if (decision == UsageConfirmDecision.Always) return true;
+
+        var key = (_lastUsageKey, result.FwVersionId);
+        if (_usageAnswers.TryGetValue(key, out var earlier)) return earlier;
+
+        var name = string.IsNullOrEmpty(result.VersionRaw) ? result.Name : $"{result.Name} — {result.VersionRaw}";
+        var reply = AppMessageBox.Show(
+            $"{name}\n\nЭто та прошивка, которую вы искали?\n\n" +
+            "Ответ идёт в подсказку «по такому запросу обычно ставят эту версию» — она поднимает нужную " +
+            "версию выше среди одинаково подходящих. Несколько одинаковых ответов подряд — и программа " +
+            "перестанет спрашивать (Настройки → Общие).",
+            "Та ли это прошивка?", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+
+        var confirmed = reply == MessageBoxResult.Yes;
+        _usageAnswers[key] = confirmed;
+        try { _services.Db.RecordFwUsageConfirmFeedback(confirmed, _services.Cfg.UsageConfirmThreshold()); }
+        catch { /* см. выше — обучение не важнее самого действия оператора */ }
+        return confirmed;
     }
 
     private void PerformFirmwareSearch(string query)

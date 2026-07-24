@@ -295,6 +295,24 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="СТАТИСТИКА ВЫБОРОВ ПРОШИВКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                       Text="«По такому запросу обычно ставят эту версию» — статистика общая для всех машин: свои выборы уезжают на сетевой диск вместе с конфигом, чужие приезжают оттуда."/>
+                            <CheckBox x:Name="UsageConfirmCheck" Margin="0,0,0,8"
+                                      Content="Спрашивать «та ли это прошивка», прежде чем засчитать выбор"
+                                      Checked="UsageConfirm_Changed" Unchecked="UsageConfirm_Changed"/>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                       Text="Порог одинаковых ответов подряд — общий с раскладкой клавиатуры (поле выше). Ответив одинаково столько раз, программа перестанет спрашивать."/>
+                            <TextBlock x:Name="UsageStatsLabel" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"/>
+                                <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- ═══════════════════════════ ИЕРАРХИЯ ═══════════════════════════ -->

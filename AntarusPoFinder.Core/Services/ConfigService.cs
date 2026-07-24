@@ -147,6 +147,28 @@ public class ConfigService
         int.TryParse(Get("layout_fallback_threshold"), out var v) && v > 0 ? v : Data.Database.LayoutFallbackDecisionThreshold;
     public void SetLayoutFallbackThreshold(int value) => Set("layout_fallback_threshold", Math.Max(1, value).ToString());
 
+    /// <summary>Сколько одинаковых ответов подряд на вопрос «это та прошивка, которую вы искали?» превращаются
+    /// в решение — после этого вопрос не задаётся (см. Database.RecordFwUsageConfirmFeedback). Общая
+    /// с раскладкой настройка: обучение устроено одинаково, и держать оператору два разных порога
+    /// «через сколько программа перестанет переспрашивать» незачем.</summary>
+    public int UsageConfirmThreshold() => LayoutFallbackThreshold();
+
+    /// <summary>Спрашивать ли перед тем, как засчитать выбор прошивки в статистику. Выключение
+    /// убирает вопрос вместе с самим сбором: считать «выбрали эту» по факту любого нажатия — то, от
+    /// чего вопрос и защищает (случайно открыл не ту карточку — версия поехала вверх в выдаче).</summary>
+    public bool UsageConfirmEnabled() => Get("usage_confirm_enabled") is not "false";
+    public void SetUsageConfirmEnabled(bool value) => Set("usage_confirm_enabled", value ? "true" : "false");
+
+    /// <summary>Момент последнего сброса статистики выборов прошивки. Настройка НЕ локальная — она
+    /// намеренно уезжает в общий конфиг: статистика общая, и сброс должен доехать до всех машин,
+    /// иначе первый же чужой снимок вернул бы старые числа. Каждая машина помнит отдельно, какой
+    /// сброс она уже выполнила у себя (FwUsageResetAppliedAt, локальный ключ).</summary>
+    public string FwUsageResetAt() => Get("fw_usage_reset_at");
+    public void SetFwUsageResetAt(string iso) => Set("fw_usage_reset_at", iso);
+
+    public string FwUsageResetAppliedAt() => Get("fw_usage_reset_applied_at");
+    public void SetFwUsageResetAppliedAt(string iso) => Set("fw_usage_reset_applied_at", iso);
+
     /// <summary>Автоматически подтягивать найденные поиском прошивки в локальный кэш, вместо кнопки
     /// «Синхронизировать» на каждой карточке (см. SearchView.AutoSyncMissing). Настройка личная,
     /// per-machine: локальный кэш — свойство конкретного ноутбука наладчика, а не орг-политика.</summary>

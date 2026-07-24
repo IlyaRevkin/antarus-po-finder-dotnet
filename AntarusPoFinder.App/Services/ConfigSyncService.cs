@@ -120,6 +120,12 @@ public static class ConfigSyncService
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
         "loader_last_target", "unified_plc_hmi_zone",
+        // Кто эта машина в общей статистике выборов и какой сброс она уже выполнила у себя (см.
+        // Database.FwUsage.cs). Оба ключа обязаны остаться локальными: уехавший в общий конфиг
+        // origin сделал бы все машины одним источником — их вклады затирали бы друг друга, а
+        // уехавшая отметка «сброс применён» отменяла бы сам сброс на остальных машинах.
+        // Сама отметка сброса (fw_usage_reset_at) — наоборот, синхронизируемая, её здесь нет.
+        Core.Data.Database.UsageOriginSettingKey, "fw_usage_reset_applied_at",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");
@@ -218,6 +224,12 @@ public static class ConfigSyncService
 
         if (settingsChanged == 0 && diff.TotalChanges == 0 && !criticalSchemaMismatch)
         {
+            // Статистика выборов прошивки — единственное, что применяется даже когда «применять
+            // нечего»: она нарочно не считается изменением (иначе плашка «Поступили изменения»
+            // срабатывала бы от каждого чужого поиска), а значит без этой строки чужие выборы
+            // доезжали бы только за компанию с какой-нибудь правкой справочника.
+            ApplySharedUsage(services, snap);
+
             // Нечего применять, но эта ревизия уже «найдена» — запоминаем её как достигнутую, иначе
             // следующий тик снова читал и разбирал бы тот же самый неизменившийся конфиг целиком
             // вместо дешёвой проверки одного маркера (см. ReadShared).
@@ -374,6 +386,10 @@ public static class ConfigSyncService
             settingsApplied++;
         }
 
+        // Сброс статистики выборов — до импорта, который несёт чужие вклады: сначала обнуляем всё,
+        // что было до сброса, потом принимаем то, что накопилось после него.
+        ApplyUsageResetMark(services);
+
         var counts = services.Db.ImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
@@ -387,6 +403,35 @@ public static class ConfigSyncService
             services.Db.RemapFwPaths(oldRoot, currentRoot);
 
         return (settingsApplied, counts);
+    }
+
+    /// <summary>Тихий приём одной только статистики выборов прошивки — для случая, когда применять
+    /// больше нечего. Идемпотентен: вклад каждой машины приходит снимком и заменяется целиком (см.
+    /// Database.ImportFwUsage), повторное применение того же конфига ничего не удваивает.</summary>
+    private static void ApplySharedUsage(AppServices services, SharedConfigSnapshot snap)
+    {
+        try
+        {
+            ApplyUsageResetMark(services);
+            if (snap.Hierarchy.FwUsage is null) return;
+            services.Db.ImportFwUsage(snap.Hierarchy.FwUsage.Select(u => new SharedFwUsageRow(u.Origin, u.QueryKey,
+                u.SubtypeSyncId, u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt)), services.Db.UsageOriginId());
+        }
+        catch { /* статистика — вспомогательная вещь, срывать из-за неё синхронизацию нельзя */ }
+    }
+
+    /// <summary>Сброс статистики, сделанный на другой машине. Отметка времени сброса едет в общем
+    /// конфиге как обычная настройка, а «какой сброс эта машина уже выполнила» — локальный ключ:
+    /// без него чужой снимок с уже пустой статистикой не смог бы обнулить местные числа (пустой
+    /// список ничего не удаляет — он означает «мне нечего добавить», а не «удалите всё»).</summary>
+    private static void ApplyUsageResetMark(AppServices services)
+    {
+        var incoming = services.Cfg.FwUsageResetAt();
+        if (string.IsNullOrEmpty(incoming)) return;
+        if (string.CompareOrdinal(incoming, services.Cfg.FwUsageResetAppliedAt()) <= 0) return;
+
+        services.Db.ResetAllFwUsage();
+        services.Cfg.SetFwUsageResetAppliedAt(incoming);
     }
 
     /// <summary>Writes the shared config file — used by the manual "Отправить сейчас"/"Экспорт на

@@ -129,6 +129,20 @@ public class ExportedAppUser
     [JsonPropertyName("role_updated_at")] public string RoleUpdatedAt { get; set; } = "";
 }
 
+/// <summary>Вклад одной машины в общую статистику выборов прошивки — см. Database.FwUsage.cs.
+/// Прошивка адресуется переносимо (sync_id подтипа и модели контроллера + version_raw): локальные id
+/// на разных машинах разные.</summary>
+public class ExportedFwUsage
+{
+    [JsonPropertyName("origin")] public string Origin { get; set; } = "";
+    [JsonPropertyName("query_key")] public string QueryKey { get; set; } = "";
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("controller_sync_id")] public string ControllerSyncId { get; set; } = "";
+    [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
+    [JsonPropertyName("uses")] public int Uses { get; set; }
+    [JsonPropertyName("last_used_at")] public string LastUsedAt { get; set; } = "";
+}
+
 public class HierarchyExportData
 {
     [JsonPropertyName("equipment_groups")] public List<ExportedGroup> EquipmentGroups { get; set; } = new();
@@ -154,6 +168,11 @@ public class HierarchyExportData
     // additive + last-writer-wins-on-role only, see Database.ConfigExchange — nobody is ever
     // removed from the roster via sync).
     [JsonPropertyName("app_users")] public List<ExportedAppUser> AppUsers { get; set; } = new();
+    /// <summary>Статистика выборов прошивки со всех известных машин (Database.FwUsage.cs). Nullable
+    /// без дефолта по той же причине, что Tags/AllowedExtensions: экспорт со старой версии приложения
+    /// ключа не содержит вовсе, и это «источник о ней не знает», а не «у источника её ноль».</summary>
+    [JsonPropertyName("fw_usage")] public List<ExportedFwUsage>? FwUsage { get; set; }
+
     /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
     /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой
     /// версии приложения ключа не содержит, и импорт тогда откатывается на прежнее чисто additive

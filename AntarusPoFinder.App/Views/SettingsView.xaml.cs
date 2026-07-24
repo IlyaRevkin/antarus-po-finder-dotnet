@@ -470,6 +470,7 @@ public partial class SettingsView : UserControl
         LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
         LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
         RefreshLayoutFallbackGrid();
+        RefreshUsageStats();
     }
 
     // ── Поиск и лоадер ─────────────────────────────────────────────────────
@@ -554,6 +555,51 @@ public partial class SettingsView : UserControl
 
         _services.Db.ResetAllLayoutFallbackLearning();
         RefreshLayoutFallbackGrid();
+    }
+
+    // ── Статистика выборов прошивки (Database.FwUsage.cs) ────────────────────
+
+    private void UsageConfirm_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetUsageConfirmEnabled(UsageConfirmCheck.IsChecked == true);
+
+    /// <summary>Сброс — намеренно для всех машин сразу, а не только у себя: статистика общая, и
+    /// сброшенная в одиночку она вернулась бы с первым же чужим снимком. Отметка времени сброса
+    /// уезжает в общем конфиге, и каждая машина, увидев отметку новее своей, чистит статистику у
+    /// себя (ConfigSyncService.ApplyUsageResetMark). Как и любая правка справочника, отметка ждёт
+    /// кнопки «Отправить всё» на плашке — до отправки сброс останется локальным.</summary>
+    private void ResetFwUsage_Click(object sender, RoutedEventArgs e)
+    {
+        var total = _services.Db.TotalFwUsageCount();
+        var reply = AppMessageBox.Show(
+            $"Сбросить статистику выборов прошивок (учтено выборов: {total})?\n\n" +
+            "Сброс распространяется на все машины — он уедет вместе со следующей отправкой конфига на сетевой диск.",
+            "Сброс статистики", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+        _services.Db.ResetAllFwUsage();
+        _services.Cfg.SetFwUsageResetAt(now);
+        _services.Cfg.SetFwUsageResetAppliedAt(now);
+        RefreshUsageStats();
+        _host?.PushCatalogChange("сброшена статистика выборов прошивок");
+    }
+
+    private void ResetUsageConfirmLearning_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Db.ResetFwUsageConfirmLearning();
+        RefreshUsageStats();
+    }
+
+    private void RefreshUsageStats()
+    {
+        UsageConfirmCheck.IsChecked = _services.Cfg.UsageConfirmEnabled();
+        var decision = _services.Db.GetFwUsageConfirmDecision() switch
+        {
+            UsageConfirmDecision.Always => "выборы засчитываются без вопроса",
+            UsageConfirmDecision.Never => "выборы не засчитываются",
+            _ => "спрашивает при каждом выборе",
+        };
+        UsageStatsLabel.Text = $"Сейчас учтено выборов: {_services.Db.TotalFwUsageCount()} · {decision}";
     }
 
     /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the

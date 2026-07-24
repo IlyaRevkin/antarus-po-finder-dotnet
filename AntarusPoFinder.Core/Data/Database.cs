@@ -243,13 +243,41 @@ public partial class Database : IDisposable
              -- sync_id — a second detection of the same still-unresolved conflict just replaces it
              -- (INSERT OR REPLACE), it doesn't pile up duplicates.
              -- «По такому запросу обычно ставят вот эту версию» — см. Database.FwUsage.cs.
-             -- Локальная таблица: в общий конфиг не выгружается и с других машин не приезжает.
+             -- Вклад ЭТОЙ машины: пишется здесь, по локальным id прошивок, и отсюда же уезжает в
+             -- общий конфиг, переведённый в переносимые ключи (fw_usage_shared ниже).
              CREATE TABLE IF NOT EXISTS fw_search_usage (
                  query_key     TEXT    NOT NULL,
                  fw_version_id INTEGER NOT NULL,
                  uses          INTEGER NOT NULL DEFAULT 0,
                  last_used_at  TEXT    NOT NULL DEFAULT '',
                  PRIMARY KEY (query_key, fw_version_id)
+             );
+
+             -- Вклад ДРУГИХ машин в ту же статистику, приехавший через общий конфиг. Отдельная
+             -- таблица, а не суммирование в fw_search_usage: чужой вклад приходит снимком целиком
+             -- («у машины X по этому запросу 7 выборов»), и складывать его в общий счётчик значило бы
+             -- считать одно и то же заново на каждой синхронизации. Прошивка адресуется переносимой
+             -- тройкой (подтип+модель контроллера по sync_id, version_raw) — локальные id прошивок на
+             -- разных машинах разные. См. Database.FwUsage.cs.
+             CREATE TABLE IF NOT EXISTS fw_usage_shared (
+                 origin             TEXT    NOT NULL,
+                 query_key          TEXT    NOT NULL,
+                 subtype_sync_id    TEXT    NOT NULL,
+                 controller_sync_id TEXT    NOT NULL,
+                 version_raw        TEXT    NOT NULL,
+                 uses               INTEGER NOT NULL DEFAULT 0,
+                 last_used_at       TEXT    NOT NULL DEFAULT '',
+                 PRIMARY KEY (origin, query_key, subtype_sync_id, controller_sync_id, version_raw)
+             );
+
+             -- Обучение вопроса «это та прошивка, которую вы искали?» — ровно один ряд, ключ всегда 1.
+             -- В отличие от раскладки клавиатуры решение здесь одно на всю программу, а не на каждый
+             -- запрос: запрос каждый раз новый, а привычка отвечать — общая. См. Database.FwUsage.cs.
+             CREATE TABLE IF NOT EXISTS fw_usage_confirm_feedback (
+                 id        INTEGER PRIMARY KEY CHECK (id = 1),
+                 yes_count INTEGER NOT NULL DEFAULT 0,
+                 no_count  INTEGER NOT NULL DEFAULT 0,
+                 decision  TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS hierarchy_pending_conflicts (
@@ -307,6 +335,7 @@ public partial class Database : IDisposable
         CREATE INDEX IF NOT EXISTS idx_param_files_subtype      ON param_files(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
         CREATE INDEX IF NOT EXISTS idx_fw_search_usage_version  ON fw_search_usage(fw_version_id);
+        CREATE INDEX IF NOT EXISTS idx_fw_usage_shared_query    ON fw_usage_shared(query_key);
         """);
 
     /// <summary>Gives every pre-existing hierarchy row (both genuinely old databases picking up the
