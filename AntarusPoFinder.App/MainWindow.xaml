@@ -420,21 +420,34 @@
                 </DockPanel>
             </Border>
 
-            <!-- Content — spans Row="0" (the header band row) AND Row="1", not just Row="1", so that
-                 in "sidebar" quick-apps mode (default: QuickAppsTopVisible false, no icon bar above)
-                 the page content itself reaches all the way up to the window's top edge instead of
-                 leaving an empty gap the height of the sidebar's own logo/role band — that band only
-                 exists on the sidebar side; content had nothing of its own to justify matching it.
-                 Spanning an Auto row (0) together with the Star row (1) is deliberate: WPF's Grid
-                 does NOT let a Star+Auto-spanning child inflate the Auto row's height, so Row 0
-                 still sizes to exactly the sidebar header's own height, same as before — this only
-                 gives content a place to show through when column 1's row 0 is otherwise empty.
-                 When QuickAppsTopVisible IS true ("top"/"top_labeled" mode), the icon bar Border
-                 above sits in that same Row 0/Column 1 cell with Panel.ZIndex="1" and an opaque
-                 background, so it still fully covers this Border there — content only becomes
-                 visible below it, exactly as before; the two bands' bottom borders still land on
-                 the same row boundary (Row 0's height is unchanged), so that alignment isn't lost. -->
-            <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Background="{DynamicResource BgBrush}">
+            <!-- Content placement is CONDITIONAL on whether the top quick-apps bar is showing, rather
+                 than fixed with an overlay:
+                   • No top bar (QuickAppsTopVisible false — "sidebar" mode / no quick apps): content
+                     spans Row 0 + Row 1, so the page reaches all the way up to the window's top edge
+                     and doesn't leave an empty gap the height of the sidebar's own logo/role band
+                     (that band only exists on the sidebar side; content has nothing of its own to
+                     justify matching it). Spanning the Auto row (0) with the Star row (1) is safe —
+                     WPF does NOT let a Star+Auto-spanning child inflate the Auto row, so Row 0 still
+                     sizes to exactly the sidebar header's height.
+                   • Top bar visible ("top"/"top_labeled"): content sits in Row 1 ONLY, so the page
+                     starts BELOW the icon bar. Earlier this relied on the bar's opaque background +
+                     Panel.ZIndex painting over content that still spanned Row 0 — but that only HID
+                     the top of the page behind the bar (clipped it), it never pushed the page down,
+                     so enabling quick-apps swallowed the top strip of the functional content. Moving
+                     content out of Row 0 when the bar is present is the actual reflow. -->
+            <Border Grid.Column="1" Background="{DynamicResource BgBrush}">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Grid.Row" Value="0"/>
+                        <Setter Property="Grid.RowSpan" Value="2"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding QuickAppsTopVisible}" Value="True">
+                                <Setter Property="Grid.Row" Value="1"/>
+                                <Setter Property="Grid.RowSpan" Value="1"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <ContentControl Content="{Binding CurrentPageContent}"/>
             </Border>
         </Grid>
