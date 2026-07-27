@@ -61,13 +61,42 @@
                      страницу "Сетевые диски", доступную всем ролям (см. NetworkSyncView) — здесь
                      остаётся только то, что реально требует прав администратора. -->
                 <StackPanel x:Name="GeneralTab">
-                    <!-- Пароли доступа / полная настройка AD (домен, группы, способ проверки, URL) —
-                         орг-политика уровня приложения, а не что-то, что имеет смысл дать
-                         наладчику/программисту крутить у себя: скрыто для них целиком (см.
-                         SettingsView.ApplyRoleVisibility), виден только TTL повторного входа ниже.
-                         Смена самой роли — в диалоге в сайдбаре (RoleSwitchDialog), здесь больше не
-                         дублируется. Каждый логический раздел — отдельная карточка (CardBorder), а не
-                         сплошной список полей вперемешку — так виднее границы между темами. -->
+                    <!-- Порядок разделов ниже: часто нужное и простое выше, редко-настраиваемое
+                         (AD, лоадер) — ниже. Каждый логический раздел — отдельная карточка
+                         (CardBorder); там, где раздел состоит из нескольких карточек сразу (Доступ;
+                         Поиск и загрузка), над ними стоит общий заголовок группы, чтобы было видно,
+                         что карточки ниже — про одно и то же. Настройки темы оформления в этой вкладке
+                         нет — переключатель светлая/тёмная живёт в сайдбаре (MainWindow, снизу слева),
+                         это отдельный UserControl без доступа к MainWindowViewModel.IsDarkTheme, дублировать
+                         его сюда означало бы заводить второй источник правды для одного и того же
+                         переключателя. -->
+
+                    <!-- ─── Запуск и поведение ─── -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ЗАПУСК ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <CheckBox x:Name="AutostartCheck" Content="Запускать автоматически при входе в Windows" Margin="0,0,0,8" Checked="Autostart_Changed" Unchecked="Autostart_Changed"/>
+                            <CheckBox x:Name="StartMinimizedCheck" Content="Запускать свёрнутым" Margin="0,0,0,16" Checked="StartMinimized_Changed" Unchecked="StartMinimized_Changed"
+                                      ToolTip="Если ниже выбрано «Сворачивать в системный трей» — окно вообще не появится при запуске, сразу свернётся в трей."/>
+
+                            <!-- Категории уведомлений переехали в окно "Уведомления" (см. NotificationHistoryWindow) —
+                                 логичнее настраивать их прямо там же, где видна сама история, а не в отдельном
+                                 разделе Настроек. -->
+
+                            <TextBlock Text="ПРИ ЗАКРЫТИИ ОКНА (КРЕСТИК)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <RadioButton x:Name="CloseActionCloseRadio" GroupName="CloseAction" Content="Закрывать приложение" Margin="0,0,0,4" Checked="CloseAction_Changed"/>
+                            <RadioButton x:Name="CloseActionTrayRadio" GroupName="CloseAction" Content="Сворачивать в системный трей" Margin="0,0,0,0" Checked="CloseAction_Changed"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ─── Доступ: пароли ролей + весь вход по AD — обе темы про то, кто и как
+                         попадает в приложение, поэтому идут одним блоком. Пароли доступа / полная
+                         настройка AD (домен, группы, способ проверки, URL) — орг-политика уровня
+                         приложения, а не что-то, что имеет смысл дать наладчику/программисту крутить у
+                         себя: скрыто для них целиком (см. SettingsView.ApplyRoleVisibility), виден
+                         только TTL повторного входа ниже. Смена самой роли — в диалоге в сайдбаре
+                         (RoleSwitchDialog), здесь больше не дублируется. -->
+                    <TextBlock Text="ДОСТУП" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10"/>
                     <StackPanel x:Name="AdminRoleAndPasswordsSection">
                         <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                             <StackPanel>
@@ -171,34 +200,15 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Общее поведение приложения: прочие переключатели, реакция на крестик,
-                         автозапуск — сгруппированы в одну карточку, так как каждый пункт по
-                         отдельности слишком мелкий для собственного раздела. -->
-                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
-                        <StackPanel>
-                            <TextBlock Text="ПРОЧЕЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
-                            <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
-
-                            <!-- Категории уведомлений переехали в окно "Уведомления" (см. NotificationHistoryWindow) —
-                                 логичнее настраивать их прямо там же, где видна сама история, а не в отдельном
-                                 разделе Настроек. -->
-
-                            <TextBlock Text="ПРИ ЗАКРЫТИИ ОКНА (КРЕСТИК)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <RadioButton x:Name="CloseActionCloseRadio" GroupName="CloseAction" Content="Закрывать приложение" Margin="0,0,0,4" Checked="CloseAction_Changed"/>
-                            <RadioButton x:Name="CloseActionTrayRadio" GroupName="CloseAction" Content="Сворачивать в системный трей" Margin="0,0,0,16" Checked="CloseAction_Changed"/>
-
-                            <TextBlock Text="ЗАПУСК ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <CheckBox x:Name="AutostartCheck" Content="Запускать автоматически при входе в Windows" Margin="0,0,0,8" Checked="Autostart_Changed" Unchecked="Autostart_Changed"/>
-                            <CheckBox x:Name="StartMinimizedCheck" Content="Запускать свёрнутым" Margin="0,0,0,0" Checked="StartMinimized_Changed" Unchecked="StartMinimized_Changed"
-                                      ToolTip="Если выше выбрано «Сворачивать в системный трей» — окно вообще не появится при запуске, сразу свернётся в трей."/>
-                        </StackPanel>
-                    </Border>
-
+                    <!-- ─── Обновление приложения — путь/источник, автообновление и постоянно видимая
+                         текущая версия (не только после нажатия "Проверить обновления"). Версия читается
+                         из того же источника, что и сравнение при проверке обновлений (AppUpdateService.
+                         CurrentVersionText, 3-компонентный вид без сборочной ревизии) — гарантирует, что
+                         здесь и в результатах проверки не разъедутся разные числа. -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" Margin="0,0,0,6"/>
+                            <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions>
@@ -228,8 +238,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Поиск и загрузка прошивки в контроллер — смежные темы (обе про то, что
-                         происходит после нахождения прошивки), объединены в одну карточку. -->
+                    <!-- ─── Поиск и загрузка: всё, что происходит после нахождения прошивки — синхронизация
+                         на локальную копию, что делать с распакованными архивами, куда грузить прошивку в
+                         контроллер, подсказка по раскладке клавиатуры в поиске и статистика выборов версии.
+                         Редко настраивается день в день — самая нижняя группа вкладки. -->
+                    <TextBlock Text="ПОИСК И ЗАГРУЗКА" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10"/>
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ПОИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -237,6 +250,9 @@
                                       Checked="SearchAutoSync_Changed" Unchecked="SearchAutoSync_Changed"/>
                             <TextBlock Text="Найденные поиском версии, которых ещё нет на этом компьютере, копируются с диска сами — отдельную кнопку «Синхронизировать» на карточке жать не нужно (она осталась в меню «Ещё» на случай ошибки). За одну выдачу тянется не больше 10 версий, остальные — вручную."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                            <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
+                            <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
 
                             <TextBlock Text="ЛОАДЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Загрузка прошивки в контроллер («Установить прошивку на ПЛК» в результатах поиска). Сейчас подключена заготовка: диалог, параметры, прогресс и лог работают, реальной загрузки не происходит. Сборка и загрузка выполняются на этом компьютере, на диск попадает только готовый результат."

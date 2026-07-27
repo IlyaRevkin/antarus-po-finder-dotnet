@@ -473,7 +473,7 @@ public partial class SettingsView : UserControl
 
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
-        AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersion}";
+        AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersionText}";
 
         SearchAutoSyncCheck.IsChecked = _services.Cfg.SearchAutoSync();
         LoaderExePathInput.Text = _services.Cfg.LoaderExePath();

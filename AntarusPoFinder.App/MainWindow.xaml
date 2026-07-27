@@ -310,6 +310,14 @@
                             <TextBlock HorizontalAlignment="Center" Margin="0,4,0,2">
                                 <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
                             </TextBlock>
+                            <!-- Дублирует "Текущая версия: …" из Настроек → Общие → Обновление приложения —
+                                 там та же самая строка (тот же AppUpdateService.CurrentVersionText), просто
+                                 крупнее; здесь — компактно и приглушённо, чтобы версия была видна и без
+                                 захода в Настройки. Значение выставляется один раз из code-behind
+                                 (MainWindow.xaml.cs) — версия сборки не меняется, пока приложение не
+                                 перезапустится после обновления. -->
+                            <TextBlock x:Name="SidebarVersionText" Text="" HorizontalAlignment="Center"
+                                       Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0"/>
                         </StackPanel>
                     </StackPanel>
 

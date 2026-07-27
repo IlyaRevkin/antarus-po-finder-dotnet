@@ -40,6 +40,11 @@ public partial class MainWindow : Window
         _vm = new MainWindowViewModel(services);
         DataContext = _vm;
 
+        // Постоянно видимая версия приложения в сайдбаре — тот же источник (и то же 3-компонентное
+        // форматирование), что и строка "Текущая версия: …" в Настройках → Общие → Обновление
+        // приложения (см. AppUpdateService.CurrentVersionText), так что оба места не могут разойтись.
+        SidebarVersionText.Text = $"v{AppUpdateService.CurrentVersionText}";
+
         ContentRendered += MainWindow_ContentRendered;
         InitTrayIcon();
         Closing += MainWindow_Closing;
