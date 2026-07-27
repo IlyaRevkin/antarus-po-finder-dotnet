@@ -44,3 +44,8 @@ installer/*.sha256
 ## скриншоты и собранный для прогона портатив — рядом с репозиторием, но не его часть.
 .live/
 .publish-live/
+
+## Docs junk
+docs/screenshots/
+docs/*.pdf
+*.psl
