@@ -101,7 +101,8 @@ public partial class Database : IDisposable
                  tags              TEXT    NOT NULL DEFAULT '',
                  author_id         INTEGER REFERENCES users(id),
                  status            TEXT    NOT NULL DEFAULT 'active',
-                 released          INTEGER NOT NULL DEFAULT 0
+                 released          INTEGER NOT NULL DEFAULT 0,
+                 manual_current    INTEGER NOT NULL DEFAULT 0
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -423,6 +424,13 @@ public partial class Database : IDisposable
             ("author_id", "INTEGER"),
             ("status", "TEXT NOT NULL DEFAULT 'active'"),
             ("released", "INTEGER NOT NULL DEFAULT 0"));
+
+        // manual_current: оператор вручную закрепил ЭТУ версию текущей для её hw-группы (подтип+
+        // контроллер+hw), в обход обычного правила «текущая = версия с максимальным sw_version» —
+        // см. Database.SetFwVersionManualCurrent и FwHistoryStatus.Labels. Отдельная колонка, а не
+        // переиспользование status: status остаётся строго active/rolled_back, эта отметка — ортогональна
+        // ему и не мешает существующим WHERE (status IS NULL OR status='active') фильтрам.
+        AddColumnsIfMissing("fw_versions", ("manual_current", "INTEGER NOT NULL DEFAULT 0"));
 
         if (!hadReleasedColumn)
             Exec("UPDATE fw_versions SET released = CASE WHEN TRIM(tags) <> '' THEN 1 ELSE 0 END");

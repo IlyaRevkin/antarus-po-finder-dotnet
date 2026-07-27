@@ -313,9 +313,12 @@
                                 <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
                                           Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
                                           ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
-                                <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,0,4"
+                                <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,16,4"
                                           Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
                                           ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                                <CheckBox x:Name="KeepSwVersionCheck" Content="Не увеличивать версию ПО (sw)" Margin="0,0,0,4"
+                                          Checked="KeepSwVersion_Toggled" Unchecked="KeepSwVersion_Toggled"
+                                          ToolTip="Новая загрузка для того же шкафа/подтипа/контроллера/HW получит ТОТ ЖЕ SW-номер, что и текущая последняя версия, вместо следующего по порядку.&#x0a;Полезно, когда сама программа ПЛК не менялась — обновился только приложенный файл (например, HMI-проект).&#x0a;Не действует, если выбран резерв номера — у резерва уже есть свой закреплённый номер."/>
                             </WrapPanel>
 
                             <Grid Margin="0,0,0,6">

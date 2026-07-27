@@ -462,7 +462,12 @@ public partial class Database
         var v = GetFwVersionById(fwVersionId);
         if (v is null) return false;
 
-        ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back' WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        // manual_current снимается вместе с откатом: «откатана» и «текущая» — взаимоисключающие
+        // состояния (FwHistoryStatus.Labels и так не рассматривает откатанные версии в качестве
+        // текущих, но без явного сброса отметка «висела» бы на записи и молча ожила бы, если её
+        // потом вернуть в активные через UnrollbackFwVersion).
+        ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back', manual_current=0 WHERE id=@id",
+            cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
 
         string newDiskPath = v.DiskPath, newHmiPath = v.HmiPath;
         try { newDiskPath = Infrastructure.FileSystemHelpers.MarkRolledBackOnDisk(v.DiskPath); } catch { /* best effort */ }
@@ -477,6 +482,48 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@id", fwVersionId);
             });
         }
+        return true;
+    }
+
+    /// <summary>Обратное действие RollbackFwVersion — возвращает откатанную версию в обычный статус
+    /// («Настройки → Прошивки → Вернуть в активные», жалоба «откатали версию по ошибке, а обратного
+    /// пути нет»). Меняет только status в БД: папку на диске, переименованную RollbackFwVersion
+    /// (маркер «_ОТКАТАНО», см. FileSystemHelpers.MarkRolledBackOnDisk), обратно не переименовываем —
+    /// пока версия была откатана, освободившийся sw-номер мог достаться следующей загрузке, и слепой
+    /// возврат имени рисковал бы конфликтовать с её файлами на диске. При необходимости оператор
+    /// переименует папку вручную. Возвращает false, если версии нет или она не была откатана.</summary>
+    public bool UnrollbackFwVersion(int fwVersionId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || v.Status != "rolled_back") return false;
+
+        ExecuteNonQuery("UPDATE fw_versions SET status='active' WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        return true;
+    }
+
+    /// <summary>Оператор вручную назначает ЭТУ версию «текущей» в её hw-группе (подтип+контроллер+hw),
+    /// в обход обычного правила «текущая = версия с максимальным sw_version» (см. FwHistoryStatus.
+    /// Labels) — например, когда более новую по номеру версию забраковали и по факту в шкафах стоит
+    /// версия постарше, но формально откатывать её не хочется (история версий должна остаться видна
+    /// целиком). В группе может быть отмечена только одна версия: перед установкой отметка снимается
+    /// со всех остальных версий той же группы. На откатанной версии отметку поставить нельзя —
+    /// «откатана» и «текущая» взаимоисключающие состояния. Возвращает false, если версия не найдена
+    /// или откатана (тогда ничего не меняется).</summary>
+    public bool SetFwVersionManualCurrent(int fwVersionId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || v.Status == "rolled_back") return false;
+
+        ExecuteNonQuery("""
+            UPDATE fw_versions SET manual_current=0
+            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", v.SubtypeId);
+            cmd.Parameters.AddWithValue("@c", v.ControllerId);
+            cmd.Parameters.AddWithValue("@h", v.HwVersion);
+        });
+        ExecuteNonQuery("UPDATE fw_versions SET manual_current=1 WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
         return true;
     }
 
@@ -637,6 +684,7 @@ public partial class Database
             AuthorId = GetIntOrNull(r, "author_id"),
             Status = GetString(r, "status", "active"),
             Released = GetBool(r, "released"),
+            ManualCurrent = GetBool(r, "manual_current"),
         };
     }
 }

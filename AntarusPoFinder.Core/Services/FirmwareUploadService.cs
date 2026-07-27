@@ -37,6 +37,14 @@ public class FirmwareUploadRequest
     /// <summary>"Дата/время в номере версии" checkbox.</summary>
     public bool IncludeDateInVersion { get; set; } = true;
 
+    /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
+    /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
+    /// версия этой группы. Полезно, когда сама программа ПЛК не менялась, а обновился только
+    /// приложенный файл (например, HMI-проект) — по факту это не "новая версия", а перезапись той же.
+    /// Игнорируется, если выбран Reservation (у резерва уже есть свой locked-in номер — см. Prepare).
+    /// По умолчанию выключен — обычное поведение (инкремент) не меняется.</summary>
+    public bool KeepSwVersion { get; set; }
+
     public bool OpcRequestEnabled { get; set; }
     public string RequestNumRaw { get; set; } = "";
     public bool OpcSnEnabled { get; set; }
@@ -320,6 +328,15 @@ public static class FirmwareUploadService
         {
             fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
             swInt = fwv.SwVersion;
+        }
+        else if (request.KeepSwVersion)
+        {
+            // «Не увеличивать версию ПО (sw)» — берём номер текущей последней активной версии этой
+            // группы вместо MAX+1. Если версий ещё не было (первая загрузка шкафа), вести себя как
+            // обычно: GetNextSwVersion всё равно вернёт 1 в этом случае.
+            var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
+            swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
+            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, includeDate: request.IncludeDateInVersion);
         }
         else
         {

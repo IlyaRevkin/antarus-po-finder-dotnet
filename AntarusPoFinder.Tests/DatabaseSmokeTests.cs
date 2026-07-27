@@ -296,6 +296,102 @@ public class DatabaseSmokeTests
         Assert.Equal("run.exe", row.ExecutableHint);
         Assert.Equal("project.fsprj", row.HmiExecutableHint);
     }
+
+    // ── Ручной статус («Сделать текущей» / «Вернуть в активные») ────────────────
+
+    private static int Seed(Database db, EquipmentGroup group, EquipmentSubType subtype, ControllerModification mod, int sw, string status = "active") =>
+        db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value,
+            ControllerId = mod.ControllerId,
+            EqPrefix = group.Prefix,
+            SubPrefix = subtype.Prefix,
+            HwVersion = mod.HwVersion,
+            SwVersion = sw,
+            DtStr = $"2026010{sw}_0000",
+            VersionRaw = $"2.1.001.000{sw}.2026010{sw}_0000",
+            Filename = "fw.psl",
+            DiskPath = "",
+            Description = "test",
+            Status = status,
+        });
+
+    [Fact]
+    public void SetFwVersionManualCurrent_MarksOnlyOneVersionPerHwGroup()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+
+        var id1 = Seed(db, group, subtype, mod, 1);
+        var id2 = Seed(db, group, subtype, mod, 2);
+
+        Assert.True(db.SetFwVersionManualCurrent(id1));
+        Assert.True(db.GetFwVersionById(id1)!.ManualCurrent);
+        Assert.False(db.GetFwVersionById(id2)!.ManualCurrent);
+
+        // Перенос отметки на другую версию той же группы должен снять её с прежней — не более одной
+        // отмеченной версии в группе одновременно.
+        Assert.True(db.SetFwVersionManualCurrent(id2));
+        Assert.False(db.GetFwVersionById(id1)!.ManualCurrent);
+        Assert.True(db.GetFwVersionById(id2)!.ManualCurrent);
+    }
+
+    [Fact]
+    public void SetFwVersionManualCurrent_RefusesOnARolledBackVersion()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+        var id = Seed(db, group, subtype, mod, 1, status: "rolled_back");
+
+        Assert.False(db.SetFwVersionManualCurrent(id));
+        Assert.False(db.GetFwVersionById(id)!.ManualCurrent);
+    }
+
+    [Fact]
+    public void RollbackFwVersion_ClearsAnyPreviousManualCurrentMark()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+        var id = Seed(db, group, subtype, mod, 1);
+        db.SetFwVersionManualCurrent(id);
+
+        db.RollbackFwVersion(id);
+
+        var row = db.GetFwVersionById(id)!;
+        Assert.Equal("rolled_back", row.Status);
+        Assert.False(row.ManualCurrent);
+    }
+
+    [Fact]
+    public void UnrollbackFwVersion_RestoresActiveStatus_OnlyWhenCurrentlyRolledBack()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+        var activeId = Seed(db, group, subtype, mod, 1);
+        var rolledBackId = Seed(db, group, subtype, mod, 2, status: "rolled_back");
+
+        // Уже активную версию "возвращать" некуда — метод не должен молча притвориться успехом.
+        Assert.False(db.UnrollbackFwVersion(activeId));
+
+        Assert.True(db.UnrollbackFwVersion(rolledBackId));
+        Assert.Equal("active", db.GetFwVersionById(rolledBackId)!.Status);
+    }
 }
 
 public class ServiceSmokeTests

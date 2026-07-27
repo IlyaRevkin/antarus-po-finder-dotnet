@@ -536,8 +536,12 @@
             <StackPanel Grid.Row="5" Orientation="Horizontal">
                 <Button Content="Редактировать" Margin="0,0,8,0" Click="EditFirmware_Click"/>
                 <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
+                <Button x:Name="SetCurrentFirmwareBtn" Content="Сделать текущей" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SetCurrentFirmware_Click"
+                        ToolTip="Отметить эту версию текущей для её шкафа (подтип+контроллер+HW), в обход обычного правила «текущая = версия с максимальным SW». Например, когда более новую версию забраковали и вернулись к этой, не откатывая её формально."/>
                 <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RollbackFirmware_Click"
                         ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                <Button x:Name="UnrollbackFirmwareBtn" Content="Вернуть в активные" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="UnrollbackFirmware_Click"
+                        ToolTip="Снять отметку «Откатана» — версия снова участвует в вычислении текущей/заменённой. Папку на диске (с маркером «_ОТКАТАНО» в имени) это не переименует обратно."/>
                 <Button x:Name="DeleteFirmwareBtn" Content="Удалить прошивку" Style="{StaticResource SecondaryButton}" Click="DeleteFirmware_Click"
                         ToolTip="Безвозвратно удалить запись и файлы на диске (папку версии). В отличие от «Откатить» — не оставляет истории."/>
             </StackPanel>

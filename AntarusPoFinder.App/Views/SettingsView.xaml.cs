@@ -26,6 +26,12 @@ public partial class SettingsView : UserControl
     private readonly AppServices _services;
     private readonly IAppHost _host;
     private List<FwVersionRecord> _fwVersionsData = new();
+    /// <summary>Вычисленный статус (id → метка, см. FwHistoryStatus.LabelsByGroup) для ВСЕХ версий из
+    /// _fwVersionsData — считается один раз на весь (неотфильтрованный) набор, а не на то, что
+    /// осталось после фильтра таблицы. Иначе фильтр по тегу/статусу мог вырезать из вида реальную
+    /// «текущую» версию шкафа, и оставшаяся в выдаче заменённая версия ошибочно посчиталась бы
+    /// текущей — статус версии не должен зависеть от того, что сейчас показано на экране.</summary>
+    private Dictionary<int, string> _fwStatusLabels = new();
 
     /// <summary>One row per subtype — the unified ТИПЫ/ПОДТИПЫ table. Normally a group has at least
     /// one subtype row (Database.EnsureEveryGroupHasSubtype backfills a «—» placeholder on startup),
@@ -69,7 +75,13 @@ public partial class SettingsView : UserControl
         public string Tags => Record.Tags;
         public string DateOnly => Record.UploadDate.Length >= 10 ? Record.UploadDate[..10] : Record.UploadDate;
         public bool IsRolledBack => Record.Status == "rolled_back";
-        public string StatusLabel => IsRolledBack ? "Откатана" : "Активна";
+        /// <summary>Вычисленный статус («Текущая»/«Заменена»/«Откатана» — см. FwHistoryStatus), как в
+        /// Истории версий, а не сырое поле status (которое знает только active/rolled_back и потому
+        /// показывало «Активна» у ВСЕХ незаменённых версий разом — жалоба «5 версий одного шкафа, у
+        /// всех Активна»). Задаётся снаружи (см. PopulateFirmwareTable), т.к. вычисляется по всей
+        /// группе версий шкафа, а не по одной этой записи. Грубый запасной вариант на случай, если
+        /// конкретную запись почему-то не посчитали (не должно происходить в обычной работе).</summary>
+        public string StatusLabel { get; init; } = "";
     }
 
     private class ReservationRow
@@ -716,11 +728,16 @@ public partial class SettingsView : UserControl
         }
     }
 
-    /// <summary>Откат — программист/администраторское действие (как в Upload); прячем кнопку
-    /// в Прошивках от всех кроме administrator (единственная роль с доступом и к Настройкам,
-    /// и к Загрузке).</summary>
-    private void UpdateRollbackAccess() =>
-        RollbackFirmwareBtn.Visibility = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Откат/возврат из отката/ручная отметка «текущей» — программист/администраторское
+    /// действие (как в Upload); прячем кнопки в Прошивках от всех кроме administrator (единственная
+    /// роль с доступом и к Настройкам, и к Загрузке).</summary>
+    private void UpdateRollbackAccess()
+    {
+        var visible = _services.Cfg.CurrentRole() == "administrator" ? Visibility.Visible : Visibility.Collapsed;
+        RollbackFirmwareBtn.Visibility = visible;
+        SetCurrentFirmwareBtn.Visibility = visible;
+        UnrollbackFirmwareBtn.Visibility = visible;
+    }
 
     /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
     /// развернуть обратно). Пустое поле АДМИНИСТРАТОРА трактуется как «не менять этот пароль» —
@@ -1499,6 +1516,7 @@ public partial class SettingsView : UserControl
     private void LoadFirmwareTab()
     {
         _fwVersionsData = _services.Db.GetAllFwVersionsWithNames();
+        _fwStatusLabels = FwHistoryStatus.LabelsByGroup(_fwVersionsData);
         PopulateFwFilterCombos();
         ApplyFwFilter();
         UpdateRollbackAccess();
@@ -1579,7 +1597,13 @@ public partial class SettingsView : UserControl
     }
 
     private void PopulateFirmwareTable(List<FwVersionRecord> data) =>
-        FwGrid.ItemsSource = data.Select(v => new FwRow { Record = v }).ToList();
+        FwGrid.ItemsSource = data.Select(v => new FwRow
+        {
+            Record = v,
+            StatusLabel = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label)
+                ? label
+                : (v.Status == "rolled_back" ? FwHistoryStatus.RolledBack : FwHistoryStatus.Current),
+        }).ToList();
 
     private void FwFilter_Changed(object sender, TextChangedEventArgs e) => ApplyFwFilter();
 
@@ -1686,6 +1710,65 @@ public partial class SettingsView : UserControl
 
         _services.Db.RollbackFwVersion(v.Id!.Value);
         _host.ShowStatus($"Откатано: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        LoadFirmwareTab();
+    }
+
+    /// <summary>Ручной оверрайд «текущей» версии в её hw-группе (см. Database.
+    /// SetFwVersionManualCurrent / FwHistoryStatus.Labels) — например, когда более новую по номеру
+    /// версию на практике забраковали и вернулись к прежней, не откатывая её формально (откат убрал
+    /// бы версию из истории/поиска совсем, а тут нужно лишь поменять, какая из активных версий
+    /// считается текущей).</summary>
+    private void SetCurrentFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        if (v.Status == "rolled_back")
+        {
+            AppMessageBox.Show("Откатанную версию нельзя сделать текущей — сначала верните её в активные.",
+                "Сделать текущей", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var currentLabel = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label) ? label : "";
+        if (currentLabel == FwHistoryStatus.Current || currentLabel == FwHistoryStatus.CurrentForHw(v.HwVersion))
+        {
+            AppMessageBox.Show("Эта версия уже текущая.", "Сделать текущей", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Сделать версию {v.VersionRaw} текущей для этого шкафа (HW {v.HwVersion})?\n\n" +
+            "Версия с бо́льшим SW-номером в той же группе перестанет считаться текущей и будет показана " +
+            "как «Заменена», хотя формально останется активной — вычисление статуса учтёт эту ручную отметку.",
+            "Сделать текущей", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.SetFwVersionManualCurrent(v.Id!.Value);
+        _host.ShowStatus($"Отмечена текущей: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        LoadFirmwareTab();
+    }
+
+    /// <summary>Обратное действие RollbackFirmware_Click — снимает отметку «Откатана» (см. Database.
+    /// UnrollbackFwVersion).</summary>
+    private void UnrollbackFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        if (v.Status != "rolled_back")
+        {
+            AppMessageBox.Show("Эта версия не откатана.", "Вернуть в активные", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Вернуть версию {v.VersionRaw} в активные?\n\n" +
+            "Статус в базе снова станет обычным, версия будет учитываться при вычислении текущей/заменённой.\n" +
+            "Папку на диске (переименованную при откате, с маркером «_ОТКАТАНО» в имени) это не переименует " +
+            "обратно — имя придётся поправить вручную при необходимости.",
+            "Вернуть в активные", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.UnrollbackFwVersion(v.Id!.Value);
+        _host.ShowStatus($"Возвращена в активные: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 

@@ -362,6 +362,134 @@ public class FirmwareUploadServiceTests : IDisposable
         finally { File.Delete(src); }
     }
 
+    // ── KeepSwVersion («Не увеличивать версию ПО (sw)») ─────────────────────────
+
+    [Fact]
+    public void KeepSwVersion_ReusesCurrentSwNumber_InsteadOfIncrementing()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+
+        var src1 = WriteTempFile(".psl");
+        FirmwareUploadResult first;
+        try
+        {
+            var request1 = BaseRequest(src1, group, subtype, mod);
+            first = FirmwareUploadService.Upload(_db, _hierarchy, request1);
+            Assert.Equal(FirmwareUploadOutcome.Success, first.Outcome);
+            Assert.Equal(1, first.Record!.SwVersion);
+        }
+        finally { File.Delete(src1); }
+
+        var src2 = WriteTempFile(".psl");
+        try
+        {
+            var request2 = BaseRequest(src2, group, subtype, mod);
+            request2.KeepSwVersion = true;
+
+            var second = FirmwareUploadService.Upload(_db, _hierarchy, request2);
+            // IncludeDateInVersion=false (как в BaseRequest) + тот же sw ⇒ та же папка, что и у первой
+            // загрузки — срабатывает уже существующая проверка "папка версии уже существует" (см.
+            // KeepSwVersion_WithoutDateStamp_CollidesWithSameFolder_NeedsOverwriteConfirmation ниже,
+            // где это специально проверяется). Здесь просто доводим загрузку до конца тем же путём,
+            // каким это сделал бы UploadView.Upload_Click.
+            if (second.Outcome == FirmwareUploadOutcome.NeedsConfirmation)
+            {
+                Assert.Equal(FirmwareConfirmationKind.OverwriteExisting, second.ConfirmationKind);
+                request2.ConfirmOverwriteExisting = true;
+                second = FirmwareUploadService.Upload(_db, _hierarchy, request2);
+            }
+
+            Assert.Equal(FirmwareUploadOutcome.Success, second.Outcome);
+            // Без KeepSwVersion следующая загрузка получила бы sw=2 (см. GetNextSwVersion) — здесь
+            // же обновился только приложенный файл, сама версия ПЛК осталась прежней.
+            Assert.Equal(1, second.Record!.SwVersion);
+        }
+        finally { File.Delete(src2); }
+    }
+
+    [Fact]
+    public void KeepSwVersion_FirstUploadEver_BehavesLikeNormalIncrement()
+    {
+        // Нечего "оставлять прежним" — версий этого шкафа ещё не было. GetLastActiveFwVersion вернёт
+        // null, и код обязан упасть обратно на обычный GetNextSwVersion (даёт sw=1), а не бросить
+        // исключение или записать sw=0.
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.KeepSwVersion = true;
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Equal(1, result.Record!.SwVersion);
+        }
+        finally { File.Delete(src); }
+    }
+
+    /// <summary>Взаимодействие с проверкой «папка версии уже существует»: если оператор одновременно
+    /// выключил «Дата/время в номере версии» И включил «Не увеличивать sw», у обеих загрузок получается
+    /// БУКВАЛЬНО одинаковый version_raw — значит, тот же путь на диске, и срабатывает уже существующий
+    /// механизм подтверждения перезаписи (никакого отдельного кода для этого не потребовалось).</summary>
+    [Fact]
+    public void KeepSwVersion_WithoutDateStamp_CollidesWithSameFolder_NeedsOverwriteConfirmation()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+
+        var src1 = WriteTempFile(".psl");
+        FirmwareUploadResult first;
+        try
+        {
+            var request1 = BaseRequest(src1, group, subtype, mod); // IncludeDateInVersion = false в BaseRequest
+            first = FirmwareUploadService.Upload(_db, _hierarchy, request1);
+            Assert.Equal(FirmwareUploadOutcome.Success, first.Outcome);
+        }
+        finally { File.Delete(src1); }
+
+        var src2 = WriteTempFile(".psl");
+        try
+        {
+            var request2 = BaseRequest(src2, group, subtype, mod);
+            request2.KeepSwVersion = true;
+
+            var second = FirmwareUploadService.Upload(_db, _hierarchy, request2);
+            Assert.Equal(FirmwareUploadOutcome.NeedsConfirmation, second.Outcome);
+            Assert.Equal(FirmwareConfirmationKind.OverwriteExisting, second.ConfirmationKind);
+
+            request2.ConfirmOverwriteExisting = true;
+            var third = FirmwareUploadService.Upload(_db, _hierarchy, request2);
+            Assert.Equal(FirmwareUploadOutcome.Success, third.Outcome);
+            Assert.Equal(first.Record!.VersionRaw, third.Record!.VersionRaw);
+            Assert.Equal(first.Record.SwVersion, third.Record.SwVersion);
+        }
+        finally { File.Delete(src2); }
+    }
+
+    [Fact]
+    public void KeepSwVersion_IsIgnored_WhenAReservationIsUsed()
+    {
+        // Резерв уже несёт свой закреплённый номер (см. Prepare — ветка reservation берётся первой),
+        // KeepSwVersion не должен его перебивать.
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var reservation = _db.ReserveNextVersion(subtype.Id!.Value, mod.ControllerId, mod.HwVersion,
+            group.Prefix, subtype.Prefix, "tester", includeDate: false);
+
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.KeepSwVersion = true;
+            request.Reservation = reservation;
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Equal(reservation.VersionRaw, result.Record!.VersionRaw);
+        }
+        finally { File.Delete(src); }
+    }
+
     // ── validation ────────────────────────────────────────────────────────────
 
     [Fact]

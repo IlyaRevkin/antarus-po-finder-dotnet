@@ -50,6 +50,11 @@ public class FwVersionRecord
     public int? AuthorId { get; set; }
     public string Status { get; set; } = "active";
     public bool Released { get; set; }
+    /// <summary>Оператор вручную закрепил эту версию «текущей» в её hw-группе (подтип+контроллер+hw),
+    /// в обход обычного правила «текущая = версия с максимальным sw_version» — см. FwHistoryStatus.
+    /// Database.SetFwVersionManualCurrent гарантирует, что в одной hw-группе отмечена не более чем
+    /// одна версия.</summary>
+    public bool ManualCurrent { get; set; }
 
     // Populated by joins for display purposes (not stored on this table).
     /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа

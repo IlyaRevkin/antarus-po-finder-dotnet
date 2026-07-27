@@ -536,6 +536,8 @@ public partial class UploadView : UserControl
 
     private void IncludeDate_Toggled(object sender, RoutedEventArgs e) => UpdatePreview();
 
+    private void KeepSwVersion_Toggled(object sender, RoutedEventArgs e) => UpdatePreview();
+
     // ── Carry-over prompt ─────────────────────────────────────────────────────
 
     private void OfferCarryOver()
@@ -576,7 +578,13 @@ public partial class UploadView : UserControl
         var fwv = reservation is not null ? FwVersionNumber.Parse(reservation.VersionRaw) : null;
         if (fwv is null)
         {
-            int swInt = _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
+            // «Не увеличивать версию ПО (sw)» — тот же выбор номера, что и в FirmwareUploadService.
+            // Prepare (см. его комментарий): берём sw текущей последней активной версии этой группы
+            // вместо MAX+1, чтобы предпросмотр пути совпадал с тем, что реально запишется при загрузке.
+            int swInt = KeepSwVersionCheck.IsChecked == true
+                ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)?.SwVersion
+                    ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
+                : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
         }
 
@@ -938,6 +946,7 @@ public partial class UploadView : UserControl
             LaunchTypes = launchTypes,
             Description = DescInput.Text.Trim(),
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
+            KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
             OpcRequestEnabled = OpcReqNumCheck.IsChecked == true,
             RequestNumRaw = ReqNumInput.Text,
             OpcSnEnabled = OpcSnCheck.IsChecked == true,
@@ -973,6 +982,10 @@ public partial class UploadView : UserControl
         OpcSnCheck.IsChecked = false;
         ReqNumInput.Text = "";
         CabinetSnInput.Text = "";
+        // Одноразовый флажок на конкретную загрузку, а не общая привычка (в отличие от IncludeDateCheck,
+        // который сознательно НЕ сбрасывается здесь) — оставленный включённым по инерции молча увёл бы
+        // sw-номер СЛЕДУЮЩЕЙ, уже не связанной загрузки назад к прежнему значению.
+        KeepSwVersionCheck.IsChecked = false;
         _launchChecks.ClearAll();
         DescInput.Text = "";
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
