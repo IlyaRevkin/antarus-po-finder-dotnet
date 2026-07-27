@@ -890,7 +890,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             _incomingChangesDetails = string.Join(Environment.NewLine, changes.Select(FormatChangeEntry));
             IncomingChangesBannerVisible = true;
             AddNotification(IncomingChangesBannerText, NotificationCategory.Sync, reopen: () => IncomingChangesBannerVisible = true);
-            ScheduleBannerAutoHide(() => IncomingChangesBannerVisible = false);
+            // НЕ автоскрывать: пользователь жаловался, что плашка исчезала раньше, чем он успевал
+            // посмотреть, ЧТО именно поменялось. Теперь висит, пока он сам не нажмёт «Показать»
+            // (полный список, ShowIncomingChangesDetails) и/или не закроет её (DismissIncomingChangesBanner).
         }
 
         if (info.CriticalSchemaMismatch)
