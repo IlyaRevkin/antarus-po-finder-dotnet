@@ -772,7 +772,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         UnknownItemsBannerVisible = true;
         // Same text as last time (nothing changed since) — AddNotification's own dedup just bumps
         // the timestamp instead of piling up identical history rows.
-        AddNotification(UnknownItemsBannerText, NotificationCategory.Hierarchy, reopen: () => UnknownItemsBannerVisible = true);
+        // reopen ПЕРЕ-СКАНИРУЕТ диск, а не тупо ставит BannerVisible=true: пользователь удалял
+        // неизвестные, а «Показать» из истории уведомлений воскрешал плашку, хотя неизвестных уже нет —
+        // и так по кругу. Теперь повторный показ проверяет актуальное состояние: если всё разрешено,
+        // CheckForUnknownItemsAsync сам оставит плашку скрытой (unknown.Count == 0 выше).
+        AddNotification(UnknownItemsBannerText, NotificationCategory.Hierarchy, reopen: () => _ = CheckForUnknownItemsAsync());
     }
 
     [RelayCommand]
