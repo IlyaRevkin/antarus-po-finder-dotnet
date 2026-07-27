@@ -4,6 +4,30 @@
         Icon="/Assets/icon.ico"
         Title="Уведомления" Width="480" Height="640"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource BgBrush}">
+    <Window.Resources>
+        <!-- Чередование фона строк — жалоба на плохую читаемость длинных уведомлений: без визуального
+             разделения соседних записей длинный многострочный текст одной записи сливается с текстом
+             следующей, и непонятно, где заканчивается одна запись и начинается другая. Обычная нижняя
+             линия (BorderBrush2) для этого недостаточна, когда сама запись — десяток строк. Красим не
+             сам ListBoxItem (это app-wide стиль в Styles.xaml — вне зоны этого файла, и трогать его
+             означало бы менять поведение ListBox во всём приложении), а внутренний Border записи, стилем
+             локальным для этого окна. AlternationIndex у контейнера (ListBoxItem) читаем через
+             RelativeSource + DataTrigger, а не через Trigger по самому свойству — Border не является
+             контейнером ItemsControl, поэтому у него самого этого свойства нет, но DataTrigger умеет
+             брать его через привязку у предка. BgSidebarBrush — тот же лёгкий тон, что уже используется
+             для похожей цели в DataGridRow (см. Styles.xaml), а не новый цвет "от себя". -->
+        <Style x:Key="NotificationRowBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <DataTrigger Value="1">
+                    <DataTrigger.Binding>
+                        <Binding RelativeSource="{RelativeSource AncestorType=ListBoxItem}" Path="(ItemsControl.AlternationIndex)"/>
+                    </DataTrigger.Binding>
+                    <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -54,10 +78,33 @@
             </StackPanel>
         </Border>
 
-        <ListBox Grid.Row="3" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent">
+        <!-- Скролл списка. Проверено: вложенных конфликтующих ScrollViewer здесь нет — ItemsControl-
+             стиль в Styles.xaml оборачивает ItemsPresenter РОВНО в один ScrollViewer, и внутрь записи
+             (DataTemplate ниже) сознательно не добавлен свой ScrollViewer — вложенный ScrollViewer
+             внутри строки внутри ScrollViewer списка это классическая причина «скролл дёргается/не
+             прокручивает то, что нужно», а не решение проблемы. Сама «плохая прокрутка» длинных записей
+             была не про верстку, а про единицу прокрутки: ListBox по умолчанию виртуализируется с
+             ScrollViewer.CanContentScroll=True, т.е. колесо мыши и полоса прокрутки двигают список НА
+             ЦЕЛЫЙ ЭЛЕМЕНТ за раз (VirtualizingStackPanel, item-based scrolling). Пока записи короткие и
+             примерно одной высоты, это незаметно, а как только среди них попадается запись с длинным
+             текстом на 10+ строк, один «тик» колеса мыши либо не двигает список вовсе, либо прыгает
+             через всю эту огромную запись целиком — из-за этого скролл и ощущался «сломанным» на длинных
+             уведомлениях. VirtualizingPanel.ScrollUnit="Pixel" переключает на попиксельную прокрутку
+             (виртуализация при этом остаётся — элементы вне видимой области всё так же не создаются),
+             и колесо мыши/полоса прокрутки двигают список плавно независимо от того, насколько высокая
+             конкретная запись. -->
+        <ListBox Grid.Row="3" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent"
+                 VirtualizingPanel.ScrollUnit="Pixel" AlternationCount="2">
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Border Padding="0,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
+                    <!-- Padding увеличен (было 0,8) — жалоба была и на читаемость: у длинной
+                         многострочной записи 8px сверху/снизу почти не отделяли её от соседних записей,
+                         из-за чего плотный текст сливался в одну "стену". Style — чередующийся фон (см.
+                         NotificationRowBorderStyle выше), BorderThickness/BorderBrush — как и раньше,
+                         тонкая линия-разделитель поверх чередующегося фона (задаются локально, поверх
+                         Style, а не в нём самом — это обычные локальные значения на элементе). -->
+                    <Border Style="{StaticResource NotificationRowBorderStyle}" Padding="8,12"
+                            BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
                         <!-- DockPanel вместо Grid с колонками Auto/Auto/*/Auto — реальная причина
                              наезда текста на кнопку была не в отсутствии обрезки (ClipToBounds
                              это не лечит), а в самой раскладке: внутри виртуализированного ListBox
