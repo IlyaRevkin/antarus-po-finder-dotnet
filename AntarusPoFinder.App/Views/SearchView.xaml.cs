@@ -75,7 +75,10 @@ public partial class SearchView : UserControl
     // и теги меняются (загрузили прошивку, приехала синхронизация), и показывать вчерашний набор
     // значений хуже, чем лишний раз спросить БД: это локальные быстрые запросы, не поход на диск.
 
-    private sealed record FilterOption(string Label, int? Id = null, string? Text = null);
+    /// <summary>internal (не private) — только чтобы DedupeFilterOptions/SubtypeFilterLabel ниже
+    /// можно было проверить тестом напрямую, без поднятия самого WPF-контрола (см. AssemblyInfo.cs,
+    /// InternalsVisibleTo("AntarusPoFinder.Tests") — уже используется так же для AppUpdateService).</summary>
+    internal sealed record FilterOption(string Label, int? Id = null, string? Text = null);
 
     private enum SearchMode { Firmware, Params, Schemas }
 
@@ -121,16 +124,49 @@ public partial class SearchView : UserControl
     /// <summary>Подтипы — только выбранного типа шкафа. Раньше список был общий на всю базу, и при
     /// выбранном «ПЖ» в нём предлагались подтипы НГР и всех остальных типов: выбрать такую пару значило
     /// гарантированно получить пустую выдачу (запись не может одновременно принадлежать типу ПЖ и
-    /// подтипу из НГР). Тип не выбран — показываем все подтипы, как и раньше.</summary>
+    /// подтипу из НГР). Тип не выбран — показываем все подтипы, как и раньше.
+    ///
+    /// Когда тип не выбран, имя подтипа перестаёт быть уникальным ключом — «2.0» есть и у ПЖ, и у НГР
+    /// (см. HierarchyDefaultsData: у обоих типов подтип с таким именем и prefix=0, но РАЗНЫЕ Id). Раньше
+    /// FillFilter схлопывал одноимённые варианты в один пункт списка по имени (см. её комментарий про
+    /// GroupBy) — второй «2.0» пропадал из выпадающего списка целиком, а тот, что оставался, был
+    /// привязан к произвольному (первому попавшемуся при чтении из БД) Id: выбор подтипа «2.0» в
+    /// фильтре превращался в лотерею между ПЖ и НГР, невидимую для оператора. Подписываем каждый
+    /// вариант его типом шкафа (SubtypeFilterLabel) — и подписи перестают совпадать, и оператор видит,
+    /// какой именно «2.0» выбирает.</summary>
     private void ReloadSubtypeFilter()
     {
         var groupId = (FilterGroupCombo.SelectedItem as FilterOption)?.Id;
-        var subtypes = groupId is null
-            ? _services.Db.GetAllEquipmentSubtypes()
-            : _services.Db.GetSubtypesForGroup(groupId.Value);
+        List<EquipmentSubType> subtypes;
+        IReadOnlyDictionary<int, string>? groupNames = null;
+        if (groupId is null)
+        {
+            subtypes = _services.Db.GetAllEquipmentSubtypes();
+            groupNames = _services.Db.GetAllEquipmentGroups()
+                .Where(g => g.Id is not null)
+                .ToDictionary(g => g.Id!.Value, g => g.Name);
+        }
+        else
+        {
+            subtypes = _services.Db.GetSubtypesForGroup(groupId.Value);
+        }
+
         FillFilter(FilterSubtypeCombo, "Подтип: любой",
-            subtypes.Where(s => s.Id is not null && s.Name != "—").Select(s => new FilterOption(s.Name, s.Id)));
+            subtypes.Where(s => s.Id is not null && s.Name != "—")
+                .Select(s => new FilterOption(SubtypeFilterLabel(s, groupNames), s.Id)));
     }
+
+    /// <summary>Подпись подтипа для панели фильтров: пока список охватывает только один тип шкафа
+    /// (groupNamesById не задан) — голое имя, как и раньше. Как только список объединяет несколько
+    /// типов (Тип шкафа: «любой») — имя подтипа дополняется его типом в скобках («2.0 (ПЖ)»,
+    /// «2.0 (НГР)»), тем же приёмом, что уже показывает тип у подтипа в «Параметрах ПЧ/УПП» (см.
+    /// SubtypeMultiSelect.RebuildItemsCore) — только формат чуть компактнее (без отдельного "/").
+    /// internal static — чистая функция от данных, без обращения к контролам, проверяется тестом
+    /// напрямую (см. SearchFilterLogicTests).</summary>
+    internal static string SubtypeFilterLabel(EquipmentSubType subtype, IReadOnlyDictionary<int, string>? groupNamesById) =>
+        groupNamesById is not null && groupNamesById.TryGetValue(subtype.GroupId, out var groupName) && !string.IsNullOrEmpty(groupName)
+            ? $"{subtype.Name} ({groupName})"
+            : subtype.Name;
 
     // ── Фильтр по расширению (только «Схемы») ─────────────────────────────
     // Рядом со схемой в PDF на диске лежит её же исходник в DWG и десяток фотографий шкафа — без
@@ -202,23 +238,42 @@ public partial class SearchView : UserControl
     /// поиск ещё раз (а по схемам — ещё один обход диска).</summary>
     private void FillFilter(ComboBox combo, string anyLabel, IEnumerable<FilterOption> options)
     {
-        var previous = (combo.SelectedItem as FilterOption)?.Label;
+        var previous = combo.SelectedItem as FilterOption;
         var items = new List<FilterOption> { new(anyLabel) };
-        items.AddRange(options
-            .Where(o => !string.IsNullOrWhiteSpace(o.Label))
-            .GroupBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase).Select(g => g.First())
-            .OrderBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase));
+        items.AddRange(DedupeFilterOptions(options));
 
         var wasFilling = _fillingFilters;
         _fillingFilters = true;
         try
         {
             combo.ItemsSource = items;
-            var restored = previous is null ? 0 : items.FindIndex(o => o.Label == previous);
+            // Пока у варианта есть Id — восстанавливаем выбор ПО ID, не по подписи: подпись подтипа
+            // умеет меняться между перезаполнениями (см. SubtypeFilterLabel — суффикс типа появляется/
+            // пропадает вместе с тем, сужен ли список одним типом шкафа), а сам подтип остаётся тем же.
+            // У вариантов без Id (LaunchType, сама заглушка "любой") сравниваем по подписи/тексту —
+            // им сравнивать больше не по чему.
+            var restored = previous is null ? -1
+                : previous.Id is int prevId ? items.FindIndex(o => o.Id == prevId)
+                : items.FindIndex(o => o.Label == previous.Label && o.Text == previous.Text);
             combo.SelectedIndex = restored < 0 ? 0 : restored;
         }
         finally { _fillingFilters = wasFilling; }
     }
+
+    /// <summary>Убирает настоящие дубликаты варианта фильтра: тот же Id (для группы/подтипа/
+    /// контроллера), а для вариантов без Id (тип пуска) — тот же текст. НЕ схлопывает разные записи с
+    /// одинаковой ПОДПИСЬЮ — прежняя версия дедупила именно по Label (см. историю правки), и это было
+    /// ошибкой: у справочника бывают одноимённые, но РАЗНЫЕ записи (подтип «2.0» и у ПЖ, и у НГР — два
+    /// разных Id). Дедуп по подписи одну из них тихо прятал из списка целиком, а оставшаяся получала
+    /// произвольный (первый попавшийся при чтении из БД) Id — фильтр «Подтип: 2.0» реально мог отфильтровать
+    /// не тот тип шкафа, который выбирал оператор. internal static — чистая функция, проверяется тестом
+    /// напрямую (см. SearchFilterLogicTests).</summary>
+    internal static List<FilterOption> DedupeFilterOptions(IEnumerable<FilterOption> options) =>
+        options.Where(o => !string.IsNullOrWhiteSpace(o.Label))
+            .GroupBy(o => o.Id?.ToString() ?? o.Label, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(o => o.Label, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
 
     /// <summary>true, пока списки фильтров наполняются кодом — SelectionChanged, который при этом
     /// поднимает сам ComboBox, не должен ни перезапускать поиск, ни пересобирать соседний список.</summary>

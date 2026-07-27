@@ -316,9 +316,14 @@
                                 <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,16,4"
                                           Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
                                           ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                                <!-- Доступность (IsEnabled) переключается кодом — см.
+                                     UploadView.UpdateKeepSwVersionAvailability: чекбокс имеет смысл,
+                                     только если для выбранного подтип/контроллер/HW уже ЕСТЬ хотя бы
+                                     одна активная версия ("не увеличивать" относительно чего — увеличивать
+                                     не от чего у самой первой загрузки в новую комбинацию). ToolTip тоже
+                                     подменяется кодом — что именно написано, зависит от доступности. -->
                                 <CheckBox x:Name="KeepSwVersionCheck" Content="Не увеличивать версию ПО (sw)" Margin="0,0,0,4"
-                                          Checked="KeepSwVersion_Toggled" Unchecked="KeepSwVersion_Toggled"
-                                          ToolTip="Новая загрузка для того же шкафа/подтипа/контроллера/HW получит ТОТ ЖЕ SW-номер, что и текущая последняя версия, вместо следующего по порядку.&#x0a;Полезно, когда сама программа ПЛК не менялась — обновился только приложенный файл (например, HMI-проект).&#x0a;Не действует, если выбран резерв номера — у резерва уже есть свой закреплённый номер."/>
+                                          Checked="KeepSwVersion_Toggled" Unchecked="KeepSwVersion_Toggled"/>
                             </WrapPanel>
 
                             <Grid Margin="0,0,0,6">

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -430,6 +431,11 @@ public partial class UploadView : UserControl
     /// which calls UpdatePreview — but UpdatePreview must never call back into this method).</summary>
     private void RefreshReservationPicker()
     {
+        // «Не увеличивать версию ПО (sw)» зависит от ровно той же тройки подтип/контроллер/HW, что и
+        // резерв номера — пересчитываем её здесь же, вместо отдельного набора вызовов по всем тем же
+        // точкам (смена группы/подтипа/контроллера уже и так гоняет этот метод).
+        UpdateKeepSwVersionAvailability();
+
         if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype || CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             ReservationPanel.Visibility = Visibility.Collapsed;
@@ -451,6 +457,45 @@ public partial class UploadView : UserControl
         ReservationCombo.SelectedIndex = 0;
         ReservationPanel.Visibility = Visibility.Visible;
     }
+
+    private const string KeepSwVersionAvailableTooltip =
+        "Новая загрузка для того же шкафа/подтипа/контроллера/HW получит ТОТ ЖЕ SW-номер, что и текущая последняя версия, вместо следующего по порядку.\n" +
+        "Полезно, когда сама программа ПЛК не менялась — обновился только приложенный файл (например, HMI-проект).\n" +
+        "Не действует, если выбран резерв номера — у резерва уже есть свой закреплённый номер.";
+
+    private const string KeepSwVersionUnavailableTooltip =
+        "Недоступно: для выбранного шкафа/подтипа/контроллера/HW ещё нет ни одной загруженной версии — увеличивать пока нечего.";
+
+    /// <summary>«Не увеличивать версию ПО (sw)» имеет смысл, только если у выбранной тройки подтип/
+    /// контроллер/HW уже ЕСТЬ хотя бы одна активная версия — сама галочка просит взять SW-номер ТЕКУЩЕЙ
+    /// последней версии вместо следующего по порядку (см. FirmwareUploadService и UpdatePreview ниже),
+    /// а у первой загрузки в новую комбинацию брать ещё нечего. Раньше галочка была видна и доступна
+    /// всегда, из-за чего можно было включить её на пустой комбинации без всякого эффекта — жалоба
+    /// пользователя.
+    ///
+    /// IsEnabled, а не Visibility.Collapsed: внезапное исчезновение чекбокса при смене подтипа/
+    /// контроллера читалось бы как баг ("куда делась галочка"), а серая недоступная галочка с поясняющим
+    /// тултипом — как осознанное ограничение. Сброс отметки при потере доступности обязателен: иначе
+    /// включённая на одной комбинации галочка молча пережила бы переключение на другую, где её
+    /// применение к делу не относится (тот же класс бага, что и у KeepSwVersionCheck в ResetForm).</summary>
+    private void UpdateKeepSwVersionAvailability()
+    {
+        bool available = KeepSwVersionAvailable(_services.Db, SubtypesSelect.MainSubtype, CtrlCombo.SelectedItem as ControllerModification);
+
+        KeepSwVersionCheck.IsEnabled = available;
+        KeepSwVersionCheck.ToolTip = available ? KeepSwVersionAvailableTooltip : KeepSwVersionUnavailableTooltip;
+        if (!available && KeepSwVersionCheck.IsChecked == true)
+            KeepSwVersionCheck.IsChecked = false;
+    }
+
+    /// <summary>Чистое условие доступности — вынесено из UpdateKeepSwVersionAvailability отдельным
+    /// internal static методом, чтобы проверить его тестом напрямую (реальная Database + TempDb), без
+    /// поднятия самого WPF-контрола (см. AssemblyInfo.cs — InternalsVisibleTo("AntarusPoFinder.Tests"),
+    /// UploadKeepSwAvailabilityTests). Подтип/контроллер не выбраны — недоступно, тут и проверять
+    /// нечего, само действие потребует их обоих.</summary>
+    internal static bool KeepSwVersionAvailable(Database db, EquipmentSubType? subtype, ControllerModification? mod) =>
+        subtype?.Id is int subtypeId && mod is not null
+            && db.GetLastActiveFwVersion(subtypeId, mod.ControllerId, mod.HwVersion) is not null;
 
     private void ReservationCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdatePreview();
 
