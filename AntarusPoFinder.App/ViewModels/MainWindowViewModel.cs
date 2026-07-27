@@ -25,6 +25,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private DispatcherTimer? _statusClearTimer;
     private DispatcherTimer? _updateCheckTimer;
     private DispatcherTimer? _periodicUpdateCheckTimer;
+    /// <summary>Разовый таймер показа окна «Что нового» после автообновления — см. CheckWhatsNewAsync.</summary>
+    private DispatcherTimer? _whatsNewCheckTimer;
     private DispatcherTimer? _fwUpdateCheckTimer;
     private DispatcherTimer? _configCheckTimer;
     private DispatcherTimer? _configPullRepeatTimer;
@@ -399,6 +401,20 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         };
         _updateCheckTimer.Start();
 
+        // 2200ms once: показ окна «Что нового» после автообновления — сравнивает версию, которую эта
+        // машина уже "видела" (ConfigService.LastWhatsNewShownVersion), с текущей CurrentVersionText.
+        // Специально ДО проверки обновлений выше (2500ms) — это два независимых действия (одно про
+        // версию, на которой приложение только что запустилось, другое про версию, которая ещё
+        // только появится), незачем ставить одно в зависимость от таймингов другого. Не требует
+        // сети/диска обновлений — GetReleaseNotesAsync внутри сама переживает недоступность GitHub.
+        _whatsNewCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
+        _whatsNewCheckTimer.Tick += async (_, _) =>
+        {
+            _whatsNewCheckTimer!.Stop();
+            await CheckWhatsNewAsync();
+        };
+        _whatsNewCheckTimer.Start();
+
         // 3000ms once: check whether any locally cached firmware has a newer version on the server.
         _fwUpdateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(3000) };
         _fwUpdateCheckTimer.Tick += async (_, _) =>
@@ -596,6 +612,55 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     [RelayCommand]
     private void DismissUpdateBanner() => UpdateBannerVisible = false;
+
+    // ── "Что нового" после автообновления ────────────────────────────────────
+
+    /// <summary>Показывает окно «Что нового в vX.Y.Z» ровно один раз на этой машине — на первом
+    /// запуске КАЖДОЙ версии, отличной от той, что уже была отмечена как показанная (решение —
+    /// чистая функция AppUpdateService.ShouldShowWhatsNew, покрыта тестами без WPF/сети). Три случая:
+    /// • ключ ещё пуст (самая первая установка / первый запуск после появления самой этой фичи на
+    ///   уже существующей установке) — окну показываться не с чем сравнивать ("что нового" относительно
+    ///   ничего не имеет смысла), молча запоминаем текущую версию и выходим;
+    /// • ключ отличается от текущей версии — приложение только что обновилось: тянем release notes
+    ///   этой версии с GitHub и показываем их;
+    /// • ключ уже равен текущей версии — уже показывали (или зачли) в этом запуске приложения, либо
+    ///   в одном из прошлых, ничего не делаем.
+    /// Версия в ключ пишется СРАЗУ по принятии решения показывать — даже если сами notes не удалось
+    /// получить (сеть недоступна, GitHub лежит, релиза с таким тегом нет) — иначе при каждом
+    /// следующем запуске приложение снова и снова пыталось бы показать то же самое окно.</summary>
+    private async Task CheckWhatsNewAsync()
+    {
+        var current = AppUpdateService.CurrentVersionText;
+        var lastShown = _services.Cfg.LastWhatsNewShownVersion();
+
+        if (!AppUpdateService.ShouldShowWhatsNew(lastShown, current))
+        {
+            if (string.IsNullOrEmpty(lastShown))
+                _services.Cfg.SetLastWhatsNewShownVersion(current);
+            return;
+        }
+
+        // Свёрнутый в трей старт (Настройки → Общие → «Запускать свёрнутым») — окно не показываем,
+        // чтобы модальный диалог не выскакивал поверх того, что для пользователя выглядит как «программа
+        // тихо сидит в трее». Версия всё равно засчитывается как показанная — не навязчивее, чем
+        // молчаливая запись при первой установке выше, и не пытается подловить момент разворачивания
+        // окна из трея отдельным механизмом ради одной информационной плашки.
+        if (_services.Cfg.AppStartMinimized())
+        {
+            _services.Cfg.SetLastWhatsNewShownVersion(current);
+            return;
+        }
+
+        string? notes;
+        try { notes = await AppUpdateService.GetReleaseNotesAsync(current); }
+        catch { notes = null; } // GetReleaseNotesAsync уже не бросает — двойная страховка на случай будущих правок
+
+        _services.Cfg.SetLastWhatsNewShownVersion(current);
+
+        if (string.IsNullOrWhiteSpace(notes)) return; // сети нет / релиза с таким тегом нет — не критично, просто не показываем
+
+        Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", notes);
+    }
 
     // ── Firmware updates ─────────────────────────────────────────────────────
 

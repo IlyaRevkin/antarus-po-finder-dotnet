@@ -418,4 +418,135 @@ public class AppUpdateServiceTests
         // comparison in the app depends on this never being null.
         Assert.NotNull(AppUpdateService.CurrentVersion);
     }
+
+    // ── "Что нового" — ShouldShowWhatsNew (чистая функция решения, без WPF/сети) ────────────────
+
+    [Fact]
+    public void ShouldShowWhatsNew_LastShownEmpty_ReturnsFalse()
+    {
+        // Самая первая установка / первый запуск после появления этой фичи на уже существующей
+        // установке — показывать нечего "что нового" относительно ничего. Вызывающая сторона
+        // (MainWindowViewModel.CheckWhatsNewAsync) в этом случае молча записывает текущую версию.
+        Assert.False(AppUpdateService.ShouldShowWhatsNew("", "1.5.0"));
+    }
+
+    [Fact]
+    public void ShouldShowWhatsNew_LastShownNull_ReturnsFalse()
+    {
+        Assert.False(AppUpdateService.ShouldShowWhatsNew(null, "1.5.0"));
+    }
+
+    [Fact]
+    public void ShouldShowWhatsNew_LastShownDiffersFromCurrent_ReturnsTrue()
+    {
+        // Приложение только что автообновилось: было отмечено на 1.4.0, сейчас уже 1.5.0.
+        Assert.True(AppUpdateService.ShouldShowWhatsNew("1.4.0", "1.5.0"));
+    }
+
+    [Fact]
+    public void ShouldShowWhatsNew_LastShownEqualsCurrent_ReturnsFalse()
+    {
+        // Уже показывали (или зачли) для этой версии — повторно не нужно.
+        Assert.False(AppUpdateService.ShouldShowWhatsNew("1.5.0", "1.5.0"));
+    }
+
+    [Fact]
+    public void ShouldShowWhatsNew_LastShownEqualsCurrent_CaseInsensitive_ReturnsFalse()
+    {
+        Assert.False(AppUpdateService.ShouldShowWhatsNew("1.5.0", "1.5.0".ToUpperInvariant()));
+    }
+
+    // ── GetReleaseNotesAsync ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetReleaseNotesAsync_ReleaseFound_ReturnsBody()
+    {
+        const string body = "- Статистика выборов\n- Расширения поиска схем";
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(req =>
+            {
+                Assert.EndsWith("/releases/tags/v1.5.0", req.RequestUri!.AbsoluteUri);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($$"""{ "tag_name": "v1.5.0", "body": {{ToJsonString(body)}} }""")
+                };
+            })));
+
+            var notes = await AppUpdateService.GetReleaseNotesAsync("1.5.0");
+
+            Assert.Equal(body, notes);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task GetReleaseNotesAsync_ReleaseNotFound_ReturnsNull()
+    {
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.NotFound))));
+
+            var notes = await AppUpdateService.GetReleaseNotesAsync("9.9.9");
+
+            Assert.Null(notes);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task GetReleaseNotesAsync_NetworkFailure_ReturnsNullInsteadOfThrowing()
+    {
+        // Отсутствие сети/недоступный GitHub — не критично для этой фичи: окно «Что нового» просто
+        // не покажется, а не роняет запуск приложения исключением.
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(
+                new ThrowingHttpMessageHandler(new HttpRequestException("No such host is known"))));
+
+            var notes = await AppUpdateService.GetReleaseNotesAsync("1.5.0");
+
+            Assert.Null(notes);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task GetReleaseNotesAsync_EmptyBody_ReturnsNull()
+    {
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{ "tag_name": "v1.5.0", "body": "" }""")
+                })));
+
+            var notes = await AppUpdateService.GetReleaseNotesAsync("1.5.0");
+
+            Assert.Null(notes);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task GetReleaseNotesAsync_MissingBodyProperty_ReturnsNull()
+    {
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{ "tag_name": "v1.5.0" }""")
+                })));
+
+            var notes = await AppUpdateService.GetReleaseNotesAsync("1.5.0");
+
+            Assert.Null(notes);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    private static string ToJsonString(string value) => System.Text.Json.JsonSerializer.Serialize(value);
 }

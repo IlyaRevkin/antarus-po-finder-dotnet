@@ -116,7 +116,7 @@ public static class ConfigSyncService
         "scan_resolution_dpi", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
-        "layout_fallback_enabled", "layout_fallback_threshold", "fw_usage_threshold",
+        "layout_fallback_enabled", "layout_fallback_threshold", "fw_usage_threshold", "last_whatsnew_shown_version",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
         "loader_last_target", "unified_plc_hmi_zone",

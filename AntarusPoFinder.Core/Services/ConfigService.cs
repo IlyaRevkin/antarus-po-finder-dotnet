@@ -116,6 +116,15 @@ public class ConfigService
         // умолчанию для всех существующих и новых установок, пока программист явно не включит эту
         // опцию себе в Настройках (см. UnifiedPlcHmiZoneEnabled ниже).
         ["unified_plc_hmi_zone"] = "false",
+        // Версия, для которой окно «Что нового» уже показано (или молча зачтено — см.
+        // AppUpdateService.ShouldShowWhatsNew) на ЭТОЙ машине. Пусто = ключ ещё ни разу не писали
+        // (самая первая установка, или самый первый запуск после появления этой фичи на уже
+        // существующей установке) — в этом случае окно не показывается, а текущая версия молча
+        // записывается сюда, чтобы отсчёт "что нового" начался со следующего реального обновления,
+        // а не задним числом показал весь список изменений версии, на которой человек и так уже
+        // работал. Per-machine — НЕ синхронизируется (см. ConfigSyncService.SkipSettingsKeys), как
+        // theme/close_action: у каждой машины свой момент обновления.
+        ["last_whatsnew_shown_version"] = "",
     };
 
     private readonly Database _db;
@@ -552,4 +561,9 @@ public class ConfigService
     /// импорте — если это станет проблемой, добавить "unified_plc_hmi_zone" в SkipSettingsKeys.</summary>
     public bool UnifiedPlcHmiZoneEnabled() => Get("unified_plc_hmi_zone").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetUnifiedPlcHmiZoneEnabled(bool value) => Set("unified_plc_hmi_zone", value ? "true" : "false");
+
+    /// <summary>Версия, для которой окно «Что нового» уже показано/зачтено на этой машине — см.
+    /// Defaults["last_whatsnew_shown_version"] и AppUpdateService.ShouldShowWhatsNew за полной логикой.</summary>
+    public string LastWhatsNewShownVersion() => Get("last_whatsnew_shown_version");
+    public void SetLastWhatsNewShownVersion(string version) => Set("last_whatsnew_shown_version", version);
 }

@@ -74,6 +74,20 @@ public static class AppUpdateService
 
     public static Version CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
 
+    /// <summary>Чистая (без побочных эффектов) логика решения «показывать ли окно "Что нового"» —
+    /// вынесена сюда из MainWindowViewModel.CheckWhatsNewAsync специально, чтобы её можно было
+    /// протестировать без WPF/Dispatcher/сети (см. AppUpdateServiceTests.ShouldShowWhatsNew_*).
+    /// <paramref name="lastShownVersion"/> — значение ключа ConfigService "last_whatsnew_shown_version".
+    /// Три случая (см. постановку задачи):
+    /// • пусто (ключ ещё ни разу не писали — самая первая установка/первый запуск этой версии ключей)
+    ///   → false: показывать нечего "что нового" относительно ничего, но вызывающая сторона обязана
+    ///   молча записать текущую версию, чтобы СЛЕДУЮЩЕЕ реальное обновление такое сравнение уже прошло;
+    /// • отличается от текущей версии → true: приложение только что обновилось;
+    /// • совпадает с текущей → false: уже показывали (или записали) для этой версии, второй раз не надо.</summary>
+    public static bool ShouldShowWhatsNew(string? lastShownVersion, string currentVersion) =>
+        !string.IsNullOrEmpty(lastShownVersion) &&
+        !string.Equals(lastShownVersion, currentVersion, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Текущая версия в компактном 3-компонентном виде ("1.32.0"), без сборочной ревизии —
     /// AssemblyVersion (см. csproj &lt;Version&gt;) всегда несёт и четвёртый компонент (revision,
     /// обычно 0), который ничего не говорит пользователю и не совпадает с тем, что видно в тегах
@@ -154,6 +168,32 @@ public static class AppUpdateService
             releases.Add(new UpdateRelease(version, exeName, UpdateSourceKind.GitHub, DownloadUrl: exeUrl, ExpectedSize: exeSize, Sha256Url: shaUrl));
         }
         return releases.OrderByDescending(r => r.Version).ToList();
+    }
+
+    /// <summary>Тело GitHub-релиза (Markdown/plain-текст из формы «Describe this release») по номеру
+    /// версии — источник текста для окна «Что нового» (см. MainWindowViewModel.CheckWhatsNewAsync).
+    /// Запрашивает релиз по тегу <c>v{version}</c> (та же схема тегов, что ListGitHubReleasesAsync
+    /// уже предполагает при чтении списка релизов). Возвращает null при ЛЮБОЙ ошибке (сети нет,
+    /// такого тега/релиза не существует, GitHub недоступен, тело пустое) — это не критично, окно
+    /// «Что нового» в этом случае просто не показывается, попытка не повторяется никакими
+    /// повторными запросами отсюда. Не поддерживается для папочного источника обновлений — у файлов
+    /// в сетевой папке обновлений нет release notes, только сам .exe.</summary>
+    public static async Task<string?> GetReleaseNotesAsync(string version)
+    {
+        try
+        {
+            var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/tags/v{version}");
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("body", out var bodyProp)) return null;
+            var body = bodyProp.GetString();
+            return string.IsNullOrWhiteSpace(body) ? null : body;
+        }
+        catch
+        {
+            // Сеть недоступна / релиз с таким тегом не найден (404) / GitHub временно лежит / битый
+            // JSON — во всех случаях одинаково: окно «Что нового» просто не покажется в этот раз.
+            return null;
+        }
     }
 
     /// <summary>Устанавливает релиз и перезапускает приложение. Для GitHub-источника сначала
