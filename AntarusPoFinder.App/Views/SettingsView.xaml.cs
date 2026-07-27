@@ -482,6 +482,7 @@ public partial class SettingsView : UserControl
         LayoutFallbackCheck.IsChecked = _services.Cfg.LayoutFallbackEnabled();
         LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
         RefreshLayoutFallbackGrid();
+        FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
         RefreshUsageStats();
     }
 
@@ -612,6 +613,41 @@ public partial class SettingsView : UserControl
             _ => "спрашивает при каждом выборе",
         };
         UsageStatsLabel.Text = $"Сейчас учтено выборов: {_services.Db.TotalFwUsageCount()} · {decision}";
+        RefreshFwUsageGrid();
+    }
+
+    private class FwUsageRow
+    {
+        public string QueryKey { get; init; } = "";
+        public string SubtypeName { get; init; } = "";
+        public string ControllerName { get; init; } = "";
+        public string VersionRaw { get; init; } = "";
+        public int Uses { get; init; }
+    }
+
+    /// <summary>Таблица просмотра накопленной статистики выборов — только чтение, сортировка по
+    /// убыванию числа выборов уже сделана в Database.GetAllFwUsage. Порог ранжирования здесь не
+    /// фильтрует строки: таблица показывает всё, что накопилось, а не только то, что уже двигает
+    /// выдачу (см. её doc-комментарий).</summary>
+    private void RefreshFwUsageGrid()
+    {
+        FwUsageGrid.ItemsSource = _services.Db.GetAllFwUsage()
+            .Select(r => new FwUsageRow
+            {
+                QueryKey = r.QueryKey,
+                SubtypeName = r.SubtypeName,
+                ControllerName = r.ControllerName,
+                VersionRaw = r.VersionRaw,
+                Uses = r.Uses,
+            })
+            .ToList();
+    }
+
+    private void FwUsageThreshold_Changed(object sender, RoutedEventArgs e)
+    {
+        if (int.TryParse(FwUsageThresholdInput.Text.Trim(), out var v) && v > 0)
+            _services.Cfg.SetFwUsageThreshold(v);
+        FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
     }
 
     /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the
@@ -957,6 +993,10 @@ public partial class SettingsView : UserControl
         ExtHmiList.Items.Clear();
         foreach (var ext in _services.Db.GetAllowedExtensionsHmi())
             ExtHmiList.Items.Add(new ListBoxItem { Content = $".{ext}", Tag = ext });
+
+        ExtSchematicList.Items.Clear();
+        foreach (var ext in _services.Db.GetAllowedExtensionsSchematic())
+            ExtSchematicList.Items.Add(new ListBoxItem { Content = $".{ext}", Tag = ext });
     }
 
     /// <summary>A cabinet type can never exist without a subtype (see Database.EnsureEveryGroupHasSubtype),
@@ -1406,6 +1446,32 @@ public partial class SettingsView : UserControl
         _services.Db.RemoveAllowedExtensionHmi(ext);
         LoadHierarchy();
         _host.PushCatalogChange($"Расширение HMI «.{ext}» удалено");
+    }
+
+    private void AddExtensionSchematic_Click(object sender, RoutedEventArgs e)
+    {
+        var ext = ExtSchematicInput.Text.Trim();
+        if (string.IsNullOrEmpty(ext)) return;
+        _services.Db.AddAllowedExtensionSchematic(ext);
+        ExtSchematicInput.Text = "";
+        LoadHierarchy();
+        _host.PushCatalogChange($"Расширение поиска схем добавлено: .{ext.ToLowerInvariant().TrimStart('.')}");
+    }
+
+    private void DeleteExtensionSchematic_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExtSchematicList.SelectedItem is not ListBoxItem item || item.Tag is not string ext)
+        {
+            AppMessageBox.Show("Выберите расширение.", "Расширение поиска схем", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var reply = AppMessageBox.Show($"Удалить расширение поиска схем «.{ext}» из списка?", "Удалить расширение",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.RemoveAllowedExtensionSchematic(ext);
+        LoadHierarchy();
+        _host.PushCatalogChange($"Расширение поиска схем «.{ext}» удалено");
     }
 
     private async void RebuildHierarchy_Click(object sender, RoutedEventArgs e)

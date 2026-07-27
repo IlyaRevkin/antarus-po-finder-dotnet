@@ -307,6 +307,29 @@
                             <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
                                        Text="Порог одинаковых ответов подряд — общий с раскладкой клавиатуры (поле выше). Ответив одинаково столько раз, программа перестанет спрашивать."/>
                             <TextBlock x:Name="UsageStatsLabel" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Порог влияния на ранжирование:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox x:Name="FwUsageThresholdInput" Width="60" Height="30" TextAlignment="Center" LostFocus="FwUsageThreshold_Changed"/>
+                            </StackPanel>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                       Text="Сколько раз версию должны выбрать по одному и тому же запросу, прежде чем эта частота начнёт поднимать её в выдаче. Выборы ниже порога видны в таблице, но на порядок выдачи не влияют — так один случайный клик не поднимает версию наравне с той, которую ставят стабильно."/>
+                            <DataGrid x:Name="FwUsageGrid" Height="160" AutoGenerateColumns="False" IsReadOnly="True" Margin="0,0,0,8"
+                                      Style="{StaticResource RoomyDataGrid}"
+                                      PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Запрос" Binding="{Binding QueryKey}" Width="*" MinWidth="120" ElementStyle="{StaticResource DataGridCellText}"/>
+                                    <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="90" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                                    <DataGridTextColumn Header="Контроллер" Binding="{Binding ControllerName}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                                    <DataGridTemplateColumn Header="Версия" Width="140">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <views:CopyableVersionText Text="{Binding VersionRaw}" Margin="6,0"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Выборов" Binding="{Binding Uses}" Width="Auto" MinWidth="70" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"/>
                                 <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"/>
@@ -368,11 +391,13 @@
                         <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteManufacturer_Click"/>
                     </StackPanel>
 
-                    <!-- ПЛК и HMI-расширения — две независимые темы, но каждая занимала целую полосу
-                         по высоте при списке всего в несколько пунктов. Кладём рядом, в два столбца,
-                         экономя вертикальное место вкладки. -->
+                    <!-- ПЛК, HMI и Схемы — три независимых списка расширений, но каждый занимал бы
+                         целую полосу по высоте при списке всего в несколько пунктов. Кладём рядом,
+                         в три столбца, экономя вертикальное место вкладки. -->
                     <Grid Margin="0,0,0,16">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="16"/>
                             <ColumnDefinition Width="*"/>
@@ -407,6 +432,22 @@
                                 <TextBox Grid.Column="0" x:Name="ExtHmiInput" Height="34" Margin="0,0,8,0" ToolTip="напр. fsprj"/>
                                 <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddExtensionHmi_Click"/>
                                 <Button Grid.Column="2" Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteExtensionHmi_Click"/>
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="РАСШИРЕНИЯ ПОИСКА СХЕМ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Какие файлы на втором диске (Поиск → «Схемы») считаются схемой шкафа. Кроме чертежей и сканов сюда можно добавить, например, xlsx/xls или doc/docx."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <ListBox x:Name="ExtSchematicList" Height="100" Margin="0,0,0,6" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" x:Name="ExtSchematicInput" Height="34" Margin="0,0,8,0" ToolTip="напр. xlsx"/>
+                                <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddExtensionSchematic_Click"/>
+                                <Button Grid.Column="2" Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteExtensionSchematic_Click"/>
                             </Grid>
                         </StackPanel>
                     </Grid>

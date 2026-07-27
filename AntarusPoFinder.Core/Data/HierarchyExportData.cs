@@ -159,6 +159,9 @@ public class HierarchyExportData
     // Независимый список расширений HMI-проектов — та же логика nullable-без-дефолта, что и у
     // AllowedExtensions выше (старый экспорт ключа просто не содержит).
     [JsonPropertyName("allowed_extensions_hmi")] public List<string>? AllowedExtensionsHmi { get; set; }
+    // Третий независимый список — расширения поиска схем на втором диске (SchematicService), та же
+    // nullable-без-дефолта логика: старый экспорт ключа не содержит вовсе.
+    [JsonPropertyName("allowed_extensions_schematic")] public List<string>? AllowedExtensionsSchematic { get; set; }
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
     [JsonPropertyName("fw_versions")] public List<ExportedFwVersion> FwVersions { get; set; } = new();
     [JsonPropertyName("param_files")] public List<ExportedParamFile> ParamFiles { get; set; } = new();
@@ -237,6 +240,11 @@ public class ImportCounts
     public int ExtensionsHmiAdded { get; set; }
     public int ExtensionsHmiRemoved { get; set; }
     public int ExtensionsHmiSkippedDelete { get; set; }
+    /// <summary>Тот же счётчик, что ExtensionsAdded/Removed выше, но для третьего независимого
+    /// списка — расширений поиска схем (allowed_extensions_schematic).</summary>
+    public int ExtensionsSchematicAdded { get; set; }
+    public int ExtensionsSchematicRemoved { get; set; }
+    public int ExtensionsSchematicSkippedDelete { get; set; }
     public int ReservationsAdded { get; set; }
     public int ReservationsUpdated { get; set; }
     public int FwVersions { get; set; }
@@ -260,6 +268,7 @@ public class ImportCounts
         GroupsAdded + GroupsUpdated + GroupsRemoved + SubtypesAdded + SubtypesUpdated + SubtypesRemoved + ControllersAdded + ControllersUpdated + ControllersRemoved +
         ModificationsAdded + ModificationsUpdated + ModificationsRemoved + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
+        ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
         AppUsersAdded + AppUsersUpdated;
 }

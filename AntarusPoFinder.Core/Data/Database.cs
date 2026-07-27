@@ -141,6 +141,16 @@ public partial class Database : IDisposable
                  ext TEXT PRIMARY KEY
              );
 
+             -- Ещё один независимый список — расширения, которые поиск по схемам (SchematicService)
+             -- считает схемой на втором диске. Раньше был захардкожен в коде (.pdf/.dwg/.dxf/.jpg/
+             -- .jpeg/.png/.tif/.tiff/.bmp); теперь настраивается здесь же, в Настройки → Иерархия,
+             -- тем же CRUD-механизмом, что allowed_extensions/allowed_extensions_hmi выше — так на
+             -- второй диск можно завести и электронные таблицы (.xlsx/.xls), и вордовские файлы
+             -- (.doc/.docx) и т.п.
+             CREATE TABLE IF NOT EXISTS allowed_extensions_schematic (
+                 ext TEXT PRIMARY KEY
+             );
+
              CREATE TABLE IF NOT EXISTS settings (
                  key   TEXT PRIMARY KEY,
                  value TEXT NOT NULL DEFAULT ''
@@ -308,6 +318,7 @@ public partial class Database : IDisposable
         SeedHierarchyDefaults();
         SeedAllowedExtensionsDefaults();
         SeedAllowedExtensionsHmiDefaults();
+        SeedAllowedExtensionsSchematicDefaults();
         SeedTagsFromExistingFwVersions();
         RunDataMigrations();
         EnsureDefaultEquipmentGroups();

@@ -86,6 +86,7 @@ public partial class Database
         data.Tags = GetAllTags();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
+        data.AllowedExtensionsSchematic = GetAllowedExtensionsSchematic();
         data.FlatListState = GetFlatListState()
             .Select(s => new ExportedFlatListState { Kind = s.Kind, Name = s.Name, DeletedAt = s.DeletedAt, RevivedAt = s.RevivedAt })
             .ToList();
@@ -218,8 +219,8 @@ public partial class Database
     /// ConfigSyncService.PrepareExport/SharedConfigSnapshot.Authoritative). Extends the SAME
     /// full-mirror-with-FK-guard treatment groups/subtypes/controllers already always get to the
     /// remaining catalog entities — controller_modifications, param_manufacturers, tags,
-    /// allowed_extensions, allowed_extensions_hmi — for exactly this one import. This is what closes
-    /// the gap those three tables didn't have: a junk catalog row that originated on some OTHER
+    /// allowed_extensions, allowed_extensions_hmi, allowed_extensions_schematic — for exactly this
+    /// one import. This is what closes the gap those tables didn't have: a junk catalog row that originated on some OTHER
     /// machine, which the "authoritative" machine never had in the first place, has nothing to
     /// tombstone against — plain absence from the admin's snapshot is the only signal there ever is.
     /// When false (the default — every existing caller), behavior is byte-for-byte what it was
@@ -268,6 +269,9 @@ public partial class Database
             DiffCategory("Разрешённые расширения HMI",
                 local.AllowedExtensionsHmi ?? new(),
                 onDisk.AllowedExtensionsHmi ?? new()),
+            DiffCategory("Разрешённые расширения поиска схем",
+                local.AllowedExtensionsSchematic ?? new(),
+                onDisk.AllowedExtensionsSchematic ?? new()),
         };
         return new AuthoritativeSyncDiff(categories);
     }
@@ -900,6 +904,11 @@ public partial class Database
             data.FlatListState, apply, GetAllowedExtensionsHmi, AddAllowedExtensionHmi, RemoveAllowedExtensionHmi,
             () => counts.ExtensionsHmiAdded++, () => counts.ExtensionsHmiRemoved++);
 
+        ImportFlatList(Database.FlatKindExtensionSchematic,
+            data.AllowedExtensionsSchematic ?? new(),
+            data.FlatListState, apply, GetAllowedExtensionsSchematic, AddAllowedExtensionSchematic, RemoveAllowedExtensionSchematic,
+            () => counts.ExtensionsSchematicAdded++, () => counts.ExtensionsSchematicRemoved++);
+
         // ── Эталонная синхронизация (authoritative) ТОЛЬКО — второй, дополнительный проход поверх
         //    четырёх ImportFlatList выше. Тот уже применил всё, что входящая сторона знает как
         //    добавленное/удалённое (по отметке времени) — но сознательно НЕ трогает имя, у которого
@@ -940,6 +949,10 @@ public partial class Database
             MirrorFlatListDeletions(GetAllowedExtensionsHmi, RemoveAllowedExtensionHmi, data.AllowedExtensionsHmi ?? new(),
                 flatState.Where(s => s.Kind == FlatKindExtensionHmi).Select(s => s.Name), null,
                 apply, () => counts.ExtensionsHmiRemoved++, () => counts.ExtensionsHmiSkippedDelete++);
+
+            MirrorFlatListDeletions(GetAllowedExtensionsSchematic, RemoveAllowedExtensionSchematic, data.AllowedExtensionsSchematic ?? new(),
+                flatState.Where(s => s.Kind == FlatKindExtensionSchematic).Select(s => s.Name), null,
+                apply, () => counts.ExtensionsSchematicRemoved++, () => counts.ExtensionsSchematicSkippedDelete++);
         }
 
         // ── Reservations (natural key = subtype+controller+hw_version+version_raw; status only

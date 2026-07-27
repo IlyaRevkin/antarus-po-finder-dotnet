@@ -35,6 +35,10 @@ public partial class Database
     /// <summary>Разрешённые расширения HMI-проектов — независимый список от FlatKindExtension (ПЛК),
     /// своя строка kind в flat_list_state, чтобы удаление/возврат в одном списке не задевало другой.</summary>
     public const string FlatKindExtensionHmi = "extension_hmi";
+    /// <summary>Разрешённые расширения поиска схем на втором диске (SchematicService) — третий
+    /// независимый список того же вида, что и два выше, своя строка kind. См.
+    /// allowed_extensions_schematic в Database.cs и Database.Params.cs.</summary>
+    public const string FlatKindExtensionSchematic = "extension_schematic";
 
     /// <summary>Секундной точности обычного NowIso здесь не хватает: «удалил и тут же вернул» (или
     /// два разных элемента списка подряд) укладывается в одну секунду, и события со строково равными

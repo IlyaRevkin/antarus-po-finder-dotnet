@@ -29,12 +29,26 @@ public record SchematicHit(string CabinetName, string Path);
 /// locking.</summary>
 public class SchematicService
 {
-    /// <summary>Расширения, которые вообще считаются схемой. Публичные: из этого же списка строится
-    /// фильтр выдачи по расширению («покажи только .dwg», «только .pdf») — на диске рядом со схемой в
-    /// PDF лежит её же исходник в DWG и десяток фотографий, и без фильтра выдача по шкафу состоит
-    /// наполовину не из того, что нужно прямо сейчас.</summary>
+    /// <summary>Расширения, которые считаются схемой, когда вызывающий явно не передал свой список
+    /// (<paramref name="scanExtensions"/> — null — в EnsureScanned/Matches/CabinetHits ниже). Это тот
+    /// же набор, что раньше был единственным и захардкоженным; теперь он — только запасной вариант
+    /// для старых вызовов (в первую очередь тестов), а реальный список настраивается оператором в
+    /// Настройки → Иерархия и хранится в БД (allowed_extensions_schematic, Database.Params.cs) —
+    /// SearchView передаёт его сюда явно, потому что сам этот сервис в Core и БД напрямую не знает.</summary>
     public static readonly string[] SchematicExtensions =
         { ".pdf", ".dwg", ".dxf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp" };
+
+    private static IReadOnlyCollection<string> ResolveScanExtensions(IReadOnlyCollection<string>? configured) =>
+        configured ?? SchematicExtensions;
+
+    /// <summary>Стабильный ключ набора расширений сканирования — им кэш отличает «тот же диск, тот же
+    /// настроенный список» (можно отдать прогретый кэш) от «список расширений с прошлого прогрева
+    /// уже другой» (список теперь настраиваемый и может меняться между поисками, в отличие от
+    /// прежнего хардкода — нужно перечитать диск заново). Регистронезависимо, порядок не важен.</summary>
+    private static string ExtensionsCacheKey(IReadOnlyCollection<string>? scanExtensions) =>
+        scanExtensions is null
+            ? "*default*"
+            : string.Join(",", scanExtensions.Select(e => e.ToLowerInvariant()).OrderBy(e => e, StringComparer.Ordinal));
 
     /// <summary>Подходит ли файл под выбранные в фильтре расширения. Пустой набор — фильтр не задан,
     /// подходит всё (именно так, а не «ничего»: пустой фильтр означает «любое расширение»).</summary>
@@ -48,6 +62,7 @@ public class SchematicService
     private static readonly Regex WordSplitter = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
 
     private string? _cachedDiskPath;
+    private string _cachedExtensionsKey = "";
     private List<ScannedFile> _cache = new();
 
     private record ScannedFile(string CabinetName, string UpperMatchText, string Path);
@@ -55,14 +70,17 @@ public class SchematicService
     public void InvalidateCache()
     {
         _cachedDiskPath = null;
+        _cachedExtensionsKey = "";
         _cache = new();
     }
 
-    /// <summary>Кэш для этого диска уже наполнен — значит, поиск по нему отработает мгновенно,
+    /// <summary>Кэш для этого диска (и этого набора расширений сканирования — см.
+    /// <paramref name="scanExtensions"/>) уже наполнен — значит, поиск по нему отработает мгновенно,
     /// обходить диск заново не нужно. Вызывающему это нужно, чтобы решить, показывать ли индикатор
     /// занятости и кнопку «Остановить»: ради фильтрации готового списка в памяти они только мешают.</summary>
-    public bool IsScanned(string diskPath) =>
-        !string.IsNullOrEmpty(diskPath) && _cachedDiskPath == diskPath;
+    public bool IsScanned(string diskPath, IReadOnlyCollection<string>? scanExtensions = null) =>
+        !string.IsNullOrEmpty(diskPath) && _cachedDiskPath == diskPath &&
+        _cachedExtensionsKey == ExtensionsCacheKey(scanExtensions);
 
     /// <summary>Прогревает кэш для указанного диска без фильтрации по запросу — тяжёлая часть
     /// (полный обход дерева папок, Directory.EnumerateFiles по SearchOption.AllDirectories) идёт
@@ -81,45 +99,61 @@ public class SchematicService
     /// <paramref name="ct"/> прерывает обход (кнопка «Остановить»). Прерванный обход кэш НЕ пишет:
     /// иначе следующий поиск принял бы обрезанный список за полный и «терял» бы половину диска до
     /// перезапуска программы. То, что успели показать оператору, вызывающий, конечно, оставляет на
-    /// экране — но это его выдача, а не наш кэш.</summary>
-    public void EnsureScanned(string diskPath, CancellationToken ct = default, Action<SchematicHit>? onFound = null)
+    /// экране — но это его выдача, а не наш кэш.
+    ///
+    /// <paramref name="scanExtensions"/> — какие расширения вообще считаются схемой при обходе (см.
+    /// ResolveScanExtensions); null — старое поведение, фиксированный SchematicExtensions. SearchView
+    /// передаёт сюда настроенный оператором список из БД (allowed_extensions_schematic). Если список
+    /// с прошлого прогрева отличается — кэш считается холодным и диск читается заново, иначе только
+    /// что добавленное в Настройках расширение молча не находилось бы до перезапуска программы.</summary>
+    public void EnsureScanned(string diskPath, CancellationToken ct = default, Action<SchematicHit>? onFound = null,
+        IReadOnlyCollection<string>? scanExtensions = null)
     {
         if (string.IsNullOrEmpty(diskPath) || !Directory.Exists(diskPath)) return;
-        if (_cachedDiskPath == diskPath) return;
+        var extKey = ExtensionsCacheKey(scanExtensions);
+        if (_cachedDiskPath == diskPath && _cachedExtensionsKey == extKey) return;
 
-        var scanned = Scan(diskPath, ct, onFound);
+        var scanned = Scan(diskPath, ResolveScanExtensions(scanExtensions), ct, onFound);
         ct.ThrowIfCancellationRequested();
         _cache = scanned;
         _cachedDiskPath = diskPath;
+        _cachedExtensionsKey = extKey;
     }
 
     /// <summary>All schematic files found on disk, sorted by cabinet name. Cached per disk path
-    /// until InvalidateCache().</summary>
-    public List<SchematicHit> CabinetHits(string diskPath) =>
-        Scanned(diskPath).Select(f => new SchematicHit(f.CabinetName, f.Path)).ToList();
+    /// (and scanExtensions — see EnsureScanned) until InvalidateCache().</summary>
+    public List<SchematicHit> CabinetHits(string diskPath, IReadOnlyCollection<string>? scanExtensions = null) =>
+        Scanned(diskPath, scanExtensions).Select(f => new SchematicHit(f.CabinetName, f.Path)).ToList();
 
     /// <summary>Schematic files whose cabinet name (folder and/or file name) matches every word of
     /// the query — partial substring by default, whole-word only when <paramref name="exactWord"/>
     /// is set.</summary>
-    public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false) =>
-        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, null));
+    public List<SchematicHit> Matches(string diskPath, string query, bool exactWord = false,
+        IReadOnlyCollection<string>? scanExtensions = null) =>
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, null, scanExtensions));
 
+    /// <param name="diskPath"></param><param name="query"></param><param name="exactWord"></param>
+    /// <param name="allowFallback"></param><param name="usedFallback"></param><param name="convertedQuery"></param>
     /// <param name="extensions">Фильтр по расширению файла (пустой/null — любое). Применяется ВНУТРИ
     /// подбора, а не поверх готового списка: иначе «ничего не нашлось по набранному» срабатывало бы
     /// от одного лишь фильтра, и поиск зря переспрашивал бы про раскладку клавиатуры.</param>
+    /// <param name="scanExtensions">Какие расширения вообще считаются схемой при (возможном холодном)
+    /// обходе диска — см. EnsureScanned. Отдельно от <paramref name="extensions"/> выше: этот параметр
+    /// определяет ВЕСЬ найденный на диске универсум файлов, тот — какую его часть показать по галочкам
+    /// в интерфейсе (подмножество universe, не наоборот).</param>
     public List<SchematicHit> Matches(string diskPath, string query, bool exactWord,
         bool allowFallback, out bool usedFallback, out string convertedQuery,
-        IReadOnlyCollection<string>? extensions = null) =>
-        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, extensions),
+        IReadOnlyCollection<string>? extensions = null, IReadOnlyCollection<string>? scanExtensions = null) =>
+        SearchService.SearchWithLayoutFallback(query, exactWord, (q, ex) => MatchesCore(diskPath, q, ex, extensions, scanExtensions),
             allowFallback, out usedFallback, out convertedQuery);
 
     private List<SchematicHit> MatchesCore(string diskPath, string query, bool exactWord,
-        IReadOnlyCollection<string>? extensions)
+        IReadOnlyCollection<string>? extensions, IReadOnlyCollection<string>? scanExtensions)
     {
         var tokens = QueryTokens(query);
         if (tokens.Length == 0) return new();
 
-        return Scanned(diskPath)
+        return Scanned(diskPath, scanExtensions)
             .Where(f => tokens.All(t => TokenMatches(t, f.UpperMatchText, exactWord)))
             .Select(f => new SchematicHit(f.CabinetName, f.Path))
             .Where(h => HitMatchesExtension(h, extensions))
@@ -147,13 +181,15 @@ public class SchematicService
         return true;
     }
 
-    private List<ScannedFile> Scanned(string diskPath)
+    private List<ScannedFile> Scanned(string diskPath, IReadOnlyCollection<string>? scanExtensions = null)
     {
         if (string.IsNullOrEmpty(diskPath) || !Directory.Exists(diskPath)) return new();
-        if (_cachedDiskPath == diskPath) return _cache;
+        var extKey = ExtensionsCacheKey(scanExtensions);
+        if (_cachedDiskPath == diskPath && _cachedExtensionsKey == extKey) return _cache;
 
-        _cache = Scan(diskPath, CancellationToken.None, null);
+        _cache = Scan(diskPath, ResolveScanExtensions(scanExtensions), CancellationToken.None, null);
         _cachedDiskPath = diskPath;
+        _cachedExtensionsKey = extKey;
         return _cache;
     }
 
@@ -164,7 +200,8 @@ public class SchematicService
         return WordSplitter.Split(upperField).Any(w => w == token);
     }
 
-    private static List<ScannedFile> Scan(string diskPath, CancellationToken ct, Action<SchematicHit>? onFound)
+    private static List<ScannedFile> Scan(string diskPath, IReadOnlyCollection<string> allowedExtensions,
+        CancellationToken ct, Action<SchematicHit>? onFound)
     {
         var hits = new List<ScannedFile>();
         var rootFull = System.IO.Path.GetFullPath(diskPath)
@@ -209,7 +246,7 @@ public class SchematicService
 
                 var file = e.Current;
                 var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
-                if (!SchematicExtensions.Contains(ext)) continue;
+                if (!allowedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase)) continue;
 
                 var fileNameNoExt = System.IO.Path.GetFileNameWithoutExtension(file).Trim();
                 var parentName = System.IO.Path.GetFileName(

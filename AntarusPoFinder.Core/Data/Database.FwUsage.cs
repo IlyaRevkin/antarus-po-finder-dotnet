@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -13,6 +14,13 @@ public enum UsageConfirmDecision { Ask, Always, Never }
 /// локальные id прошивок на разных машинах не совпадают.</summary>
 public record SharedFwUsageRow(string Origin, string QueryKey, string SubtypeSyncId, string ControllerSyncId,
     string VersionRaw, int Uses, string LastUsedAt);
+
+/// <summary>Одна строка таблицы просмотра статистики (Настройки → Общие) — накопленное число выборов
+/// по паре «запрос → конкретная версия», уже с человекочитаемым названием подтипа/контроллера вместо
+/// внутренних id. Uses — сумма своего вклада и уже известного чужого (см. GetAllFwUsage), то же самое
+/// сложение, что и в GetFwUsageForQuery, только сразу по всем запросам, а не по одному.</summary>
+public record FwUsageStatRow(string QueryKey, string SubtypeName, string ControllerName, string VersionRaw,
+    int Uses, string LastUsedAt);
 
 /// <summary>«По такому запросу обычно ставят вот эту версию» — счётчик выбора версии из выдачи
 /// поиска.
@@ -100,6 +108,61 @@ public partial class Database
             """, cmd => cmd.Parameters.AddWithValue("@v", fwVersionId)) is long o ? (int)o : 0;
 
         return mine + others;
+    }
+
+    /// <summary>Вся накопленная статистика разом — таблица просмотра в Настройках → Общие (кому
+    /// интересно, что вообще накопилось, не открывая карточку за карточкой в поиске). Свой вклад
+    /// (fw_search_usage) и уже известный чужой (fw_usage_shared) складываются по одной и той же
+    /// прошивке — тот же принцип, что и в GetFwUsageForQuery, но по всем запросам сразу, а не по
+    /// одному. Порог ранжирования (ConfigService.FwUsageThreshold) здесь НЕ применяется — это
+    /// таблица «что вообще накопилось», а не «что сейчас двигает выдачу»: строка ниже порога всё
+    /// равно должна быть видна, иначе непонятно, почему редкий выбор до сих пор не влияет на поиск.</summary>
+    public List<FwUsageStatRow> GetAllFwUsage()
+    {
+        var byKey = new Dictionary<(string Query, int SubtypeId, int ControllerId, string VersionRaw), FwUsageStatRow>();
+
+        void Add(string query, int subtypeId, int controllerId, string subtypeName, string controllerName,
+            string versionRaw, int uses, string lastUsedAt)
+        {
+            var key = (query, subtypeId, controllerId, versionRaw);
+            if (byKey.TryGetValue(key, out var existing))
+                byKey[key] = existing with
+                {
+                    Uses = existing.Uses + uses,
+                    LastUsedAt = string.CompareOrdinal(lastUsedAt, existing.LastUsedAt) > 0 ? lastUsedAt : existing.LastUsedAt,
+                };
+            else
+                byKey[key] = new FwUsageStatRow(query, subtypeName, controllerName, versionRaw, uses, lastUsedAt);
+        }
+
+        using (var reader = ExecuteReader("""
+            SELECT u.query_key, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
+                   fv.version_raw, u.uses, u.last_used_at
+            FROM fw_search_usage u
+            JOIN fw_versions        fv ON fv.id = u.fw_version_id
+            JOIN equipment_subtypes es ON es.id = fv.subtype_id
+            JOIN controller_models  cm ON cm.id = fv.controller_id
+            """))
+            while (reader.Read())
+                Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
+                    GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
+                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"));
+
+        using (var reader = ExecuteReader($"""
+            SELECT u.query_key, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
+                   fv.version_raw, u.uses, u.last_used_at
+            FROM fw_usage_shared u
+            {SharedUsageJoin}
+            """))
+            while (reader.Read())
+                Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
+                    GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
+                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"));
+
+        return byKey.Values
+            .OrderByDescending(r => r.Uses)
+            .ThenBy(r => r.QueryKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>Удалённая версия статистику за собой не тянет — иначе счётчик по её id молча

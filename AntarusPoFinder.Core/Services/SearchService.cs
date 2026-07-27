@@ -114,13 +114,18 @@ public static class SearchService
         return converted;
     }
 
+    /// <summary><paramref name="usageThreshold"/> — см. Database.SearchFwVersions: сколько раз
+    /// версию должны выбрать по этому запросу, прежде чем статистика начнёт двигать выдачу (по
+    /// умолчанию 1 — единственный выбор уже учитывается, как было до появления настраиваемого
+    /// порога; реальный вызывающий код передаёт ConfigService.FwUsageThreshold()).</summary>
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
-        FirmwareSearchFilters? filters = null) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters));
+        FirmwareSearchFilters? filters = null, int usageThreshold = 1) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
-        bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters),
+        bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null,
+        int usageThreshold = 1) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold),
             allowFallback, out usedFallback, out convertedQuery);
 
     /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
@@ -128,7 +133,7 @@ public static class SearchService
     public static string UsageKey(string query) => Normalize(query);
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
-        FirmwareSearchFilters? filters)
+        FirmwareSearchFilters? filters, int usageThreshold)
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -136,7 +141,7 @@ public static class SearchService
         // разбирает сам Database.SearchFwVersions; пустой запрос без фильтров ничего не ищет.
         if (tokens.Length == 0 && (filters is null || filters.IsEmpty)) return new();
 
-        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query);
+        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold);
 
         return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount)).ToList();
     }

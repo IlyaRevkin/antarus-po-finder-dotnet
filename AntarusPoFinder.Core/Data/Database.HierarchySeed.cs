@@ -98,6 +98,24 @@ public partial class Database
         }
     }
 
+    /// <summary>Тот же одноразовый сид «только для пустой таблицы», что и у двух блоков выше, но для
+    /// списка расширений, которые поиск по схемам (SchematicService) на втором диске вообще считает
+    /// схемой. Ровно тот набор, что раньше был захардкожен в SchematicService.SchematicExtensions —
+    /// сид переносит его в настраиваемый список один в один, ничего не добавляя и не убирая по
+    /// умолчанию; электронные таблицы/вордовские файлы и т.п. оператор добавляет сам через
+    /// Настройки → Иерархия, если они реально нужны на его втором диске.</summary>
+    private void SeedAllowedExtensionsSchematicDefaults()
+    {
+        var count = (long)(ExecuteScalar("SELECT COUNT(*) FROM allowed_extensions_schematic") ?? 0L);
+        if (count > 0) return;
+        foreach (var ext in new[] { "pdf", "dwg", "dxf", "jpg", "jpeg", "png", "tif", "tiff", "bmp" })
+        {
+            var e = ext;
+            ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions_schematic(ext) VALUES(@e)",
+                cmd => cmd.Parameters.AddWithValue("@e", e));
+        }
+    }
+
     /// <summary>Idempotent: add any DefaultEquipmentGroup missing (by name) from equipment_groups.
     /// Runs on every startup (unlike SeedHierarchyDefaults, which only seeds a fresh/empty DB) so a
     /// group added to the reference catalogue later (e.g. ШУЗ) reaches already-existing installs

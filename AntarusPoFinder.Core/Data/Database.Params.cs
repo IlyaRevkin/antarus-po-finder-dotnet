@@ -180,4 +180,34 @@ public partial class Database
         ExecuteNonQuery("DELETE FROM allowed_extensions_hmi WHERE ext=@e", cmd => cmd.Parameters.AddWithValue("@e", ext));
         MarkFlatListDeleted(FlatKindExtensionHmi, ext);
     }
+
+    // ── Allowed Schematic Search Extensions ─────────────────────────────────────
+    // Тот же CRUD, что и у двух блоков выше, но для расширений, которые поиск по схемам на втором
+    // диске (SchematicService) вообще считает схемой — раньше был захардкожен в
+    // SchematicService.SchematicExtensions, теперь настраивается здесь (allowed_extensions_schematic),
+    // свой независимый список, свой FlatKind.
+
+    public List<string> GetAllowedExtensionsSchematic()
+    {
+        var result = new List<string>();
+        using var reader = ExecuteReader("SELECT ext FROM allowed_extensions_schematic ORDER BY ext");
+        while (reader.Read())
+            result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public void AddAllowedExtensionSchematic(string ext)
+    {
+        ext = ext.Trim().ToLowerInvariant().TrimStart('.');
+        if (string.IsNullOrEmpty(ext)) return;
+        ExecuteNonQuery("INSERT OR IGNORE INTO allowed_extensions_schematic(ext) VALUES(@e)", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListAlive(FlatKindExtensionSchematic, ext);
+    }
+
+    public void RemoveAllowedExtensionSchematic(string ext)
+    {
+        ext = ext.Trim().ToLowerInvariant().TrimStart('.');
+        ExecuteNonQuery("DELETE FROM allowed_extensions_schematic WHERE ext=@e", cmd => cmd.Parameters.AddWithValue("@e", ext));
+        MarkFlatListDeleted(FlatKindExtensionSchematic, ext);
+    }
 }

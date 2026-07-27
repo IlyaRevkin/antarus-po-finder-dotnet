@@ -172,33 +172,37 @@ public partial class SearchView : UserControl
     // Рядом со схемой в PDF на диске лежит её же исходник в DWG и десяток фотографий шкафа — без
     // этого фильтра половина выдачи по шкафу состоит не из того, что нужно прямо сейчас.
 
-    /// <summary>Подпись → расширения, которые она включает. Пары (.jpg/.jpeg, .tif/.tiff) — одна
-    /// галочка: для оператора это одно и то же «фотография»/«скан», а не два разных формата.</summary>
-    private static readonly (string Label, string[] Extensions)[] SchemaExtensionOptions =
-    {
-        ("PDF", new[] { ".pdf" }),
-        ("DWG", new[] { ".dwg" }),
-        ("DXF", new[] { ".dxf" }),
-        ("JPG", new[] { ".jpg", ".jpeg" }),
-        ("PNG", new[] { ".png" }),
-        ("TIFF", new[] { ".tif", ".tiff" }),
-        ("BMP", new[] { ".bmp" }),
-    };
-
     private readonly List<(CheckBox Check, string[] Extensions)> _schemaExtChecks = new();
 
+    /// <summary>Одна галочка на каждое расширение из настроенного списка (Настройки → Иерархия →
+    /// «Расширения поиска схем», Database.GetAllowedExtensionsSchematic) — раньше был фиксированный
+    /// SchemaExtensionOptions с семью захардкоженными группами (в т.ч. пары «JPG» на .jpg+.jpeg,
+    /// «TIFF» на .tif+.tiff); список стал настраиваемым, и группировка синонимичных расширений под
+    /// одной подписью ушла вместе с хардкодом — теперь у каждого настроенного расширения своя
+    /// галочка, зато любое добавленное в Настройках (.xlsx, .doc и т.п.) появляется здесь само.</summary>
     private void BuildSchemaExtensionChecks()
     {
-        if (_schemaExtChecks.Count > 0) return; // набор расширений постоянный — строить заново незачем
-        foreach (var (label, extensions) in SchemaExtensionOptions)
+        if (_schemaExtChecks.Count > 0) return; // набор расширений строится один раз за сессию страницы
+        foreach (var ext in _services.Db.GetAllowedExtensionsSchematic())
         {
-            var cb = new CheckBox { Content = label, Margin = new Thickness(0, 0, 14, 6) };
+            var extLower = "." + ext.Trim().ToLowerInvariant().TrimStart('.');
+            var cb = new CheckBox { Content = ext.ToUpperInvariant(), Margin = new Thickness(0, 0, 14, 6) };
             cb.Checked += SchemaExtension_Changed;
             cb.Unchecked += SchemaExtension_Changed;
-            _schemaExtChecks.Add((cb, extensions));
+            _schemaExtChecks.Add((cb, new[] { extLower }));
             SchemaExtPanel.Children.Add(cb);
         }
     }
+
+    /// <summary>Полный настроенный список — то, что обход второго диска вообще считает схемой (весь
+    /// «универсум» файлов, из которого галочки выше выбирают показываемое подмножество). Читается из
+    /// БД при каждом поиске (не кэшируется на странице), поэтому изменение списка в Настройках
+    /// подхватывается следующим же «Найти» без перезапуска программы — в отличие от самих галочек
+    /// фильтра (BuildSchemaExtensionChecks), которые строятся один раз за сессию страницы.</summary>
+    private HashSet<string> ActiveSchemaScanExtensions() =>
+        _services.Db.GetAllowedExtensionsSchematic()
+            .Select(e => "." + e.Trim().ToLowerInvariant().TrimStart('.'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private void SchemaExtension_Changed(object sender, RoutedEventArgs e)
     {
@@ -501,7 +505,8 @@ public partial class SearchView : UserControl
         var exact = ExactWordCheck.IsChecked == true;
         var filters = ActiveFilters();
         var results = SearchService.Search(_services.Db, query, exact,
-            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters);
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
+            _services.Cfg.FwUsageThreshold());
         if (results.Count == 0)
         {
             ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
@@ -859,6 +864,12 @@ public partial class SearchView : UserControl
         public required CancellationTokenSource Cts { get; init; }
         public object Sync { get; } = new();
 
+        /// <summary>Весь настроенный список расширений схем (Настройки → Иерархия), с которым этот
+        /// обход был начат — в отличие от Extensions ниже (какие из уже НАЙДЕННЫХ файлов сейчас
+        /// показывать) не меняется при RetargetSchemasScan: список того, что вообще считается схемой,
+        /// не зависит от текста запроса.</summary>
+        public HashSet<string>? ScanExtensions { get; init; }
+
         /// <summary>Все файлы схем, которые обход уже нашёл — по ним выдача перерисовывается
         /// мгновенно, когда оператор меняет запрос, не дожидаясь конца обхода.</summary>
         public List<SchematicHit> Found { get; } = new();
@@ -998,6 +1009,9 @@ public partial class SearchView : UserControl
         var exact = ExactWordCheck.IsChecked == true;
         var tokens = SchematicService.QueryTokens(query);
         var extensions = ActiveSchemaExtensions();
+        // Весь настроенный список (Настройки → Иерархия → «Расширения поиска схем») — что вообще
+        // считается схемой при обходе диска, независимо от того, какие галочки сейчас отмечены.
+        var scanExtensions = ActiveSchemaScanExtensions();
 
         // Обход этого же диска уже идёт — новый не запускаем (см. п.1 в комментарии выше), а
         // перенацеливаем текущий на новый запрос: то, что диск успел отдать, перерисовывается сразу,
@@ -1010,9 +1024,9 @@ public partial class SearchView : UserControl
 
         // Диск уже обойден в этой сессии (обычный случай для второго и следующих поисков) — фильтруем
         // готовый список в памяти, без фона, индикатора занятости и кнопки «Остановить».
-        if (_services.Schematics.IsScanned(diskPath))
+        if (_services.Schematics.IsScanned(diskPath, scanExtensions))
         {
-            ShowSchemasFromCache(diskPath, query, exact, extensions);
+            ShowSchemasFromCache(diskPath, query, exact, extensions, scanExtensions);
             return;
         }
 
@@ -1020,6 +1034,7 @@ public partial class SearchView : UserControl
         {
             DiskPath = diskPath,
             Cts = new CancellationTokenSource(),
+            ScanExtensions = scanExtensions,
             Tokens = tokens,
             ExactWord = exact,
             Extensions = extensions,
@@ -1036,7 +1051,7 @@ public partial class SearchView : UserControl
             try
             {
                 await Task.Run(() => _services.Schematics.EnsureScanned(diskPath, scan.Cts.Token,
-                    hit => OnSchemaFileFound(scan, hit)));
+                    hit => OnSchemaFileFound(scan, hit), scanExtensions));
             }
             catch (OperationCanceledException)
             {
@@ -1119,10 +1134,12 @@ public partial class SearchView : UserControl
     /// <summary>Диск уже обойден: выдача целиком, сразу и в привычном порядке (по названию шкафа).
     /// Здесь же — вопрос про раскладку клавиатуры: он имеет смысл только когда точно известно, что по
     /// набранному не нашлось ничего, а на середине обхода это ещё не известно.</summary>
-    private void ShowSchemasFromCache(string diskPath, string query, bool exact, HashSet<string> extensions)
+    private void ShowSchemasFromCache(string diskPath, string query, bool exact, HashSet<string> extensions,
+        HashSet<string>? scanExtensions = null)
     {
         var hits = _services.Schematics.Matches(diskPath, query, exact,
-            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, extensions);
+            LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, extensions,
+            scanExtensions ?? ActiveSchemaScanExtensions());
         if (hits.Count == 0)
         {
             ShowNoResults(query, extensions.Count > 0 ? SchemaNotFoundFilteredHint : SchemaNotFoundHint);
@@ -1155,7 +1172,7 @@ public partial class SearchView : UserControl
     /// Заодно только теперь точно известно, что по набранному не нашлось ничего, — и можно предложить
     /// ту же выдачу в другой раскладке клавиатуры.</summary>
     private void FinishSchemasScan(SchemasScan scan) =>
-        ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord, scan.Extensions);
+        ShowSchemasFromCache(scan.DiskPath, scan.Query, scan.ExactWord, scan.Extensions, scan.ScanExtensions);
 
     /// <summary>Дорисовать пачку совпадений, которую обход накопил, но не успел отдать интерфейсу.
     /// В отличие от FlushSchemaCards не сверяется с _schemasScan: вызывается уже ПОСЛЕ того, как обход

@@ -59,7 +59,7 @@ public static class ConfigSyncService
     {
         "exported_at", "exported_by", "source_root_path", "equipment_groups", "equipment_subtypes",
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
-        "allowed_extensions", "allowed_extensions_hmi", "fw_version_reservations", "fw_versions", "param_files", "app_users",
+        "allowed_extensions", "allowed_extensions_hmi", "allowed_extensions_schematic", "fw_version_reservations", "fw_versions", "param_files", "app_users",
         "flat_list_state", "schema_version", "authoritative",
     };
 
@@ -116,7 +116,7 @@ public static class ConfigSyncService
         "scan_resolution_dpi", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
-        "layout_fallback_enabled", "layout_fallback_threshold",
+        "layout_fallback_enabled", "layout_fallback_threshold", "fw_usage_threshold",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
         "loader_last_target", "unified_plc_hmi_zone",

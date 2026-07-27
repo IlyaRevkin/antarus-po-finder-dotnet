@@ -125,9 +125,13 @@ public partial class Database
 
     /// <summary>Полный вариант с фильтрами и счётчиком выбора. <paramref name="usageQueryKey"/> —
     /// нормализованный запрос, по которому смотрится статистика «что по такому запросу обычно
-    /// ставят» (см. Database.FwUsage.cs); пустой — статистика не учитывается.</summary>
+    /// ставят» (см. Database.FwUsage.cs); пустой — статистика не учитывается.
+    /// <paramref name="usageThreshold"/> — сколько раз версию должны выбрать по этому запросу,
+    /// прежде чем накопленная частота начнёт двигать выдачу (см. EffectiveUsage/Rank ниже и
+    /// ConfigService.FwUsageThreshold); 1 по умолчанию — единственный выбор уже учитывается, ровно
+    /// как было до появления настраиваемого порога.</summary>
     public List<ScoredFwVersion> SearchFwVersions(IReadOnlyList<string> tokens, bool exactWord = false,
-        FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "")
+        FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "", int usageThreshold = 1)
     {
         filters ??= FirmwareSearchFilters.None;
 
@@ -146,7 +150,7 @@ public partial class Database
         if (qTokens.Length == 0)
         {
             if (filters.IsEmpty) return new();
-            return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, Uses(r, usage))));
+            return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, Uses(r, usage))), usageThreshold);
         }
 
         var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
@@ -209,7 +213,7 @@ public partial class Database
         // Тег-фраза найдена — остальное к этому запросу отношения не имеет.
         if (anyPhraseTagHit && exactWord) scored = phraseTagRows;
 
-        return Deduplicate(scored);
+        return Deduplicate(scored, usageThreshold);
     }
 
     /// <summary>Насколько сильно частота выбора может подвинуть выдачу. Ограничена сознательно:
@@ -223,25 +227,34 @@ public partial class Database
     private static int Uses(FwVersionRecord row, IReadOnlyDictionary<int, int> usage) =>
         row.Id is int id && usage.TryGetValue(id, out var n) ? n : 0;
 
-    private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored)
+    /// <summary>Порог статистики (Задача «порог влияния статистики на ранжирование»): выбор,
+    /// которых по этому запросу набралось МЕНЬШЕ порога, ранжирование не двигает вовсе — чтобы один
+    /// случайный клик не поднимал версию наравне с той, которую ставят стабильно. Сырое
+    /// ScoredFwVersion.UsageCount при этом не трогается нигде — карточка в поиске
+    /// («по этому запросу выбирали N раз») продолжает показывать правду независимо от порога,
+    /// обрезается только вклад в Rank/сортировку ниже.</summary>
+    private static int EffectiveUsage(int uses, int usageThreshold) => uses >= Math.Max(1, usageThreshold) ? uses : 0;
+
+    private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold)
     {
         var seen = new Dictionary<(int, int), ScoredFwVersion>();
         foreach (var entry in scored)
         {
             var key = (entry.Row.SubtypeId, entry.Row.ControllerId);
             if (!seen.TryGetValue(key, out var existing) ||
-                Rank(entry) > Rank(existing))
+                Rank(entry, usageThreshold) > Rank(existing, usageThreshold))
                 seen[key] = entry;
         }
 
         return seen.Values
-            .OrderByDescending(Rank)
-            .ThenByDescending(e => e.UsageCount)
+            .OrderByDescending(e => Rank(e, usageThreshold))
+            .ThenByDescending(e => EffectiveUsage(e.UsageCount, usageThreshold))
             .ThenByDescending(e => e.Row.Id ?? 0)
             .ToList();
     }
 
-    private static int Rank(ScoredFwVersion e) => e.Score + Math.Min(e.UsageCount, MaxUsageBonus);
+    private static int Rank(ScoredFwVersion e, int usageThreshold) =>
+        e.Score + Math.Min(EffectiveUsage(e.UsageCount, usageThreshold), MaxUsageBonus);
 
     private static bool PassesFilters(FwVersionRecord row, FirmwareSearchFilters f)
     {

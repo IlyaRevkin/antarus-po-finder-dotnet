@@ -96,6 +96,13 @@ public class ConfigService
         ["app_start_minimized"] = "false",
         ["layout_fallback_enabled"] = "true",
         ["layout_fallback_threshold"] = "3",
+        // Порог статистики выборов прошивки (Database.FwUsage.cs): по такому запросу версию должны
+        // выбрать хотя бы столько раз, прежде чем частота выбора начнёт двигать выдачу поиска. Без
+        // порога один случайный клик уже поднимал бы версию наравне со «ставят стабильно» —
+        // см. Database.Search.cs (EffectiveUsage/Rank). 2 — минимальный порог, отличающий
+        // «выбрали хоть раз» от «выбирают регулярно», не требуя от оператора десятка одинаковых
+        // кликов ради того, чтобы подсказка вообще заработала.
+        ["fw_usage_threshold"] = "2",
         ["ad_require_login"] = "false",
         ["ad_require_login_default_days"] = "14",
         ["ad_last_login"] = "",
@@ -178,6 +185,19 @@ public class ConfigService
 
     public string FwUsageResetAppliedAt() => Get("fw_usage_reset_applied_at");
     public void SetFwUsageResetAppliedAt(string iso) => Set("fw_usage_reset_applied_at", iso);
+
+    /// <summary>Сколько раз версию должны выбрать по ОДНОМУ И ТОМУ ЖЕ запросу, прежде чем эта частота
+    /// начнёт двигать выдачу поиска (см. Database.SearchFwVersions/EffectiveUsage). По смыслу — тот же
+    /// вид настройки, что и LayoutFallbackThreshold выше (числовой порог чувствительности к
+    /// накопленной статистике, а не сама статистика), и та per-machine — эта задумана так же: две
+    /// машины видят одну и ту же общую статистику выборов (см. FwUsageResetAt), но насколько
+    /// чувствительно ранжирование к ней — личная настройка чувствительности поиска на конкретном
+    /// компьютере, а не орг-политика. ⚠️ Чтобы это действительно не синхронизировалось, ключ
+    /// "fw_usage_threshold" нужно добавить в ConfigSyncService.SkipSettingsKeys (тот файл вне зоны
+    /// этой правки — см. отчёт).</summary>
+    public int FwUsageThreshold() =>
+        int.TryParse(Get("fw_usage_threshold"), out var v) && v > 0 ? v : 2;
+    public void SetFwUsageThreshold(int value) => Set("fw_usage_threshold", Math.Max(1, value).ToString());
 
     /// <summary>Автоматически подтягивать найденные поиском прошивки в локальный кэш, вместо кнопки
     /// «Синхронизировать» на каждой карточке (см. SearchView.AutoSyncMissing). Настройка личная,
