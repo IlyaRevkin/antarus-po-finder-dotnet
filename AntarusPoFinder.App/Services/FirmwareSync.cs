@@ -10,13 +10,18 @@ namespace AntarusPoFinder.App.Services;
 /// scan/window (see MainWindowViewModel.CheckForFirmwareUpdates, FirmwareUpdatesWindow).</summary>
 public static class FirmwareSync
 {
-    public static string CopyToLocal(HierarchyResult result)
+    /// <param name="cleanup">Снести ли остальные локальные версии этой прошивки (кроме закреплённых).
+    /// true — обычная авто-синхронизация из поиска (локально держим только актуальную). false —
+    /// ручное «Скачать на этот ПК»/«Закрепить» из истории версий: там наладчик осознанно тянет
+    /// КОНКРЕТНУЮ (часто старую) версию и не хочет, чтобы это стёрло уже лежащую под рукой текущую;
+    /// не закреплённую разовую копию потом всё равно уберёт ближайшая авто-синхронизация.</param>
+    public static string CopyToLocal(HierarchyResult result, bool cleanup = true)
     {
         var localDir = LocalFirmwareCache.SanitizeName(result.Name);
         var dst = Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw);
 
         FileSystemHelpers.CopyTree(result.FirmwareDir, dst, overwrite: true);
-        CleanupOldLocalVersions(localDir, result.VersionRaw);
+        if (cleanup) CleanupOldLocalVersions(localDir, result.VersionRaw);
 
         var ctrlDir = Directory.GetParent(result.FirmwareDir)?.FullName;
         if (ctrlDir is not null)
@@ -42,7 +47,9 @@ public static class FirmwareSync
     }
 
     /// <summary>Removes locally cached version subfolders other than the one just downloaded, so the
-    /// local cache doesn't accumulate superseded versions after an update.</summary>
+    /// local cache doesn't accumulate superseded versions after an update. Версии, помеченные
+    /// «закреплено локально» (LocalFirmwareCache — метка .keep в папке версии), НЕ трогаются: наладчик
+    /// сознательно оставил их под рукой, даже когда на сетевом диске они уже неактуальны/удалены (#12).</summary>
     private static void CleanupOldLocalVersions(string localDir, string keepVersionRaw)
     {
         var baseDir = Path.Combine(ConfigService.LocalFw, localDir);
@@ -51,6 +58,7 @@ public static class FirmwareSync
         foreach (var sub in Directory.EnumerateDirectories(baseDir))
         {
             if (string.Equals(Path.GetFileName(sub), keepVersionRaw, StringComparison.OrdinalIgnoreCase)) continue;
+            if (LocalFirmwareCache.IsKeptDir(sub)) continue; // закреплённую версию уборка не удаляет
             try { Directory.Delete(sub, recursive: true); }
             catch { /* best effort — don't fail the sync over a stale cache folder */ }
         }

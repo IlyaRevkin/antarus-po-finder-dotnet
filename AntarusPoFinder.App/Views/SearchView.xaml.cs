@@ -516,7 +516,9 @@ public partial class SearchView : UserControl
         // Что именно искали — нужно, чтобы записать выбор оператора по этому запросу
         // (см. RecordUsage): выбор осмыслен только в паре с запросом, который его показал.
         _lastUsageKey = SearchService.UsageKey(query);
-        StatusLabel.Text = filters.IsEmpty ? $"Найдено: {results.Count}" : $"Найдено: {results.Count} (с фильтрами)";
+        _foundCount = results.Count;
+        _foundFiltered = !filters.IsEmpty;
+        UpdateFoundLabel(0);
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
@@ -588,6 +590,20 @@ public partial class SearchView : UserControl
         _ = ScanDiskFlagsAsync(pending, _searchGeneration);
     }
 
+    private int _foundCount;
+    private bool _foundFiltered;
+
+    /// <summary>Строка «Найдено: N» с поправкой на скрытые мёртвые версии (нет ни локально, ни на
+    /// диске — см. ScanDiskFlagsAsync). hiddenDead растёт по ходу фонового обхода, поэтому счётчик
+    /// обновляется на месте, а не пишется один раз.</summary>
+    private void UpdateFoundLabel(int hiddenDead)
+    {
+        var shown = _foundCount - hiddenDead;
+        var text = _foundFiltered ? $"Найдено: {shown} (с фильтрами)" : $"Найдено: {shown}";
+        if (hiddenDead > 0) text += $" · скрыто отсутствующих на диске: {hiddenDead}";
+        StatusLabel.Text = text;
+    }
+
     // ── Что лежит рядом с версией на диске ────────────────────────────────
     // Обход папки версии (LFS/PSL/HMI/карта ВВ) — единственная по-настоящему медленная часть выдачи:
     // папка живёт на сетевом диске компании, который регулярно отвечает через раз. Поэтому карточки
@@ -595,7 +611,7 @@ public partial class SearchView : UserControl
 
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
         bool HasIoMap, bool HasInstructions, bool HasModbus,
-        string? PlcOpenExtension, string? HmiOpenExtension);
+        string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -603,7 +619,7 @@ public partial class SearchView : UserControl
     /// той версии, на карточке которой он написан.</summary>
     private static DiskScan ScanVersionFolder(HierarchyResult result)
     {
-        bool lfs = false, psl = false, hmiFile = false;
+        bool lfs = false, psl = false, hmiFile = false, networkAlive = false;
         foreach (var dir in VersionFolders(result))
         {
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
@@ -611,6 +627,7 @@ public partial class SearchView : UserControl
             {
                 foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
                 {
+                    networkAlive = true; // в папке версии на сетевом диске реально лежат файлы
                     var ext = Path.GetExtension(file).ToLowerInvariant();
                     if (ext == LoaderFiles.LfsExtension) lfs = true;
                     else if (ext == LoaderFiles.PslExtension) psl = true;
@@ -637,7 +654,7 @@ public partial class SearchView : UserControl
         // То же самое для панели: расширение считает HmiOpenResolver, он же потом и открывает (OpenHmi).
         // Только когда панель вообще есть — иначе это лишний обход папок ради подписи несуществующей кнопки.
         var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result)) : null;
-        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt, hmiExt);
+        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt, hmiExt, networkAlive);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -675,12 +692,32 @@ public partial class SearchView : UserControl
     {
         var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
 
+        // Сетевой диск доступен? Только тогда «папки версии на диске нет» означает «прошивку удалили»,
+        // а не «сеть сейчас отвалилась». При недоступном диске ничего не прячем — иначе при обрыве сети
+        // выдача схлопнулась бы в ноль (см. #12: «прошивка есть локально, а на диске её нет»).
+        var root = _services.Cfg.RootPath();
+        var netReachable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
+        var hiddenDead = 0;
+
         foreach (var (card, result, baseFlags) in cards)
         {
             if (generation != _searchGeneration) return;
 
             var scan = await Task.Run(() => ScanVersionFolder(result));
             if (generation != _searchGeneration) return;
+
+            // Версия, которой нет ни в локальном кэше, ни в папке на доступном сетевом диске — это
+            // «мёртвая» ссылка (прошивку удалили с диска): открыть её нечем, и в выдаче ей не место.
+            // Запись в БД не трогаем (удаление не должно уехать на другие машины как тумбстоун, см.
+            // ConfigExchange) — просто убираем карточку из показанной выдачи; вернутся файлы — вернётся
+            // и карточка при следующем поиске.
+            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive)
+            {
+                ResultsPanel.Children.Remove(card);
+                hiddenDead++;
+                UpdateFoundLabel(hiddenDead);
+                continue;
+            }
 
             card.Configure(result, baseFlags with
             {

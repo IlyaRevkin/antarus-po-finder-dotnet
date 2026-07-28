@@ -24,4 +24,37 @@ public static class LocalFirmwareCache
         var dir = DirFor(name);
         return Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir, "*", SearchOption.AllDirectories).Any();
     }
+
+    /// <summary>Имя файла-метки «закреплено локально». Пустой файл рядом с прошивкой в её папке
+    /// версии — переживает и уборку старых копий (CleanupOldLocalVersions), и любое пересоздание БД:
+    /// метка живёт на диске вместе с самими файлами, а не в базе. Так наладчик держит нужную старую
+    /// версию под рукой, даже когда на сетевом диске её уже сделали неактуальной или удалили.</summary>
+    public const string KeepMarkerName = ".keep";
+
+    public static string KeepMarkerPath(string name, string versionRaw) =>
+        Path.Combine(DirFor(name), versionRaw, KeepMarkerName);
+
+    /// <summary>Закреплена ли конкретная версия в кэше — по метке в её папке.</summary>
+    public static bool IsKept(string name, string versionRaw) => File.Exists(KeepMarkerPath(name, versionRaw));
+
+    /// <summary>Закреплена ли версия, папка которой известна напрямую (для уборки, где имя прошивки
+    /// уже не восстановить из имени каталога).</summary>
+    public static bool IsKeptDir(string versionDir) => File.Exists(Path.Combine(versionDir, KeepMarkerName));
+
+    /// <summary>Поставить/снять метку закрепления. Ставится только если папка версии реально существует
+    /// (закреплять нечего, пока прошивка не скачана локально); снятие удаляет метку, если она есть.</summary>
+    public static void SetKept(string name, string versionRaw, bool kept)
+    {
+        var dir = Path.Combine(DirFor(name), versionRaw);
+        var marker = Path.Combine(dir, KeepMarkerName);
+        if (kept)
+        {
+            if (!Directory.Exists(dir)) return;
+            try { File.WriteAllText(marker, ""); } catch { /* best effort */ }
+        }
+        else
+        {
+            try { if (File.Exists(marker)) File.Delete(marker); } catch { /* best effort */ }
+        }
+    }
 }
