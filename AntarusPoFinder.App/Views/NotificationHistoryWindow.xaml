@@ -159,10 +159,16 @@
                                      (item 9: "no way to configure per-category behavior directly from a
                                      notification"). Not just decorative text: this is the reachable path
                                      from a notification row to its category's on/off and unread-count switches. -->
+                                <!-- Компактная колонка 112px не вмещает длинные категории («Прошивки и
+                                     параметры», «Синхронизация и сетевой диск») — раньше бейдж просто
+                                     обрезался без всякого признака. Теперь при нехватке места — многоточие,
+                                     а полное имя категории и подсказку «настроить» видно во всплывающей
+                                     подсказке при наведении (компактную раскладку это не ломает). -->
                                 <Border Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="5,1" Margin="0,3,0,0"
                                         HorizontalAlignment="Left" Cursor="Hand" MouseLeftButtonUp="CategoryBadge_Click"
-                                        ToolTip="Настроить эту категорию уведомлений">
-                                    <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="10"/>
+                                        ToolTipService.ToolTip="{Binding CategoryLabel, StringFormat='{}{0} — нажмите, чтобы настроить эту категорию'}">
+                                    <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="10"
+                                               TextTrimming="CharacterEllipsis"/>
                                 </Border>
                             </StackPanel>
                             <!-- Кнопка пристыкована справа (DockPanel.Dock="Right") — своя,
