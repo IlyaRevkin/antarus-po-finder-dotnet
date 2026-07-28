@@ -1579,14 +1579,55 @@ public partial class SearchView : UserControl
         TryOpen(path);
     }
 
-    /// <summary>Загрузка в контроллер через лоадер. Подставляет найденный .lfs — заливается именно
-    /// он; если его нет, диалог открывается с пустым полем, и оператор выбирает файл сам (лоадера
-    /// всё равно пока нет — см. LoaderDialog).</summary>
-    private void OpenLoader(HierarchyResult result)
+    /// <summary>Загрузка в контроллер через лоадер. Если рядом с приложением (или в настройках) есть
+    /// Segnetics Loader — открывает его сразу с найденным файлом (.lfs, а нет — .psl на сборку), и
+    /// оператор доводит загрузку в его окне. Если лоадера нет — показывает прежний диалог, который
+    /// объясняет, как его подключить, и ничего не заливает.</summary>
+    private async void OpenLoader(HierarchyResult result)
     {
-        var source = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension) ?? "";
-        LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg,
-            $"{result.Name} {result.VersionRaw}".Trim(), source);
+        var versionName = $"{result.Name} {result.VersionRaw}".Trim();
+        var loaderExe = SegneticsLoaderResolver.Resolve(_services.Cfg.LoaderExePath());
+        if (loaderExe is null)
+        {
+            var src = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension) ?? "";
+            LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg, versionName, src);
+            return;
+        }
+
+        // Заливается .lfs; если его нет — отдаём .psl (Segnetics Loader соберёт сам). Файл сначала
+        // копируется на эту машину: лоадер не должен читать прошивку по сетевой шаре — обрыв SMB
+        // посреди загрузки превращается в наполовину записанный контроллер.
+        var file = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension)
+                   ?? LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.PslExtension);
+
+        string? localFile = null;
+        try
+        {
+            if (file is not null)
+            {
+                using (_host.BeginBusy($"Подготовка файла для загрузчика: {versionName}"))
+                    localFile = await Task.Run(() =>
+                        LoaderWorkspace.Create(ConfigService.LocalLoader, versionName).Import(file));
+            }
+
+            SegneticsLoaderBackend.Launch(loaderExe, localFile);
+            _host.ShowStatus(localFile is null
+                ? "Segnetics Loader запущен"
+                : $"Segnetics Loader запущен: {Path.GetFileName(localFile)}");
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            AppMessageBox.Show(
+                "Не удалось запустить Segnetics Loader. Похоже, на этом компьютере не установлен " +
+                ".NET 8 Desktop Runtime (x64).\n\nСкачайте и установите его:\n" +
+                "https://dotnet.microsoft.com/download/dotnet/8.0/runtime",
+                "Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось открыть Segnetics Loader:\n{ex.Message}",
+                "Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с

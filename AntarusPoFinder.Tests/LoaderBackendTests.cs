@@ -112,7 +112,7 @@ public class LoaderBackendTests
     }
 
     [Fact]
-    public void Factory_AlwaysStubForNow_ButExplainsWhy()
+    public void Factory_FallsBackToStub_WhenNoLoaderFound()
     {
         var noPath = FirmwareLoaderFactory.Create("");
         var badPath = FirmwareLoaderFactory.Create(@"C:\нет\такого\loader.exe");
@@ -121,6 +121,33 @@ public class LoaderBackendTests
         Assert.False(badPath.IsAvailable);
         Assert.Contains("не задан", noPath.UnavailableReason!);
         Assert.Contains("не найден", badPath.UnavailableReason!);
+    }
+
+    [Fact]
+    public void Factory_UsesRealBackend_WhenLoaderExeExists()
+    {
+        using var root = new TempRoot();
+        var exe = Path.Combine(root.Path, "SegneticsLoader.exe");
+        File.WriteAllText(exe, "MZ"); // важен только факт существования файла, не содержимое
+
+        var backend = FirmwareLoaderFactory.Create(exe);
+
+        Assert.True(backend.IsAvailable);
+        Assert.Equal("Segnetics Loader", backend.Name);
+        Assert.Null(backend.UnavailableReason);
+    }
+
+    [Fact]
+    public void Resolver_PrefersConfiguredExe_OtherwiseNull()
+    {
+        using var root = new TempRoot();
+        var exe = Path.Combine(root.Path, "SegneticsLoader.exe");
+        File.WriteAllText(exe, "MZ");
+
+        Assert.Equal(exe, SegneticsLoaderResolver.Resolve(exe));
+        // Нет встроенной копии рядом с тестом → несуществующий и пустой путь дают null.
+        Assert.Null(SegneticsLoaderResolver.Resolve(Path.Combine(root.Path, "нет.exe")));
+        Assert.Null(SegneticsLoaderResolver.Resolve(""));
     }
 
     [Fact]

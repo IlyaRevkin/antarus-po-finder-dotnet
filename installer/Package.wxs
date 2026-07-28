@@ -25,7 +25,12 @@
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="INSTALLFOLDER" Name="Programs">
-        <Directory Id="APPDIR" Name="AntarusPoFinder" />
+        <Directory Id="APPDIR" Name="AntarusPoFinder">
+          <!-- Встроенный Segnetics Loader кладётся сюда; приложение находит его по этому пути
+               (SegneticsLoaderResolver.DefaultBundledPath = <папка приложения>\Loader\SegneticsLoader.exe),
+               поэтому оператору не нужно ничего настраивать. -->
+          <Directory Id="LoaderDir" Name="Loader" />
+        </Directory>
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="DesktopFolder" />
@@ -68,6 +73,13 @@
       </Feature>
       <Feature Id="StartMenuShortcutFeature" Title="Ярлык в меню Пуск" Level="1" AllowAdvertise="no">
         <ComponentRef Id="StartMenuShortcutComponent" />
+      </Feature>
+      <!-- Встроенный Segnetics Loader ставится вместе с приложением и обновляется тем же MSI —
+           так «Загрузить в ПЛК» работает из коробки, а каждое обновление Finder подтягивает
+           актуальный лоадер. Files рекурсивно забирает installer/loader/** (exe, dll, docs, tools). -->
+      <Feature Id="SegneticsLoaderFeature" Title="Segnetics Loader (загрузчик в контроллер)"
+               Level="1" AllowAbsent="no" AllowAdvertise="no">
+        <Files Directory="LoaderDir" Include="loader\**" />
       </Feature>
     </Feature>
 

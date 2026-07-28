@@ -1,0 +1,13 @@
+7-Zip standalone command-line executable
+
+This distribution includes 7za.exe from 7-Zip.
+
+7-Zip is licensed primarily under the GNU LGPL. Some 7-Zip components have
+additional license notes, including AES code license terms and unRAR-related
+restrictions for parts that are not used by this loader.
+
+Project site and source code:
+https://www.7-zip.org/
+
+Bundled executable:
+7-Zip (a) 26.01 (x86), Copyright (c) 1999-2026 Igor Pavlov

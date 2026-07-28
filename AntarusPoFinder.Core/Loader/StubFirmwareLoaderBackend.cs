@@ -123,18 +123,21 @@ public sealed class StubFirmwareLoaderBackend : IFirmwareLoaderBackend
     }
 }
 
-/// <summary>Единственное место, где приложение решает, каким лоадером грузить. Пока всегда
-/// заглушка — коллеге, подключающему настоящий лоадер, менять нужно ровно этот метод (и добавить
-/// свою реализацию <see cref="IFirmwareLoaderBackend"/>).</summary>
+/// <summary>Единственное место, где приложение решает, каким лоадером грузить. Если лоадер найден
+/// (по настройке или среди встроенных — см. <see cref="SegneticsLoaderResolver"/>), отдаёт реальный
+/// <see cref="SegneticsLoaderBackend"/>; иначе — заглушку с понятным объяснением, почему.</summary>
 public static class FirmwareLoaderFactory
 {
     public static IFirmwareLoaderBackend Create(string? loaderExePath = null, TimeSpan? stepDelay = null)
     {
-        var reason = string.IsNullOrWhiteSpace(loaderExePath)
-            ? "Путь к лоадеру не задан (Настройки → Общие → «Лоадер»), и сама интеграция ещё не реализована."
-            : File.Exists(loaderExePath)
-                ? $"Лоадер найден ({loaderExePath}), но интеграция с ним ещё не реализована — см. docs/loader-integration.md."
-                : $"По указанному пути лоадер не найден: {loaderExePath}";
+        var resolved = SegneticsLoaderResolver.Resolve(loaderExePath);
+        if (resolved is not null) return new SegneticsLoaderBackend(resolved);
+
+        var configured = loaderExePath?.Trim() ?? "";
+        var reason = configured.Length == 0
+            ? "Путь к лоадеру не задан (Настройки → Общие → «Лоадер»), и встроенный Segnetics Loader " +
+              $"не найден рядом с приложением: {SegneticsLoaderResolver.DefaultBundledPath}"
+            : $"По указанному пути лоадер не найден: {configured}";
         return new StubFirmwareLoaderBackend(reason, stepDelay);
     }
 }
