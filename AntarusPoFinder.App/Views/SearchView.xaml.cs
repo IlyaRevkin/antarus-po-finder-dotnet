@@ -1674,7 +1674,10 @@ public partial class SearchView : UserControl
     private void ShowHistory(HierarchyResult result)
     {
         var versions = _services.Db.GetFwVersionsHistory(result.SubtypeId, result.ControllerId);
-        var dlg = new HistoryDialog(result.Name, versions) { Owner = Window.GetWindow(this) };
+        var dlg = new HistoryDialog(result.Name, versions, _services, result.SubtypeId, result.ControllerId, _host)
+        {
+            Owner = Window.GetWindow(this)
+        };
         dlg.ShowDialog();
     }
 

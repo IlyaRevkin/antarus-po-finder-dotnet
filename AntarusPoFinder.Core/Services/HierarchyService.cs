@@ -446,6 +446,43 @@ public class HierarchyService
 
     public SyncFromDiskResult SyncFwFromDisk(string root) => ImportFwCandidates(ScanFwDisk(PlanFwSync(root)));
 
+    /// <summary>Убирает осиротевшие ярлыки прошивок. Когда файлы версии удалили прямо на диске (мимо
+    /// программы), запись-ярлык дополнительного подтипа («{VersionRaw}.lnk» в его папке контроллера,
+    /// см. FirmwareSubtypeLinkService.LinkExtras) раньше повисала навсегда: её убирало только явное
+    /// «отвязать подтип» (Apply/RemoveShortcut), а обхода, который подчистил бы её по факту исчезновения
+    /// файлов, не было (жалоба «корневой файл исчез, а ярлык не исчезает»). Здесь именно он: для каждой
+    /// версии, чьи файлы на диске пропали, ищем в её папке контроллера ярлык с её именем и удаляем.
+    ///
+    /// Работает, только когда корень реально доступен — иначе offline-шара выглядела бы как «всё
+    /// пропало» и снесла бы живые ярлыки. Настоящую папку версии основной записи это не трогает: у неё
+    /// в папке контроллера лежит сама версия, а не ярлык, поэтому File.Exists(.lnk) там ложь, и удалять
+    /// нечего — искать «кто основной» отдельно не нужно. Всё best-effort: занятый файл или недоступная
+    /// папка не роняют обход, а собираются в список ошибок.</summary>
+    public (int Removed, List<string> Errors) PruneOrphanedFirmwareShortcuts(string root)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return (0, errors);
+
+        var removed = 0;
+        foreach (var t in _db.GetFwVersionShortcutTargets())
+        {
+            // Файлы версии ещё на месте (папкой или одиночным файлом) — ярлык живой, не трогаем.
+            if (Directory.Exists(t.DiskPath) || File.Exists(t.DiskPath)) continue;
+            try
+            {
+                var link = Path.Combine(
+                    ControllerFolder(root, t.GroupName, t.SubtypeName, t.ControllerName, t.IsOpc),
+                    $"{t.VersionRaw}.lnk");
+                if (File.Exists(link)) { File.Delete(link); removed++; }
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{t.GroupName}/{t.SubtypeName}/{t.ControllerName}/{t.VersionRaw}.lnk: {ex.Message}");
+            }
+        }
+        return (removed, errors);
+    }
+
     /// <summary>БД-фаза: какие папки контроллеров смотреть и какие номера версий там уже известны.
     /// Известные версии берутся ОДНИМ запросом на пару подтип/контроллер (раньше запрос уходил на
     /// каждую найденную папку версии) — тот же ответ, но без похода в БД посреди обхода диска.</summary>

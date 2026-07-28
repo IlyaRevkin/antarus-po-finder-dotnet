@@ -769,6 +769,15 @@ public partial class SettingsView : UserControl
         InstallAppVersion(_latestAppRelease);
     }
 
+    /// <summary>Открыть постоянный журнал «что менялось по версиям программы» — то же, что разовое
+    /// окно «Что нового» после обновления, но сохранённое (ConfigService.AppChangelogHistory), чтобы
+    /// вернуться в любой момент.</summary>
+    private void ShowAppChangelog_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new AppChangelogWindow(_services.Cfg.AppChangelogHistory()) { Owner = Window.GetWindow(this) };
+        win.ShowDialog();
+    }
+
     private void InstallSelectedVersion_Click(object sender, RoutedEventArgs e)
     {
         if (AppVersionsCombo.SelectedItem is not AppVersionOption option)

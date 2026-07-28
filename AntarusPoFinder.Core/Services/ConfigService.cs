@@ -125,6 +125,13 @@ public class ConfigService
         // работал. Per-machine — НЕ синхронизируется (см. ConfigSyncService.SkipSettingsKeys), как
         // theme/close_action: у каждой машины свой момент обновления.
         ["last_whatsnew_shown_version"] = "",
+        // Постоянный журнал «что менялось по версиям приложения»: JSON-список AppChangelogEntry,
+        // новые версии сверху. Наполняется при обновлении (MainWindowViewModel.CheckWhatsNewAsync
+        // кладёт сюда тело release notes ровно тогда же, когда показывает окно «Что нового»), а
+        // читается окном истории изменений в любой момент потом. Per-machine, как и
+        // last_whatsnew_shown_version, — это журнал обновлений именно ЭТОЙ установки, не общий
+        // справочник (см. ConfigSyncService.SkipSettingsKeys).
+        ["app_changelog_history"] = "[]",
     };
 
     private readonly Database _db;
@@ -566,4 +573,30 @@ public class ConfigService
     /// Defaults["last_whatsnew_shown_version"] и AppUpdateService.ShouldShowWhatsNew за полной логикой.</summary>
     public string LastWhatsNewShownVersion() => Get("last_whatsnew_shown_version");
     public void SetLastWhatsNewShownVersion(string version) => Set("last_whatsnew_shown_version", version);
+
+    /// <summary>Сколько версий держим в журнале изменений: история «что нового» полезна на несколько
+    /// релизов назад, но не бесконечно — старое всё равно уже неактуально, а раздувать настройку
+    /// незачем.</summary>
+    private const int AppChangelogLimit = 50;
+
+    /// <summary>Постоянный журнал изменений приложения — от новых версий к старым. Битый JSON
+    /// самолечится в пустой список (как и остальные JSON-настройки здесь), а не роняет запуск.</summary>
+    public List<AppChangelogEntry> AppChangelogHistory()
+    {
+        try { return JsonSerializer.Deserialize<List<AppChangelogEntry>>(Get("app_changelog_history")) ?? new(); }
+        catch { return new(); }
+    }
+
+    /// <summary>Дописать в журнал изменений версию с её release notes. Дедуп по версии (одна строка на
+    /// версию — иначе повторный показ «Что нового» той же версии сыпал бы дубли), новая всегда сверху,
+    /// список подрезается до AppChangelogLimit. Пустую версию игнорируем.</summary>
+    public void AddAppChangelogEntry(string version, string notes, DateTime seenAt)
+    {
+        if (string.IsNullOrWhiteSpace(version)) return;
+        var list = AppChangelogHistory();
+        list.RemoveAll(e => e.Version == version);
+        list.Insert(0, new AppChangelogEntry(version, notes ?? "", seenAt));
+        while (list.Count > AppChangelogLimit) list.RemoveAt(list.Count - 1);
+        Set("app_changelog_history", JsonSerializer.Serialize(list));
+    }
 }

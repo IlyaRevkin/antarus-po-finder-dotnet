@@ -527,6 +527,50 @@ public partial class Database
         return true;
     }
 
+    /// <summary>Переназначить версию другому контроллеру (модели) — правка атрибуции в истории версий,
+    /// когда прошивку по ошибке завели под не тем контроллером. Меняется только запись в каталоге:
+    /// версия переезжает в другую hw-группу (подтип+контроллер+hw), поэтому manual_current сбрасываем —
+    /// прежняя отметка «текущая» относилась к старой группе. Файлы на диске и ярлыки не двигаем (как и
+    /// откат: это «поправить запись», а не «перелить файлы») — disk_path остаётся прежним и по-прежнему
+    /// открывается; про расхождение «папка под старым контроллером — запись под новым» вызывающий явно
+    /// предупреждает. Возвращает false, если версии нет, контроллер не задан или уже такой.</summary>
+    public bool ReassignFwVersionController(int fwVersionId, int newControllerId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || newControllerId <= 0 || v.ControllerId == newControllerId) return false;
+
+        ExecuteNonQuery("UPDATE fw_versions SET controller_id=@c, manual_current=0 WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@c", newControllerId);
+            cmd.Parameters.AddWithValue("@id", fwVersionId);
+        });
+        return true;
+    }
+
+    /// <summary>Все живые версии, чьи файлы лежат на диске, с именами группы/подтипа/контроллера —
+    /// для обхода, убирающего осиротевшие ярлыки (HierarchyService.PruneOrphanedFirmwareShortcuts).
+    /// Откатанные тоже включаем: их ярлык (если был) точно так же повисает, когда исчезают файлы.</summary>
+    public List<FwShortcutTarget> GetFwVersionShortcutTargets()
+    {
+        var result = new List<FwShortcutTarget>();
+        using var reader = ExecuteReader($"""
+            SELECT fv.version_raw, fv.disk_path, fv.is_opc,
+                   eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.archived=0 AND {NotDeleted("fv")}
+              AND fv.disk_path IS NOT NULL AND fv.disk_path <> ''
+            """);
+        while (reader.Read())
+            result.Add(new FwShortcutTarget(
+                GetString(reader, "version_raw"), GetString(reader, "disk_path"),
+                GetString(reader, "group_name"), GetString(reader, "subtype_name"),
+                GetString(reader, "ctrl_name"), GetInt(reader, "is_opc") != 0));
+        return result;
+    }
+
     public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion)
     {
         using var reader = ExecuteReader($"""

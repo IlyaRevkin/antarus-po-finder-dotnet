@@ -94,16 +94,58 @@ public partial class Database
         });
     }
 
+    /// <summary>Служебный «запрос» для ручного счётчика версии, выставленного не из поиска, а прямо в
+    /// истории версий (SetLocalFwUsageVersionTotal). Ключ намеренно в нижнем регистре: все настоящие
+    /// ключи проходят через SearchService.Normalize с ToUpperInvariant, поэтому строчный "manual"
+    /// нормализованным запросом не порождается никогда, поэтому ранжирование поиска (GetFwUsageForQuery по конкретному запросу) его
+    /// сам собой не подхватывает: ручная правка меняет ОБЩЕЕ «сколько раз выбирали» (карточка/история),
+    /// не подтасовывая выдачу под какой-то один запрос. Из по-запросной статистики и из обмена между
+    /// машинами он тоже исключён (см. GetAllFwUsage/GetFwUsageQueriesForVersion/ExportFwUsage) — это
+    /// правка счётчика ровно этой машины, а не переносимый факт «выбирали по запросу X».</summary>
+    public const string ManualUsageKey = "manual";
+
+    /// <summary>Задать суммарный вклад ЭТОЙ машины в счётчик обращений версии одним числом — правка
+    /// «кол-во обращений» прямо в истории версий, где счётчик показан агрегатом по всем запросам, а не
+    /// по одному. Итог локального счётчика версии становится ровно newTotal:
+    /// • newTotal ≥ уже накопленного по реальным запросам — разница уходит в служебную строку
+    ///   (ManualUsageKey), настоящая по-запросная статистика сохраняется;
+    /// • newTotal меньше (оператор осознанно занижает/обнуляет) — реальные по-запросные строки этой
+    ///   машины для версии удаляются, и остаётся только служебная строка на newTotal.
+    /// Чужой вклад (fw_usage_shared) не трогаем — он приходит снимком с других машин; общий показанный
+    /// итог (GetFwUsageTotal) поэтому может быть больше newTotal ровно на сумму чужих вкладов.</summary>
+    public void SetLocalFwUsageVersionTotal(int fwVersionId, int newTotal)
+    {
+        if (fwVersionId <= 0) return;
+        newTotal = Math.Max(0, newTotal);
+
+        var real = ExecuteScalar(
+            "SELECT COALESCE(SUM(uses),0) FROM fw_search_usage WHERE fw_version_id=@v AND query_key<>@m",
+            cmd => { cmd.Parameters.AddWithValue("@v", fwVersionId); cmd.Parameters.AddWithValue("@m", ManualUsageKey); })
+            is long l ? (int)l : 0;
+
+        if (newTotal < real)
+        {
+            // Ниже реально накопленного числом не опустить, не тронув сами по-запросные строки —
+            // оператор явно переопределяет счётчик, поэтому реальные строки этой машины убираем.
+            ExecuteNonQuery("DELETE FROM fw_search_usage WHERE fw_version_id=@v",
+                cmd => cmd.Parameters.AddWithValue("@v", fwVersionId));
+            real = 0;
+        }
+        // Остаток держим служебной строкой (0 ⇒ SetLocalFwUsage удалит её).
+        SetLocalFwUsage(ManualUsageKey, fwVersionId, newTotal - real);
+    }
+
     /// <summary>Запросы, по которым ЭТА машина уже засчитывала выбор конкретной версии, с их весом —
     /// для редактора «вес в поиске» в окне модерации прошивки. Только свой вклад: чужой правится не
-    /// здесь, а у своей машины-источника.</summary>
+    /// здесь, а у своей машины-источника. Служебная строка ручного счётчика (ManualUsageKey) сюда не
+    /// попадает — редактировать её как «запрос» нечего, у неё нет настоящего запроса.</summary>
     public List<(string QueryKey, int Uses)> GetFwUsageQueriesForVersion(int fwVersionId)
     {
         var result = new List<(string, int)>();
         if (fwVersionId <= 0) return result;
         using var reader = ExecuteReader(
-            "SELECT query_key, uses FROM fw_search_usage WHERE fw_version_id=@v ORDER BY uses DESC, query_key",
-            cmd => cmd.Parameters.AddWithValue("@v", fwVersionId));
+            "SELECT query_key, uses FROM fw_search_usage WHERE fw_version_id=@v AND query_key<>@m ORDER BY uses DESC, query_key",
+            cmd => { cmd.Parameters.AddWithValue("@v", fwVersionId); cmd.Parameters.AddWithValue("@m", ManualUsageKey); });
         while (reader.Read())
             result.Add((GetString(reader, "query_key"), GetInt(reader, "uses")));
         return result;
@@ -138,6 +180,15 @@ public partial class Database
 
         return result;
     }
+
+    /// <summary>Вклад ТОЛЬКО этой машины в счётчик версии (свои по-запросные строки + служебная
+    /// строка ручной правки ManualUsageKey), без чужих снимков (fw_usage_shared). Именно это число
+    /// задаёт SetLocalFwUsageVersionTotal, поэтому редактор «кол-во обращений» показывает его как
+    /// текущее значение — тогда «оставить как есть» не меняет счётчик (в отличие от общего итога, в
+    /// который на многомашинной установке подмешан чужой вклад).</summary>
+    public int GetLocalFwUsageTotal(int fwVersionId) =>
+        ExecuteScalar("SELECT COALESCE(SUM(uses), 0) FROM fw_search_usage WHERE fw_version_id = @v",
+            cmd => cmd.Parameters.AddWithValue("@v", fwVersionId)) is long l ? (int)l : 0;
 
     /// <summary>Сколько раз версию выбирали по всем запросам вместе — для строки на карточке.</summary>
     public int GetFwUsageTotal(int fwVersionId)
@@ -191,7 +242,8 @@ public partial class Database
             JOIN fw_versions        fv ON fv.id = u.fw_version_id
             JOIN equipment_subtypes es ON es.id = fv.subtype_id
             JOIN controller_models  cm ON cm.id = fv.controller_id
-            """))
+            WHERE u.query_key <> @m
+            """, cmd => cmd.Parameters.AddWithValue("@m", ManualUsageKey)))
             while (reader.Read())
                 Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
                     GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
@@ -267,8 +319,8 @@ public partial class Database
             JOIN fw_versions        fv ON fv.id = u.fw_version_id
             JOIN equipment_subtypes es ON es.id = fv.subtype_id
             JOIN controller_models  cm ON cm.id = fv.controller_id
-            WHERE es.sync_id <> '' AND cm.sync_id <> ''
-            """))
+            WHERE es.sync_id <> '' AND cm.sync_id <> '' AND u.query_key <> @m
+            """, cmd => cmd.Parameters.AddWithValue("@m", ManualUsageKey)))
             while (reader.Read())
                 result.Add(new SharedFwUsageRow(origin, GetString(reader, "query_key"),
                     GetString(reader, "subtype_sync_id"), GetString(reader, "controller_sync_id"),

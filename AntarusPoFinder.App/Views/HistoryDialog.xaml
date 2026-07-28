@@ -20,6 +20,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <GridSplitter Grid.Row="0" Height="0"/>
@@ -42,7 +43,12 @@
                     </DataGridTemplateColumn>
                     <DataGridTextColumn Header="Дата" Binding="{Binding DateDisplay}" Width="140"
                                         ElementStyle="{StaticResource HistoryCell}"/>
-                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="150"
+                    <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="130"
+                                        ElementStyle="{StaticResource HistoryCell}"/>
+                    <!-- Сколько раз версию выбирали в поиске по всем запросам вместе (тот же счётчик,
+                         что на карточке результата, Database.GetFwUsageTotal) — правится кнопкой
+                         «Кол-во обращений» ниже. -->
+                    <DataGridTextColumn Header="Обращений" Binding="{Binding UsageTotal}" Width="90"
                                         ElementStyle="{StaticResource HistoryCell}"/>
                     <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="*"
                                         ElementStyle="{StaticResource HistoryCell}"/>
@@ -79,12 +85,24 @@
             </Grid>
         </Grid>
 
+        <!-- Правка выбранной версии прямо в истории: сменить контроллер (запись завели не под тем),
+             поправить счётчик обращений и откатить/вернуть в активные конкретную версию. Кнопки
+             включаются по выбору и статусу (см. RefreshEditState). -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="ChangeCtrlBtn" Content="Сменить контроллер" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="ChangeController_Click"/>
+            <Button x:Name="EditUsageBtn" Content="Кол-во обращений" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="EditUsage_Click"/>
+            <Button x:Name="RollbackBtn" Content="Откатить" Style="{StaticResource SecondaryButton}"
+                    Click="RollbackToggle_Click"/>
+        </StackPanel>
+
         <!-- Слева — работа с локальной копией выбранной версии (#12): «Скачать на этот ПК» тянет её
              с сетевого диска в локальный кэш, чтобы потом загрузить в ПЛК; «Закрепить локально»
              ставит метку .keep, и тогда версия останется на этом компьютере даже после того, как на
              сетевом диске её сделают неактуальной или удалят (не закреплённую разовую копию уберёт
              ближайшая авто-синхронизация). Справа — «Закрыть». -->
-        <Grid Grid.Row="1" Margin="0,12,0,0">
+        <Grid Grid.Row="2" Margin="0,8,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
                 <TextBlock x:Name="LocalStatus" VerticalAlignment="Center" Margin="0,0,12,0"
                            Foreground="{DynamicResource TextMutedBrush}"/>

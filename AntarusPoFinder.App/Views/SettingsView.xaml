@@ -226,6 +226,10 @@
                                 <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"/>
                                 <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Click="InstallLatestUpdate_Click"/>
                             </StackPanel>
+                            <!-- Постоянный журнал «что нового по версиям» — то же, что разовое окно после
+                                 обновления, но к нему можно вернуться в любой момент (см. AppChangelogWindow). -->
+                            <Button Content="История изменений программы" Style="{StaticResource SecondaryButton}"
+                                    HorizontalAlignment="Left" Margin="0,0,0,8" Click="ShowAppChangelog_Click"/>
                             <TextBlock Text="Откат на другую версию:" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>

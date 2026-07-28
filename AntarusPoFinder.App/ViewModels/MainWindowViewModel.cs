@@ -640,26 +640,48 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             return;
         }
 
-        // Свёрнутый в трей старт (Настройки → Общие → «Запускать свёрнутым») — окно не показываем,
-        // чтобы модальный диалог не выскакивал поверх того, что для пользователя выглядит как «программа
-        // тихо сидит в трее». Версия всё равно засчитывается как показанная — не навязчивее, чем
-        // молчаливая запись при первой установке выше, и не пытается подловить момент разворачивания
-        // окна из трея отдельным механизмом ради одной информационной плашки.
-        if (_services.Cfg.AppStartMinimized())
-        {
-            _services.Cfg.SetLastWhatsNewShownVersion(current);
-            return;
-        }
-
         string? notes;
         try { notes = await AppUpdateService.GetReleaseNotesAsync(current); }
         catch { notes = null; } // GetReleaseNotesAsync уже не бросает — двойная страховка на случай будущих правок
 
         _services.Cfg.SetLastWhatsNewShownVersion(current);
 
+        // Сохраняем «что нового» СРАЗУ по факту обновления — и в постоянный журнал изменений (его
+        // открывают потом, когда разовое окно давно закрыто), и строкой в историю уведомлений. Делаем
+        // это ДО проверки свёрнутого старта: журнал и уведомление человек смотрит сам, поэтому они
+        // должны наполниться независимо от того, показалось ли разовое модальное окно. Строка истории
+        // не дублирует всё тело релиза, а ведёт назад в то же окно «Что нового» кнопкой «Показать».
+        if (!string.IsNullOrWhiteSpace(notes))
+        {
+            var body = notes!;
+            _services.Cfg.AddAppChangelogEntry(current, body, DateTime.Now);
+            AddNotification($"Обновление до версии {current}. Нажмите «Показать», чтобы посмотреть, что нового.",
+                NotificationCategory.AppUpdates,
+                reopen: () => Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", body));
+        }
+
+        // Свёрнутый в трей старт (Настройки → Общие → «Запускать свёрнутым») — модальное окно не
+        // показываем, чтобы оно не выскакивало поверх того, что для пользователя выглядит как «программа
+        // тихо сидит в трее»: запись в журнал/историю уже сделана выше, этого достаточно.
+        if (_services.Cfg.AppStartMinimized()) return;
+
         if (string.IsNullOrWhiteSpace(notes)) return; // сети нет / релиза с таким тегом нет — не критично, просто не показываем
 
         Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", notes);
+    }
+
+    /// <summary>Открыть журнал «что менялось по версиям приложения» — постоянная история release notes
+    /// всех версий, которые эта установка видела (ConfigService.AppChangelogHistory наполняется в
+    /// CheckWhatsNewAsync выше). В отличие от разового окна «Что нового», сюда можно вернуться в любой
+    /// момент — например, разбираясь, в какой версии починили конкретную вещь.</summary>
+    [RelayCommand]
+    private void ShowAppChangelog()
+    {
+        var win = new AppChangelogWindow(_services.Cfg.AppChangelogHistory())
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+        win.ShowDialog();
     }
 
     // ── Firmware updates ─────────────────────────────────────────────────────
@@ -1177,6 +1199,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         try
         {
+            // Заодно тем же тиком чистим осиротевшие ярлыки версий: файлы прошивки удалили прямо на
+            // диске (мимо программы), а ярлык доп.подтипа на них так и висел (жалоба «корневой файл
+            // исчез, а ярлык не исчезает»). Обход диска best-effort и не мешает поиску новых версий —
+            // выполняется до него и в фоне; недоступный корень PruneOrphanedFirmwareShortcuts просто
+            // пропускает, чтобы offline-шара не выглядела как «всё пропало».
+            var pruned = await Task.Run(() => _services.Hierarchy.PruneOrphanedFirmwareShortcuts(root));
+            if (pruned.Removed > 0) RefreshSearchIfActive();
+
             var plan = _services.Hierarchy.PlanFwSync(root);
             FwDiskScan scan;
             using (Busy.Begin("Поиск новых прошивок на диске…"))

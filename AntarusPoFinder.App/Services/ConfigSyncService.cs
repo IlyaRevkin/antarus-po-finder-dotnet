@@ -124,6 +124,10 @@ public static class ConfigSyncService
         "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
         "inspection_auto_cleanup_minutes", "quick_apps_display_mode", "app_start_minimized",
         "layout_fallback_enabled", "layout_fallback_threshold", "fw_usage_threshold", "last_whatsnew_shown_version",
+        // Журнал изменений приложения — per-machine, как и last_whatsnew_shown_version рядом: это
+        // история обновлений именно ЭТОЙ установки (что и когда здесь обновлялось), а не общий
+        // справочник; уехав в общий конфиг, он смешал бы журналы разных машин.
+        "app_changelog_history",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
         "loader_last_target", "unified_plc_hmi_zone",

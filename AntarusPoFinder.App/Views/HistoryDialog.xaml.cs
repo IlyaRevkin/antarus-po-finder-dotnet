@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -23,6 +24,9 @@ public partial class HistoryDialog : Window
             ? $"{Record.DtStr[6..8]}.{Record.DtStr[4..6]}.{Record.DtStr[0..4]} {Record.DtStr[9..11]}:{Record.DtStr[11..13]}"
             : Record.UploadDate;
         public string CtrlName => Record.CtrlName;
+        /// <summary>Сколько раз версию выбирали в поиске по всем запросам вместе (Database.
+        /// GetFwUsageTotal) — тот же счётчик, что на карточке результата.</summary>
+        public int UsageTotal { get; init; }
         public bool IsRolledBack => Record.Status == "rolled_back";
         /// <summary>Самая свежая живая версия — выделяется жирным в таблице.</summary>
         public bool IsCurrent { get; init; }
@@ -30,23 +34,58 @@ public partial class HistoryDialog : Window
         public string DescriptionShort => Record.Description.Length > 80 ? Record.Description[..80] + "…" : Record.Description;
     }
 
+    private readonly AppServices _services;
+    private readonly IAppHost _host;
+    private readonly int _subtypeId;
+    private readonly int _controllerId;
+
+    /// <summary>Оператор правил историю (сменил контроллер / счётчик / откат) — вызывающий обновит
+    /// после закрытия то, что от этого зависит (выдачу поиска). Правки применяются сразу в БД, флаг
+    /// нужен только чтобы не дёргать перерисовку зря, если ничего не трогали.</summary>
+    public bool Changed { get; private set; }
+
     /// <summary>«Активна» стояло у КАЖДОЙ не откатанной строки — то есть у всей истории сразу
     /// (реальная жалоба: «загружаю прошивку, а в истории все активные»). Что именно считать
     /// актуальным — см. FwHistoryStatus; versions приходят от новых к старым, как их отдаёт
     /// Database.GetFwVersionsHistory.</summary>
-    public HistoryDialog(string cabinetTitle, System.Collections.Generic.List<FwVersionRecord> versions)
+    public HistoryDialog(string cabinetTitle, List<FwVersionRecord> versions,
+        AppServices services, int subtypeId, int controllerId, IAppHost host)
     {
         InitializeComponent();
         Title = $"История версий — {cabinetTitle}";
+        _services = services;
+        _host = host;
+        _subtypeId = subtypeId;
+        _controllerId = controllerId;
 
+        LoadRows(versions, selectVersionId: null);
+    }
+
+    /// <summary>Заполняет таблицу по списку версий: считает статусы и счётчик обращений для каждой,
+    /// сохраняет выбор по id (после правки строка остаётся выделенной). versions — от новых к старым.</summary>
+    private void LoadRows(List<FwVersionRecord> versions, int? selectVersionId)
+    {
         var labels = FwHistoryStatus.Labels(versions);
-        VersionsGrid.ItemsSource = versions.Select((v, i) => new Row
+        var rows = versions.Select((v, i) => new Row
         {
             Record = v,
             IsCurrent = labels[i] == FwHistoryStatus.Current,
             StatusLabel = labels[i],
+            UsageTotal = v.Id is int id ? _services.Db.GetFwUsageTotal(id) : 0,
         }).ToList();
-        if (VersionsGrid.Items.Count > 0) VersionsGrid.SelectedIndex = 0;
+        VersionsGrid.ItemsSource = rows;
+
+        var pick = selectVersionId is int want ? rows.FirstOrDefault(r => r.Record.Id == want) : null;
+        VersionsGrid.SelectedItem = pick ?? rows.FirstOrDefault();
+    }
+
+    /// <summary>Перечитывает историю той же пары подтип/контроллер из БД — после правки, меняющей
+    /// набор/атрибуты версий (счётчик, откат). Версия, у которой сменили контроллер, из этой пары
+    /// уходит: показываем ту же историю без неё, ничего не выдумывая.</summary>
+    private void Reload(int? selectVersionId)
+    {
+        var versions = _services.Db.GetFwVersionsHistory(_subtypeId, _controllerId);
+        LoadRows(versions, selectVersionId);
     }
 
     /// <summary>Путь выбранной строки (диск в приоритете, иначе локальный) — открывается кликом
@@ -65,11 +104,12 @@ public partial class HistoryDialog : Window
             _selectedRecord = null;
             PathPanel.Visibility = Visibility.Collapsed;
             RefreshLocalState();
+            RefreshEditState();
             return;
         }
         var r = row.Record;
         _selectedRecord = r;
-        var blocks = new System.Collections.Generic.List<string>();
+        var blocks = new List<string>();
         if (!string.IsNullOrEmpty(r.Description)) blocks.Add($"Описание:\n{r.Description}");
         if (!string.IsNullOrEmpty(r.Changelog) && r.Changelog != r.Description) blocks.Add($"Изменения:\n{r.Changelog}");
         DetailText.Text = string.Join("\n\n", blocks);
@@ -85,6 +125,116 @@ public partial class HistoryDialog : Window
             PathPanel.Visibility = Visibility.Visible;
         }
         RefreshLocalState();
+        RefreshEditState();
+    }
+
+    // ── Правка выбранной версии: контроллер / счётчик / откат ─────────────────
+
+    /// <summary>Кнопки правки доступны, только когда версия выбрана; подпись «Откатить» меняется на
+    /// «Вернуть в активные» для уже откатанной, чтобы одна кнопка работала в обе стороны.</summary>
+    private void RefreshEditState()
+    {
+        var has = _selectedRecord is not null;
+        ChangeCtrlBtn.IsEnabled = has;
+        EditUsageBtn.IsEnabled = has;
+        RollbackBtn.IsEnabled = has;
+        RollbackBtn.Content = _selectedRecord?.Status == "rolled_back" ? "Вернуть в активные" : "Откатить";
+    }
+
+    private void ChangeController_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecord is not { Id: int id } r) return;
+
+        var options = _services.Db.GetAllControllerModels()
+            .Where(c => c.Id is not null)
+            .Select(c => new PickOptionDialog.Option(c.Id!.Value, c.Name))
+            .ToList();
+        if (options.Count == 0) return;
+
+        var picked = PickOptionDialog.Pick(this, "Сменить контроллер",
+            $"Контроллер для версии {r.VersionRaw}:", options, r.ControllerId);
+        if (picked is not int newCtrl || newCtrl == r.ControllerId) return;
+
+        // Файлы на диске и папку не двигаем — как и откат, это «поправить запись». Предупреждаем, что
+        // папка версии осталась под старым контроллером.
+        var confirm = AppMessageBox.Show(
+            $"Перенести версию {r.VersionRaw} на другой контроллер?\n\n" +
+            "Изменится только запись в каталоге. Файлы прошивки на диске останутся на месте — при " +
+            "необходимости перенесите их папку под новый контроллер вручную.",
+            "Сменить контроллер", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        if (_services.Db.ReassignFwVersionController(id, newCtrl))
+        {
+            Changed = true;
+            _host.InvalidateSearchResults();
+            // Версия уехала на другой контроллер — в истории этой пары её больше нет.
+            Reload(selectVersionId: null);
+            _host.ShowStatus($"Версия {r.VersionRaw} перенесена на другой контроллер",
+                category: NotificationCategory.FirmwareAndParams);
+        }
+    }
+
+    private void EditUsage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecord is not { Id: int id } r) return;
+
+        var current = _services.Db.GetLocalFwUsageTotal(id);
+        var input = TextPromptDialog.Prompt(this, "Кол-во обращений",
+            $"Сколько раз выбирали версию {r.VersionRaw} (вклад этого компьютера):", current.ToString());
+        if (input is null) return;
+
+        if (!int.TryParse(input.Trim(), out var n) || n < 0)
+        {
+            AppMessageBox.Show("Введите целое число не меньше нуля.", "Кол-во обращений",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _services.Db.SetLocalFwUsageVersionTotal(id, n);
+        Changed = true;
+        Reload(selectVersionId: id);
+    }
+
+    private void RollbackToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecord is not { Id: int id } r) return;
+
+        if (r.Status == "rolled_back")
+        {
+            var back = AppMessageBox.Show(
+                $"Вернуть версию {r.VersionRaw} в активные?\n\n" +
+                "Статус в базе снова станет обычным. Папку на диске, переименованную при откате " +
+                "(«_ОТКАТАНО»), при необходимости переименуйте обратно вручную.",
+                "Вернуть в активные", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+            if (back != MessageBoxResult.Yes) return;
+
+            if (_services.Db.UnrollbackFwVersion(id))
+            {
+                Changed = true;
+                _host.InvalidateSearchResults();
+                Reload(selectVersionId: id);
+                _host.ShowStatus($"Версия {r.VersionRaw} возвращена в активные",
+                    category: NotificationCategory.FirmwareAndParams);
+            }
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Откатить версию {r.VersionRaw}?\n\n" +
+            "Запись в базе будет помечена как откатанная.\nСледующая загрузка получит тот же SW-номер заново.\n" +
+            "Файлы на диске останутся нетронутыми (папка получит пометку «_ОТКАТАНО»).",
+            "Откат версии", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        if (_services.Db.RollbackFwVersion(id))
+        {
+            Changed = true;
+            _host.InvalidateSearchResults();
+            Reload(selectVersionId: id);
+            _host.ShowStatus($"Версия {r.VersionRaw} откатана",
+                category: NotificationCategory.FirmwareAndParams);
+        }
     }
 
     // ── Локальная копия версии (#12): скачать / закрепить ─────────────────────
