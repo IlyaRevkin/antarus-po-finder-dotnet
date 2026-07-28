@@ -260,6 +260,12 @@ public partial class Database : IDisposable
                  query_key     TEXT    NOT NULL,
                  fw_version_id INTEGER NOT NULL,
                  uses          INTEGER NOT NULL DEFAULT 0,
+                 -- Ручной вес прошивки под этот запрос — ОТДЕЛЬНЫЙ от uses (авто-счётчика открытий):
+                 -- оператор осознанно поднимает версию в выдаче, не дожидаясь, пока частота накопится
+                 -- сама, и этот вес СКЛАДЫВАЕТСЯ со счётчиком открытий, а не перезатирает его (см.
+                 -- Database.FwUsage.cs SetLocalFwWeight и Database.Search.cs Rank). До этого столбца
+                 -- «ручной вес» и «счётчик» были одним числом (uses), и правка веса стирала статистику.
+                 weight        INTEGER NOT NULL DEFAULT 0,
                  last_used_at  TEXT    NOT NULL DEFAULT '',
                  PRIMARY KEY (query_key, fw_version_id)
              );
@@ -277,6 +283,10 @@ public partial class Database : IDisposable
                  controller_sync_id TEXT    NOT NULL,
                  version_raw        TEXT    NOT NULL,
                  uses               INTEGER NOT NULL DEFAULT 0,
+                 -- Ручной вес чужой машины (см. weight в fw_search_usage). Приезжает только если та
+                 -- машина включила «делиться ручным весом» (ConfigService.FwWeightShared) — иначе в
+                 -- снимке приходит 0. Складывается с местным весом при чтении (GetFwUsageForQuery).
+                 weight             INTEGER NOT NULL DEFAULT 0,
                  last_used_at       TEXT    NOT NULL DEFAULT '',
                  PRIMARY KEY (origin, query_key, subtype_sync_id, controller_sync_id, version_raw)
              );
@@ -458,6 +468,13 @@ public partial class Database : IDisposable
 
         AddColumnsIfMissing("hierarchy_sync_watermarks",
             ("last_resolved_incoming_at", "TEXT NOT NULL DEFAULT ''"));
+
+        // Ручной вес выдачи, отделённый от авто-счётчика открытий (см. weight в CREATE TABLE выше и
+        // Database.FwUsage.cs). На старых базах столбца ещё нет — добавляем со значением 0, чтобы
+        // существующая накопленная статистика (uses) осталась ровно как была, а ранжирование до
+        // первой ручной правки веса вело себя в точности как прежде.
+        AddColumnsIfMissing("fw_search_usage", ("weight", "INTEGER NOT NULL DEFAULT 0"));
+        AddColumnsIfMissing("fw_usage_shared", ("weight", "INTEGER NOT NULL DEFAULT 0"));
     }
 
     /// <summary>Assigns a stable GUID to any row left with an empty sync_id — either a brand-new

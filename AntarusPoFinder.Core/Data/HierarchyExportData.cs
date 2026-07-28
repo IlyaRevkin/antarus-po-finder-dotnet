@@ -141,6 +141,11 @@ public class ExportedFwUsage
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("uses")] public int Uses { get; set; }
     [JsonPropertyName("last_used_at")] public string LastUsedAt { get; set; } = "";
+    /// <summary>Ручной вес выдачи (см. Database.FwUsage.cs weight). Ноль, если машина-источник не
+    /// делится своим весом (ConfigService.FwWeightShared) — счётчик открытий при этом уезжает всё
+    /// равно. Дефолт 0 и по той же причине, что и остальные новые поля: экспорт со старой версии
+    /// приложения ключа не содержит вовсе, и это «источник о нём не знает», а не «у источника вес нулевой».</summary>
+    [JsonPropertyName("weight")] public int Weight { get; set; }
 }
 
 public class HierarchyExportData

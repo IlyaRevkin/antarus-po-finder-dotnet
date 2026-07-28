@@ -147,22 +147,22 @@
             </Grid>
         </StackPanel>
 
-        <!-- Вес прошивки в поиске по конкретному запросу. Это та же «статистика выборов» (по паре
-             запрос→версия), но правится вручную и адресно: наладчик знает, что по «пожар» надо
-             ставить именно эту версию, и поднимает её вес, не дожидаясь, пока частота накопится сама
+        <!-- Ручной вес прошивки в поиске по конкретному запросу — ОТДЕЛЬНЫЙ от счётчика открытий
+             (складывается с ним, а не заменяет). Правится вручную и адресно: наладчик знает, что по
+             «пожар» надо ставить именно эту версию, и поднимает её вес, не дожидаясь частоты
              (или гасит случайно накликанное). Информация внутренняя — в самом поиске она не
              показывается, только влияет на порядок выдачи; поэтому и живёт здесь, в модерации, а не
-             на карточке. Правится только вклад ЭТОЙ машины (SetLocalFwUsage). -->
+             на карточке. Правится только вклад ЭТОЙ машины (SetLocalFwWeight). -->
         <StackPanel x:Name="WeightPanel" Visibility="Collapsed" Margin="0,0,0,16">
             <TextBlock Text="ВЕС В ПОИСКЕ (ПО ЗАПРОСАМ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
-                       Text="Сколько раз по данному запросу выбрали именно эту версию. Чем больше вес, тем выше она в выдаче по этому запросу. Можно задать вручную: добавить запрос и число, поменять или обнулить вес. В самом поиске этот вес не виден — он только влияет на порядок."/>
+                       Text="Ручной вес этой версии под запрос. Он СКЛАДЫВАЕТСЯ со счётчиком открытий (не заменяет его): чем больше вес, тем выше версия в выдаче по этому запросу. Чтобы гарантированно обойти самую популярную версию, задайте вес больше потолка авто-популярности (он показан в Настройках → Общие). В самом поиске вес не виден — только влияет на порядок."/>
             <DataGrid x:Name="WeightGrid" AutoGenerateColumns="False" MaxHeight="150" Margin="0,0,0,6"
                       Style="{StaticResource RoomyDataGrid}" IsReadOnly="False" CanUserAddRows="False"
                       HeadersVisibility="Column">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Запрос" Binding="{Binding QueryKey, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                    <DataGridTextColumn Header="Вес" Binding="{Binding Uses, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                    <DataGridTextColumn Header="Вес" Binding="{Binding Weight, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
                 </DataGrid.Columns>
             </DataGrid>
             <StackPanel Orientation="Horizontal">

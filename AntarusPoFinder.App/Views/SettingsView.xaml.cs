@@ -483,6 +483,7 @@ public partial class SettingsView : UserControl
         LayoutFallbackThresholdInput.Text = _services.Cfg.LayoutFallbackThreshold().ToString();
         RefreshLayoutFallbackGrid();
         FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
+        RefreshUsageMultiplierUi();
         RefreshUsageStats();
     }
 
@@ -639,6 +640,9 @@ public partial class SettingsView : UserControl
         public string ControllerName { get; init; } = "";
         public string VersionRaw { get; init; } = "";
         public int Uses { get; set; }
+        /// <summary>Ручной вес под этот запрос — только для показа (правится адресно в модерации
+        /// прошивки), чтобы в таблице «что накопилось» вес не был невидим.</summary>
+        public int Weight { get; init; }
         /// <summary>Локальная строка fw_versions, к которой относится эта пара запрос→версия — нужна
         /// для записи ручной правки веса. Null, если строка целиком чужая и локальной версии под неё
         /// нет (тогда править нечего — правка идёт у машины-источника).</summary>
@@ -674,6 +678,7 @@ public partial class SettingsView : UserControl
                 ControllerName = r.ControllerName,
                 VersionRaw = r.VersionRaw,
                 Uses = r.Uses,
+                Weight = r.Weight,
                 LocalVersionId = r.LocalVersionId,
             })
             .ToList();
@@ -684,6 +689,35 @@ public partial class SettingsView : UserControl
         if (int.TryParse(FwUsageThresholdInput.Text.Trim(), out var v) && v > 0)
             _services.Cfg.SetFwUsageThreshold(v);
         FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
+    }
+
+    /// <summary>Множитель популярности — синхронизируемый (уезжает на все машины). Принимаем и дробное
+    /// («1.5»), инвариантной культурой, чтобы одинаково читалось при любой локали; отрицательное и
+    /// мусор откатываются к текущему значению. После правки обновляем подсказку с актуальным потолком
+    /// авто-вклада — ориентиром для ручного веса.</summary>
+    private void FwUsageMultiplier_Changed(object sender, RoutedEventArgs e)
+    {
+        if (double.TryParse(FwUsageMultiplierInput.Text.Trim(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0)
+            _services.Cfg.SetFwUsageMultiplier(v);
+        RefreshUsageMultiplierUi();
+    }
+
+    private void FwWeightShared_Changed(object sender, RoutedEventArgs e) =>
+        _services.Cfg.SetFwWeightShared(FwWeightSharedCheck.IsChecked == true);
+
+    /// <summary>Подтягивает поле множителя, галочку «делиться весом» и подсказку с текущим потолком
+    /// авто-вклада (FwUsageMaxAutoBonus) — то самое число, выше которого ставят ручной вес, чтобы
+    /// обойти популярность.</summary>
+    private void RefreshUsageMultiplierUi()
+    {
+        FwUsageMultiplierInput.Text = _services.Cfg.FwUsageMultiplier()
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        FwWeightSharedCheck.IsChecked = _services.Cfg.FwWeightShared();
+        FwUsageMultiplierHint.Text =
+            $"На сколько частота выбора двигает выдачу. 1 — как обычно, больше — сильнее, 0 — популярность не влияет вовсе. " +
+            $"Сейчас счётчик открытий добавляет к версии не больше {_services.Cfg.FwUsageMaxAutoBonus()} баллов — " +
+            $"задавайте ручной вес выше этого числа, чтобы поднять версию над самой популярной.";
     }
 
     /// <summary>Reads both radios' current IsChecked rather than trusting which one raised the

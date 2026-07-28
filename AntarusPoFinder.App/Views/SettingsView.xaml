@@ -346,6 +346,18 @@
                             </StackPanel>
                             <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
                                        Text="Сколько раз версию должны выбрать по одному и тому же запросу, прежде чем эта частота начнёт поднимать её в выдаче. Выборы ниже порога видны в таблице, но на порядок выдачи не влияют — так один случайный клик не поднимает версию наравне с той, которую ставят стабильно."/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Множитель популярности:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox x:Name="FwUsageMultiplierInput" Width="60" Height="30" TextAlignment="Center" LostFocus="FwUsageMultiplier_Changed"/>
+                            </StackPanel>
+                            <!-- Текст с актуальным потолком авто-вклада проставляется из кода
+                                 (RefreshUsageStats) — он зависит от текущего множителя. -->
+                            <TextBlock x:Name="FwUsageMultiplierHint" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
+                            <CheckBox x:Name="FwWeightSharedCheck" Margin="0,0,0,8"
+                                      Content="Делиться ручным весом выдачи с другими машинами"
+                                      Checked="FwWeightShared_Changed" Unchecked="FwWeightShared_Changed"/>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                       Text="Ручной вес (задаётся в модерации прошивки) складывается со счётчиком открытий. Множитель — общая настройка (уезжает на все машины); «делиться весом» — личное решение этой машины: счётчик открытий уезжает всегда, а ручной вес — только с этой галочкой."/>
                             <!-- «Выборов» правится прямо в таблице (двойной клик): задаёт вклад этой
                                  машины по паре запрос→версия. Остальные столбцы — только чтение (это
                                  идентификация строки). Добавить новый запрос к версии — в модерации
@@ -366,6 +378,8 @@
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="Выборов" Binding="{Binding Uses}" Width="Auto" MinWidth="70" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                                    <!-- Ручной вес — только чтение: правится адресно в модерации прошивки, не здесь. -->
+                                    <DataGridTextColumn Header="Вес" Binding="{Binding Weight}" Width="Auto" MinWidth="55" IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                                 </DataGrid.Columns>
                             </DataGrid>
                             <StackPanel Orientation="Horizontal">

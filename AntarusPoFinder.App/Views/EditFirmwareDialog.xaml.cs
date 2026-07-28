@@ -131,15 +131,15 @@ public partial class EditFirmwareDialog : Window
     public sealed class WeightRow
     {
         public string QueryKey { get; set; } = "";
-        public int Uses { get; set; }
+        public int Weight { get; set; }
     }
 
     private readonly System.Collections.ObjectModel.ObservableCollection<WeightRow> _weightRows = new();
 
     private void LoadSearchWeights(int fwVersionId)
     {
-        foreach (var (q, uses) in _db.GetFwUsageQueriesForVersion(fwVersionId))
-            _weightRows.Add(new WeightRow { QueryKey = q, Uses = uses });
+        foreach (var (q, weight) in _db.GetFwUsageQueriesForVersion(fwVersionId))
+            _weightRows.Add(new WeightRow { QueryKey = q, Weight = weight });
         WeightGrid.ItemsSource = _weightRows;
         WeightPanel.Visibility = Visibility.Visible;
     }
@@ -147,7 +147,7 @@ public partial class EditFirmwareDialog : Window
     private void AddWeightRow_Click(object sender, RoutedEventArgs e)
     {
         WeightGrid.CommitEdit(DataGridEditingUnit.Row, true);
-        var row = new WeightRow { QueryKey = "", Uses = 1 };
+        var row = new WeightRow { QueryKey = "", Weight = 1 };
         _weightRows.Add(row);
         WeightGrid.SelectedItem = row;
         WeightGrid.ScrollIntoView(row);
@@ -160,10 +160,11 @@ public partial class EditFirmwareDialog : Window
 
     private void ClearWeights_Click(object sender, RoutedEventArgs e) => _weightRows.Clear();
 
-    /// <summary>Сохранить веса: приводим строки редактора к нормализованному запросу
+    /// <summary>Сохранить ручной вес: приводим строки редактора к нормализованному запросу
     /// (SearchService.UsageKey — тот же ключ, что пишет обычный выбор из поиска, иначе ручной вес не
-    /// сложился бы с накопленным по тому же запросу), и синхронизируем с БД — удаляем убранные строки,
-    /// проставляем новые значения. Пустой запрос пропускаем.</summary>
+    /// сложился бы с накопленным счётчиком по тому же запросу), и синхронизируем с БД — убираем
+    /// удалённые строки, проставляем новые значения через SetLocalFwWeight (это ВЕС, отдельный от
+    /// счётчика открытий: он складывается со счётчиком, а не заменяет его). Пустой запрос пропускаем.</summary>
     private void ApplySearchWeights()
     {
         if (_record.Id is not int id) return;
@@ -174,14 +175,14 @@ public partial class EditFirmwareDialog : Window
         {
             var key = AntarusPoFinder.Core.Services.SearchService.UsageKey(row.QueryKey ?? "");
             if (string.IsNullOrWhiteSpace(key)) continue;
-            desired[key] = Math.Max(0, row.Uses); // 0 = убрать (SetLocalFwUsage удалит строку)
+            desired[key] = Math.Max(0, row.Weight); // 0 = убрать вес (SetLocalFwWeight снимет его)
         }
 
         var existing = _db.GetFwUsageQueriesForVersion(id).Select(r => r.QueryKey).ToHashSet(StringComparer.Ordinal);
         foreach (var gone in existing.Where(k => !desired.ContainsKey(k)))
-            _db.SetLocalFwUsage(gone, id, 0);
-        foreach (var (key, uses) in desired)
-            _db.SetLocalFwUsage(key, id, uses);
+            _db.SetLocalFwWeight(gone, id, 0);
+        foreach (var (key, weight) in desired)
+            _db.SetLocalFwWeight(key, id, weight);
     }
 
     private (string GroupName, string SubtypeName, string ControllerName)? _names;

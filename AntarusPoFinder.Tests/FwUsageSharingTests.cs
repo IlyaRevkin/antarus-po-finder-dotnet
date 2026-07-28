@@ -52,11 +52,11 @@ public class FwUsageSharingTests
             ConfigSyncService.Export(m.SvcA, m.Root.Path, "profileA");
             ConfigSyncService.Apply(m.SvcB, ConfigSyncService.ConfigPathFor(m.Root.Path), m.Root.Path);
 
-            Assert.Equal(4, m.DbB.GetFwUsageForQuery(key)[bTarget]);
+            Assert.Equal(4, m.DbB.GetFwUsageForQuery(key)[bTarget].Uses);
             Assert.Equal(4, m.DbB.GetFwUsageTotal(bTarget));
             // Своя статистика при этом складывается с чужой, а не заменяется ею.
             m.DbB.RecordFwUsage(key, bTarget);
-            Assert.Equal(5, m.DbB.GetFwUsageForQuery(key)[bTarget]);
+            Assert.Equal(5, m.DbB.GetFwUsageForQuery(key)[bTarget].Uses);
         }
         finally { ConfigSyncService.TransportFactory = r => new FileShareTransport(r); }
     }

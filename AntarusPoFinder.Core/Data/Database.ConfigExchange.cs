@@ -174,12 +174,16 @@ public partial class Database
         // Статистика выборов прошивки — вклад этой машины и всё, что она знает о чужих (см.
         // Database.FwUsage.cs). Общий конфиг переписывается целиком, поэтому чужие вклады
         // пересылаются дальше: выгрузив только своё, машина стёрла бы в снимке остальные.
-        data.FwUsage = ExportFwUsage(UsageOriginId())
+        // Свой ручной вес уезжает только если машина включила «делиться весом» (fw_weight_shared) —
+        // читаем настройку прямо из БД (сырой ключ с дефолтом false), т.к. сюда ConfigService не
+        // передаётся. Чужой вес ExportFwUsage пересылает независимо от флага.
+        var shareOwnWeight = GetSetting("fw_weight_shared", "false") == "true";
+        data.FwUsage = ExportFwUsage(UsageOriginId(), shareOwnWeight)
             .Select(u => new ExportedFwUsage
             {
                 Origin = u.Origin, QueryKey = u.QueryKey, SubtypeSyncId = u.SubtypeSyncId,
                 ControllerSyncId = u.ControllerSyncId, VersionRaw = u.VersionRaw,
-                Uses = u.Uses, LastUsedAt = u.LastUsedAt,
+                Uses = u.Uses, LastUsedAt = u.LastUsedAt, Weight = u.Weight,
             })
             .ToList();
 
@@ -1011,7 +1015,7 @@ public partial class Database
         //    изменения» дёргала бы оператора целыми днями по поводу, который его не касается.
         if (apply && data.FwUsage is not null)
             ImportFwUsage(data.FwUsage.Select(u => new SharedFwUsageRow(u.Origin, u.QueryKey, u.SubtypeSyncId,
-                u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt)), UsageOriginId());
+                u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt, u.Weight)), UsageOriginId());
 
         // ── fw_versions / param_files: additive-only, as before — each machine may have uploads
         //    the exporting one never saw, so absence locally never means "delete it". The one

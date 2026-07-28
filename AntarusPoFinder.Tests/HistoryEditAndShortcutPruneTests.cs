@@ -68,7 +68,7 @@ public class HistoryEditAndShortcutPruneTests : IDisposable
         Assert.Equal(10, _db.GetLocalFwUsageTotal(id));
         Assert.Equal(10, _db.GetFwUsageTotal(id));
         // Настоящая по-запросная строка уцелела (разницу добрала служебная строка ручной правки).
-        Assert.Equal(3, _db.GetFwUsageForQuery(key)[id]);
+        Assert.Equal(3, _db.GetFwUsageForQuery(key)[id].Uses);
         // Служебная строка не выдаётся как «запрос» в редакторе веса.
         Assert.DoesNotContain(_db.GetFwUsageQueriesForVersion(id), q => q.QueryKey == Database.ManualUsageKey);
     }

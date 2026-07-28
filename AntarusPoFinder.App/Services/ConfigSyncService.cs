@@ -137,6 +137,11 @@ public static class ConfigSyncService
         // уехавшая отметка «сброс применён» отменяла бы сам сброс на остальных машинах.
         // Сама отметка сброса (fw_usage_reset_at) — наоборот, синхронизируемая, её здесь нет.
         Core.Data.Database.UsageOriginSettingKey, "fw_usage_reset_applied_at",
+        // «Делиться ли своим ручным весом» — решение КАЖДОЙ машины за свой вес, поэтому per-machine
+        // (см. ConfigService.FwWeightShared). Уехав в общий конфиг, оно навязало бы всем чужой выбор.
+        // Заметь: fw_usage_multiplier здесь СОЗНАТЕЛЬНО НЕТ — множитель популярности синхронизируемый
+        // (общая политика поиска), см. ConfigService.FwUsageMultiplier.
+        "fw_weight_shared",
     };
 
     public static string ConfigPathFor(string root) => Path.Combine(root, "Конфиг", "po_finder_config.json");
@@ -431,7 +436,7 @@ public static class ConfigSyncService
             ApplyUsageResetMark(services);
             if (snap.Hierarchy.FwUsage is null) return;
             services.Db.ImportFwUsage(snap.Hierarchy.FwUsage.Select(u => new SharedFwUsageRow(u.Origin, u.QueryKey,
-                u.SubtypeSyncId, u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt)), services.Db.UsageOriginId());
+                u.SubtypeSyncId, u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt, u.Weight)), services.Db.UsageOriginId());
         }
         catch { /* статистика — вспомогательная вещь, срывать из-за неё синхронизацию нельзя */ }
     }

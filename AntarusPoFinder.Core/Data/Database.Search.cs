@@ -24,9 +24,12 @@ public record FirmwareSearchFilters
         string.IsNullOrWhiteSpace(LaunchType);
 }
 
-/// <summary>Строка выдачи вместе с тем, чем она заслужила своё место: очки релевантности и сколько
-/// раз ИМЕННО эту версию выбирали по такому же запросу (Database.FwUsage.cs).</summary>
-public record ScoredFwVersion(FwVersionRecord Row, int Score, int UsageCount);
+/// <summary>Строка выдачи вместе с тем, чем она заслужила своё место: очки релевантности, сколько
+/// раз ИМЕННО эту версию выбирали по такому же запросу (UsageCount — авто-счётчик открытий) и ручной
+/// вес под этот запрос (Weight), проставленный оператором осознанно. И то, и другое — из
+/// Database.FwUsage.cs; в Rank они входят по-разному (счётчик через порог и множитель, вес
+/// напрямую).</summary>
+public record ScoredFwVersion(FwVersionRecord Row, int Score, int UsageCount, int Weight = 0);
 
 public partial class Database
 {
@@ -129,9 +132,14 @@ public partial class Database
     /// <paramref name="usageThreshold"/> — сколько раз версию должны выбрать по этому запросу,
     /// прежде чем накопленная частота начнёт двигать выдачу (см. EffectiveUsage/Rank ниже и
     /// ConfigService.FwUsageThreshold); 1 по умолчанию — единственный выбор уже учитывается, ровно
-    /// как было до появления настраиваемого порога.</summary>
+    /// как было до появления настраиваемого порога.
+    /// <paramref name="usageMultiplier"/> — на сколько умножать вклад счётчика открытий в ранг (см.
+    /// Rank/ConfigService.FwUsageMultiplier); 1 по умолчанию — прежнее поведение. Ручной вес
+    /// (Weight) множитель НЕ трогает: он и так задаётся оператором в тех же «баллах», что и потолок
+    /// авто-вклада, и складывается напрямую.</summary>
     public List<ScoredFwVersion> SearchFwVersions(IReadOnlyList<string> tokens, bool exactWord = false,
-        FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "", int usageThreshold = 1)
+        FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "", int usageThreshold = 1,
+        double usageMultiplier = 1)
     {
         filters ??= FirmwareSearchFilters.None;
 
@@ -139,7 +147,7 @@ public partial class Database
         if (rows.Count == 0) return new();
 
         var usage = string.IsNullOrEmpty(usageQueryKey)
-            ? new Dictionary<int, int>()
+            ? new Dictionary<int, (int Uses, int Weight)>()
             : GetFwUsageForQuery(usageQueryKey);
 
         var qTokens = tokens.Where(t => !string.IsNullOrEmpty(t) && t.Length >= 2)
@@ -150,7 +158,8 @@ public partial class Database
         if (qTokens.Length == 0)
         {
             if (filters.IsEmpty) return new();
-            return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, Uses(r, usage))), usageThreshold);
+            return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, UsesOf(r, usage), WeightOf(r, usage))),
+                usageThreshold, usageMultiplier);
         }
 
         var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
@@ -205,7 +214,7 @@ public partial class Database
             // галочку и вбивший точное название, ждёт ровно одну прошивку — теперь так и есть.
             if (exactWord && matchedTokens < qTokens.Length) continue;
 
-            var entry = new ScoredFwVersion(row, score, Uses(row, usage));
+            var entry = new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage));
             scored.Add(entry);
             if (phraseTag) phraseTagRows.Add(entry);
         }
@@ -213,48 +222,67 @@ public partial class Database
         // Тег-фраза найдена — остальное к этому запросу отношения не имеет.
         if (anyPhraseTagHit && exactWord) scored = phraseTagRows;
 
-        return Deduplicate(scored, usageThreshold);
+        return Deduplicate(scored, usageThreshold, usageMultiplier);
     }
 
-    /// <summary>Насколько сильно частота выбора может подвинуть выдачу. Ограничена сознательно:
-    /// «десять раз ставили именно её» должно поднимать версию среди РАВНО подходящих, а не
-    /// вытаскивать наверх прошивку от другого шкафа только потому, что её часто открывали.</summary>
+    /// <summary>Потолок вклада ОДНОГО ЛИШЬ счётчика открытий (до умножения на множитель): «десять раз
+    /// ставили именно её» должно поднимать версию среди РАВНО подходящих, а не вытаскивать наверх
+    /// прошивку от другого шкафа только потому, что её часто открывали. Ручной вес (Weight) этим
+    /// потолком НЕ ограничен — он и есть осознанный рычаг «поставить выше»; чтобы гарантированно
+    /// обойти самую популярную версию с тем же score, оператору достаточно задать вес больше
+    /// MaxUsageBonus×множитель (это число показывается в Настройках как ориентир).</summary>
     private const int MaxUsageBonus = 5;
 
     /// <summary>Совпадение запроса с тегом целиком весит больше любого набора отдельных слов.</summary>
     private const int PhraseTagBonus = 10;
 
-    private static int Uses(FwVersionRecord row, IReadOnlyDictionary<int, int> usage) =>
-        row.Id is int id && usage.TryGetValue(id, out var n) ? n : 0;
+    private static int UsesOf(FwVersionRecord row, IReadOnlyDictionary<int, (int Uses, int Weight)> usage) =>
+        row.Id is int id && usage.TryGetValue(id, out var e) ? e.Uses : 0;
+
+    private static int WeightOf(FwVersionRecord row, IReadOnlyDictionary<int, (int Uses, int Weight)> usage) =>
+        row.Id is int id && usage.TryGetValue(id, out var e) ? e.Weight : 0;
 
     /// <summary>Порог статистики (Задача «порог влияния статистики на ранжирование»): выбор,
     /// которых по этому запросу набралось МЕНЬШЕ порога, ранжирование не двигает вовсе — чтобы один
     /// случайный клик не поднимал версию наравне с той, которую ставят стабильно. Сырое
     /// ScoredFwVersion.UsageCount при этом не трогается нигде — карточка в поиске
     /// («по этому запросу выбирали N раз») продолжает показывать правду независимо от порога,
-    /// обрезается только вклад в Rank/сортировку ниже.</summary>
+    /// обрезается только вклад в Rank/сортировку ниже. Ручного веса порог не касается — он задан
+    /// осознанно и действует сразу.</summary>
     private static int EffectiveUsage(int uses, int usageThreshold) => uses >= Math.Max(1, usageThreshold) ? uses : 0;
 
-    private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold)
+    /// <summary>Вклад авто-счётчика открытий в ранг: обрезанный потолком MaxUsageBonus и умноженный
+    /// на множитель (ConfigService.FwUsageMultiplier). Множитель 0 полностью отключает влияние
+    /// популярности, оставляя ранжирование на очках релевантности и ручном весе.</summary>
+    private static int AutoUsageBonus(int uses, int usageThreshold, double usageMultiplier) =>
+        (int)Math.Round(Math.Min(EffectiveUsage(uses, usageThreshold), MaxUsageBonus) * Math.Max(0, usageMultiplier),
+            MidpointRounding.AwayFromZero);
+
+    private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold,
+        double usageMultiplier)
     {
         var seen = new Dictionary<(int, int), ScoredFwVersion>();
         foreach (var entry in scored)
         {
             var key = (entry.Row.SubtypeId, entry.Row.ControllerId);
             if (!seen.TryGetValue(key, out var existing) ||
-                Rank(entry, usageThreshold) > Rank(existing, usageThreshold))
+                Rank(entry, usageThreshold, usageMultiplier) > Rank(existing, usageThreshold, usageMultiplier))
                 seen[key] = entry;
         }
 
         return seen.Values
-            .OrderByDescending(e => Rank(e, usageThreshold))
-            .ThenByDescending(e => EffectiveUsage(e.UsageCount, usageThreshold))
+            .OrderByDescending(e => Rank(e, usageThreshold, usageMultiplier))
+            .ThenByDescending(e => AutoUsageBonus(e.UsageCount, usageThreshold, usageMultiplier) + e.Weight)
             .ThenByDescending(e => e.Row.Id ?? 0)
             .ToList();
     }
 
-    private static int Rank(ScoredFwVersion e, int usageThreshold) =>
-        e.Score + Math.Min(EffectiveUsage(e.UsageCount, usageThreshold), MaxUsageBonus);
+    /// <summary>Ранг = очки релевантности + вклад счётчика открытий (с потолком и множителем) + ручной
+    /// вес (напрямую, без потолка). Ручной вес живёт в тех же «баллах», что и очки/авто-вклад, — так
+    /// оператор понимает, какое число ставить: больше MaxUsageBonus×множитель, чтобы обойти
+    /// популярность, больше PhraseTagBonus, чтобы обойти даже точное совпадение тега.</summary>
+    private static int Rank(ScoredFwVersion e, int usageThreshold, double usageMultiplier) =>
+        e.Score + AutoUsageBonus(e.UsageCount, usageThreshold, usageMultiplier) + e.Weight;
 
     private static bool PassesFilters(FwVersionRecord row, FirmwareSearchFilters f)
     {

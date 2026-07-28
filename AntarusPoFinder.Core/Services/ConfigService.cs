@@ -103,6 +103,18 @@ public class ConfigService
         // «выбрали хоть раз» от «выбирают регулярно», не требуя от оператора десятка одинаковых
         // кликов ради того, чтобы подсказка вообще заработала.
         ["fw_usage_threshold"] = "2",
+        // На сколько умножать вклад счётчика открытий в ранг выдачи (см. Database.Search.cs
+        // AutoUsageBonus). 1 — прежнее поведение; больше — популярность двигает выдачу сильнее; 0 —
+        // счётчик перестаёт влиять вовсе, остаётся релевантность и ручной вес. В отличие от
+        // fw_usage_threshold этот параметр СИНХРОНИЗИРУЕМЫЙ (его нет в ConfigSyncService.
+        // SkipSettingsKeys): «насколько популярность вообще важна» — общая политика поиска, а не
+        // чувствительность конкретной машины.
+        ["fw_usage_multiplier"] = "1",
+        // Делиться ли СВОИМ ручным весом выдачи с другими машинами (см. Database.FwUsage.cs weight).
+        // false — вес остаётся личным (счётчик открытий уезжает всё равно, это общая статистика);
+        // true — вес уезжает в общий конфиг и складывается с весом других. Сам переключатель
+        // per-machine (в SkipSettingsKeys): каждая машина решает за свой вес.
+        ["fw_weight_shared"] = "false",
         ["ad_require_login"] = "false",
         ["ad_require_login_default_days"] = "14",
         ["ad_last_login"] = "",
@@ -214,6 +226,29 @@ public class ConfigService
     public int FwUsageThreshold() =>
         int.TryParse(Get("fw_usage_threshold"), out var v) && v > 0 ? v : 2;
     public void SetFwUsageThreshold(int value) => Set("fw_usage_threshold", Math.Max(1, value).ToString());
+
+    /// <summary>На сколько умножать вклад счётчика открытий в ранг выдачи (см. Database.Search.cs
+    /// AutoUsageBonus и Defaults["fw_usage_multiplier"]). ≥0; 1 по умолчанию. Хранится и читается в
+    /// инвариантной культуре, чтобы «1.5» одинаково понималось на машинах с разной локалью. В отличие
+    /// от порога — СИНХРОНИЗИРУЕМЫЙ параметр (в общий конфиг уходит), см. его doc в Defaults.</summary>
+    public double FwUsageMultiplier() =>
+        double.TryParse(Get("fw_usage_multiplier"), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : 1;
+    public void SetFwUsageMultiplier(double value) =>
+        Set("fw_usage_multiplier", Math.Max(0, value).ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>Максимальный вклад одного лишь счётчика открытий в ранг при текущем множителе —
+    /// ориентир для оператора, задающего ручной вес: вес выше этого числа гарантированно поднимает
+    /// версию над самой популярной с тем же совпадением (см. Database.Search.cs MaxUsageBonus=5 и
+    /// AutoUsageBonus). Считается здесь, чтобы Настройки могли показать актуальное число, не завися от
+    /// приватной константы ядра.</summary>
+    public int FwUsageMaxAutoBonus() => (int)Math.Round(5 * FwUsageMultiplier(), MidpointRounding.AwayFromZero);
+
+    /// <summary>Делиться ли ручным весом выдачи с другими машинами (см.
+    /// Defaults["fw_weight_shared"] и Database.FwUsage.cs ExportFwUsage). Per-machine — в
+    /// ConfigSyncService.SkipSettingsKeys, каждая машина решает за свой вес.</summary>
+    public bool FwWeightShared() => Get("fw_weight_shared").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetFwWeightShared(bool value) => Set("fw_weight_shared", value ? "true" : "false");
 
     /// <summary>Автоматически подтягивать найденные поиском прошивки в локальный кэш, вместо кнопки
     /// «Синхронизировать» на каждой карточке (см. SearchView.AutoSyncMissing). Настройка личная,

@@ -119,13 +119,13 @@ public static class SearchService
     /// умолчанию 1 — единственный выбор уже учитывается, как было до появления настраиваемого
     /// порога; реальный вызывающий код передаёт ConfigService.FwUsageThreshold()).</summary>
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
-        FirmwareSearchFilters? filters = null, int usageThreshold = 1) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold));
+        FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
         bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null,
-        int usageThreshold = 1) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold),
+        int usageThreshold = 1, double usageMultiplier = 1) =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier),
             allowFallback, out usedFallback, out convertedQuery);
 
     /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
@@ -133,7 +133,7 @@ public static class SearchService
     public static string UsageKey(string query) => Normalize(query);
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
-        FirmwareSearchFilters? filters, int usageThreshold)
+        FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier)
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -141,7 +141,7 @@ public static class SearchService
         // разбирает сам Database.SearchFwVersions; пустой запрос без фильтров ничего не ищет.
         if (tokens.Length == 0 && (filters is null || filters.IsEmpty)) return new();
 
-        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold);
+        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold, usageMultiplier);
 
         return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount)).ToList();
     }
