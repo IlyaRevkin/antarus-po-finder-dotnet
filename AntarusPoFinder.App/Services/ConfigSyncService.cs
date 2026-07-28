@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -112,6 +113,12 @@ public static class ConfigSyncService
         // ложный SettingsChanged=1 на приёмнике при полностью пустом реальном дифе. Обнаружено этим
         // же раундом правок (Задача 2/3 — тест на "нечего применять после второго экспорта").
         "config_last_pushed_at",
+        // Снимок (хеш) синхронизируемого содержимого на момент последней отправки/приёма — чисто
+        // машинно-локальный watermark: по нему плашка «готово к отправке» понимает, что правки
+        // вернули справочник ровно к тому состоянию, что уже на диске (добавил тип и удалил его,
+        // переименовал и вернул имя, поменял и вернул префикс) — отправлять тогда нечего, накопитель
+        // очищается. В общий конфиг уходить не должен — у каждой машины он свой.
+        "config_last_pushed_sig",
         "config_last_synced_revision",
         "scan_resolution_dpi", "config_push_interval_min", "onboarding_shown",
         "notification_categories_disabled", "notification_categories_muted_unread", "close_action", "inspection_auto_cleanup_days",
@@ -289,6 +296,9 @@ public static class ConfigSyncService
         var newRevision = ReadCurrentRevision(currentRoot);
         if (newRevision > LocalWatermarkRevision(services)) SetLocalWatermarkRevision(services, newRevision);
 
+        // Локальное содержимое теперь равно тому, что на диске — переустанавливаем базовую сигнатуру,
+        // чтобы плашка «готово к отправке» не считала только что применённое своими исходящими правками.
+        RebaselineContentSignature(services);
         return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
     }
 
@@ -363,6 +373,8 @@ public static class ConfigSyncService
         // случился, пока applyAsync выполнялся.
         if (snap.Revision > LocalWatermarkRevision(services)) SetLocalWatermarkRevision(services, snap.Revision);
 
+        // См. Apply(): после приёма локальное содержимое совпадает с диском — сбрасываем базовую сигнатуру.
+        RebaselineContentSignature(services);
         return new ConfigApplyResult(settingsApplied, counts, exportedAt, snap.ExportedBy);
     }
 
@@ -605,7 +617,38 @@ public static class ConfigSyncService
         // Полный экспорт по определению уносит на диск ВСЁ текущее состояние этой машины (Задача 4) —
         // значит и всё, что накопилось в sync_pending_changes, теперь отправлено.
         services.Db.ClearSyncPendingChanges();
+        RebaselineContentSignature(services);
     }
+
+    /// <summary>Настроечный ключ, куда пишется хеш синхронизируемого содержимого на момент, когда
+    /// это содержимое заведомо совпадает с тем, что на общем диске (после отправки или приёма).</summary>
+    public const string ContentSignatureKey = "config_last_pushed_sig";
+
+    /// <summary>Хеш ВСЕГО, что реально синхронизируется между машинами: справочник
+    /// (ExportHierarchyData — типы/подтипы/контроллеры/теги/прошивки/параметры) плюс не-локальные
+    /// настройки (всё, кроме SkipSettingsKeys). Именно эта пара и уходит в общий конфиг (см.
+    /// BuildExport), поэтому равенство сигнатур = «на диске уже ровно это, отправлять нечего».
+    /// Волатильные поля (exported_at/exported_by/revision) в сигнатуру НЕ входят — они меняются при
+    /// каждой отправке и к содержимому отношения не имеют.</summary>
+    public static string ComputeContentSignature(AppServices services)
+    {
+        var sb = new StringBuilder();
+        foreach (var kv in services.Db.GetAllSettings()
+                     .Where(k => !SkipSettingsKeys.Contains(k.Key))
+                     .OrderBy(k => k.Key, StringComparer.Ordinal))
+            sb.Append(kv.Key).Append('=').Append(kv.Value).Append('\n');
+        // ExportHierarchyData читает БД детерминированным порядком (ORDER BY), поэтому сериализация
+        // одного и того же состояния байт в байт совпадает от вызова к вызову.
+        sb.Append(JsonSerializer.Serialize(services.Db.ExportHierarchyData()));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(hash);
+    }
+
+    /// <summary>Запомнить текущее синхронизируемое содержимое как «совпадающее с диском» — вызывается
+    /// после успешной отправки И после приёма чужого конфига, т.е. в обеих точках, где локальное
+    /// состояние заведомо равно дисковому.</summary>
+    public static void RebaselineContentSignature(AppServices services) =>
+        services.Cfg.Set(ContentSignatureKey, ComputeContentSignature(services));
 
     /// <summary>Lets a non-administrator contribute their own AD-login roster entry to the shared
     /// config. Only the administrator gets the full Export() above (auto-push timer + manual button

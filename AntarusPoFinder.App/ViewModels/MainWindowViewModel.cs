@@ -994,6 +994,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private void RefreshPendingChangesBanner()
     {
         var pending = _services.Db.GetSyncPendingChanges();
+
+        // «Добавил тип шкафа и тут же удалил» (или переименовал/сменил префикс и вернул обратно) —
+        // накопитель хранит по строке-описанию на каждую правку, поэтому показывал бы «добавлен» И
+        // «удалён», намекая на 2 исходящих изменения, хотя справочник вернулся ровно к тому состоянию,
+        // что уже на диске. Сверяем сигнатуру синхронизируемого содержимого с базовой (последняя
+        // отправка/приём): совпала — отправлять реально нечего, чистим накопитель. База может
+        // отсутствовать (машина ещё ни разу не отправляла/не принимала конфиг) — тогда не трогаем.
+        if (pending.Count > 0)
+        {
+            var baseline = _services.Cfg.Get(Services.ConfigSyncService.ContentSignatureKey);
+            if (!string.IsNullOrEmpty(baseline) &&
+                Services.ConfigSyncService.ComputeContentSignature(_services) == baseline)
+            {
+                _services.Db.ClearSyncPendingChanges();
+                pending = _services.Db.GetSyncPendingChanges();
+            }
+        }
+
         PendingChangesCount = pending.Count;
         PendingChangesBannerVisible = pending.Count > 0;
         PendingChangesSummary = pending.Count == 0 ? "" : $"Изменений готово к отправке: {pending.Count}";
@@ -1001,6 +1019,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         PendingChangesDetails.Clear();
         foreach (var change in pending)
             PendingChangesDetails.Add(change.Description);
+    }
+
+    /// <summary>Полный список готовых к отправке правок — открывается отдельным окном (TextViewDialog),
+    /// как и «Показать» у входящих изменений. Раньше кнопка разворачивала список ВНУТРИ самой плашки
+    /// (ещё одной плашкой ниже) — пользователь просил вынести в отдельное окно.</summary>
+    [RelayCommand]
+    private void ShowPendingChangesDetails()
+    {
+        var pending = _services.Db.GetSyncPendingChanges();
+        var text = pending.Count == 0
+            ? "Изменений нет."
+            : string.Join(Environment.NewLine, pending.Select(c =>
+            {
+                var when = c.Ts.Length >= 16 ? c.Ts[..16].Replace('T', ' ') : c.Ts;
+                var who = string.IsNullOrWhiteSpace(c.Author) ? "" : $"  ·  {c.Author}";
+                return $"{when}{who}\n    {c.Description}";
+            }));
+        Views.TextViewDialog.Show(System.Windows.Application.Current?.MainWindow, "Готово к отправке", text);
     }
 
     [RelayCommand]
