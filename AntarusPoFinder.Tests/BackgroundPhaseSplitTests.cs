@@ -229,7 +229,7 @@ public class BackgroundPhaseSplitTests : IDisposable
 
             var stored = _db.GetFwVersionById(result.FwVersionId);
             Assert.NotNull(stored);
-            Assert.Equal("3.0.005.0001", stored!.VersionRaw);
+            Assert.Equal("3.0.0005.0001", stored!.VersionRaw);
             Assert.Equal("тестовая загрузка", stored.Description);
         }
         finally { File.Delete(src); }

@@ -18,7 +18,7 @@ public static class FwVersionTableExportService
     private sealed record TableGroup(EquipmentGroup Group, List<EquipmentSubType> Subtypes);
     private sealed record TableRow(ControllerModel Controller, ControllerModification Mod);
 
-    private static string Hw(int hw) => hw.ToString("D3");
+    private static string Hw(int hw) => hw.ToString("D4");
 
     public static void Generate(string filePath, Database db)
     {

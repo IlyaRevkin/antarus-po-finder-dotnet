@@ -103,7 +103,7 @@ public class DatabaseSmokeTests
     public void FwVersionNumber_BuildAndParse_RoundTrips()
     {
         var v = Core.Domain.FwVersionNumber.Build(2, 1, 42, 3, new System.DateTime(2026, 4, 22, 13, 48, 0));
-        Assert.Equal("2.1.042.0003.20260422_1348", v.ToString());
+        Assert.Equal("2.1.0042.0003.20260422_1348", v.ToString());
 
         var parsed = Core.Domain.FwVersionNumber.Parse(v.ToString());
         Assert.NotNull(parsed);
@@ -116,7 +116,7 @@ public class DatabaseSmokeTests
     {
         // "Добавлять дату/время" unchecked in Upload — manager decided the timestamp isn't needed.
         var v = Core.Domain.FwVersionNumber.Build(2, 1, 42, 3, includeDate: false);
-        Assert.Equal("2.1.042.0003", v.ToString());
+        Assert.Equal("2.1.0042.0003", v.ToString());
         Assert.Equal("", v.DtStr);
         Assert.Equal("hw42.sw3", v.Display);
 

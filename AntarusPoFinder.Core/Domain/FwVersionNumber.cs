@@ -6,8 +6,8 @@ namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>
 /// Firmware version string: eq_prefix.sub_prefix.hw_version.sw_version[.YYYYMMDD_HHMM]
-/// Example: 2.1.042.0001.20260422_1348 (НГР, КПЧ, hw42, sw1). hw_version is zero-padded to 3
-/// digits and sw_version to 4 digits in the raw string (numbers wider than that are shown in
+/// Example: 2.1.0042.0001.20260422_1348 (НГР, КПЧ, hw42, sw1). hw_version and sw_version are both
+/// zero-padded to 4 digits in the raw string (numbers wider than that are shown in
 /// full, not truncated) — HwVersion/SwVersion properties stay plain ints. The trailing date/time is
 /// optional — the manager decided it isn't actually needed, so upload/reservation now expose a
 /// checkbox ("Добавлять дату/время") instead of always stamping DateTime.Now.
@@ -36,7 +36,7 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
 
     public static FwVersionNumber Build(int eqPrefix, int subPrefix, int hwVersion, int swVersion, DateTime? dt = null, bool includeDate = true)
     {
-        var hwStr = hwVersion.ToString("D3", CultureInfo.InvariantCulture);
+        var hwStr = hwVersion.ToString("D4", CultureInfo.InvariantCulture);
         var swStr = swVersion.ToString("D4", CultureInfo.InvariantCulture);
 
         if (!includeDate)
@@ -70,7 +70,7 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
 
     /// <summary>Raw version without the trailing date/time suffix — "eq.sub.hw.sw" only.</summary>
     public string NumberPart =>
-        $"{EqPrefix}.{SubPrefix}.{HwVersion.ToString("D3", CultureInfo.InvariantCulture)}.{SwVersion.ToString("D4", CultureInfo.InvariantCulture)}";
+        $"{EqPrefix}.{SubPrefix}.{HwVersion.ToString("D4", CultureInfo.InvariantCulture)}.{SwVersion.ToString("D4", CultureInfo.InvariantCulture)}";
 
     /// <summary>Human-readable: 'hw42.sw1  (22.04.2026 13:48)', or just 'hw42.sw1' when no date/time was stamped.</summary>
     public string Display

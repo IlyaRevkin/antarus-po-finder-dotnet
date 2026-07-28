@@ -82,7 +82,7 @@ public class FirmwareUploadServiceTests : IDisposable
             Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
             Assert.True(result.IsSuccess);
             Assert.NotNull(result.Record);
-            Assert.Equal("3.0.005.0001", result.Record!.VersionRaw); // ТГР prefix=3, "—" prefix=0, SMH5 hw=5, first sw
+            Assert.Equal("3.0.0005.0001", result.Record!.VersionRaw); // ТГР prefix=3, "—" prefix=0, SMH5 hw=5, first sw
             Assert.True(Directory.Exists(result.DestinationFolder));
             Assert.True(File.Exists(Path.Combine(result.DestinationFolder!, result.DestinationFilename!)));
             Assert.True(File.Exists(Path.Combine(result.DestinationFolder!, "CHANGELOG.md")));
