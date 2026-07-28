@@ -378,6 +378,15 @@
         </Setter>
     </Style>
 
+    <!-- Неявный (без ключа) стиль ComboBoxItem = ThemedComboBoxItem, чтобы КАЖДЫЙ выпадающий список
+         в приложении получал темизированные пункты автоматически, а не только те ComboBox, к которым
+         явно применён ItemContainerStyle через implicit-стиль ComboBox ниже. Реальный баг, найденный
+         живым прогоном: комбобокс роли в окне «Смена роли» (RoleSwitchDialog, отдельное Window) не
+         подхватывал ItemContainerStyle и рисовал выбранный пункт СИСТЕМНЫМ синим фоном с тёмным
+         текстом — «чёрное на синем» в светлой теме, ровно как жаловался пользователь. Implicit-стиль
+         покрывает все окна и диалоги разом. -->
+    <Style TargetType="ComboBoxItem" BasedOn="{StaticResource ThemedComboBoxItem}"/>
+
     <!-- ComboBox — same reasoning as ComboBoxItem above: the default template's "closed" display
          area ignores our Background/Foreground setters (renders near-white regardless of theme),
          so it needs a full custom template rather than property setters alone. -->
