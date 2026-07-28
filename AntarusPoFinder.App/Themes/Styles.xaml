@@ -348,25 +348,29 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
-                        <!-- Same implicit-TextBlock-style precedence bug as PrimaryButton: DisplayMemberPath
-                             items render as a plain string, wrapped in a TextBlock that otherwise picks up
-                             the app-wide TextBlock style (dark TextBrush) over this item's own Foreground,
-                             leaving highlighted (accent-blue) rows unreadable in light theme. -->
-                        <Border.Resources>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}"/>
-                            </Style>
-                        </Border.Resources>
+                    <!-- Полоса-индикатор слева (BorderThickness 3,0,0,0) отмечает выбранную строку.
+                         Ховер/выделение окрашивают ТОЛЬКО фон нейтральным тоном (BgSidebarBrush),
+                         который читается с обычным цветом текста в ОБЕИХ темах. Раньше подсветка красила
+                         фон в синий AccentBrush и рассчитывала на светлый Foreground через implicit-стиль
+                         TextBlock в Border.Resources — но у DisplayMemberPath/ItemTemplate-контента этот
+                         стиль до сгенерированного шаблоном текста НЕ доходит (implicit-стиль из .Resources
+                         элемента шаблона не попадает в область поиска для контента ContentPresenter),
+                         поэтому app-wide тёмный TextBrush выигрывал → «чёрный текст на синем» в светлой
+                         теме (в тёмной TextBrush и так светлый, оттого жалоба только про светлую). Также
+                         прежний IsSelected=BgInputBrush в светлой теме = #FFFFFF, т.е. невидим на белом
+                         фоне выпадающего списка. Нейтральный фон + акцентная полоса убирают саму
+                         зависимость от прокраски текста. -->
+                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}"
+                            BorderBrush="Transparent" BorderThickness="3,0,0,0">
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgInputBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -687,6 +691,13 @@
     <Style x:Key="RoomyDataGrid" TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
         <Setter Property="RowHeight" Value="34"/>
         <Setter Property="ColumnHeaderHeight" Value="38"/>
+        <!-- Вертикальные разделители между колонками. Базовый стиль DataGrid рисует только
+             горизонтальные линии; в таблице иерархии из-за этого «Тип шкафа» (короткие ПЖ/НГР слева)
+             визуально сливался с соседним «Префикс типа» — жалоба «тип шкафа к левому краю съехал и
+             слипся». Тем же тоном, что и горизонтальные линии (BorderBrush2), чтобы вид оставался
+             единым, а не появлялась жирная сетка. -->
+        <Setter Property="GridLinesVisibility" Value="All"/>
+        <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrush2}"/>
     </Style>
 
     <!-- Card container (search results, dialogs) -->

@@ -16,6 +16,30 @@
              контейнером ItemsControl, поэтому у него самого этого свойства нет, но DataTrigger умеет
              брать его через привязку у предка. BgSidebarBrush — тот же лёгкий тон, что уже используется
              для похожей цели в DataGridRow (см. Styles.xaml), а не новый цвет "от себя". -->
+        <!-- Строки истории — это ЖУРНАЛ, а не список для выбора: выделять их незачем. App-wide стиль
+             ListBoxItem на IsSelected красит фон в AccentBrush (синий), но текст записи и бейдж
+             категории имеют СВОЙ Foreground/фон (MutedText, BgCardBrush) и по синему не перекрашиваются —
+             отсюда жалоба «чёрный текст еле видно на синем, а категория светлая». Локальный контейнер
+             убирает Accent-выделение совсем: фон всегда прозрачный (чередование и разделитель рисует
+             внутренний Border записи), на hover — лёгкий тон, без синего. -->
+        <Style x:Key="NotificationRowItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="NotificationRowBorderStyle" TargetType="Border">
             <Setter Property="Background" Value="Transparent"/>
             <Style.Triggers>
@@ -94,6 +118,7 @@
              и колесо мыши/полоса прокрутки двигают список плавно независимо от того, насколько высокая
              конкретная запись. -->
         <ListBox Grid.Row="3" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent"
+                 ItemContainerStyle="{StaticResource NotificationRowItem}"
                  VirtualizingPanel.ScrollUnit="Pixel" AlternationCount="2">
             <ListBox.ItemTemplate>
                 <DataTemplate>
@@ -124,18 +149,22 @@
                              ширину, а тексту физически не может достаться больше места, чем
                              осталось — переносится он ДО кнопки, а не под неё. -->
                         <DockPanel LastChildFill="True">
-                            <TextBlock DockPanel.Dock="Left" Text="{Binding WhenLabel}" Style="{StaticResource MutedText}"
-                                       Margin="0,0,10,0" VerticalAlignment="Center"/>
-                            <!-- Category badge — clickable, opens the per-category settings panel above
-                                 (item 9: "no way to configure per-category behavior directly from a
-                                 notification"). Not just decorative text: this is the reachable path
-                                 from a notification row to its category's on/off and unread-count
-                                 switches. -->
-                            <Border DockPanel.Dock="Left" Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="6,2" Margin="0,0,10,0"
-                                    VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="CategoryBadge_Click"
-                                    ToolTip="Настроить эту категорию уведомлений">
-                                <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="11"/>
-                            </Border>
+                            <!-- Время и категория — компактной колонкой слева (жалоба: раньше они
+                                 занимали много места по горизонтали в ущерб самому тексту уведомления).
+                                 Мелкий шрифт, время над бейджем, минимальные отступы. -->
+                            <StackPanel DockPanel.Dock="Left" Margin="0,0,10,0" VerticalAlignment="Center" Width="112">
+                                <TextBlock Text="{Binding WhenLabel}" Style="{StaticResource MutedText}" FontSize="11"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <!-- Category badge — clickable, opens the per-category settings panel above
+                                     (item 9: "no way to configure per-category behavior directly from a
+                                     notification"). Not just decorative text: this is the reachable path
+                                     from a notification row to its category's on/off and unread-count switches. -->
+                                <Border Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="5,1" Margin="0,3,0,0"
+                                        HorizontalAlignment="Left" Cursor="Hand" MouseLeftButtonUp="CategoryBadge_Click"
+                                        ToolTip="Настроить эту категорию уведомлений">
+                                    <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="10"/>
+                                </Border>
+                            </StackPanel>
                             <!-- Кнопка пристыкована справа (DockPanel.Dock="Right") — своя,
                                  фиксированная по содержимому ширина, всегда у правого края строки;
                                  её место вычитается из доступной ширины ДО того, как текст ниже
