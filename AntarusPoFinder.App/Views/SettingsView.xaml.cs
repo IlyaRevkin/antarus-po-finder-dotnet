@@ -520,9 +520,25 @@ public partial class SettingsView : UserControl
     private class LayoutFallbackRow
     {
         public string QueryKey { get; init; } = "";
-        public int YesCount { get; init; }
-        public int NoCount { get; init; }
+        public int YesCount { get; set; }
+        public int NoCount { get; set; }
         public string DecisionLabel { get; init; } = "";
+    }
+
+    /// <summary>Правка «да»/«нет» прямо в таблице — задаёт накопленные ответы напрямую и пересчитывает
+    /// решение по тем же числам, что и обычный ответ. WPF сначала пишет отредактированное значение в
+    /// свойство строки, поэтому читаем из строки (после отложенного применения edit'а).</summary>
+    private void LayoutFallbackGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit || e.Row.Item is not LayoutFallbackRow row) return;
+        var edited = (e.EditingElement as System.Windows.Controls.TextBox)?.Text;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _services.Db.SetLayoutFallbackCounts(row.QueryKey, row.YesCount, row.NoCount,
+                _services.Cfg.LayoutFallbackThreshold());
+            RefreshLayoutFallbackGrid();
+        }), System.Windows.Threading.DispatcherPriority.Background);
+        _ = edited;
     }
 
     private void RefreshLayoutFallbackGrid()
@@ -622,7 +638,26 @@ public partial class SettingsView : UserControl
         public string SubtypeName { get; init; } = "";
         public string ControllerName { get; init; } = "";
         public string VersionRaw { get; init; } = "";
-        public int Uses { get; init; }
+        public int Uses { get; set; }
+        /// <summary>Локальная строка fw_versions, к которой относится эта пара запрос→версия — нужна
+        /// для записи ручной правки веса. Null, если строка целиком чужая и локальной версии под неё
+        /// нет (тогда править нечего — правка идёт у машины-источника).</summary>
+        public int? LocalVersionId { get; init; }
+    }
+
+    /// <summary>Ручная правка числа выборов прямо в таблице — задаёт вклад ЭТОЙ машины по паре
+    /// запрос→версия (SetLocalFwUsage). Отображаемое число — сумма своего и чужого вкладов, поэтому
+    /// после правки таблица перечитывается: при наличии чужого вклада показанное значение может
+    /// отличаться от введённого на его величину (для одиночной машины совпадает).</summary>
+    private void FwUsageGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit || e.Row.Item is not FwUsageRow row) return;
+        if (row.LocalVersionId is not int id) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _services.Db.SetLocalFwUsage(row.QueryKey, id, row.Uses);
+            RefreshUsageStats();
+        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>Таблица просмотра накопленной статистики выборов — только чтение, сортировка по
@@ -639,6 +674,7 @@ public partial class SettingsView : UserControl
                 ControllerName = r.ControllerName,
                 VersionRaw = r.VersionRaw,
                 Uses = r.Uses,
+                LocalVersionId = r.LocalVersionId,
             })
             .ToList();
     }
@@ -773,6 +809,7 @@ public partial class SettingsView : UserControl
         RollbackFirmwareBtn.Visibility = visible;
         SetCurrentFirmwareBtn.Visibility = visible;
         UnrollbackFirmwareBtn.Visibility = visible;
+        UpdateFirmwareActionState();
     }
 
     /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
@@ -1715,6 +1752,32 @@ public partial class SettingsView : UserControl
     private void FwGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (DataGridClickGuard.IsOverDataRow(e)) EditFirmware_Click(sender, e);
+    }
+
+    private void FwGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateFirmwareActionState();
+
+    /// <summary>Доступность кнопок статуса зависит от выбранной версии — раньше они были включены
+    /// всегда, и «Вернуть в активные» у активной прошивки лишь ругалось диалогом после нажатия.
+    /// Теперь недоступное действие сразу серое: откатанную можно только вернуть в активные, активную —
+    /// откатить или (если она не текущая) сделать текущей.</summary>
+    private void UpdateFirmwareActionState()
+    {
+        var v = FwGrid.SelectedItem is FwRow row ? row.Record : null;
+        if (v is null)
+        {
+            SetCurrentFirmwareBtn.IsEnabled = false;
+            RollbackFirmwareBtn.IsEnabled = false;
+            UnrollbackFirmwareBtn.IsEnabled = false;
+            return;
+        }
+
+        var isRolledBack = v.Status == "rolled_back";
+        var label = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var l) ? l : "";
+        var isCurrent = label == FwHistoryStatus.Current || label == FwHistoryStatus.CurrentForHw(v.HwVersion);
+
+        RollbackFirmwareBtn.IsEnabled = !isRolledBack;
+        UnrollbackFirmwareBtn.IsEnabled = isRolledBack;
+        SetCurrentFirmwareBtn.IsEnabled = !isRolledBack && !isCurrent;
     }
 
     private void EditFirmware_Click(object sender, RoutedEventArgs e)

@@ -120,7 +120,68 @@ public partial class EditFirmwareDialog : Window
                 AttachmentsPanel.Visibility = Visibility.Visible;
                 BuildSubtypeChecks();
             }
+            LoadSearchWeights(v.Id.Value);
         }
+    }
+
+    // ── Вес в поиске (по запросам) ────────────────────────────────────────────
+
+    /// <summary>Мутабельная строка редактора веса — record с get-only не годится для правки прямо
+    /// в DataGrid.</summary>
+    public sealed class WeightRow
+    {
+        public string QueryKey { get; set; } = "";
+        public int Uses { get; set; }
+    }
+
+    private readonly System.Collections.ObjectModel.ObservableCollection<WeightRow> _weightRows = new();
+
+    private void LoadSearchWeights(int fwVersionId)
+    {
+        foreach (var (q, uses) in _db.GetFwUsageQueriesForVersion(fwVersionId))
+            _weightRows.Add(new WeightRow { QueryKey = q, Uses = uses });
+        WeightGrid.ItemsSource = _weightRows;
+        WeightPanel.Visibility = Visibility.Visible;
+    }
+
+    private void AddWeightRow_Click(object sender, RoutedEventArgs e)
+    {
+        WeightGrid.CommitEdit(DataGridEditingUnit.Row, true);
+        var row = new WeightRow { QueryKey = "", Uses = 1 };
+        _weightRows.Add(row);
+        WeightGrid.SelectedItem = row;
+        WeightGrid.ScrollIntoView(row);
+    }
+
+    private void RemoveWeightRow_Click(object sender, RoutedEventArgs e)
+    {
+        if (WeightGrid.SelectedItem is WeightRow row) _weightRows.Remove(row);
+    }
+
+    private void ClearWeights_Click(object sender, RoutedEventArgs e) => _weightRows.Clear();
+
+    /// <summary>Сохранить веса: приводим строки редактора к нормализованному запросу
+    /// (SearchService.UsageKey — тот же ключ, что пишет обычный выбор из поиска, иначе ручной вес не
+    /// сложился бы с накопленным по тому же запросу), и синхронизируем с БД — удаляем убранные строки,
+    /// проставляем новые значения. Пустой запрос пропускаем.</summary>
+    private void ApplySearchWeights()
+    {
+        if (_record.Id is not int id) return;
+        WeightGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
+        var desired = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var row in _weightRows)
+        {
+            var key = AntarusPoFinder.Core.Services.SearchService.UsageKey(row.QueryKey ?? "");
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            desired[key] = Math.Max(0, row.Uses); // 0 = убрать (SetLocalFwUsage удалит строку)
+        }
+
+        var existing = _db.GetFwUsageQueriesForVersion(id).Select(r => r.QueryKey).ToHashSet(StringComparer.Ordinal);
+        foreach (var gone in existing.Where(k => !desired.ContainsKey(k)))
+            _db.SetLocalFwUsage(gone, id, 0);
+        foreach (var (key, uses) in desired)
+            _db.SetLocalFwUsage(key, id, uses);
     }
 
     private (string GroupName, string SubtypeName, string ControllerName)? _names;
@@ -255,6 +316,7 @@ public partial class EditFirmwareDialog : Window
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         ApplyAttachments();
         ApplySubtypeLinks();
+        ApplySearchWeights();
         DialogResult = true;
     }
 

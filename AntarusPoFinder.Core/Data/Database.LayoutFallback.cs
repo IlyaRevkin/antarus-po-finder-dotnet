@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace AntarusPoFinder.Core.Data;
@@ -89,6 +90,30 @@ public partial class Database
                 GetString(reader, "query_key"), GetInt(reader, "yes_count"), GetInt(reader, "no_count"), decision));
         }
         return result;
+    }
+
+    /// <summary>Ручная правка накопленных ответов прямо в таблице обучения (Настройки → Общие):
+    /// оператор задаёт «да»/«нет» напрямую, а не подтверждениями по одному. После записи решение
+    /// пересчитывается по тому же перевесу, что и при обычном ответе (см. RecordLayoutFallbackFeedback),
+    /// чтобы правка чисел сразу отражалась на поведении подсказки. Пустой запрос игнорируется;
+    /// счётчики ниже нуля подтягиваются к нулю.</summary>
+    public void SetLayoutFallbackCounts(string queryKey, int yes, int no, int threshold = LayoutFallbackDecisionThreshold)
+    {
+        if (string.IsNullOrWhiteSpace(queryKey)) return;
+        yes = Math.Max(0, yes);
+        no = Math.Max(0, no);
+        ExecuteNonQuery("""
+            INSERT INTO layout_fallback_feedback(query_key, yes_count, no_count) VALUES(@k, @yes, @no)
+            ON CONFLICT(query_key) DO UPDATE SET yes_count = @yes, no_count = @no
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@k", queryKey.Trim());
+            cmd.Parameters.AddWithValue("@yes", yes);
+            cmd.Parameters.AddWithValue("@no", no);
+        });
+
+        var decision = yes - no >= threshold ? "always" : no - yes >= threshold ? "never" : "ask";
+        SetLayoutFallbackDecision(queryKey.Trim(), decision);
     }
 
     public void ResetLayoutFallbackLearning(string queryKey) =>

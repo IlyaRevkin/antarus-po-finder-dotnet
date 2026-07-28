@@ -147,6 +147,31 @@
             </Grid>
         </StackPanel>
 
+        <!-- Вес прошивки в поиске по конкретному запросу. Это та же «статистика выборов» (по паре
+             запрос→версия), но правится вручную и адресно: наладчик знает, что по «пожар» надо
+             ставить именно эту версию, и поднимает её вес, не дожидаясь, пока частота накопится сама
+             (или гасит случайно накликанное). Информация внутренняя — в самом поиске она не
+             показывается, только влияет на порядок выдачи; поэтому и живёт здесь, в модерации, а не
+             на карточке. Правится только вклад ЭТОЙ машины (SetLocalFwUsage). -->
+        <StackPanel x:Name="WeightPanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="ВЕС В ПОИСКЕ (ПО ЗАПРОСАМ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Text="Сколько раз по данному запросу выбрали именно эту версию. Чем больше вес, тем выше она в выдаче по этому запросу. Можно задать вручную: добавить запрос и число, поменять или обнулить вес. В самом поиске этот вес не виден — он только влияет на порядок."/>
+            <DataGrid x:Name="WeightGrid" AutoGenerateColumns="False" MaxHeight="150" Margin="0,0,0,6"
+                      Style="{StaticResource RoomyDataGrid}" IsReadOnly="False" CanUserAddRows="False"
+                      HeadersVisibility="Column">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Запрос" Binding="{Binding QueryKey, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                    <DataGridTextColumn Header="Вес" Binding="{Binding Uses, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Добавить запрос" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddWeightRow_Click"/>
+                <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RemoveWeightRow_Click"/>
+                <Button Content="Обнулить всё" Style="{StaticResource SecondaryButton}" Click="ClearWeights_Click"/>
+            </StackPanel>
+        </StackPanel>
+
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
             <Button Content="Сохранить" Width="90" Click="Save_Click" IsDefault="True"/>

@@ -20,7 +20,7 @@ public record SharedFwUsageRow(string Origin, string QueryKey, string SubtypeSyn
 /// внутренних id. Uses — сумма своего вклада и уже известного чужого (см. GetAllFwUsage), то же самое
 /// сложение, что и в GetFwUsageForQuery, только сразу по всем запросам, а не по одному.</summary>
 public record FwUsageStatRow(string QueryKey, string SubtypeName, string ControllerName, string VersionRaw,
-    int Uses, string LastUsedAt);
+    int Uses, string LastUsedAt, int? LocalVersionId = null);
 
 /// <summary>«По такому запросу обычно ставят вот эту версию» — счётчик выбора версии из выдачи
 /// поиска.
@@ -62,6 +62,51 @@ public partial class Database
             cmd.Parameters.AddWithValue("@v", fwVersionId);
             cmd.Parameters.AddWithValue("@t", NowIso());
         });
+    }
+
+    /// <summary>Задать вклад ЭТОЙ машины по паре «запрос → версия» напрямую (ручная правка веса в
+    /// таблице статистики и в модерации прошивки — оператор поднимает/опускает версию под запрос
+    /// осознанно, не дожидаясь, пока частота накопится сама). Ноль и меньше — убрать строку совсем.
+    /// Правится только СВОЙ вклад (fw_search_usage); чужой (fw_usage_shared) приходит снимком с других
+    /// машин и здесь не трогается — иначе следующая синхронизация всё равно вернула бы его значение.</summary>
+    public void SetLocalFwUsage(string queryKey, int fwVersionId, int uses)
+    {
+        if (string.IsNullOrWhiteSpace(queryKey) || fwVersionId <= 0) return;
+        if (uses <= 0)
+        {
+            ExecuteNonQuery("DELETE FROM fw_search_usage WHERE query_key=@q AND fw_version_id=@v", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@q", queryKey.Trim());
+                cmd.Parameters.AddWithValue("@v", fwVersionId);
+            });
+            return;
+        }
+        ExecuteNonQuery("""
+            INSERT INTO fw_search_usage (query_key, fw_version_id, uses, last_used_at)
+            VALUES (@q, @v, @u, @t)
+            ON CONFLICT(query_key, fw_version_id) DO UPDATE SET uses = @u, last_used_at = @t
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@q", queryKey.Trim());
+            cmd.Parameters.AddWithValue("@v", fwVersionId);
+            cmd.Parameters.AddWithValue("@u", uses);
+            cmd.Parameters.AddWithValue("@t", NowIso());
+        });
+    }
+
+    /// <summary>Запросы, по которым ЭТА машина уже засчитывала выбор конкретной версии, с их весом —
+    /// для редактора «вес в поиске» в окне модерации прошивки. Только свой вклад: чужой правится не
+    /// здесь, а у своей машины-источника.</summary>
+    public List<(string QueryKey, int Uses)> GetFwUsageQueriesForVersion(int fwVersionId)
+    {
+        var result = new List<(string, int)>();
+        if (fwVersionId <= 0) return result;
+        using var reader = ExecuteReader(
+            "SELECT query_key, uses FROM fw_search_usage WHERE fw_version_id=@v ORDER BY uses DESC, query_key",
+            cmd => cmd.Parameters.AddWithValue("@v", fwVersionId));
+        while (reader.Read())
+            result.Add((GetString(reader, "query_key"), GetInt(reader, "uses")));
+        return result;
     }
 
     /// <summary>Сколько раз каждую версию выбирали ИМЕННО по этому запросу — на всех машинах вместе.
@@ -122,7 +167,7 @@ public partial class Database
         var byKey = new Dictionary<(string Query, int SubtypeId, int ControllerId, string VersionRaw), FwUsageStatRow>();
 
         void Add(string query, int subtypeId, int controllerId, string subtypeName, string controllerName,
-            string versionRaw, int uses, string lastUsedAt)
+            string versionRaw, int uses, string lastUsedAt, int localVersionId)
         {
             var key = (query, subtypeId, controllerId, versionRaw);
             if (byKey.TryGetValue(key, out var existing))
@@ -130,13 +175,17 @@ public partial class Database
                 {
                     Uses = existing.Uses + uses,
                     LastUsedAt = string.CompareOrdinal(lastUsedAt, existing.LastUsedAt) > 0 ? lastUsedAt : existing.LastUsedAt,
+                    // Локальный id одной и той же прошивки одинаков в обеих ветках (свой вклад и чужой
+                    // резолвятся в одну строку fw_versions), поэтому берём первый ненулевой.
+                    LocalVersionId = existing.LocalVersionId ?? (localVersionId > 0 ? localVersionId : null),
                 };
             else
-                byKey[key] = new FwUsageStatRow(query, subtypeName, controllerName, versionRaw, uses, lastUsedAt);
+                byKey[key] = new FwUsageStatRow(query, subtypeName, controllerName, versionRaw, uses, lastUsedAt,
+                    localVersionId > 0 ? localVersionId : null);
         }
 
         using (var reader = ExecuteReader("""
-            SELECT u.query_key, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
+            SELECT u.query_key, fv.id AS fw_id, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
                    fv.version_raw, u.uses, u.last_used_at
             FROM fw_search_usage u
             JOIN fw_versions        fv ON fv.id = u.fw_version_id
@@ -146,10 +195,11 @@ public partial class Database
             while (reader.Read())
                 Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
                     GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
-                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"));
+                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"),
+                    GetInt(reader, "fw_id"));
 
         using (var reader = ExecuteReader($"""
-            SELECT u.query_key, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
+            SELECT u.query_key, fv.id AS fw_id, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
                    fv.version_raw, u.uses, u.last_used_at
             FROM fw_usage_shared u
             {SharedUsageJoin}
@@ -157,7 +207,8 @@ public partial class Database
             while (reader.Read())
                 Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
                     GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
-                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"));
+                    GetString(reader, "version_raw"), GetInt(reader, "uses"), GetString(reader, "last_used_at"),
+                    GetInt(reader, "fw_id"));
 
         return byKey.Values
             .OrderByDescending(r => r.Uses)
