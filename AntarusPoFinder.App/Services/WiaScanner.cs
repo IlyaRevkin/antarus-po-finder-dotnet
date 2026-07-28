@@ -8,11 +8,13 @@ using Microsoft.CSharp.RuntimeBinder;
 
 namespace AntarusPoFinder.App.Services;
 
-/// <summary>Scans directly through the WIA Automation Layer COM API (ProgID "WIA.CommonDialog")
-/// instead of launching the separate "Сканер Windows" app — ShowAcquireImage() drives the
-/// scanner's own acquire/device-selection UI in-process and hands back the scanned image, so no
-/// external process window ever opens. Uses late-bound `dynamic` COM calls so the app doesn't need
-/// a WIA type-library reference (wiaaut.dll is a Windows component, not a NuGet package).</summary>
+/// <summary>Scans directly through the WIA Automation Layer COM API. The primary path connects to
+/// the default scanner via WIA.DeviceManager and calls Items[1].Transfer() — a fully silent, in-
+/// process acquire with NO window at all (this is what the operator asked for: press "Сканировать"
+/// and the scanner just runs). Only if no scanner can be enumerated do we fall back to
+/// WIA.CommonDialog's acquire UI, so setups that expose a scanner only through the common dialog
+/// still work. Uses late-bound `dynamic` COM calls so the app doesn't need a WIA type-library
+/// reference (wiaaut.dll is a Windows component, not a NuGet package).</summary>
 public static class WiaScanner
 {
     /// <summary>WIA_IPS_XRES / WIA_IPS_YRES — the scan item's horizontal/vertical resolution
@@ -20,47 +22,36 @@ public static class WiaScanner
     private const string PropHorizontalRes = "6147";
     private const string PropVerticalRes = "6148";
 
+    /// <summary>WiaDeviceType.ScannerDeviceType — filters the device list to scanners (skips
+    /// cameras/video, which WIA also enumerates).</summary>
+    private const int ScannerDeviceType = 1;
+
+    /// <summary>wiaFormatBMP — the image format Transfer() hands back (a plain BMP we re-encode to
+    /// PDF below).</summary>
+    private const string FormatBmp = "{B96B3CAB-0728-11D3-9D7B-0000F81EF32E}";
+
     /// <summary>Scans, then wraps the result into a single-page PDF at <paramref name="destPath"/>
     /// (should end in .pdf) sized to the document's real physical size at <paramref name="dpi"/>.
-    /// Returns false with <paramref name="error"/> null if the user cancelled the scan dialog, or
-    /// non-null if WIA itself is unavailable/failed.</summary>
+    /// Returns false with <paramref name="error"/> null if the user cancelled a fallback scan
+    /// dialog, or non-null if WIA itself is unavailable/failed.</summary>
     public static bool TryScan(string destPath, int dpi, out string? error)
     {
         error = null;
-        var dialogType = Type.GetTypeFromProgID("WIA.CommonDialog");
-        if (dialogType is null)
-        {
-            error = "WIA (служба сканирования Windows) недоступна на этом компьютере.";
-            return false;
-        }
-
-        TryApplyResolution(dpi);
-
-        object? dialog = null;
         var tempBmp = Path.Combine(Path.GetTempPath(), $"scan_{Guid.NewGuid():N}.bmp");
         try
         {
-            dialog = Activator.CreateInstance(dialogType);
-            dynamic dyn = dialog!;
-            // UseCommonUI:false skips WIA's own property/preview screen (the "another window
-            // where you click Scan again" the user was seeing) and scans straight from the
-            // default device; AlwaysSelectDevice:false skips the device-picker too when there's
-            // just one scanner. Falls back to the full dialog if this overload isn't supported.
-            dynamic? imageFile;
-            try
+            // Primary: silent direct transfer from the default scanner — no window opens.
+            if (TryDirectTransfer(dpi, tempBmp, out error))
             {
-                imageFile = dyn.ShowAcquireImage(AlwaysSelectDevice: false, UseCommonUI: false);
+                ConvertToPdf(tempBmp, destPath, dpi);
+                return true;
             }
-            catch (RuntimeBinderException)
-            {
-                // This WIA version doesn't support the named-argument overload — fall back to
-                // the full acquire dialog rather than failing the scan outright.
-                imageFile = dyn.ShowAcquireImage();
-            }
-            if (imageFile is null) return false; // user cancelled the scan
+            // error != null → a real scanner error (busy/no paper/driver) already surfaced, stop.
+            if (error is not null) return false;
 
-            imageFile.SaveFile(tempBmp);
-            Marshal.ReleaseComObject(imageFile);
+            // error == null → no scanner was enumerable through DeviceManager at all. Fall back to
+            // the common acquire dialog so device-selection-only setups still function.
+            if (!TryDialogAcquire(dpi, tempBmp, out error)) return false;
 
             ConvertToPdf(tempBmp, destPath, dpi);
             return true;
@@ -72,39 +63,101 @@ public static class WiaScanner
         }
         finally
         {
-            if (dialog is not null) Marshal.ReleaseComObject(dialog);
             try { if (File.Exists(tempBmp)) File.Delete(tempBmp); } catch { /* best effort */ }
         }
     }
 
-    /// <summary>Best-effort: asks the default scanner to acquire at <paramref name="dpi"/>. Not
-    /// every driver exposes or allows changing this property, so any failure here just means the
-    /// scan proceeds at the device's own default resolution instead.</summary>
-    private static void TryApplyResolution(int dpi)
+    /// <summary>Connects to the first available scanner and transfers a page straight to
+    /// <paramref name="tempBmp"/> with no UI. Returns true on success; false with
+    /// <paramref name="error"/> null when there simply is no scanner to drive (caller then falls
+    /// back to the dialog), or non-null when a scanner was found but the acquire itself failed.</summary>
+    private static bool TryDirectTransfer(int dpi, string tempBmp, out string? error)
     {
+        error = null;
         var managerType = Type.GetTypeFromProgID("WIA.DeviceManager");
-        if (managerType is null) return;
+        if (managerType is null) return false; // WIA not present → try the CommonDialog path
 
         object? manager = null;
         object? device = null;
+        object? imageFile = null;
         try
         {
             manager = Activator.CreateInstance(managerType);
             dynamic dyn = manager!;
-            if (dyn.DeviceInfos.Count < 1) return;
+            dynamic infos = dyn.DeviceInfos;
 
-            dynamic deviceInfo = dyn.DeviceInfos[1];
-            device = deviceInfo.Connect();
+            dynamic? scannerInfo = null;
+            for (int i = 1; i <= infos.Count; i++) // WIA collections are 1-based
+            {
+                dynamic info = infos[i];
+                if ((int)info.Type == ScannerDeviceType) { scannerInfo = info; break; }
+            }
+            if (scannerInfo is null) return false; // no scanner → let caller fall back to dialog
+
+            device = scannerInfo.Connect();
             dynamic dev = device!;
             dynamic item = dev.Items[1];
             TrySetProperty(item.Properties, PropHorizontalRes, dpi);
             TrySetProperty(item.Properties, PropVerticalRes, dpi);
+
+            imageFile = item.Transfer(FormatBmp);
+            dynamic img = imageFile!;
+            img.SaveFile(tempBmp);
+            return true;
         }
-        catch { /* scanner may be busy/unavailable — the acquire dialog below will report that */ }
+        catch (COMException ex)
+        {
+            // A scanner exists but the scan failed (busy, no paper, cover open, driver error).
+            // Report it rather than silently opening a dialog — the operator asked for a direct scan.
+            error = $"Не удалось выполнить сканирование:\n{ex.Message}";
+            return false;
+        }
         finally
         {
+            if (imageFile is not null) Marshal.ReleaseComObject(imageFile);
             if (device is not null) Marshal.ReleaseComObject(device);
             if (manager is not null) Marshal.ReleaseComObject(manager);
+        }
+    }
+
+    /// <summary>Fallback acquire through WIA.CommonDialog when no scanner could be enumerated
+    /// directly. Returns false with <paramref name="error"/> null if the user cancelled.</summary>
+    private static bool TryDialogAcquire(int dpi, string tempBmp, out string? error)
+    {
+        error = null;
+        var dialogType = Type.GetTypeFromProgID("WIA.CommonDialog");
+        if (dialogType is null)
+        {
+            error = "WIA (служба сканирования Windows) недоступна на этом компьютере.";
+            return false;
+        }
+
+        object? dialog = null;
+        object? imageFile = null;
+        try
+        {
+            dialog = Activator.CreateInstance(dialogType);
+            dynamic dyn = dialog!;
+            dynamic? acquired;
+            try
+            {
+                acquired = dyn.ShowAcquireImage(AlwaysSelectDevice: false, UseCommonUI: false);
+            }
+            catch (RuntimeBinderException)
+            {
+                acquired = dyn.ShowAcquireImage();
+            }
+            if (acquired is null) return false; // user cancelled
+
+            imageFile = acquired;
+            dynamic img = imageFile!;
+            img.SaveFile(tempBmp);
+            return true;
+        }
+        finally
+        {
+            if (imageFile is not null) Marshal.ReleaseComObject(imageFile);
+            if (dialog is not null) Marshal.ReleaseComObject(dialog);
         }
     }
 
