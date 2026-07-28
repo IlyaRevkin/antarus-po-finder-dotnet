@@ -466,6 +466,12 @@ public partial class UploadView : UserControl
     private const string KeepSwVersionUnavailableTooltip =
         "Недоступно: для выбранного шкафа/подтипа/контроллера/HW ещё нет ни одной загруженной версии — увеличивать пока нечего.";
 
+    private const string RollbackAvailableTooltip =
+        "Пометить последнюю активную прошивку для выбранного шкафа/подтипа/контроллера как откатанную. Следующая загрузка получит тот же SW-номер заново. Файлы на диске не удаляются.";
+
+    private const string RollbackUnavailableTooltip =
+        "Недоступно: для выбранного шкафа/подтипа/контроллера/HW нет активных версий — откатывать нечего.";
+
     /// <summary>«Не увеличивать версию ПО (sw)» имеет смысл, только если у выбранной тройки подтип/
     /// контроллер/HW уже ЕСТЬ хотя бы одна активная версия — сама галочка просит взять SW-номер ТЕКУЩЕЙ
     /// последней версии вместо следующего по порядку (см. FirmwareUploadService и UpdatePreview ниже),
@@ -486,6 +492,14 @@ public partial class UploadView : UserControl
         KeepSwVersionCheck.ToolTip = available ? KeepSwVersionAvailableTooltip : KeepSwVersionUnavailableTooltip;
         if (!available && KeepSwVersionCheck.IsChecked == true)
             KeepSwVersionCheck.IsChecked = false;
+
+        // «Откатить последнюю версию» опирается ровно на ту же тройку подтип/контроллер/HW и на наличие
+        // последней активной версии (GetLastActiveFwVersion — см. Rollback_Click), что и галочка выше:
+        // без активной версии откатывать нечего. Раньше кнопка была доступна всегда и на пустой
+        // комбинации упиралась в сообщение «Нет активных версий для отката» — теперь она сразу серая
+        // с поясняющим тултипом, по аналогии с «Не увеличивать версию ПО».
+        RollbackBtn.IsEnabled = available;
+        RollbackBtn.ToolTip = available ? RollbackAvailableTooltip : RollbackUnavailableTooltip;
     }
 
     /// <summary>Чистое условие доступности — вынесено из UpdateKeepSwVersionAvailability отдельным

@@ -444,8 +444,10 @@
                     <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,8,0,8" TextWrapping="Wrap"/>
 
                     <Button x:Name="UploadBtn" Content="Загрузить прошивку" Height="40" Click="Upload_Click"/>
-                    <Button x:Name="RollbackBtn" Content="Откатить последнюю версию" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Click="Rollback_Click"
-                            ToolTip="Пометить последнюю активную прошивку для выбранного шкафа/подтипа/контроллера как откатанную. Следующая загрузка получит тот же SW-номер заново. Файлы на диске не удаляются."/>
+                    <!-- IsEnabled/ToolTip задаются кодом (UpdateKeepSwVersionAvailability): кнопка доступна
+                         только когда для выбранного подтип/контроллер/HW есть последняя активная версия —
+                         откатывать иначе нечего. По умолчанию серая, до первого пересчёта доступности. -->
+                    <Button x:Name="RollbackBtn" Content="Откатить последнюю версию" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Click="Rollback_Click" IsEnabled="False"/>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

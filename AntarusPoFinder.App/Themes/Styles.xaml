@@ -588,6 +588,13 @@
         </Setter>
     </Style>
 
+    <!-- Заголовок столбца по центру — для колонок с центрированным содержимым (DataGridCellTextCentered):
+         иначе содержимое ячеек по центру, а подпись столбца прижата влево (HorizontalContentAlignment="Left"
+         в базовом стиле выше) — столбец читается «не по центру». Применяется точечно через HeaderStyle. -->
+    <Style x:Key="CenteredColumnHeader" TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    </Style>
+
     <Style TargetType="DataGridRowHeader">
         <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
