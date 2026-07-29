@@ -1095,11 +1095,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         UnknownItemsBannerVisible = true;
         // Same text as last time (nothing changed since) — AddNotification's own dedup just bumps
         // the timestamp instead of piling up identical history rows.
-        // reopen ПЕРЕ-СКАНИРУЕТ диск, а не тупо ставит BannerVisible=true: пользователь удалял
-        // неизвестные, а «Показать» из истории уведомлений воскрешал плашку, хотя неизвестных уже нет —
-        // и так по кругу. Теперь повторный показ проверяет актуальное состояние: если всё разрешено,
-        // CheckForUnknownItemsAsync сам оставит плашку скрытой (unknown.Count == 0 выше).
-        AddNotification(UnknownItemsBannerText, NotificationCategory.Hierarchy, reopen: () => _ = CheckForUnknownItemsAsync());
+        // reopen из истории уведомлений открывает подробности (ShowUnknownItemsDetails) МОДАЛЬНО поверх
+        // окна уведомлений (reopenIsModal: true) — оно не закрывается, после закрытия подробностей
+        // оператор остаётся в списке уведомлений. ShowUnknownItemsDetails сам ПЕРЕ-СКАНИРУЕТ диск перед
+        // показом и молча выходит, если неизвестных уже нет (пользователь мог их разрешить), поэтому
+        // «Показать» не воскрешает устаревшую плашку — как и прежде.
+        AddNotification(UnknownItemsBannerText, NotificationCategory.Hierarchy, reopen: () => _ = ShowUnknownItemsDetails(), reopenIsModal: true);
     }
 
     [RelayCommand]
@@ -1227,7 +1228,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // существовали только числом «и ещё 45», посмотреть их было негде вообще.
             _incomingChangesDetails = string.Join(Environment.NewLine, changes.Select(FormatChangeEntry));
             IncomingChangesBannerVisible = true;
-            AddNotification(IncomingChangesBannerText, NotificationCategory.Sync, reopen: () => IncomingChangesBannerVisible = true);
+            // reopen из истории открывает полный список изменений МОДАЛЬНО поверх окна уведомлений
+            // (ShowIncomingChangesDetails → TextViewDialog), а не показывает плашку на главном окне за
+            // модальным окном истории: окно уведомлений при этом НЕ закрывается, после закрытия
+            // подробностей оператор остаётся в списке и может открыть следующее уведомление.
+            AddNotification(IncomingChangesBannerText, NotificationCategory.Sync, reopen: ShowIncomingChangesDetails, reopenIsModal: true);
             // НЕ автоскрывать: пользователь жаловался, что плашка исчезала раньше, чем он успевал
             // посмотреть, ЧТО именно поменялось. Теперь висит, пока он сам не нажмёт «Показать»
             // (полный список, ShowIncomingChangesDetails) и/или не закроет её (DismissIncomingChangesBanner).
@@ -1375,7 +1380,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         HierarchyConflictBannerText = $"Конфликты синхронизации, требуют решения: {count}";
         HierarchyConflictBannerVisible = true;
-        AddNotification(HierarchyConflictBannerText, NotificationCategory.Sync, reopen: () => HierarchyConflictBannerVisible = true);
+        // reopen из истории открывает диалог разрешения конфликтов МОДАЛЬНО поверх окна уведомлений
+        // (ShowHierarchyConflictsDetails → ConflictResolutionDialog), а не показывает плашку за модальным
+        // окном истории: окно уведомлений НЕ закрывается, после закрытия диалога оператор остаётся в списке.
+        AddNotification(HierarchyConflictBannerText, NotificationCategory.Sync, reopen: ShowHierarchyConflictsDetails, reopenIsModal: true);
     }
 
     [RelayCommand]
