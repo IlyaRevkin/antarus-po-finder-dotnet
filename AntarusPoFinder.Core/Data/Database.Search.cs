@@ -29,7 +29,11 @@ public record FirmwareSearchFilters
 /// вес под этот запрос (Weight), проставленный оператором осознанно. И то, и другое — из
 /// Database.FwUsage.cs; в Rank они входят по-разному (счётчик через порог и множитель, вес
 /// напрямую).</summary>
-public record ScoredFwVersion(FwVersionRecord Row, int Score, int UsageCount, int Weight = 0);
+/// <summary><paramref name="MatchedTokens"/> — сколько РАЗНЫХ слов запроса совпало с этой версией
+/// в обычном поиске (см. SearchByKeywords). Нужно выдаче, чтобы отделить «совпало всё, что ввели»
+/// от «совпало только одно общее слово» и убрать вторые под «Показать ещё». В точном поиске и в
+/// пустом запросе с фильтрами число одинаково у всех строк — там сворачивать нечего.</summary>
+public record ScoredFwVersion(FwVersionRecord Row, int Score, int UsageCount, int Weight = 0, int MatchedTokens = 0);
 
 public partial class Database
 {
@@ -269,7 +273,7 @@ public partial class Database
             if (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase))
                 score += PhraseTagBonus;
 
-            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage)));
+            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage), matchedTokens));
         }
 
         return scored;
@@ -310,7 +314,10 @@ public partial class Database
             if (!inTag && !OrderedContains(phraseUpper, haystack)) continue;
 
             var score = inTag ? PhraseTagBonus : 3;
-            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage)));
+            // Точный (позиционный) поиск: либо вся фраза совпала целиком, либо строки нет в выдаче —
+            // «частичных» совпадений тут не бывает. Ставим всем одинаковое число, чтобы выдача не
+            // прятала ничего под «Показать ещё» в этом режиме.
+            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage), tokens.Count));
         }
 
         return scored;

@@ -527,8 +527,18 @@ public partial class SearchView : UserControl
         // кнопкой карточки лишь когда лоадер реально допилят. Считаем один раз на всю выдачу.
         var loaderConnected = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath()).IsAvailable;
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
+        var generation = _searchGeneration;
 
-        foreach (var result in results)
+        // Обычный поиск находит «широко» — по любому ОДНОМУ совпавшему слову. Чтобы одно общее слово
+        // («SMH») не тащило в выдачу чужие прошивки, у которых нет остальных слов запроса, показываем
+        // сразу только карточки, совпавшие по МАКСИМУМУ введённых слов, а менее точные прячем под
+        // «Показать ещё» (строятся по клику). В точном поиске и в пустом запросе с фильтрами число
+        // совпавших слов у всех строк одинаково — там сворачивать нечего.
+        var maxMatched = results.Max(r => r.MatchedTokens);
+        var strong = results.Where(r => r.MatchedTokens >= maxMatched).ToList();
+        var weak = results.Where(r => r.MatchedTokens < maxMatched).ToList();
+
+        (FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags) BuildCard(HierarchyResult result)
         {
             var subtypeName = _subtypesById.TryGetValue(result.SubtypeId, out var sub) ? sub.Name : "";
             // Только дешёвые признаки: локальный кэш (свой диск) и запрос в SQLite. Всё, что требует
@@ -582,8 +592,12 @@ public partial class SearchView : UserControl
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
-            pending.Add((card, result, flags));
+            return (card, result, flags);
         }
+
+        foreach (var result in strong) pending.Add(BuildCard(result));
+
+        if (weak.Count > 0) AddWeakMatchesFold(weak, BuildCard, generation);
 
         if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
         {
@@ -591,7 +605,32 @@ public partial class SearchView : UserControl
             return;
         }
 
-        _ = ScanDiskFlagsAsync(pending, _searchGeneration);
+        _ = ScanDiskFlagsAsync(pending, generation);
+    }
+
+    /// <summary>Кнопка «Показать ещё» под точными совпадениями обычного поиска: менее точные карточки
+    /// (совпало меньше слов запроса) строятся и досматриваются на диске только по клику, чтобы широкий
+    /// запрос не рисовал и не обходил десятки чужих прошивок зря. Поколение (<paramref name="generation"/>)
+    /// сверяется на клике — если оператор успел искать заново, кнопка от старой выдачи ничего не делает.</summary>
+    private void AddWeakMatchesFold(List<HierarchyResult> weak,
+        Func<HierarchyResult, (FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)> buildCard,
+        int generation)
+    {
+        var button = new Button
+        {
+            Content = $"Показать ещё {weak.Count} — менее точные совпадения",
+            Style = (Style)FindResource("SecondaryButton"),
+            Margin = new Thickness(0, 8, 0, 8),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        button.Click += (_, _) =>
+        {
+            if (generation != _searchGeneration) return;
+            ResultsPanel.Children.Remove(button);
+            var revealed = weak.Select(buildCard).ToList();
+            _ = ScanDiskFlagsAsync(revealed, generation);
+        };
+        ResultsPanel.Children.Add(button);
     }
 
     private int _foundCount;

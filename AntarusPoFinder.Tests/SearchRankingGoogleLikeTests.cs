@@ -54,6 +54,25 @@ public class SearchRankingGoogleLikeTests
         Assert.True(hits.Count > 1, "обычный поиск остаётся широким — версия с одним совпавшим словом тоже в выдаче");
     }
 
+    /// <summary>Выдача помечает КАЖДЫЙ результат числом совпавших слов запроса (MatchedTokens), чтобы
+    /// экран мог показать сразу только полные совпадения, а частичные («совпало лишь одно общее
+    /// слово») спрятать под «Показать ещё». По запросу «smh hertz» карточка НГР с обоими словами
+    /// помечена 2, чужая ПЖ SMH без тега hertz — 1.</summary>
+    [Fact]
+    public void MatchedTokens_CountsDistinctQueryWordsHit()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var partial = AddVersion(db, "УПД", 2, TagString.Join(new[] { "пж" }), controller: "SMH5");
+        var full = AddVersion(db, "КНС", 1, TagString.Join(new[] { "hertz" }), controller: "SMH5");
+
+        var byId = SearchService.Search(db, "smh hertz").ToDictionary(h => h.FwVersionId);
+
+        Assert.Equal(2, byId[full].MatchedTokens);   // совпали и «smh» (контроллер), и «hertz» (тег)
+        Assert.Equal(1, byId[partial].MatchedTokens); // совпал только «smh», тега hertz нет
+    }
+
     /// <summary>«Точнее запрос → выше»: два одинаковых по числу совпавших слов кандидата, но у одного
     /// слова стоят рядом и в том же порядке, что в запросе, — он выше.</summary>
     [Fact]

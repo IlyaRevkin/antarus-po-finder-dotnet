@@ -34,6 +34,12 @@ public class HierarchyResult
     public int Score { get; init; }
     public int FwVersionId { get; init; }
 
+    /// <summary>Сколько РАЗНЫХ слов запроса совпало с этой версией в обычном поиске (см.
+    /// Database.SearchByKeywords). Выдача по нему отделяет «совпало всё, что ввели» от «совпало
+    /// только одно общее слово» и прячет вторые под «Показать ещё». 0 — поиск без слов (только
+    /// фильтры) либо результат не из поиска (скан обновлений).</summary>
+    public int MatchedTokens { get; init; }
+
     /// <summary>Сколько раз ИМЕННО эту версию выбирали по такому же запросу (см.
     /// Database.FwUsage.cs). 0 — ни разу либо запрос новый.</summary>
     public int UsageCount { get; init; }
@@ -147,7 +153,7 @@ public static class SearchService
 
         var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold, usageMultiplier);
 
-        return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount, localRoot)).ToList();
+        return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount, localRoot, row.MatchedTokens)).ToList();
     }
 
     /// <summary>Maps a joined fw_versions row (group/subtype/controller names already populated by the
@@ -159,7 +165,7 @@ public static class SearchService
     /// firmware uploaded on a machine that stored the share as "\\ant_srv\Software" opens/downloads on a
     /// machine that mounts it as "Z:\Software" and vice versa. Empty (the default) keeps the stored
     /// paths verbatim — used by callers that only need the Name (e.g. HistoryDialog.LocalName).</summary>
-    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0, int usageCount = 0, string localRoot = "")
+    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0, int usageCount = 0, string localRoot = "", int matchedTokens = 0)
     {
         var sub = !string.IsNullOrEmpty(row.SubtypeFolder) ? row.SubtypeFolder : row.SubtypeName;
         var name = $"{sub} {row.CtrlName}".Trim();
@@ -190,6 +196,7 @@ public static class SearchService
             UploadDate = uploadDate,
             Score = score,
             UsageCount = usageCount,
+            MatchedTokens = matchedTokens,
         };
     }
 }
