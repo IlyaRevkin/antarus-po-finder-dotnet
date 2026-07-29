@@ -73,6 +73,44 @@ public class SearchRankingGoogleLikeTests
         Assert.Equal(1, byId[partial].MatchedTokens); // совпал только «smh», тега hertz нет
     }
 
+    /// <summary>Смешанная раскладка: оператор пишет «hertz» на ЙЦУКЕН, не переключившись (выходит
+    /// «рукея»), «кпч» русскими, а «smh» латиницей. Сплошная замена всего запроса сломала бы «кпч» и
+    /// «smh»; послованная чинит только «рукея»→«hertz», и НГР со всеми тремя признаками (тег hertz,
+    /// тип пуска КПЧ, контроллер SMH5) находится и совпадает по всем трём словам.</summary>
+    [Fact]
+    public void MixedKeyboardLayout_RepairsOnlyWrongLayoutTokens()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var target = AddVersion(db, "КНС", 1, TagString.Join(new[] { "hertz" }), controller: "SMH5",
+            launchTypes: new List<string> { "КПЧ" });
+
+        // «рукея» = h-e-r-t-z, набранные на ЙЦУКЕН; «кпч» русскими; «smh» латиницей.
+        var byId = SearchService.Search(db, "рукея кпч smh").ToDictionary(h => h.FwVersionId);
+
+        Assert.Contains(target, byId.Keys);
+        Assert.Equal(3, byId[target].MatchedTokens);
+    }
+
+    /// <summary>Обратная сторона той же починки: слово чинится по раскладке, только если как есть оно
+    /// не встречается в индексе. «kinco» (латиницей, правильно) не должно превращаться в «лштсщ» —
+    /// раз уж такой контроллер в базе есть, слово оставляют как есть.</summary>
+    [Fact]
+    public void MixedKeyboardLayout_LeavesTokensThatAlreadyMatch()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var target = AddVersion(db, "КНС", 1, TagString.Join(new[] { "нгр" }), controller: "SMH5");
+
+        // «нгр» совпадает как есть (тег), «smh» — как есть (контроллер): ни одно не должно конвертироваться.
+        var byId = SearchService.Search(db, "нгр smh").ToDictionary(h => h.FwVersionId);
+
+        Assert.Contains(target, byId.Keys);
+        Assert.Equal(2, byId[target].MatchedTokens);
+    }
+
     /// <summary>«Точнее запрос → выше»: два одинаковых по числу совпавших слов кандидата, но у одного
     /// слова стоят рядом и в том же порядке, что в запросе, — он выше.</summary>
     [Fact]

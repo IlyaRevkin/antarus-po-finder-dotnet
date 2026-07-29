@@ -516,9 +516,23 @@ public partial class SearchView : UserControl
         // Что именно искали — нужно, чтобы записать выбор оператора по этому запросу
         // (см. RecordUsage): выбор осмыслен только в паре с запросом, который его показал.
         _lastUsageKey = SearchService.UsageKey(query);
-        _foundCount = results.Count;
+
+        // Обычный поиск находит «широко» — по любому ОДНОМУ совпавшему слову. Чтобы одно общее слово
+        // («SMH») не тащило в выдачу чужие прошивки, у которых нет остальных слов запроса, показываем
+        // сразу только карточки, совпавшие по МАКСИМУМУ введённых слов, а менее точные прячем под
+        // «Показать ещё» (строятся по клику). В точном поиске и в пустом запросе с фильтрами число
+        // совпавших слов у всех строк одинаково — там weak пуст, сворачивать нечего.
+        var maxMatched = results.Max(r => r.MatchedTokens);
+        var strong = results.Where(r => r.MatchedTokens >= maxMatched).ToList();
+        var weak = results.Where(r => r.MatchedTokens < maxMatched).ToList();
+
+        // «Найдено: N» показывает СНАЧАЛА только число точных (strong) совпадений — «сколько найдено
+        // именно точных». Менее точные (weak) прибавятся к счётчику лишь когда оператор раскроет их
+        // кнопкой «Показать ещё» (см. AddWeakMatchesFold): пока они спрятаны — они и не в счёте.
+        _foundCount = strong.Count;
         _foundFiltered = !filters.IsEmpty;
-        UpdateFoundLabel(0);
+        _hiddenDead = 0;
+        UpdateFoundLabel();
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
@@ -528,15 +542,6 @@ public partial class SearchView : UserControl
         var loaderConnected = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath()).IsAvailable;
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
-
-        // Обычный поиск находит «широко» — по любому ОДНОМУ совпавшему слову. Чтобы одно общее слово
-        // («SMH») не тащило в выдачу чужие прошивки, у которых нет остальных слов запроса, показываем
-        // сразу только карточки, совпавшие по МАКСИМУМУ введённых слов, а менее точные прячем под
-        // «Показать ещё» (строятся по клику). В точном поиске и в пустом запросе с фильтрами число
-        // совпавших слов у всех строк одинаково — там сворачивать нечего.
-        var maxMatched = results.Max(r => r.MatchedTokens);
-        var strong = results.Where(r => r.MatchedTokens >= maxMatched).ToList();
-        var weak = results.Where(r => r.MatchedTokens < maxMatched).ToList();
 
         (FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags) BuildCard(HierarchyResult result)
         {
@@ -627,6 +632,9 @@ public partial class SearchView : UserControl
         {
             if (generation != _searchGeneration) return;
             ResultsPanel.Children.Remove(button);
+            // Теперь менее точные совпадения на экране — они входят и в счёт «Найдено».
+            _foundCount += weak.Count;
+            UpdateFoundLabel();
             var revealed = weak.Select(buildCard).ToList();
             _ = ScanDiskFlagsAsync(revealed, generation);
         };
@@ -636,14 +644,20 @@ public partial class SearchView : UserControl
     private int _foundCount;
     private bool _foundFiltered;
 
-    /// <summary>Строка «Найдено: N» с поправкой на скрытые мёртвые версии (нет ни локально, ни на
-    /// диске — см. ScanDiskFlagsAsync). hiddenDead растёт по ходу фонового обхода, поэтому счётчик
-    /// обновляется на месте, а не пишется один раз.</summary>
-    private void UpdateFoundLabel(int hiddenDead)
+    /// <summary>Сколько версий выдачи оказались «мёртвыми» ссылками (нет ни локально, ни на доступном
+    /// сетевом диске — см. ScanDiskFlagsAsync) и убраны с экрана. Копится по ходу фонового обхода — и
+    /// у strong, и у раскрытых weak, — поэтому это поле, а не локальная переменная одного обхода;
+    /// сбрасывается в 0 на каждый новый поиск.</summary>
+    private int _hiddenDead;
+
+    /// <summary>Строка «Найдено: N» с поправкой на скрытые мёртвые версии. И _foundCount (растёт при
+    /// раскрытии «Показать ещё»), и _hiddenDead (растёт по ходу фонового обхода) — поля, поэтому
+    /// строка пересчитывается на месте по актуальному состоянию, а не пишется один раз.</summary>
+    private void UpdateFoundLabel()
     {
-        var shown = _foundCount - hiddenDead;
+        var shown = _foundCount - _hiddenDead;
         var text = _foundFiltered ? $"Найдено: {shown} (с фильтрами)" : $"Найдено: {shown}";
-        if (hiddenDead > 0) text += $" · скрыто отсутствующих на диске: {hiddenDead}";
+        if (_hiddenDead > 0) text += $" · скрыто отсутствующих на диске: {_hiddenDead}";
         StatusLabel.Text = text;
     }
 
@@ -752,7 +766,6 @@ public partial class SearchView : UserControl
         // выдача схлопнулась бы в ноль (см. #12: «прошивка есть локально, а на диске её нет»).
         var root = _services.Cfg.RootPath();
         var netReachable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
-        var hiddenDead = 0;
 
         foreach (var (card, result, baseFlags) in cards)
         {
@@ -777,8 +790,8 @@ public partial class SearchView : UserControl
             if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive && PathCheckableHere(result, root))
             {
                 ResultsPanel.Children.Remove(card);
-                hiddenDead++;
-                UpdateFoundLabel(hiddenDead);
+                _hiddenDead++;
+                UpdateFoundLabel();
                 continue;
             }
 

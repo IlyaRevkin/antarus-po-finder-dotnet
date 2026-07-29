@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -203,7 +204,7 @@ public partial class Database
         //     слов, весу и частоте выбора.
         var scored = exactWord
             ? SearchOrdered(rows, tokens, phrase, usage)
-            : SearchByKeywords(rows, qTokens, phrase, usage);
+            : SearchByKeywords(rows, RepairMixedLayout(qTokens, rows), phrase, usage);
 
         return Deduplicate(scored, usageThreshold, usageMultiplier);
     }
@@ -277,6 +278,74 @@ public partial class Database
         }
 
         return scored;
+    }
+
+    /// <summary>Чинит РАСКЛАДКУ каждого слова обычного поиска по отдельности — в отличие от сплошной
+    /// замены всего запроса в SearchService.SearchWithLayoutFallback, которая срабатывает, только если
+    /// как есть не нашлось НИЧЕГО. Оператор пишет вперемешку: «рукея» (это «hertz», набранный на
+    /// ЙЦУКЕН, не переключив раскладку), «кпч» русскими, «smh» латиницей. Сплошная замена такой запрос
+    /// испортила бы («кпч»→«rgx», «smh»→«ыьр»), а как есть — «рукея» не совпадает ни с чем, и НГР
+    /// находится лишь по общим «кпч»/«smh», вытаскивая заодно чужие SMH. Поэтому слово переводим в
+    /// другую раскладку, только если как есть его нет в индексе, а переведённое — есть: та же гарантия
+    /// «не превратит верное совпадение в ошибочное», что и у сплошной замены, но послованно.
+    ///
+    /// Работает ТОЛЬКО для смешанного запроса — когда хоть одно слово совпало как есть. Если как есть
+    /// не совпало ни одно (вся раскладка неверная), чинить тут нечего: такой запрос вернёт пустую
+    /// выдачу, и его целиком подхватит SearchService.SearchWithLayoutFallback (с вопросом «была
+    /// включена не та раскладка?»), поведение которого мы не трогаем.</summary>
+    private static string[] RepairMixedLayout(string[] qTokens, List<FwVersionRecord> rows)
+    {
+        if (qTokens.Length < 2) return qTokens;
+
+        var hay = BuildLayoutHaystack(rows);
+        // Хоть одно слово должно совпадать как есть — иначе это не «смешанная», а сплошь неверная
+        // раскладка, и ею занимается сплошной фолбэк уровнем выше.
+        if (!qTokens.Any(t => hay.Contains(t, StringComparison.Ordinal))) return qTokens;
+
+        var repaired = new string[qTokens.Length];
+        var changed = false;
+        for (var i = 0; i < qTokens.Length; i++)
+        {
+            var token = qTokens[i];
+            if (hay.Contains(token, StringComparison.Ordinal)) { repaired[i] = token; continue; }
+
+            var converted = SearchService.ConvertLayout(token).ToUpperInvariant();
+            if (converted != token && hay.Contains(converted, StringComparison.Ordinal))
+            {
+                repaired[i] = converted;
+                changed = true;
+            }
+            else repaired[i] = token;
+        }
+
+        return changed ? repaired : qTokens;
+    }
+
+    /// <summary>Один большой «стог» из всех искомых полей индекса (uppercase), поля разделены '\n',
+    /// чтобы подстрочная проверка слова из <see cref="RepairMixedLayout"/> не склеивала соседние
+    /// поля в ложное совпадение. Токены поиска — минимум 2 буквенно-цифровых символа, '\n' в них не
+    /// попадает.</summary>
+    private static string BuildLayoutHaystack(List<FwVersionRecord> rows)
+    {
+        var sb = new StringBuilder();
+
+        void Append(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            sb.Append('\n').Append(s.ToUpperInvariant());
+        }
+
+        foreach (var row in rows)
+        {
+            Append(row.GroupName);
+            Append(row.SubtypeName);
+            Append(row.SubtypeFolder);
+            Append(row.CtrlName);
+            foreach (var tag in TagString.Parse(row.Tags)) Append(tag);
+            foreach (var lt in row.LaunchTypes ?? new List<string>()) Append(lt);
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>Общий «стог» для позиционных проверок: название группы/подтипа/папки/контроллера +
