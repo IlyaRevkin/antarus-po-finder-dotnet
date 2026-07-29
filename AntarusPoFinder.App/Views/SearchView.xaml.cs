@@ -506,7 +506,7 @@ public partial class SearchView : UserControl
         var filters = ActiveFilters();
         var results = SearchService.Search(_services.Db, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
-            _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier());
+            _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath());
         if (results.Count == 0)
         {
             ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);

@@ -101,6 +101,42 @@ public class InspectionCleanupServiceTests
         Assert.Empty(result.Errors);
     }
 
+    /// <summary>Regression for the "переносишь старый файл параметров в осмотр — а его сразу сносит
+    /// автоочистка" bug: a source file with an ancient LastWriteTime, once dropped via InspectionDrop,
+    /// must be seen as fresh (age counted from the drop), and therefore survive a cleanup that would
+    /// have deleted it had the copy inherited the source's old date.</summary>
+    [Fact]
+    public void Drop_ThenCleanup_KeepsJustDroppedFileEvenIfSourceWasAncient()
+    {
+        var share = NewTempFolder();
+        var inspection = NewTempFolder();
+        try
+        {
+            var now = new DateTime(2026, 7, 20, 12, 0, 0);
+
+            var source = Path.Combine(share, "params.knt");
+            File.WriteAllText(source, "x");
+            File.SetLastWriteTime(source, now.AddYears(-3)); // лежит на сервере три года
+
+            var dest = InspectionDrop.CopyInto(inspection, source, now);
+
+            Assert.Equal(Path.Combine(inspection, "params.knt"), dest);
+            Assert.True(File.Exists(dest));
+            // Возраст считается с момента переноса, а не с даты источника.
+            Assert.Equal(now, File.GetLastWriteTime(dest));
+
+            // Автоочистка «старше 10 минут» через минуту после переноса не должна тронуть файл.
+            var result = InspectionCleanupService.Cleanup(inspection, maxAgeMinutes: 10, now.AddMinutes(1));
+            Assert.Equal(0, result.DeletedCount);
+            Assert.True(File.Exists(dest));
+        }
+        finally
+        {
+            Directory.Delete(share, recursive: true);
+            Directory.Delete(inspection, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(0, "0 мин.")]
     [InlineData(45, "45 мин.")]

@@ -72,8 +72,10 @@ public partial class CardParamsDialog : Window
             _cfg.SetInspectionFolder(proto);
         }
 
-        Directory.CreateDirectory(proto);
-        File.Copy(full, Path.Combine(proto, item.File.Filename), overwrite: true);
+        // InspectionDrop, не File.Copy напрямую: файл параметров мог годами лежать на сервере, и
+        // его старая дата изменения перенеслась бы на копию — тогда автоочистка папки осмотра (по
+        // возрасту файла) снесла бы его почти сразу после переноса. Хелпер ставит дату «сейчас».
+        InspectionDrop.CopyInto(proto, full, System.DateTime.Now);
         AppMessageBox.Show($"Скопировано в протокол: {item.File.Filename}", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 

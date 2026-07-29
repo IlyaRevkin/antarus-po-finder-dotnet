@@ -725,7 +725,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 busy.Report(i, autoOnes.Count);
                 try
                 {
-                    var source = SearchService.ToHierarchyResult(u.Latest);
+                    var source = SearchService.ToHierarchyResult(u.Latest, localRoot: _services.Cfg.RootPath());
                     await Task.Run(() => FirmwareSync.CopyToLocal(source));
                     autoUpdated++;
                 }
@@ -776,7 +776,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 busy.Report(i, pending.Count);
                 try
                 {
-                    var source = SearchService.ToHierarchyResult(u.Latest);
+                    var source = SearchService.ToHierarchyResult(u.Latest, localRoot: _services.Cfg.RootPath());
                     await Task.Run(() => FirmwareSync.CopyToLocal(source));
                     count++;
                 }

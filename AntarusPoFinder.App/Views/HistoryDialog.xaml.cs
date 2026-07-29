@@ -114,7 +114,7 @@ public partial class HistoryDialog : Window
         if (!string.IsNullOrEmpty(r.Changelog) && r.Changelog != r.Description) blocks.Add($"Изменения:\n{r.Changelog}");
         DetailText.Text = string.Join("\n\n", blocks);
 
-        _selectedPath = string.IsNullOrEmpty(r.DiskPath) ? r.LocalPath : r.DiskPath;
+        _selectedPath = string.IsNullOrEmpty(r.DiskPath) ? r.LocalPath : FirmwarePathLocalizer.Localize(r.DiskPath, _services.Cfg.RootPath());
         if (string.IsNullOrEmpty(_selectedPath))
         {
             PathPanel.Visibility = Visibility.Collapsed;
@@ -288,7 +288,10 @@ public partial class HistoryDialog : Window
         var name = LocalName(r);
         var isLocal = LocalFirmwareCache.HasVersion(name, r.VersionRaw);
         var isKept = LocalFirmwareCache.IsKept(name, r.VersionRaw);
-        var diskAvailable = !string.IsNullOrEmpty(r.DiskPath) && Directory.Exists(r.DiskPath);
+        // Путь мог быть сохранён на другой машине (её форма шары) — приводим к нашей, иначе кнопка
+        // «Скачать» была бы вечно недоступна для чужих прошивок. См. FirmwarePathLocalizer.
+        var localDiskPath = FirmwarePathLocalizer.Localize(r.DiskPath, _services.Cfg.RootPath());
+        var diskAvailable = !string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath);
 
         LocalStatus.Text = isLocal
             ? (isKept ? "На этом ПК: да · закреплено" : "На этом ПК: да")
@@ -330,7 +333,8 @@ public partial class HistoryDialog : Window
     private async Task DownloadAsync(FwVersionRecord r, bool pin)
     {
         var name = LocalName(r);
-        var diskAvailable = !string.IsNullOrEmpty(r.DiskPath) && Directory.Exists(r.DiskPath);
+        var localDiskPath = FirmwarePathLocalizer.Localize(r.DiskPath, _services.Cfg.RootPath());
+        var diskAvailable = !string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath);
         var alreadyLocal = LocalFirmwareCache.HasVersion(name, r.VersionRaw);
 
         if (!diskAvailable && !alreadyLocal)
@@ -347,7 +351,7 @@ public partial class HistoryDialog : Window
         {
             if (diskAvailable)
             {
-                var result = SearchService.ToHierarchyResult(r);
+                var result = SearchService.ToHierarchyResult(r, localRoot: _services.Cfg.RootPath());
                 await Task.Run(() => FirmwareSync.CopyToLocal(result, cleanup: false));
             }
             if (pin) LocalFirmwareCache.SetKept(name, r.VersionRaw, true);
@@ -379,7 +383,7 @@ public partial class HistoryDialog : Window
     {
         if (!DataGridClickGuard.IsOverDataRow(e)) return;
         if (VersionsGrid.SelectedItem is not Row row) return;
-        OpenFolder(!string.IsNullOrEmpty(row.Record.DiskPath) ? row.Record.DiskPath : row.Record.LocalPath);
+        OpenFolder(!string.IsNullOrEmpty(row.Record.DiskPath) ? FirmwarePathLocalizer.Localize(row.Record.DiskPath, _services.Cfg.RootPath()) : row.Record.LocalPath);
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

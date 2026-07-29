@@ -105,7 +105,7 @@ public partial class FirmwareUpdatesWindow : Window
     {
         try
         {
-            var source = SearchService.ToHierarchyResult(u.Latest);
+            var source = SearchService.ToHierarchyResult(u.Latest, localRoot: _services.Cfg.RootPath());
             await Task.Run(() => FirmwareSync.CopyToLocal(source));
             UpdatedCount++;
             _updates.Remove(u);

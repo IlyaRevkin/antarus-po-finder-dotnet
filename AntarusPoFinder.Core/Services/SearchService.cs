@@ -119,13 +119,13 @@ public static class SearchService
     /// умолчанию 1 — единственный выбор уже учитывается, как было до появления настраиваемого
     /// порога; реальный вызывающий код передаёт ConfigService.FwUsageThreshold()).</summary>
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
-        FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier));
+        FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "") =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
         bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null,
-        int usageThreshold = 1, double usageMultiplier = 1) =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier),
+        int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "") =>
+        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot),
             allowFallback, out usedFallback, out convertedQuery);
 
     /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
@@ -133,7 +133,7 @@ public static class SearchService
     public static string UsageKey(string query) => Normalize(query);
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
-        FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier)
+        FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier, string localRoot = "")
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -143,13 +143,19 @@ public static class SearchService
 
         var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold, usageMultiplier);
 
-        return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount)).ToList();
+        return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount, localRoot)).ToList();
     }
 
     /// <summary>Maps a joined fw_versions row (group/subtype/controller names already populated by the
     /// caller's query) to a HierarchyResult — the same shape Search() returns, reused by the firmware-
-    /// update scan so it can hand rows straight to FirmwareSync.CopyToLocal.</summary>
-    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0, int usageCount = 0)
+    /// update scan so it can hand rows straight to FirmwareSync.CopyToLocal.
+    ///
+    /// <paramref name="localRoot"/> — this machine's root_path (ConfigService.RootPath()). When set,
+    /// every disk path on the result is re-rooted onto it via <see cref="FirmwarePathLocalizer"/>, so a
+    /// firmware uploaded on a machine that stored the share as "\\ant_srv\Software" opens/downloads on a
+    /// machine that mounts it as "Z:\Software" and vice versa. Empty (the default) keeps the stored
+    /// paths verbatim — used by callers that only need the Name (e.g. HistoryDialog.LocalName).</summary>
+    public static HierarchyResult ToHierarchyResult(FwVersionRecord row, int score = 0, int usageCount = 0, string localRoot = "")
     {
         var sub = !string.IsNullOrEmpty(row.SubtypeFolder) ? row.SubtypeFolder : row.SubtypeName;
         var name = $"{sub} {row.CtrlName}".Trim();
@@ -167,13 +173,13 @@ public static class SearchService
             Controller = row.CtrlName,
             EquipmentType = row.GroupName,
             WorkType = string.Join(", ", row.LaunchTypes),
-            IoMapPath = row.IoMapPath,
-            InstructionsPath = row.InstructionsPath,
-            ModbusMapPath = row.ModbusMapPath,
-            HmiPath = row.HmiPath,
+            IoMapPath = FirmwarePathLocalizer.Localize(row.IoMapPath, localRoot),
+            InstructionsPath = FirmwarePathLocalizer.Localize(row.InstructionsPath, localRoot),
+            ModbusMapPath = FirmwarePathLocalizer.Localize(row.ModbusMapPath, localRoot),
+            HmiPath = FirmwarePathLocalizer.Localize(row.HmiPath, localRoot),
             ExecutableHint = row.ExecutableHint,
             HmiExecutableHint = row.HmiExecutableHint,
-            FirmwareDir = row.DiskPath,
+            FirmwareDir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot),
             VersionRaw = row.VersionRaw,
             Description = row.Description,
             Tags = row.Tags,
