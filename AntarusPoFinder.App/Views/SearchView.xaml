@@ -127,9 +127,9 @@
                  тем же порядком и написанием (НГР-2.0, а не НГР 2 0), как непрерывную фразу. Живьём
                  читается из ExactWordCheck.IsChecked (см. SearchView.xaml.cs), поэтому смена дефолта —
                  это только атрибут здесь. Логика — Database.SearchFwVersions (SearchOrdered / SearchByKeywords). -->
-            <CheckBox x:Name="ExactWordCheck" Content="Точный поиск (как «в кавычках»)" VerticalAlignment="Center"
+            <CheckBox x:Name="ExactWordCheck" Content="Точный поиск" VerticalAlignment="Center"
                       IsChecked="False"
-                      ToolTip="Как кавычки в Гугле: ищет введённое целиком, тем же порядком и написанием (НГР-2.0, а не НГР 2 0). Снимите галочку для обычного поиска по словам с ранжированием по точности"
+                      ToolTip="Как кавычки в Гугле: ищет введённое целиком, тем же порядком и написанием. Снимите галочку для обычного поиска по словам с ранжированием по точности"
                       Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
         </StackPanel>
 

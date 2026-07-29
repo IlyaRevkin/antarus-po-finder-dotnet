@@ -727,7 +727,15 @@ public partial class SearchView : UserControl
             // Запись в БД не трогаем (удаление не должно уехать на другие машины как тумбстоун, см.
             // ConfigExchange) — просто убираем карточку из показанной выдачи; вернутся файлы — вернётся
             // и карточка при следующем поиске.
-            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive)
+            //
+            // НО «папку не нашли» ≠ «прошивку удалили»: если путь версии вообще не удалось разложить на
+            // ЭТОТ диск (сохранён у коллеги как «Z:\Software\…», а у нас диск смонтирован как
+            // «\\ant_srv\Software\…», и FirmwarePathLocalizer не смог заякориться на «ПО»/«Параметры»),
+            // то result.FirmwareDir так и остался чужим — он НЕ под нашим корнем, и «Directory.Exists
+            // вернул false» не значит, что прошивки нет, значит только «мы не туда посмотрели». Прятать
+            // такую версию — ровно жалоба «прошивка есть, теги совпадают, а поиск её не находит».
+            // Прячем, только когда искали в правильном месте: путь пуст или лежит под нашим корнем.
+            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive && PathCheckableHere(result, root))
             {
                 ResultsPanel.Children.Remove(card);
                 hiddenDead++;
@@ -755,6 +763,21 @@ public partial class SearchView : UserControl
         }
 
         if (pendingSync.Count > 0) await AutoSyncMissingAsync(pendingSync, generation);
+    }
+
+    /// <summary>Смогли ли мы вообще проверить, есть ли эта версия на диске — то есть искали ли в
+    /// правильном месте. True, когда сетевой путь версии пуст (проверять нечего — решение принимается
+    /// по локальному кэшу) или лежит под корнем ЭТОГО диска (значит FirmwarePathLocalizer разложил
+    /// путь на нашу машину, и «папки нет» действительно означает «прошивку удалили»). False, когда
+    /// путь остался чужим (не под нашим корнем) — его не удалось разложить на этот диск, и отсутствие
+    /// папки ничего не доказывает: прятать версию по такому «нет» нельзя, иначе прошивка коллеги с
+    /// иначе смонтированным диском молча пропадает из выдачи, хотя реально существует.</summary>
+    private static bool PathCheckableHere(HierarchyResult result, string root)
+    {
+        var dir = result.FirmwareDir ?? "";
+        if (dir.Length == 0) return true;
+        if (string.IsNullOrEmpty(root)) return false;
+        return dir.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── Автосинхронизация локальных копий ─────────────────────────────────

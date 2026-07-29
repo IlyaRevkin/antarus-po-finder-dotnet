@@ -41,7 +41,11 @@ public class HierarchyResult
 
 public static class SearchService
 {
-    private static readonly Regex Separators = new(@"[,;\-/\\]+", RegexOptions.Compiled);
+    // Разделители слов запроса. Скобки/кавычки/двоеточие входят сюда наравне с запятой и дефисом:
+    // в обозначении шкафа «НГР-КПЧ-3-1,5(3,8А)-РВР» скобки склеивали куски в мусорные токены «5(3»,
+    // «8А)», которые ни с чем не совпадали. Точка НАМЕРЕННО не разделитель — «2.0» должно оставаться
+    // одним словом (иначе распалось бы на «2» и «0», а односимвольные токены поиск отбрасывает).
+    private static readonly Regex Separators = new(@"[,;:\-/\\()\[\]{}""«»]+", RegexOptions.Compiled);
 
     public static string Normalize(string q)
     {
