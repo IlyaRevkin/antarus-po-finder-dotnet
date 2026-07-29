@@ -25,6 +25,14 @@
     <Color x:Key="ErrorColor">#D20F39</Color>
     <Color x:Key="TagBgColor">#CCD0DA</Color>
     <Color x:Key="RolledBackColor">#B85C00</Color>
+    <!-- Фон выделенной строки ListBox (Производители ПЧ/УПП и списки расширений в Настройки →
+         Иерархия). Намеренно НЕ сплошной AccentColor (#1E66F5): текст строки — TextBlock, который
+         ContentPresenter создаёт сам, и он берёт app-wide Foreground=TextBrush (тёмный), до него не
+         достаёт ни локальный стиль ListBoxItem, ни его триггер выделения — на сплошном синем это
+         давало нечитаемый тёмный текст на синем (жалоба пользователя). Светло-синий оттенок читается
+         с тем же тёмным TextBrush (контраст #4C4F69 на #C4D4F7 ~ 7:1) и при этом ясно отличается от
+         фона карточки и от ховера. -->
+    <Color x:Key="ListSelectedBgColor">#C4D4F7</Color>
 
     <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
     <SolidColorBrush x:Key="BgSidebarBrush" Color="{StaticResource BgSidebarColor}"/>
@@ -42,5 +50,6 @@
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
     <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
     <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
+    <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>
 
 </ResourceDictionary>

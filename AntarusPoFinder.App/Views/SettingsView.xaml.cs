@@ -239,6 +239,14 @@ public partial class SettingsView : UserControl
         var activeTab = allTabs.FirstOrDefault(b => (string?)b.Tag == "Active");
         if (activeTab is null || activeTab.Visibility != Visibility.Visible)
             Tab_Click(allTabs.First(b => b.Visibility == Visibility.Visible), new RoutedEventArgs());
+
+        // Кнопки статуса на вкладке «Прошивки» (Сделать текущей/Откатить/Вернуть в активные) видимы
+        // только администратору — их видимость выставляется в UpdateRollbackAccess, но раньше она
+        // вызывалась лишь из LoadFirmwareTab (один раз при создании SettingsView). Экземпляр
+        // кэшируется (MainWindowViewModel), а при смене роли вызывается только этот метод — без этого
+        // вызова наладчик, открывший Настройки и затем ставший администратором, видел вкладку
+        // «Прошивки» вообще без этих трёх кнопок, пока не нажмёт «Обновить».
+        UpdateRollbackAccess();
     }
 
     // ── Nested-scroll bubbling ───────────────────────────────────────────────

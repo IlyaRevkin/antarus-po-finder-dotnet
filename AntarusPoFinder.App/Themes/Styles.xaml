@@ -466,48 +466,39 @@
     </Style>
 
     <!-- ListBoxItem — like ComboBoxItem, WPF's default draws these with system chrome (white
-         background regardless of app theme), so it needs a full template.
-
-         Контраст на выделении (синий AccentBrush-фон + светлый TextOnAccentBrush-текст) — тот же
-         приём, что и у DataGridCell/ComboBoxItem выше: явный IsSelected-триггер переключает и фон
-         строки, и Foreground самого ListBoxItem, а Border.Resources ниже перехватывает implicit-
-         стиль для содержимого, чтобы оно реально унаследовало этот Foreground, а не app-wide
-         TextBrush. Помимо простого TextBlock-контента (строка/DisplayMemberPath — так устроены
-         "Производители ПЧ/УПП" и оба списка "Разрешённые расширения" в Настройки → Иерархия)
-         накрыт и CheckBox-контент (см. UnknownFilesDialog, где строка списка — CheckBox с текстом):
-         у CheckBox своя app-wide Style (Foreground=TextBrush, см. ниже), которая иначе выигрывала бы
-         у унаследованного Foreground точно так же, как обычный TextBlock. -->
+         background regardless of app theme), so it needs a full template. -->
     <Style TargetType="ListBoxItem">
+        <!-- Контраст выделения (жалоба: тёмный текст на синем фоне в списках «Производители ПЧ/УПП» и
+             «Разрешённые расширения» в Настройки → Иерархия — нечитаемо в светлой теме).
+             Содержимое такой строки — простой текст (строка/DisplayMemberPath или Content у ListBoxItem-
+             объектов, см. ExtList в SettingsView), для которого ContentPresenter создаёт TextBlock сам.
+             Этот TextBlock берёт app-wide implicit-стиль TextBlock (Foreground=TextBrush) — ни локальный
+             стиль ListBoxItem, ни его триггер, ни implicit-стили в Style.Resources/шаблоне до него НЕ
+             достают (проверено вживую: попытка переключить Foreground на TextOnAccentBrush эффекта не
+             давала). Поэтому текст выделенной строки всегда TextBrush — и фон выделения выбран так, чтобы
+             ИМЕННО с TextBrush он читался в обеих темах: ListSelectedBgBrush (светло-синий в светлой,
+             приглушённо-синий в тёмной). Ховер — BgSidebarBrush (виден в обеих темах и отличается от
+             выделения). Foreground при выделении НЕ трогаем (остаётся TextBrush — то, что реально видно). -->
         <Setter Property="Padding" Value="8,6"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
-                        <!-- Same implicit-style-precedence bug as PrimaryButton/ComboBoxItem/DataGridCell
-                             above — see those for the full explanation. -->
-                        <Border.Resources>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}"/>
-                            </Style>
-                            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
-                                <Setter Property="Foreground" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}"/>
-                            </Style>
-                        </Border.Resources>
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
                         <ContentPresenter/>
                     </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgInputBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ListSelectedBgBrush}"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- ListBox — the default panel/scrollviewer chrome is also system-white regardless of theme. -->

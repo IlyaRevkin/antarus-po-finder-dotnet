@@ -70,6 +70,13 @@
          контраст ~5.9:1 (BgColor) / ~5.0:1 (BgCardColor). Light.xaml не трогаю — там тот же
          #B85C00 на светлом фоне даёт контраст с большим запасом. -->
     <Color x:Key="RolledBackColor">#E08425</Color>
+    <!-- Симметрично Light.xaml (см. там подробный комментарий): фон выделенной строки ListBox не
+         сплошной AccentColor, а приглушённый синий, читаемый со стандартным светлым TextColor
+         (#CDD6F4 на #35406A — контраст ~6:1), т.к. текст строки берёт app-wide TextBrush, а не
+         TextOnAccentBrush. В тёмной теме тёмный текст на синем как раз читался (TextColor светлый),
+         но фон делаем единым по механике с Light, чтобы поведение выделения было одинаковым в обеих
+         темах и не зависело от совпадения «светлый текст ↔ насыщенный синий». -->
+    <Color x:Key="ListSelectedBgColor">#35406A</Color>
 
     <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
     <SolidColorBrush x:Key="BgSidebarBrush" Color="{StaticResource BgSidebarColor}"/>
@@ -87,5 +94,6 @@
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
     <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
     <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
+    <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>
 
 </ResourceDictionary>
