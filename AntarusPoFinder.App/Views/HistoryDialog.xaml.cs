@@ -139,6 +139,33 @@ public partial class HistoryDialog : Window
         EditUsageBtn.IsEnabled = has;
         RollbackBtn.IsEnabled = has;
         RollbackBtn.Content = _selectedRecord?.Status == "rolled_back" ? "Вернуть в активные" : "Откатить";
+        DeleteBtn.IsEnabled = has;
+    }
+
+    /// <summary>Удалить версию из каталога совсем (в отличие от «Откатить», который лишь помечает её
+    /// заменённой и оставляет в истории). Через Database.TombstoneFwVersion — тот же безопасный путь,
+    /// что у «Настройки → Прошивки → Удалить прошивку»: запись помечается тумбстоуном, исчезает из всех
+    /// списков и поиска на этом ПК и переносит удаление на другие ПК при синхронизации, а не воскресает
+    /// при следующем экспорте. Файлы на диске не трогаем — как и «Откатить»/«Сменить контроллер».</summary>
+    private void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecord is not { Id: int id } r) return;
+
+        var reply = AppMessageBox.Show(
+            $"Удалить версию {r.VersionRaw} из каталога?\n\n" +
+            "Запись исчезнет из истории и поиска на этом компьютере, а при синхронизации — и на других.\n" +
+            "Файлы прошивки на диске останутся на месте — при необходимости удалите папку версии вручную.\n\n" +
+            "Отменить удаление нельзя.",
+            "Удалить версию", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Db.TombstoneFwVersion(id);
+        Changed = true;
+        _host.InvalidateSearchResults();
+        // Версия удалена — показываем ту же историю без неё, выбор сбросится на первую оставшуюся.
+        Reload(selectVersionId: null);
+        _host.ShowStatus($"Версия {r.VersionRaw} удалена из каталога",
+            category: NotificationCategory.FirmwareAndParams);
     }
 
     private void ChangeController_Click(object sender, RoutedEventArgs e)

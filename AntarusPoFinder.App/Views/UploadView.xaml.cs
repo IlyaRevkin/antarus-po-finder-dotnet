@@ -463,9 +463,6 @@ public partial class UploadView : UserControl
         "Полезно, когда сама программа ПЛК не менялась — обновился только приложенный файл (например, HMI-проект).\n" +
         "Не действует, если выбран резерв номера — у резерва уже есть свой закреплённый номер.";
 
-    private const string KeepSwVersionUnavailableTooltip =
-        "Недоступно: для выбранного шкафа/подтипа/контроллера/HW ещё нет ни одной загруженной версии — увеличивать пока нечего.";
-
     private const string RollbackAvailableTooltip =
         "Пометить последнюю активную прошивку для выбранного шкафа/подтипа/контроллера как откатанную. Следующая загрузка получит тот же SW-номер заново. Файлы на диске не удаляются.";
 
@@ -475,21 +472,19 @@ public partial class UploadView : UserControl
     /// <summary>«Не увеличивать версию ПО (sw)» имеет смысл, только если у выбранной тройки подтип/
     /// контроллер/HW уже ЕСТЬ хотя бы одна активная версия — сама галочка просит взять SW-номер ТЕКУЩЕЙ
     /// последней версии вместо следующего по порядку (см. FirmwareUploadService и UpdatePreview ниже),
-    /// а у первой загрузки в новую комбинацию брать ещё нечего. Раньше галочка была видна и доступна
-    /// всегда, из-за чего можно было включить её на пустой комбинации без всякого эффекта — жалоба
-    /// пользователя.
+    /// а у первой загрузки в новую комбинацию брать ещё нечего.
     ///
-    /// IsEnabled, а не Visibility.Collapsed: внезапное исчезновение чекбокса при смене подтипа/
-    /// контроллера читалось бы как баг ("куда делась галочка"), а серая недоступная галочка с поясняющим
-    /// тултипом — как осознанное ограничение. Сброс отметки при потере доступности обязателен: иначе
-    /// включённая на одной комбинации галочка молча пережила бы переключение на другую, где её
-    /// применение к делу не относится (тот же класс бага, что и у KeepSwVersionCheck в ResetForm).</summary>
+    /// Чекбокс именно ПОЯВЛЯЕТСЯ/ИСЧЕЗАЕТ (Visibility), а не просто становится серым: по прямой просьбе
+    /// пользователя — на пустой комбинации (нет более ранней прошивки) галочки быть не должно вовсе,
+    /// а не «видно, но недоступно». Сброс отметки при потере доступности обязателен: иначе включённая
+    /// на одной комбинации галочка молча пережила бы переключение на другую, где её применение к делу
+    /// не относится (тот же класс бага, что и у KeepSwVersionCheck в ResetForm).</summary>
     private void UpdateKeepSwVersionAvailability()
     {
         bool available = KeepSwVersionAvailable(_services.Db, SubtypesSelect.MainSubtype, CtrlCombo.SelectedItem as ControllerModification);
 
-        KeepSwVersionCheck.IsEnabled = available;
-        KeepSwVersionCheck.ToolTip = available ? KeepSwVersionAvailableTooltip : KeepSwVersionUnavailableTooltip;
+        KeepSwVersionCheck.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+        KeepSwVersionCheck.ToolTip = KeepSwVersionAvailableTooltip;
         if (!available && KeepSwVersionCheck.IsChecked == true)
             KeepSwVersionCheck.IsChecked = false;
 

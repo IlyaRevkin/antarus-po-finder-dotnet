@@ -94,7 +94,14 @@
             <Button x:Name="EditUsageBtn" Content="Кол-во обращений" Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0" Click="EditUsage_Click"/>
             <Button x:Name="RollbackBtn" Content="Откатить" Style="{StaticResource SecondaryButton}"
-                    Click="RollbackToggle_Click"/>
+                    Margin="0,0,8,0" Click="RollbackToggle_Click"/>
+            <!-- Удаление лишней/ошибочной версии из каталога — через тумбстоун (Database.
+                 TombstoneFwVersion), тот же безопасный путь, что у «Настройки → Прошивки → Удалить
+                 прошивку»: запись помечается удалённой и уходит из всех списков/поиска, а удаление
+                 переносится на другие ПК при синхронизации (не воскресает обратно). Файлы на диске
+                 этот диалог, как и «Откатить»/«Сменить контроллер», не трогает. -->
+            <Button x:Name="DeleteBtn" Content="Удалить версию" Style="{StaticResource SecondaryButton}"
+                    Click="Delete_Click"/>
         </StackPanel>
 
         <!-- Слева — работа с локальной копией выбранной версии (#12): «Скачать на этот ПК» тянет её
