@@ -787,7 +787,17 @@ public partial class SearchView : UserControl
             // вернул false» не значит, что прошивки нет, значит только «мы не туда посмотрели». Прятать
             // такую версию — ровно жалоба «прошивка есть, теги совпадают, а поиск её не находит».
             // Прячем, только когда искали в правильном месте: путь пуст или лежит под нашим корнем.
-            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive && PathCheckableHere(result, root))
+            //
+            // И «папки по точному пути нет» ≠ «прошивку удалили»: папку версии могли ПЕРЕИМЕНОВАТЬ на
+            // диске (откат дописал «_ОТКАТАНО», правку hw переписали номер в середине имени, перезалив
+            // сменил дату), а disk_path в базе остался прежним. Файлы лежат в той же папке контроллера
+            // под соседним именем той же сборки — FirmwareDiskPresence опознаёт её по номеру ИЛИ по
+            // метке даты-времени сборки. Прячем, только когда версии на диске нет и под переименованным
+            // именем тоже (иначе жалоба «выбрал фильтр — найдено 0, скрыто отсутствующих, хотя прошивка
+            // на диске есть и hw я переименовал»).
+            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive
+                && !FirmwareDiskPresence.VersionPresentOnDisk(result.FirmwareDir, result.VersionRaw)
+                && PathCheckableHere(result, root))
             {
                 ResultsPanel.Children.Remove(card);
                 _hiddenDead++;
