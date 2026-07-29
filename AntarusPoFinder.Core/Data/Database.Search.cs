@@ -46,6 +46,33 @@ public partial class Database
         return WordSplitter.Split(f).Any(w => w == token);
     }
 
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
+
+    /// <summary>Схлопывает пробелы, обрезает края, поднимает регистр — но НАМЕРЕННО не трогает
+    /// дефисы, точки и прочие разделители. В точном (позиционном) поиске «НГР-2.0» и «НГР 2.0» —
+    /// разные запросы: оператор так и просил — если вместо точки поставить пробел, это уже другое
+    /// совпадение.</summary>
+    private static string CollapseForOrdered(string? s) =>
+        WhitespaceRun.Replace(s ?? "", " ").Trim().ToUpperInvariant();
+
+    /// <summary>Точное (позиционное) совпадение: <paramref name="phraseUpper"/> встречается в
+    /// <paramref name="haystackUpper"/> как непрерывная подстрока, начинающаяся НА ГРАНИЦЕ СЛОВА —
+    /// в начале строки или сразу после разделителя (не буквы и не цифры). Отсюда два свойства,
+    /// которые и просил наладчик: «НГР-2» находит «НГР-2.0 SMH5» (запрос — префикс от начала слова,
+    /// разделители и порядок совпадают), но «ПЧ» не всплывает внутри «КПЧ» (там совпадение началось
+    /// бы в середине слова).</summary>
+    private static bool OrderedContains(string phraseUpper, string haystackUpper)
+    {
+        if (phraseUpper.Length == 0 || haystackUpper.Length == 0) return false;
+        var idx = 0;
+        while ((idx = haystackUpper.IndexOf(phraseUpper, idx, StringComparison.Ordinal)) >= 0)
+        {
+            if (idx == 0 || !char.IsLetterOrDigit(haystackUpper[idx - 1])) return true;
+            idx++;
+        }
+        return false;
+    }
+
     // ── Индекс поиска ─────────────────────────────────────────────────────────
     // Раньше КАЖДЫЙ поиск заново вычитывал все fw_versions с тремя JOIN'ами и только потом считал
     // очки в памяти. На каждое нажатие «Найти», на каждое переключение режима, на каждый молчаливый
@@ -162,11 +189,31 @@ public partial class Database
                 usageThreshold, usageMultiplier);
         }
 
-        var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
+        // Два принципиально разных режима, а не одно матчирование с флажком:
+        //   • Точный (галочка «Точное совпадение слова») — ПОЗИЦИОННЫЙ: запрос целиком, в том же
+        //     порядке и с теми же разделителями, должен непрерывно встретиться в названии/тегах —
+        //     см. SearchOrdered. Это то, чего ждёт наладчик: «НГР-2» находит «НГР-2.0 SMH5», а
+        //     «НГР 2 0» (пробелы вместо точки) — уже нет.
+        //   • Обычный — ПО КЛЮЧЕВЫМ СЛОВАМ: каждое слово запроса ищется по отдельности в названии,
+        //     типе пуска и тегах (см. SearchByKeywords). Находит шире, ранжирует по числу совпавших
+        //     слов, весу и частоте выбора.
+        var scored = exactWord
+            ? SearchOrdered(rows, tokens, phrase, usage)
+            : SearchByKeywords(rows, qTokens, phrase, usage);
 
+        return Deduplicate(scored, usageThreshold, usageMultiplier);
+    }
+
+    /// <summary>Обычный поиск: каждое слово запроса (>= 2 символов) ищется подстрокой в полях
+    /// названия и тегах, а тип пуска сверяется целым значением. Очки складываются по всем словам —
+    /// чем больше слов запроса совпало, тем выше версия. Полное совпадение нормализованного запроса
+    /// с ОДНИМ тегом добавляет крупный бонус, поднимая точно поименованную прошивку в самый верх, не
+    /// отсекая при этом остальное — обычный поиск остаётся широким.</summary>
+    private List<ScoredFwVersion> SearchByKeywords(List<FwVersionRecord> rows, string[] qTokens, string phrase,
+        IReadOnlyDictionary<int, (int Uses, int Weight)> usage)
+    {
+        var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
         var scored = new List<ScoredFwVersion>();
-        bool anyPhraseTagHit = false;
-        var phraseTagRows = new List<ScoredFwVersion>();
 
         foreach (var row in rows)
         {
@@ -175,54 +222,64 @@ public partial class Database
             var launchTypes = row.LaunchTypes ?? new List<string>();
 
             int score = 0;
-            int matchedTokens = 0;
             foreach (var token in qTokens)
             {
-                bool hit = false;
-                if (fields.Any(f => TokenMatches(token, f, exactWord))) { score += 1; hit = true; }
+                if (fields.Any(f => TokenMatches(token, f, false))) score += 1;
                 // Тег весит больше названия папки: тег проставлен человеком осознанно, совпадение в
                 // названии подтипа может быть случайным.
-                if (tags.Any(t => TokenMatches(token, t, exactWord))) { score += 2; hit = true; }
-                // Сравнение целым значением, а не подстрокой, и НЕЗАВИСИМО от «точного совпадения
-                // слова»: список типов пуска закрытый (ConfigService.LaunchTypes), и почти каждый
-                // короткий в нём — подстрока длинного («ПЧ» в «КПЧ», «ПП» в «УПП»). Подстрочно
-                // «НГР ПЧ» поднимало ещё и шкафы с КПЧ — тип пуска не то поле, где полезно угадывать.
+                if (tags.Any(t => TokenMatches(token, t, false))) score += 2;
+                // Сравнение целым значением, а не подстрокой: список типов пуска закрытый
+                // (ConfigService.LaunchTypes), и почти каждый короткий в нём — подстрока длинного
+                // («ПЧ» в «КПЧ», «ПП» в «УПП»). Подстрочно «НГР ПЧ» поднимало ещё и шкафы с КПЧ —
+                // тип пуска не то поле, где полезно угадывать.
                 if (launchTypes.Any(lt => string.Equals(lt, token, StringComparison.OrdinalIgnoreCase)))
-                {
                     score += 2;
-                    hit = true;
-                }
-                if (hit) matchedTokens++;
             }
 
-            // Запрос целиком совпал с ОДНИМ тегом («шкаф управления пожарными насосами Антарус
-            // ПЖ-ПП-2-…»): это уже не совпадение слов, а прямое указание на конкретную прошивку.
-            var phraseTag = normalizedPhrase.Length > 0 &&
-                tags.Any(t => SearchService.Normalize(t) == normalizedPhrase);
-            if (phraseTag)
-            {
+            // Запрос целиком совпал с ОДНИМ тегом — прямое указание на конкретную прошивку: она
+            // всплывает наверх, но выдача не сужается (для «ровно одна прошивка» есть точный поиск).
+            if (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase))
                 score += PhraseTagBonus;
-                matchedTokens = qTokens.Length;
-                anyPhraseTagHit = true;
-            }
 
             if (score == 0) continue;
-
-            // «Точное совпадение слова» — это ещё и «все слова запроса, а не любое из них». Раньше
-            // хватало одного совпавшего слова: тег с полным названием шкафа поднимал нужную версию
-            // наверх, но следом шло всё, что случайно совпало словом «шкаф». Оператор, поставивший
-            // галочку и вбивший точное название, ждёт ровно одну прошивку — теперь так и есть.
-            if (exactWord && matchedTokens < qTokens.Length) continue;
-
-            var entry = new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage));
-            scored.Add(entry);
-            if (phraseTag) phraseTagRows.Add(entry);
+            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage)));
         }
 
-        // Тег-фраза найдена — остальное к этому запросу отношения не имеет.
-        if (anyPhraseTagHit && exactWord) scored = phraseTagRows;
+        return scored;
+    }
 
-        return Deduplicate(scored, usageThreshold, usageMultiplier);
+    /// <summary>Точный (позиционный) поиск. Запрос как есть — со схлопнутыми пробелами, но с
+    /// сохранёнными дефисами/точками и порядком слов — должен непрерывно встретиться, начиная с
+    /// границы слова, либо в тегах (тогда бонус как за тег-фразу), либо в общем «стоге» из названия,
+    /// типа пуска и тегов. Стог склеивается через пробел, поэтому запрос вроде «НГР 2.0» находит
+    /// версию, у которой «НГР» — тип шкафа, а «2.0» — подтип (два соседних поля), даже если такого
+    /// тега нет.</summary>
+    private List<ScoredFwVersion> SearchOrdered(List<FwVersionRecord> rows, IReadOnlyList<string> tokens,
+        string phrase, IReadOnlyDictionary<int, (int Uses, int Weight)> usage)
+    {
+        // SearchFwVersionsByTokens зовёт без сырой фразы — тогда собираем её из токенов.
+        var phraseUpper = CollapseForOrdered(string.IsNullOrEmpty(phrase) ? string.Join(" ", tokens) : phrase);
+        if (phraseUpper.Length < 2) return new();
+
+        var scored = new List<ScoredFwVersion>();
+        foreach (var row in rows)
+        {
+            var tags = TagString.Parse(row.Tags);
+            var tagText = CollapseForOrdered(string.Join(" ", tags));
+
+            var parts = new List<string?> { row.GroupName, row.SubtypeName, row.SubtypeFolder, row.CtrlName };
+            parts.AddRange(tags);
+            parts.AddRange(row.LaunchTypes ?? new List<string>());
+            var haystack = CollapseForOrdered(string.Join(" ", parts.Where(p => !string.IsNullOrEmpty(p))));
+
+            var inTag = OrderedContains(phraseUpper, tagText);
+            if (!inTag && !OrderedContains(phraseUpper, haystack)) continue;
+
+            var score = inTag ? PhraseTagBonus : 3;
+            scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage)));
+        }
+
+        return scored;
     }
 
     /// <summary>Потолок вклада ОДНОГО ЛИШЬ счётчика открытий (до умножения на множитель): «десять раз

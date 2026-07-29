@@ -169,27 +169,46 @@ public class SearchTagsAndFiltersTests
         Assert.Empty(SearchService.Search(db, ""));
     }
 
-    /// <summary>Раньше это проверялось через отдельный фильтр «Тег» в панели фильтров — его убрали
-    /// (поиск по тегу теперь идёт прямо из строки поиска с «Точное совпадение слова», см.
-    /// ExactSearchByFullCabinetNameTag_FindsOnlyThatFirmware), но гарантия «совпадает весь тег
-    /// целиком, а не слово внутри более длинного тега» должна остаться — проверяем её здесь тем же
-    /// путём, каким теперь и пользуется оператор.</summary>
+    /// <summary>Точный поиск теперь ПОЗИЦИОННЫЙ (по просьбе наладчика: «НГР-2» должен находить
+    /// «НГР-2.0 SMH5» как префикс). Значит, запрос-префикс тега находит и более длинный тег — это
+    /// осознанно другое поведение, чем прежнее «совпадает тег целиком». Но слова вразнобой (не
+    /// подряд и не по порядку) точный поиск по-прежнему не соединяет — тем и отличается от обычного.</summary>
     [Fact]
-    public void ExactWordSearch_MatchesWholeTag_NotJustWordsInsideALongerTag()
+    public void ExactWordSearch_MatchesTagByOrderedPrefix_ButNotScatteredWords()
     {
         using var dbFile = new TempDb();
         using var db = new Database(dbFile.Path);
 
-        var exact = AddVersion(db, "КНС", 1, TagString.Join(new[] { "шкаф пожарный" }));
-        // Тег длиннее запроса, но содержит оба его слова — раньше через фильтр TagString.Contains
-        // такое тоже не совпало бы (сравнение целым значением), и «тег-фраза» этот же принцип
-        // сохраняет: полное совпадение нормализованного запроса с ОДНИМ тегом сужает выдачу.
-        AddVersion(db, "УПД", 2, TagString.Join(new[] { "шкаф пожарный резервный" }));
+        var prefixed = AddVersion(db, "КНС", 1, TagString.Join(new[] { "шкаф пожарный резервный" }));
+        // Те же слова, но переставленные — «шкаф ... резервный» без «пожарный» между ними по порядку.
+        AddVersion(db, "УПД", 2, TagString.Join(new[] { "шкаф насосный резервный" }));
 
-        var hits = SearchService.Search(db, "шкаф пожарный", exactWord: true);
+        // Префикс тега по порядку — находит именно ту версию, чей тег с него начинается.
+        var byPrefix = Assert.Single(SearchService.Search(db, "шкаф пожарный", exactWord: true));
+        Assert.Equal(prefixed, byPrefix.FwVersionId);
 
-        var hit = Assert.Single(hits);
-        Assert.Equal(exact, hit.FwVersionId);
+        // Слова не подряд и не по порядку — точный поиск молчит (для широкого поиска есть обычный).
+        Assert.Empty(SearchService.Search(db, "резервный шкаф", exactWord: true));
+    }
+
+    /// <summary>Жалоба наладчика: залил прошивку НГР-2.0 SMH5, проставил тег «нгр 2.0 smh5», включил
+    /// точный поиск — и «нгр 2.0» не находило ничего. Причина: старый точный режим бил запрос на
+    /// слова-целиком, а «2.0» как слово не существовало (точка — разделитель), поэтому совпадение
+    /// никогда не набиралось. Позиционный режим ищет фразу целиком.</summary>
+    [Fact]
+    public void ExactWordSearch_FindsFirmwareByOrderedPhraseWithDot()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var id = AddVersion(db, "КНС", 1, TagString.Join(new[] { "нгр 2.0 smh5" }), controller: "SMH5");
+
+        // Фраза с точкой, как в теге, — находит.
+        Assert.Equal(id, Assert.Single(SearchService.Search(db, "нгр 2.0", exactWord: true)).FwVersionId);
+        // Префикс по порядку — тоже находит.
+        Assert.Equal(id, Assert.Single(SearchService.Search(db, "нгр 2", exactWord: true)).FwVersionId);
+        // Пробел вместо точки — уже другое совпадение, точный поиск его не даёт.
+        Assert.Empty(SearchService.Search(db, "нгр 2 0", exactWord: true));
     }
 
     [Fact]
