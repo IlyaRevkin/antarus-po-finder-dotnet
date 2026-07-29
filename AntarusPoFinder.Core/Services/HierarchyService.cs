@@ -164,6 +164,111 @@ public class HierarchyService
         return new RenameFolderResult(true, null, remapped);
     }
 
+    /// <summary>Переименовывает папки контроллера во ВСЕХ ветках дерева ПО (контроллер — это лист под
+    /// каждым типом/подтипом: ПО\&lt;тип&gt;\&lt;подтип&gt;\&lt;контроллер&gt;) и перекидывает сохранённые пути уже
+    /// загруженных прошивок. Как и с типом/подтипом, имя контроллера читается живьём из справочника при
+    /// каждом EnsureStructure/FwPath, поэтому правка только в БД осиротила бы старые папки и сломала
+    /// «Открыть» для всего, что залито под старым именем. RemapPathPrefix сверяет полный путь-сегмент
+    /// (равенство или «old\»), так что имя-префикс другого контроллера (SMH4 vs SMH4X) не заденется.</summary>
+    public RenameFolderResult RenameControllerFolders(string root, string oldName, string newName)
+    {
+        if (oldName == newName) return new RenameFolderResult(true, null, 0);
+
+        var errors = new List<string>();
+        int remapped = 0;
+        foreach (var g in _db.GetAllEquipmentGroups())
+        {
+            var subs = _db.GetSubtypesForGroup(g.Id!.Value);
+            var subNames = subs.Count == 0 ? new List<string> { "—" } : subs.Select(s => s.Name).ToList();
+            foreach (var sn in subNames)
+            {
+                var oldPath = ControllerFolder(root, g.Name, sn, oldName);
+                var newPath = ControllerFolder(root, g.Name, sn, newName);
+                var existed = Directory.Exists(oldPath);
+                TryRenameFolder(oldPath, newPath, errors);
+                if (existed && !Directory.Exists(oldPath) && Directory.Exists(newPath))
+                    remapped += _db.RemapPathPrefix(oldPath, newPath);
+            }
+        }
+        return errors.Count > 0
+            ? new RenameFolderResult(false, string.Join("\n", errors), remapped)
+            : new RenameFolderResult(true, null, remapped);
+    }
+
+    // ── Переписывание hw уже загруженных прошивок ────────────────────────────
+
+    public record HwRewriteResult(bool Ok, int UpdatedRows, List<string> Renamed, List<string> Errors);
+
+    /// <summary>Переписывает hw_version всех уже загруженных прошивок ОДНОГО контроллера со старого
+    /// значения на новое — «скрипт», который выправляет уже залитые прошивки, когда оператор
+    /// прямо на рабочем месте меняет hw модификации (напр. PIXEL2-1321, ошибочно заведённую как
+    /// hw 44, надо перевести на настоящую ревизию 1321). hw зашит в строку версии
+    /// (FwVersionNumber — 3-й сегмент, дополнен до 4 знаков), а имя папки версии на диске = этой самой
+    /// строке, поэтому запись в БД (hw_version/version_raw/disk_path) и физическая папка должны
+    /// переехать вместе: правка только БД осиротила бы старую папку, и ближайший обход диска затянул
+    /// бы её обратно как отдельную «новую» прошивку. Файлы ВНУТРИ папки имена не меняют (как и
+    /// RenameGroupFolder) — открытие идёт по disk_path+filename и не ломается; переименовывается
+    /// только сама папка версии и колонки БД. Каждая запись обрабатывается независимо: сбой на одной
+    /// (папка занята, конфликт имён) не мешает остальным. oldHw == newHw — пустая операция.</summary>
+    public HwRewriteResult RewriteControllerHwVersion(string root, int controllerId, int oldHw, int newHw)
+    {
+        var renamed = new List<string>();
+        var errors = new List<string>();
+        if (oldHw == newHw) return new HwRewriteResult(true, 0, renamed, errors);
+
+        int updated = 0;
+        foreach (var v in _db.GetFwVersionsByControllerAndHw(controllerId, oldHw))
+        {
+            var parsed = FwVersionNumber.Parse(v.VersionRaw);
+            if (parsed is null)
+            {
+                errors.Add($"{v.VersionRaw}: не разобрать строку версии — пропущено.");
+                continue;
+            }
+            // Пересобираем строку версии с новым hw, сохраняя точный суффикс даты/времени (может быть пуст).
+            var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{parsed.SwVersion.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}";
+            var newRaw = string.IsNullOrEmpty(parsed.DtStr) ? core : $"{core}.{parsed.DtStr}";
+            var newDiskPath = v.DiskPath;
+
+            // Запись с файлами на диске: папку надо переименовать. Если диск/шара недоступны — НЕ
+            // трогаем и БД тоже, иначе version_raw в базе разъедется с именем папки, когда шара
+            // вернётся. Запись без файлов (disk_path пуст) правится только в БД.
+            if (!string.IsNullOrWhiteSpace(v.DiskPath))
+            {
+                if (!Directory.Exists(v.DiskPath))
+                {
+                    errors.Add($"{v.VersionRaw}: папка на диске недоступна — пропущено.");
+                    continue;
+                }
+                var parent = Path.GetDirectoryName(v.DiskPath);
+                var candidate = parent is null ? newRaw : Path.Combine(parent, newRaw);
+                if (!string.Equals(candidate, v.DiskPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (Directory.Exists(candidate))
+                    {
+                        errors.Add($"«{newRaw}» уже существует на диске — версия {v.VersionRaw} пропущена.");
+                        continue;
+                    }
+                    try
+                    {
+                        Directory.Move(v.DiskPath, candidate);
+                        renamed.Add($"{v.VersionRaw} → {newRaw}");
+                    }
+                    catch (Exception e)
+                    {
+                        errors.Add($"{v.VersionRaw}: {e.Message}");
+                        continue;
+                    }
+                }
+                newDiskPath = candidate;
+            }
+
+            _db.UpdateFwVersionHw(v.Id!.Value, newHw, newRaw, newDiskPath);
+            updated++;
+        }
+        return new HwRewriteResult(errors.Count == 0, updated, renamed, errors);
+    }
+
     private static void TryRenameFolder(string oldPath, string newPath, List<string> errors)
     {
         if (!Directory.Exists(oldPath)) return; // nothing on disk yet — EnsureStructure will create it under the new name

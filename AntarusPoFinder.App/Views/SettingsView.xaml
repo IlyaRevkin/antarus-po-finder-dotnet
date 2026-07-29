@@ -422,7 +422,8 @@
                          короткие), "Описание" — единственная звёздная колонка, забирает весь остаток. -->
                     <DataGrid x:Name="ControllersGrid" Height="220" AutoGenerateColumns="False" Margin="0,0,0,4"
                               Style="{StaticResource RoomyDataGrid}"
-                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
+                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"
+                              MouseDoubleClick="ControllersGrid_MouseDoubleClick">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Тип" Binding="{Binding ControllerName}" Width="Auto" MinWidth="70" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Модификация" Binding="{Binding DisplayName}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>

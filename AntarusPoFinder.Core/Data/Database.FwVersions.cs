@@ -404,6 +404,38 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Все уже загруженные прошивки одного контроллера с заданным hw_version — любого статуса
+    /// (активные, откатанные, архивные), кроме удалённых. Нужно переписыванию hw
+    /// (HierarchyService.RewriteControllerHwVersion), когда оператор правит hw модификации на рабочем
+    /// месте: все версии со старым hw переезжают на новый вместе с папками на диске.</summary>
+    public List<FwVersionRecord> GetFwVersionsByControllerAndHw(int controllerId, int hwVersion)
+    {
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader(
+            $"SELECT * FROM fw_versions WHERE controller_id=@c AND hw_version=@h AND {NotDeleted()}",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@c", controllerId);
+                cmd.Parameters.AddWithValue("@h", hwVersion);
+            });
+        while (reader.Read())
+            result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>Переписывает hw_version одной записи вместе с зависящими от него полями строки версии
+    /// (version_raw) и путём к папке на диске (disk_path) — их пересчитывает
+    /// HierarchyService.RewriteControllerHwVersion, здесь только атомарная запись в БД.</summary>
+    public void UpdateFwVersionHw(int fwVersionId, int hwVersion, string versionRaw, string diskPath) =>
+        ExecuteNonQuery("UPDATE fw_versions SET hw_version=@h, version_raw=@v, disk_path=@d WHERE id=@id",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@h", hwVersion);
+                cmd.Parameters.AddWithValue("@v", versionRaw);
+                cmd.Parameters.AddWithValue("@d", diskPath);
+                cmd.Parameters.AddWithValue("@id", fwVersionId);
+            });
+
     /// <summary>Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
     /// currently-open reservations (see Database.FwVersionReservations.cs) for this exact
     /// (subtype, controller, hw_version) combo. Including reservations here is what makes the live

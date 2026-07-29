@@ -1427,6 +1427,82 @@ public partial class SettingsView : UserControl
         _host.ShowStatus($"Модификация добавлена: {dlg.ModName} (hw{dlg.HwVersion})", category: NotificationCategory.Hierarchy);
     }
 
+    private void ControllersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!DataGridClickGuard.IsOverDataRow(e)) return;
+        if (ControllersGrid.SelectedItem is not ControllerModRow row) return;
+
+        // Строка-контроллер без модификаций — правится только имя типа.
+        if (row.ModificationId is not int modId)
+        {
+            var newName = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать контроллер", "Название:", row.ControllerName);
+            if (string.IsNullOrWhiteSpace(newName)) return;
+            var upperName = newName.Trim().ToUpperInvariant();
+            if (upperName == row.ControllerName) return;
+
+            var root0 = _services.Cfg.RootPath();
+            if (!string.IsNullOrEmpty(root0) && Directory.Exists(root0))
+            {
+                var moved = _services.Hierarchy.RenameControllerFolders(root0, row.ControllerName, upperName);
+                if (!moved.Ok)
+                {
+                    AppMessageBox.Show($"Не удалось переименовать папки контроллера на диске:\n{moved.Error}\n\nПереименование отменено.",
+                        "Контроллер", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+            _services.Db.UpdateControllerModelName(row.ControllerId, upperName);
+            LoadHierarchy();
+            AutoRebuild();
+            _host.PushCatalogChange($"Контроллер переименован: «{row.ControllerName}» → «{upperName}»");
+            _host.ShowStatus($"Контроллер переименован: {upperName}", category: NotificationCategory.Hierarchy);
+            return;
+        }
+
+        // Строка-модификация — полноценная правка (тип / название / hw / описание).
+        var controllers = _services.Db.GetAllControllerModels();
+        var loadedCount = _services.Db.GetFwVersionsByControllerAndHw(row.ControllerId, row.HwVersion).Count;
+        var hint = loadedCount > 0
+            ? $"Уже загружено прошивок с hw{row.HwVersion}: {loadedCount}. При смене hw будет предложено переписать их (с переименованием папок на диске)."
+            : null;
+
+        var dlg = new AddModificationDialog(controllers, row.ControllerId, row.DisplayName, row.HwVersion, row.Description, hint)
+            { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        var newCtrlId = dlg.SelectedControllerId ?? row.ControllerId;
+        var hwChanged = dlg.HwVersion != row.HwVersion;
+        var ctrlChanged = newCtrlId != row.ControllerId;
+
+        _services.Db.UpdateControllerModification(modId, newCtrlId, dlg.ModName, dlg.HwVersion, dlg.Description);
+
+        // Переписывание уже загруженных прошивок предлагаем только когда сменился именно hw и контроллер
+        // остался прежним — перенос модификации к другому типу это отдельная редкая правка справочника,
+        // её файлы на диске трогать не станем без явного сценария.
+        if (hwChanged && !ctrlChanged && loadedCount > 0)
+        {
+            var ask = AppMessageBox.Show(
+                $"Найдено уже загруженных прошивок с hw{row.HwVersion} для «{row.ControllerName}»: {loadedCount}.\n\n" +
+                $"Переписать их на hw{dlg.HwVersion} (переименовать папки версий на диске)?",
+                "Переписать hw прошивок", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+            if (ask == MessageBoxResult.Yes)
+            {
+                var root = _services.Cfg.RootPath();
+                var res = _services.Hierarchy.RewriteControllerHwVersion(root, row.ControllerId, row.HwVersion, dlg.HwVersion);
+                if (res.Errors.Count > 0)
+                    AppMessageBox.Show(
+                        $"Переписано версий: {res.UpdatedRows}.\nНе удалось: {res.Errors.Count}.\n\n" + string.Join("\n", res.Errors),
+                        "Переписать hw", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _host.ShowStatus($"hw прошивок переписан: {res.UpdatedRows} версий (hw{row.HwVersion} → hw{dlg.HwVersion})",
+                    category: NotificationCategory.Hierarchy);
+            }
+        }
+
+        LoadHierarchy();
+        _host.PushCatalogChange($"Модификация изменена: {dlg.ModName} (hw{dlg.HwVersion})");
+        _host.ShowStatus($"Модификация обновлена: {dlg.ModName} (hw{dlg.HwVersion})", category: NotificationCategory.Hierarchy);
+    }
+
     private void DeleteControllerRow_Click(object sender, RoutedEventArgs e)
     {
         if (ControllersGrid.SelectedItem is not ControllerModRow row)
@@ -1695,7 +1771,12 @@ public partial class SettingsView : UserControl
         Fill(FwGroupFilterCombo, "Группа: все", _fwVersionsData.Select(v => v.GroupName));
         Fill(FwSubtypeFilterCombo, "Подтип: все", _fwVersionsData.Select(v => v.SubtypeName));
         Fill(FwControllerFilterCombo, "Контроллер: все", _fwVersionsData.Select(v => v.CtrlName));
-        Fill(FwStatusFilterCombo, "Статус: все", new[] { "Активна", "Откатана" });
+        // Значения совпадают с тем, что реально показано в столбце «Статус» таблицы (вычисленная
+        // метка FwHistoryStatus), а не сырое поле status. Раньше здесь были «Активна»/«Откатана», а в
+        // таблице значились «Текущая»/«Заменена»/«Откатана» — фильтр не совпадал ни с одной строкой на
+        // экране и выглядел неработающим. «Текущая» покрывает и «Текущая (HW n)» — см. StatusCategory.
+        Fill(FwStatusFilterCombo, "Статус: все",
+            new[] { FwHistoryStatus.Current, FwHistoryStatus.Superseded, FwHistoryStatus.RolledBack });
         Fill(FwTagFilterCombo, "Тег: все", _fwVersionsData.SelectMany(v => TagString.Parse(v.Tags)));
     }
 
@@ -1751,13 +1832,19 @@ public partial class SettingsView : UserControl
     }
 
     private void PopulateFirmwareTable(List<FwVersionRecord> data) =>
-        FwGrid.ItemsSource = data.Select(v => new FwRow
-        {
-            Record = v,
-            StatusLabel = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label)
-                ? label
-                : (v.Status == "rolled_back" ? FwHistoryStatus.RolledBack : FwHistoryStatus.Current),
-        }).ToList();
+        FwGrid.ItemsSource = data.Select(v => new FwRow { Record = v, StatusLabel = LabelFor(v) }).ToList();
+
+    /// <summary>Вычисленная метка статуса записи — ровно та, что показана в столбце «Статус» таблицы.
+    /// Общая для отрисовки и для фильтра по статусу, чтобы они не разъезжались.</summary>
+    private string LabelFor(FwVersionRecord v) =>
+        v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label)
+            ? label
+            : (v.Status == "rolled_back" ? FwHistoryStatus.RolledBack : FwHistoryStatus.Current);
+
+    /// <summary>Схлопывает «Текущая (HW n)» до «Текущая», чтобы одна опция фильтра ловила и общую
+    /// текущую, и текущие по каждому hw. Остальные метки возвращаются как есть.</summary>
+    private static string StatusCategory(string label) =>
+        label.StartsWith(FwHistoryStatus.Current, StringComparison.Ordinal) ? FwHistoryStatus.Current : label;
 
     private void FwFilter_Changed(object sender, TextChangedEventArgs e) => ApplyFwFilter();
 
@@ -1776,7 +1863,7 @@ public partial class SettingsView : UserControl
         if (FwControllerFilterCombo.SelectedIndex > 0 && FwControllerFilterCombo.SelectedItem is string ctrl)
             rows = rows.Where(v => v.CtrlName == ctrl);
         if (FwStatusFilterCombo.SelectedIndex > 0 && FwStatusFilterCombo.SelectedItem is string status)
-            rows = rows.Where(v => (status == "Откатана") == (v.Status == "rolled_back"));
+            rows = rows.Where(v => StatusCategory(LabelFor(v)) == status);
         if (FwTagFilterCombo.SelectedIndex > 0 && FwTagFilterCombo.SelectedItem is string tag)
             rows = rows.Where(v => TagString.Contains(v.Tags, tag));
 

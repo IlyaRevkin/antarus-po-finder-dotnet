@@ -303,6 +303,35 @@ public partial class Database
         return id is long l ? (int)l : -1;
     }
 
+    /// <summary>Правит существующую модификацию (двойной клик по строке в Настройки → Иерархия):
+    /// тип-контроллер, название, hw_version и описание. controller_id тоже правится — оператор может
+    /// перенести ошибочно заведённую модификацию к другому типу. updated_at бампается ради синка.
+    /// Смена hw_version уже загруженных прошивок этой модификации выполняется ОТДЕЛЬНО
+    /// (HierarchyService.RewriteControllerHwVersion) — здесь меняется только справочная запись.</summary>
+    public void UpdateControllerModification(int modId, int controllerId, string displayName, int hwVersion, string description) =>
+        ExecuteNonQuery(
+            "UPDATE controller_modifications SET controller_id=@c, display_name=@d, hw_version=@h, description=@desc, updated_at=@u WHERE id=@m",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@c", controllerId);
+                cmd.Parameters.AddWithValue("@d", displayName);
+                cmd.Parameters.AddWithValue("@h", hwVersion);
+                cmd.Parameters.AddWithValue("@desc", description);
+                cmd.Parameters.AddWithValue("@u", NowIso());
+                cmd.Parameters.AddWithValue("@m", modId);
+            });
+
+    /// <summary>Переименовывает тип контроллера по id (двойной клик по строке-контроллеру без
+    /// модификаций). UpsertControllerModel матчит по имени и для переименования не годится.</summary>
+    public void UpdateControllerModelName(int id, string newName) =>
+        ExecuteNonQuery("UPDATE controller_models SET name=@n, updated_at=@u WHERE id=@id",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@n", newName);
+                cmd.Parameters.AddWithValue("@u", NowIso());
+                cmd.Parameters.AddWithValue("@id", id);
+            });
+
     public void DeleteControllerModification(int modId) =>
         ExecuteNonQuery("DELETE FROM controller_modifications WHERE id=@m", cmd => cmd.Parameters.AddWithValue("@m", modId));
 

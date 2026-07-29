@@ -7,18 +7,27 @@
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <StackPanel Margin="16">
+        <!-- Тип (контроллер) — виден только в режиме правки, где модификацию можно перенести к
+             другому типу. В режиме добавления тип фиксирован выбранной в таблице строкой. -->
+        <StackPanel x:Name="ControllerPanel" Visibility="Collapsed">
+            <TextBlock Text="Тип (контроллер):" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ControllerCombo" Margin="0,0,0,12" DisplayMemberPath="Name"/>
+        </StackPanel>
+
         <TextBlock Text="Модификация:" Margin="0,0,0,4"/>
         <TextBox x:Name="NameInput" Margin="0,0,0,12" ToolTip="напр. PIXEL2-1020"/>
 
         <TextBlock Text="hw_version:" Margin="0,0,0,4"/>
-        <TextBox x:Name="HwVersionInput" Margin="0,0,0,12" ToolTip="целое число, напр. 41"/>
+        <TextBox x:Name="HwVersionInput" Margin="0,0,0,4" ToolTip="целое число — ревизия платы, напр. 1020"/>
+        <TextBlock x:Name="HwHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Visibility="Collapsed"/>
 
         <TextBlock Text="Описание:" Margin="0,0,0,4"/>
         <TextBox x:Name="DescriptionInput" Margin="0,0,0,16" ToolTip="напр. 8DI / 6DO / 8AI / 2AO"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
-            <Button Content="Добавить" Width="90" Click="Ok_Click" IsDefault="True"/>
+            <Button x:Name="OkButton" Content="Добавить" Width="90" Click="Ok_Click" IsDefault="True"/>
         </StackPanel>
     </StackPanel>
 </Window>
