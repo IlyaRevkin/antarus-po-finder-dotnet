@@ -73,6 +73,22 @@ public sealed record FirmwareCardFlags
     /// <summary>Включена ли автосинхронизация локальной копии (Настройки → Общие). От неё зависит
     /// только начальный текст статуса — пункт ручной синхронизации в меню есть всегда.</summary>
     public bool AutoSync { get; init; }
+
+    /// <summary>Папку версии на диске не нашли (и локальной копии нет). Раньше такую карточку молча
+    /// УБИРАЛИ с экрана («найдено 0, скрыто отсутствующих на диске»), из-за чего реальная прошивка
+    /// «пропадала» из выдачи, стоило переименовать hw/папку на диске или назвать её нестандартно —
+    /// любой промах определения присутствия молча прятал живой результат. Теперь карточку не прячем,
+    /// а помечаем: спрятать реальную прошивку хуже, чем показать её с честным предупреждением, что
+    /// файлов для открытия по сохранённому пути может не быть. Считается фоновым обходом
+    /// (SearchView.ScanDiskFlagsAsync), поэтому до конца обхода всегда false.</summary>
+    public bool DiskMissing { get; init; }
+
+    /// <summary>Правки этой прошивки (теги/описание/типы пуска) ещё лежат в накопителе синхры и не
+    /// уехали на общий диск — коллеги их пока не видят. Машинно-локальный признак: истинен только на
+    /// той машине, где правку сделали, и только пока «Отправить всё» не унесло накопитель на диск
+    /// (см. Database.GetPendingSubjectKeys, SearchView заполняет по FwVersionId). Ровно ответ на
+    /// вопрос оператора «а этот тег уже синхронизирован или нет».</summary>
+    public bool TagsPending { get; init; }
 }
 
 /// <summary>One search-result card. Кнопок стало слишком много для одного ряда, поэтому основными
@@ -149,6 +165,13 @@ public partial class FirmwareCard : UserControl
         var tags = TagString.Parse(result.Tags);
         TagsView.Configure(tags, null, readOnly: true);
         TagsView.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // «Синхронизирован ли этот тег» — правки этой прошивки ещё в накопителе, на диск не ушли
+        // (машинно-локально, только у того, кто правил). Скруглённые стрелки + акцент — та же
+        // семантика «ждёт отправки», что у пилюли синхры вверху.
+        TagsPendingLabel.Visibility = flags.TagsPending ? Visibility.Visible : Visibility.Collapsed;
+        if (flags.TagsPending)
+            TagsPendingLabel.Text = "⟳ Ваши правки этой прошивки ещё не на диске — коллеги их пока не видят. «Отправить всё» вверху.";
 
         SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
 
@@ -376,6 +399,15 @@ public partial class FirmwareCard : UserControl
 
     private void ShowInitialSyncStatus(FirmwareCardFlags flags)
     {
+        // Версии на диске по сохранённому пути нет и локальной копии тоже — раньше карточку прятали,
+        // теперь показываем с явной пометкой (см. FirmwareCardFlags.DiskMissing). Приоритетнее
+        // «есть локальная копия»: если файлов нет ни там, ни там — важно сказать именно это.
+        if (flags.DiskMissing && !flags.HasLocal)
+        {
+            SetSyncStatus("⚠ На диске по сохранённому пути не найдена — возможно, папку переименовали или прошивку удалили. Файлов для открытия может не быть.",
+                "WarningBrush");
+            return;
+        }
         if (flags.HasLocal)
         {
             SetSyncStatus(null);

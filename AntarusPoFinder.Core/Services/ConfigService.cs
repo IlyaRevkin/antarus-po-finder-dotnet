@@ -311,6 +311,22 @@ public class ConfigService
     public string ConfigLastPushedAt() => Get("config_last_pushed_at");
     public void SetConfigLastPushedAt(string exportedAt) => Set("config_last_pushed_at", exportedAt);
 
+    /// <summary>UpdatedAt самого свежего тикета, который эта машина уже показывала оператору (страницу
+    /// «Тикеты» открывали при этом состоянии). По нему бейдж на пункте меню считает «сколько тикетов/
+    /// смен статуса пришло с других машин с тех пор» — раньше о новом тикете не узнавали вовсе, пока
+    /// сами не заходили на страницу (PullNewEvents срабатывал только при её открытии). Per-machine —
+    /// у каждого компьютера свой момент «последнего просмотра», в общий конфиг не уходит (см.
+    /// ConfigSyncService.SkipSettingsKeys).</summary>
+    public string TicketsLastSeenAt() => Get("tickets_last_seen_at");
+    public void SetTicketsLastSeenAt(string at) => Set("tickets_last_seen_at", at);
+
+    /// <summary>Подробный режим синхронизации (кнопка на «Сетевые диски») — когда включён, каждый
+    /// фоновый тик приёма/отправки/тикетов пишет в статус-строку, ЧТО именно синхронизировалось
+    /// (обычно всё это происходит молча). Нужен, чтобы отследить «что синхронится, а что нет», не
+    /// гадая. Per-machine, в общий конфиг не уходит (см. ConfigSyncService.SkipSettingsKeys).</summary>
+    public bool SyncVerbose() => Get("sync_verbose") == "true";
+    public void SetSyncVerbose(bool value) => Set("sync_verbose", value ? "true" : "false");
+
     /// <summary>"ldap" (default — unchanged behaviour for existing installs) = only способ №1 (прямой
     /// LDAP-бинд, требует сетевого доступа к контроллеру домена); "http" = только способ №2 (HTTP-
     /// запрос к AdHttpUrl() с NTLM/Negotiate); "both" = пробовать LDAP, и только если домен

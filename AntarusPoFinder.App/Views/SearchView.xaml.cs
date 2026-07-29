@@ -531,7 +531,6 @@ public partial class SearchView : UserControl
         // кнопкой «Показать ещё» (см. AddWeakMatchesFold): пока они спрятаны — они и не в счёте.
         _foundCount = strong.Count;
         _foundFiltered = !filters.IsEmpty;
-        _hiddenDead = 0;
         UpdateFoundLabel();
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
@@ -540,6 +539,10 @@ public partial class SearchView : UserControl
         // StubFirmwareLoaderBackend.IsAvailable = false), поэтому «Загрузить в ПЛК» станет основной
         // кнопкой карточки лишь когда лоадер реально допилят. Считаем один раз на всю выдачу.
         var loaderConnected = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath()).IsAvailable;
+        // Прошивки, чьи правки (теги/описание) ещё лежат в накопителе и не уехали на диск — карточка
+        // покажет «правки этой прошивки ещё не на диске» (см. FirmwareCardFlags.TagsPending). Читаем
+        // один раз на всю выдачу; на не-администраторских машинах набор обычно пуст (правят только они).
+        var pendingSubjects = _services.Db.GetPendingSubjectKeys();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -559,6 +562,7 @@ public partial class SearchView : UserControl
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
+                TagsPending = pendingSubjects.Contains(result.FwVersionId.ToString()),
                 DiskScanPending = true,
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
@@ -644,21 +648,13 @@ public partial class SearchView : UserControl
     private int _foundCount;
     private bool _foundFiltered;
 
-    /// <summary>Сколько версий выдачи оказались «мёртвыми» ссылками (нет ни локально, ни на доступном
-    /// сетевом диске — см. ScanDiskFlagsAsync) и убраны с экрана. Копится по ходу фонового обхода — и
-    /// у strong, и у раскрытых weak, — поэтому это поле, а не локальная переменная одного обхода;
-    /// сбрасывается в 0 на каждый новый поиск.</summary>
-    private int _hiddenDead;
-
-    /// <summary>Строка «Найдено: N» с поправкой на скрытые мёртвые версии. И _foundCount (растёт при
-    /// раскрытии «Показать ещё»), и _hiddenDead (растёт по ходу фонового обхода) — поля, поэтому
-    /// строка пересчитывается на месте по актуальному состоянию, а не пишется один раз.</summary>
+    /// <summary>Строка «Найдено: N». _foundCount — число ТОЧНЫХ совпадений (strong), растёт при
+    /// раскрытии «Показать ещё» (менее точные weak). Версии, которых не нашли на диске, больше НЕ
+    /// вычитаются: их не прячут, а показывают с пометкой (см. ScanDiskFlagsAsync), поэтому в счёте
+    /// они по-прежнему есть — иначе «найдено 0» при видимых на экране карточках вводило в ступор.</summary>
     private void UpdateFoundLabel()
     {
-        var shown = _foundCount - _hiddenDead;
-        var text = _foundFiltered ? $"Найдено: {shown} (с фильтрами)" : $"Найдено: {shown}";
-        if (_hiddenDead > 0) text += $" · скрыто отсутствующих на диске: {_hiddenDead}";
-        StatusLabel.Text = text;
+        StatusLabel.Text = _foundFiltered ? $"Найдено: {_foundCount} (с фильтрами)" : $"Найдено: {_foundCount}";
     }
 
     // ── Что лежит рядом с версией на диске ────────────────────────────────
@@ -792,16 +788,23 @@ public partial class SearchView : UserControl
             // диске (откат дописал «_ОТКАТАНО», правку hw переписали номер в середине имени, перезалив
             // сменил дату), а disk_path в базе остался прежним. Файлы лежат в той же папке контроллера
             // под соседним именем той же сборки — FirmwareDiskPresence опознаёт её по номеру ИЛИ по
-            // метке даты-времени сборки. Прячем, только когда версии на диске нет и под переименованным
-            // именем тоже (иначе жалоба «выбрал фильтр — найдено 0, скрыто отсутствующих, хотя прошивка
-            // на диске есть и hw я переименовал»).
-            if (netReachable && !baseFlags.HasLocal && !scan.NetworkAlive
+            // метке даты-времени сборки.
+            //
+            // РАНЬШЕ здесь карточку убирали с экрана и считали «скрыто отсутствующих на диске». Это
+            // давало регулярную жалобу «выбрал фильтр — найдено 0, скрыто отсутствующих, хотя прошивка
+            // на диске ЕСТЬ»: любой промах определения присутствия (переименовали hw без метки сборки,
+            // нестандартное имя папки Pixel, иначе смонтированный диск) молча прятал живой результат, и
+            // человек не понимал, куда делась прошивка. Теперь ничего не прячем — карточку показываем с
+            // явной пометкой «на диске не найдена» (FirmwareCardFlags.DiskMissing) и не тянем её
+            // автосинхронизацией (тянуть нечего). Спрятать реальную прошивку хуже, чем показать её с
+            // предупреждением: если файлов правда нет — карточка честно об этом и скажет, а решение
+            // открыть/поискать вручную остаётся за оператором.
+            var diskMissing = netReachable && !baseFlags.HasLocal && !scan.NetworkAlive
                 && !FirmwareDiskPresence.VersionPresentOnDisk(result.FirmwareDir, result.VersionRaw)
-                && PathCheckableHere(result, root))
+                && PathCheckableHere(result, root);
+            if (diskMissing)
             {
-                ResultsPanel.Children.Remove(card);
-                _hiddenDead++;
-                UpdateFoundLabel();
+                card.Configure(result, baseFlags with { DiskScanPending = false, DiskMissing = true });
                 continue;
             }
 

@@ -49,6 +49,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private bool _appUpdateCheckLastFailed;
     private Version? _lastNotifiedUpdateVersion;
 
+    /// <summary>Тикеты приходят с других машин в любой момент, а PullNewEvents раньше срабатывал
+    /// только при открытии страницы «Тикеты» — о новом тикете оператор не узнавал, пока сам туда не
+    /// заходил. Теперь тянем их тем же фоном, что и конфиг; _ticketSyncRunning гасит наложение тиков,
+    /// _lastUnseenTickets — прежнее число непросмотренных (всплывашку показываем только на РОСТ, как
+    /// у бейджа модерации), чтобы каждый тик не гудел о том же.</summary>
+    private bool _ticketSyncRunning;
+    private int? _lastUnseenTickets;
+
+    /// <summary>Сколько операций синхронизации (приём/отправка конфига, тикеты) идёт прямо сейчас —
+    /// СВОЙ счётчик, отдельный от Busy (тот общий с поиском и обходом диска). По просьбе из тикета
+    /// коллеги индикатор синхронизации крутится ровно на синхре, а не на любой фоновой работе.</summary>
+    private int _syncActivity;
+
+    /// <summary>Текст последней ошибки синхронизации и когда она случилась — сбрасывается любой
+    /// успешной синхрой. Держит пилюлю статуса в состоянии «ошибка» (оранжевый треугольник), пока не
+    /// пройдёт удачный тик.</summary>
+    private string? _syncLastError;
+
     /// <summary>Тик синхронизации теперь асинхронный, значит следующий может прийти, пока предыдущий
     /// ещё ждёт сетевой диск (диск отвечает медленнее, чем sync_interval_min). Раньше такого быть не
     /// могло — всё выполнялось внутри одного Tick на потоке интерфейса. Наложение прогонов не даёт
@@ -90,6 +108,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _incomingChangesBannerVisible;
     [ObservableProperty] private string _incomingChangesBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
+
+    /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
+    /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
+    /// "syncing" — идёт синхра (стрелки крутятся), "error" — последний тик упал (оранжевый ⚠),
+    /// "pending" — есть неотправленное (свои правки/теги в накопителе или тикеты в очереди),
+    /// "synced" — всё синхронизировано (приглушённые стрелки). XAML разбирает строку в глиф/цвет/
+    /// анимацию через DataTrigger — так одно поле правит и вид, и подсказку.</summary>
+    [ObservableProperty] private string _syncStatusState = "synced";
+    [ObservableProperty] private string _syncStatusTooltip = "Синхронизация";
     /// <summary>Быстрый доступ display mode — see ConfigService.QuickAppsDisplayMode. Two separate
     /// Visibility-driving flags (rather than one enum bound with a converter) because MainWindow.xaml
     /// needs to combine this with "QuickApps.Count > 0" (an empty list never shows a bar/strip either
@@ -146,6 +173,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         ReloadSidebarApps();
         Navigate(FirstAllowedPageId(CurrentRole));
 
+        // Пилюля статуса синхры и накопитель — показать актуальное состояние сразу, не дожидаясь
+        // первого фонового тика (RefreshPendingChangesBanner сам зовёт RefreshSyncStatus).
+        RefreshPendingChangesBanner();
+
         StartTimers();
     }
 
@@ -168,7 +199,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (pageId == "network" && _pageCache[pageId] is NetworkSyncView networkView)
             networkView.RefreshIfActive();
         if (pageId == "tickets" && _pageCache[pageId] is TicketsView ticketsView)
+        {
             ticketsView.RefreshIfActive();
+            // Открыли страницу «Тикеты» — всё, что на ней сейчас видно, считается просмотренным:
+            // сдвигаем watermark на самый свежий тикет и гасим бейдж (без всплывашки — это не новое
+            // событие, оператор сам сюда пришёл).
+            MarkTicketsSeen();
+        }
         // Загрузка ПО / Параметры перечитывают справочники (типы шкафов, подтипы, контроллеры,
         // производители) — иначе в комбобоксах остаётся состояние на момент первой отрисовки
         // страницы, см. UploadView.RefreshIfActive.
@@ -181,6 +218,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             item.IsActive = item.PageId == pageId;
         IsSettingsActive = pageId == "settings";
         RefreshModerationBadge();
+        RefreshTicketsBadge(notify: false);
     }
 
     /// <summary>Keeps the "Модерация прошивок" sidebar badge in sync with Settings→Прошивки→Модерация's
@@ -203,6 +241,183 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         catch { /* best effort — badge just won't update this time */ }
     }
+
+    // ── Тикеты: фоновый приём + бейдж/уведомление ───────────────────────────────
+    // PullNewEvents раньше срабатывал ТОЛЬКО при открытии страницы «Тикеты», поэтому о тикете,
+    // оставленном коллегой, оператор не узнавал, пока сам туда не заходил. Теперь тянем их тем же
+    // фоном, что и конфиг (см. вызов в CheckForConfigUpdateAsync), и показываем счётчик на пункте
+    // меню + всплывашку на КАЖДЫЙ прирост непросмотренных.
+
+    /// <summary>Тянет новые события тикетов с диска и обновляет бейдж. DB-часть (InsertTicketIfMissing/
+    /// ApplyTicketStatusIfNewer внутри PullNewEvents) идёт на потоке интерфейса — соединение SQLite одно
+    /// и не потокобезопасно (см. HierarchyService), ровно так же тикеты синхронизирует TicketsView при
+    /// открытии страницы. Тикеты малы и их немного, поэтому короткий поход на шару здесь допустим;
+    /// _ticketSyncRunning гасит наложение тиков.</summary>
+    private void SyncTicketsNow()
+    {
+        if (_ticketSyncRunning) return;
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root)) return;
+
+        _ticketSyncRunning = true;
+        using var activity = BeginSyncActivity();
+        try
+        {
+            int applied;
+            using (Busy.Begin("Синхронизация тикетов…"))
+            {
+                TicketSyncService.FlushOutbox(_services, root, out var flushFailed);
+                applied = TicketSyncService.PullNewEvents(_services, root, out var pullFailed);
+                if (flushFailed + pullFailed > 0)
+                    NoteSyncOutcome($"Тикеты: не удалось обработать файлов: {flushFailed + pullFailed}", isError: true);
+                else
+                    NoteSyncOutcome(applied > 0 ? $"Тикеты: получено событий: {applied}" : null, isError: false);
+            }
+            RefreshTicketsBadge(notify: true);
+            // Тикет мог сменить статус на «в очереди на отправке нечего» — освежаем и пилюлю.
+            RefreshSyncStatus();
+        }
+        catch { /* best effort — локальные тикеты всё равно видны, повтор на следующем тике */ }
+        finally { _ticketSyncRunning = false; }
+    }
+
+    /// <summary>Тикеты, видимые ТЕКУЩЕЙ роли (администратор — все, остальные — только свои, по имени
+    /// Windows/AD, тот же фильтр, что в TicketsView), у которых что-то поменялось (UpdatedAt) после
+    /// последнего просмотра страницы. Ставит бейдж на пункт «Тикеты» и, если непросмотренных стало
+    /// БОЛЬШЕ (пришло новое), негромко уведомляет — на каждый тик подряд об одном и том же не гудит.</summary>
+    private void RefreshTicketsBadge(bool notify)
+    {
+        var item = NavItems.FirstOrDefault(n => n.PageId == "tickets");
+        if (item is null) return;
+        try
+        {
+            var lastSeen = _services.Cfg.TicketsLastSeenAt();
+            var me = _services.CurrentUserName;
+            var isAdmin = CurrentRole == "administrator";
+            var unseen = _services.Db.GetTickets()
+                .Where(t => isAdmin || string.Equals(t.CreatedBy, me, StringComparison.OrdinalIgnoreCase))
+                .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeen) > 0);
+
+            item.BadgeCount = unseen;
+
+            if (notify && _lastUnseenTickets.HasValue && unseen > _lastUnseenTickets.Value && unseen > 0)
+                ShowStatus(unseen == 1 ? "Новый тикет" : $"Новые тикеты/изменения: {unseen}", 8000, NotificationCategory.General);
+            _lastUnseenTickets = unseen;
+        }
+        catch { /* best effort — бейдж просто не обновится в этот раз */ }
+    }
+
+    /// <summary>IAppHost — TicketsView зовёт после того, как показал страницу (и подтянул новые
+    /// события с диска), чтобы пометка «просмотрено» ставилась по актуальному списку.</summary>
+    public void OnTicketsViewed() => MarkTicketsSeen();
+
+    /// <summary>Открыли страницу «Тикеты» — сдвигаем watermark на самый свежий видимый тикет (всё, что
+    /// на ней сейчас показано, считается просмотренным) и гасим бейдж без всплывашки.</summary>
+    private void MarkTicketsSeen()
+    {
+        try
+        {
+            var me = _services.CurrentUserName;
+            var isAdmin = CurrentRole == "administrator";
+            var newest = _services.Db.GetTickets()
+                .Where(t => isAdmin || string.Equals(t.CreatedBy, me, StringComparison.OrdinalIgnoreCase))
+                .Select(t => t.UpdatedAt)
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .LastOrDefault() ?? "";
+            if (!string.IsNullOrEmpty(newest)) _services.Cfg.SetTicketsLastSeenAt(newest);
+        }
+        catch { /* не смогли — бейдж просто не сбросится до следующего открытия */ }
+        RefreshTicketsBadge(notify: false);
+    }
+
+    // ── Пилюля статуса синхронизации (статус-строка) ────────────────────────────
+    // Отдельный от Busy индикатор именно про синхру (тикет коллеги: «отделить анимацию синхронизации
+    // конфига от анимации поиска, добавить иконку в виде скруглённых стрелок, ошибку — красными
+    // стрелками / восклицательным знаком в оранжевом треугольнике»). Приоритет состояний:
+    // идёт синхра → ошибка → есть неотправленное → всё синхронизировано.
+
+    /// <summary>Отмечает начало операции синхронизации: пилюля переходит в «крутящиеся стрелки», пока
+    /// scope не освобождён. Считает вложенно (несколько синхр разом — нормально), поэтому int-счётчик,
+    /// а не bool.</summary>
+    private IDisposable BeginSyncActivity()
+    {
+        _syncActivity++;
+        RefreshSyncStatus();
+        return new SyncActivityScope(this);
+    }
+
+    private sealed class SyncActivityScope(MainWindowViewModel owner) : IDisposable
+    {
+        private bool _disposed;
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            owner._syncActivity--;
+            owner.RefreshSyncStatus();
+        }
+    }
+
+    /// <summary>Итог одного синхро-тика: запомнить ошибку (пилюля станет «ошибка») либо стереть её
+    /// (успех). Плюс в подробном режиме синхронизации (Сетевые диски → «Подробный режим») пишет в
+    /// статус-строку, ЧТО именно синхронизировалось — обычно всё это происходит молча.</summary>
+    private void NoteSyncOutcome(string? message, bool isError)
+    {
+        if (isError) _syncLastError = message;
+        else _syncLastError = null;
+
+        if (_services.Cfg.SyncVerbose() && !string.IsNullOrEmpty(message))
+            ShowStatus((isError ? "⚠ " : "⟳ ") + message, isError ? 8000 : 4000, NotificationCategory.Sync);
+
+        RefreshSyncStatus();
+    }
+
+    /// <summary>Пересчитывает состояние пилюли по приоритету и собирает подсказку. Дёшево (пара
+    /// запросов COUNT + чтение настроек) — зовётся из каждой точки, где синхро-состояние могло
+    /// поменяться.</summary>
+    private void RefreshSyncStatus()
+    {
+        int outbox = 0;
+        try { outbox = _services.Db.GetTicketOutbox().Count; } catch { /* БД занята — ноль, поправится на след. тике */ }
+        var pendingLocal = PendingChangesCount + outbox;
+
+        string state;
+        string tip;
+        if (_syncActivity > 0)
+        {
+            state = "syncing";
+            tip = "Идёт синхронизация с сетевым диском…";
+        }
+        else if (_syncLastError is not null)
+        {
+            state = "error";
+            tip = "Ошибка синхронизации: " + _syncLastError + "\nПовторится автоматически. Открыть «Сетевые диски» →";
+        }
+        else if (pendingLocal > 0)
+        {
+            state = "pending";
+            var parts = new List<string>();
+            if (PendingChangesCount > 0) parts.Add($"правок справочника/тегов: {PendingChangesCount}");
+            if (outbox > 0) parts.Add($"событий тикетов: {outbox}");
+            tip = "Ожидает отправки на диск (" + string.Join(", ", parts) + ").\nОткрыть «Сетевые диски» →";
+        }
+        else
+        {
+            state = "synced";
+            var last = _services.Cfg.ConfigLastSyncedAt();
+            var when = last.Length >= 16 ? last[..16].Replace('T', ' ') : last;
+            tip = string.IsNullOrEmpty(when) ? "Синхронизировано с сетевым диском" : $"Синхронизировано · последний приём: {when}";
+            tip += "\nОткрыть «Сетевые диски» →";
+        }
+
+        SyncStatusState = state;
+        SyncStatusTooltip = tip;
+    }
+
+    /// <summary>Клик по пилюле статуса — открывает «Сетевые диски» (там таймстемпы приёма/отправки,
+    /// ревизия, конфликты и переключатель подробного режима синхронизации).</summary>
+    [RelayCommand]
+    private void ShowSyncDetails() => Navigate("network");
 
     private bool TryCreatePage(string pageId, out object? page)
     {
@@ -920,8 +1135,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// can check whenever they care, rather than being interrupted by it.</summary>
     private async Task CheckForConfigUpdateAsync()
     {
+        // Тикеты тянем тем же фоном (независимо от гейта конфига ниже — у SyncTicketsNow свой
+        // guard): раньше о новом тикете узнавали, только зайдя на страницу «Тикеты».
+        SyncTicketsNow();
+
         if (_configSyncRunning) return; // тик пришёл, пока предыдущий ещё тянет диск — просто пропускаем
         _configSyncRunning = true;
+        using var activity = BeginSyncActivity();
         try
         {
             SharedConfigSnapshot? snapshot;
@@ -935,10 +1155,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 // Root reachable but reading/parsing the shared config itself failed — worth telling
                 // the user, unlike an unreachable share (already covered by DiskStatusText) or "no
                 // update yet", which stay silent. The app keeps running on the local copy regardless.
+                NoteSyncOutcome($"Не удалось проверить обновление конфига: {error}", isError: true);
                 ShowStatus($"Не удалось проверить обновление конфига: {error}", 8000, NotificationCategory.Sync);
                 return;
             }
-            if (info is null || snapshot is null) return;
+            if (info is null || snapshot is null) { NoteSyncOutcome(null, isError: false); return; }
 
             var root = _services.Cfg.RootPath();
             using (Busy.Begin("Синхронизация прошивок с диском…"))
@@ -952,6 +1173,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // накопитель) — здесь же дешёвый повод перечитать и наш собственный счётчик, а не только
             // после PushCatalogChange/PushConfigNow.
             RefreshPendingChangesBanner();
+            NoteSyncOutcome($"Применён конфиг с диска (изменений: {info.Changes?.Count ?? 0})", isError: false);
+        }
+        catch (Exception e)
+        {
+            NoteSyncOutcome($"Сбой синхронизации конфига: {e.Message}", isError: true);
         }
         finally
         {
@@ -1047,6 +1273,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         PendingChangesDetails.Clear();
         foreach (var change in pending)
             PendingChangesDetails.Add(change.Description);
+
+        // Накопитель (в т.ч. правки тегов) — это и есть «неотправленное» для пилюли статуса синхры.
+        RefreshSyncStatus();
     }
 
     /// <summary>Полный список готовых к отправке правок — открывается отдельным окном (TextViewDialog),
@@ -1434,13 +1663,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     ///
     /// Автоотправка по таймеру (PushConfigNowAsync), если администратор её включил, по-прежнему
     /// уносит накопленное сама — эта настройка не менялась.</summary>
-    public void PushCatalogChange(string what) => _ = PushCatalogChangeAsync(what);
+    public void PushCatalogChange(string what, string subjectKey = "") => _ = PushCatalogChangeAsync(what, subjectKey);
 
-    private Task PushCatalogChangeAsync(string what)
+    private Task PushCatalogChangeAsync(string what, string subjectKey)
     {
         // Накопитель (Database.SyncPendingChange) — и счётчик на плашке, и источник описаний для
-        // журнала маркера ревизии при отправке (ExportAsync(changeDescriptions:)).
-        _services.Db.AddSyncPendingChange("catalog", what, _services.CurrentUserName);
+        // журнала маркера ревизии при отправке (ExportAsync(changeDescriptions:)). subjectKey даёт
+        // карточке выдачи точечную подсветку «правки этой прошивки ещё не на диске».
+        _services.Db.AddSyncPendingChange("catalog", what, _services.CurrentUserName, subjectKey);
         RefreshPendingChangesBanner();
 
         // Полный экспорт разрешён только администратору (см. SendPendingChangesNow) — остальным
@@ -1464,6 +1694,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private async Task PushConfigNowAsync()
     {
         var root = _services.Cfg.RootPath();
+        using var activity = BeginSyncActivity();
         try
         {
             var exportedBy = $"{_services.CurrentUserName} ({RoleLabel})";
@@ -1471,6 +1702,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             using (Busy.Begin("Отправка конфига на диск…"))
                 await ConfigSyncService.ExportAsync(_services, root, exportedBy, descriptions);
             RefreshPendingChangesBanner();
+            NoteSyncOutcome(descriptions.Count > 0 ? $"Отправлено на диск (правок: {descriptions.Count})" : null, isError: false);
             if (_configPushLastFailed)
             {
                 _configPushLastFailed = false;
@@ -1479,6 +1711,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         catch (Exception ex)
         {
+            NoteSyncOutcome($"Автоотправка конфига не удалась: {ex.Message}", isError: true);
             if (!_configPushLastFailed)
             {
                 _configPushLastFailed = true;

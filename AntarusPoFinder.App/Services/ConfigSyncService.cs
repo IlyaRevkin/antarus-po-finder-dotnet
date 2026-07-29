@@ -129,6 +129,11 @@ public static class ConfigSyncService
         // справочник; уехав в общий конфиг, он смешал бы журналы разных машин.
         "app_changelog_history",
         "ad_require_login", "ad_require_login_default_days", "ad_last_login",
+        // «Докуда эта машина уже видела тикеты» и «включён ли подробный режим синхронизации» — оба
+        // чисто машинно-локальные (см. ConfigService.TicketsLastSeenAt/SyncVerbose): у каждого
+        // компьютера свой момент последнего просмотра и своя настройка отладки, в общий конфиг им
+        // уезжать нельзя.
+        "tickets_last_seen_at", "sync_verbose",
         "search_auto_sync", "loader_exe_path", "loader_format_default", "loader_update_kernel_default",
         "loader_last_target", "unified_plc_hmi_zone",
         // Кто эта машина в общей статистике выборов и какой сброс она уже выполнила у себя (см.

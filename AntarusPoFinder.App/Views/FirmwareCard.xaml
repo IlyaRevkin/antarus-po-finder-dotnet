@@ -27,6 +27,12 @@
                  строк changelog'а на КАЖДОЙ карточке выдачи), а прочитать его можно там, где оно
                  и осмысленно — «Ещё» → «История версий», где видно ещё и чем версии отличаются. -->
             <views:TagBubbleEditor x:Name="TagsView" Margin="0,4,0,0"/>
+            <!-- Правки тегов/описания этой прошивки ещё лежат в накопителе и не уехали на общий диск —
+                 значит коллеги их пока не видят (машинно-локальный признак, см. FirmwareCardFlags.TagsPending
+                 и Database.GetPendingSubjectKeys). Акцентный цвет + скруглённые стрелки — та же семантика
+                 «ждёт отправки», что и у пилюли синхры в статус-строке. -->
+            <TextBlock x:Name="TagsPendingLabel" Margin="0,3,0,0" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource AccentBrush}" Visibility="Collapsed"/>
 
             <Grid Margin="0,8,0,0">
                 <Grid.ColumnDefinitions>

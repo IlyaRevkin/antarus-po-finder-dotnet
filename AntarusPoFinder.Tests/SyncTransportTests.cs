@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -446,6 +447,30 @@ public class SyncPendingChangesTests
         db.ClearSyncPendingChanges();
         Assert.Equal(0, db.SyncPendingChangeCount());
         Assert.Empty(db.GetSyncPendingChanges());
+    }
+
+    [Fact]
+    public void PendingSubjectKeys_TrackPerFirmware_AndClearOnFlush()
+    {
+        using var dbFile = new TempDb();
+        using var db = new AntarusPoFinder.Core.Data.Database(dbFile.Path);
+
+        // Правки без привязки к прошивке (пустой subject) не подсвечивают ни одной карточки.
+        db.AddSyncPendingChange("catalog", "добавлен производитель VEDA", "profileA");
+        Assert.Empty(db.GetPendingSubjectKeys());
+
+        // Правка тегов конкретной прошивки несёт её FwVersionId — карточка именно этой прошивки
+        // должна показать «правки ещё не на диске».
+        db.AddSyncPendingChange("catalog", "Прошивка X: изменены теги", "profileA", subject: "42");
+        db.AddSyncPendingChange("catalog", "Прошивка X: изменено описание", "profileA", subject: "42"); // та же прошивка — один ключ
+        db.AddSyncPendingChange("catalog", "Прошивка Y: изменены теги", "profileA", subject: "7");
+
+        var keys = db.GetPendingSubjectKeys();
+        Assert.Equal(new HashSet<string> { "42", "7" }, keys);
+
+        // «Отправить всё» унесло накопитель на диск — точечная подсветка гаснет.
+        db.ClearSyncPendingChanges();
+        Assert.Empty(db.GetPendingSubjectKeys());
     }
 
     [Fact]

@@ -18,14 +18,30 @@ public class SyncPendingChange
 
 public partial class Database
 {
-    public void AddSyncPendingChange(string changeType, string description, string author) =>
-        ExecuteNonQuery("INSERT INTO sync_pending_changes(ts, author, change_type, description) VALUES(@t,@a,@ty,@d)", cmd =>
+    /// <summary>subject — к какому объекту относится правка (для правок прошивки — её FwVersionId в
+    /// виде строки), чтобы карточка выдачи точечно показала «правки этой прошивки ещё не на диске».
+    /// Пусто — правка без привязки к конкретной прошивке (тип/подтип/контроллер и т.п.).</summary>
+    public void AddSyncPendingChange(string changeType, string description, string author, string subject = "") =>
+        ExecuteNonQuery("INSERT INTO sync_pending_changes(ts, author, change_type, description, subject) VALUES(@t,@a,@ty,@d,@s)", cmd =>
         {
             cmd.Parameters.AddWithValue("@t", NowIso());
             cmd.Parameters.AddWithValue("@a", author);
             cmd.Parameters.AddWithValue("@ty", changeType);
             cmd.Parameters.AddWithValue("@d", description);
+            cmd.Parameters.AddWithValue("@s", subject ?? "");
         });
+
+    /// <summary>Множество subject'ов ещё не отправленных правок (пустые отброшены) — по нему карточка
+    /// выдачи решает, подсвечивать ли «правки этой прошивки ещё не на диске». Копится, пока
+    /// «Отправить всё» не очистит накопитель (ClearSyncPendingChanges после успешного экспорта).</summary>
+    public HashSet<string> GetPendingSubjectKeys()
+    {
+        var result = new HashSet<string>();
+        using var r = ExecuteReader("SELECT DISTINCT subject FROM sync_pending_changes WHERE subject <> ''");
+        while (r.Read())
+            result.Add(GetString(r, "subject"));
+        return result;
+    }
 
     /// <summary>Oldest first — что накопилось раньше, показывается выше в развёрнутом списке плашки.</summary>
     public List<SyncPendingChange> GetSyncPendingChanges()

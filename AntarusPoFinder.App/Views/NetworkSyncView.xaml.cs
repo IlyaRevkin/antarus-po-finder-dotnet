@@ -56,6 +56,17 @@ public partial class NetworkSyncView : UserControl
         ConflictStatusPanel.Visibility = conflictCount > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (conflictCount > 0)
             ConflictStatusText.Text = $"Конфликты синхронизации, требуют решения: {conflictCount}";
+
+        SyncVerboseCheck.IsChecked = _services.Cfg.SyncVerbose();
+    }
+
+    private void SyncVerbose_Click(object sender, RoutedEventArgs e)
+    {
+        var on = SyncVerboseCheck.IsChecked == true;
+        _services.Cfg.SetSyncVerbose(on);
+        _host.ShowStatus(on
+            ? "Подробный режим синхронизации включён — тики синхры будут писать в статус-строку"
+            : "Подробный режим синхронизации выключен", category: NotificationCategory.Sync);
     }
 
     private void ShowConflicts_Click(object sender, RoutedEventArgs e)

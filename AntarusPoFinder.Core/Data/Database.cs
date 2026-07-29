@@ -475,6 +475,12 @@ public partial class Database : IDisposable
         // первой ручной правки веса вело себя в точности как прежде.
         AddColumnsIfMissing("fw_search_usage", ("weight", "INTEGER NOT NULL DEFAULT 0"));
         AddColumnsIfMissing("fw_usage_shared", ("weight", "INTEGER NOT NULL DEFAULT 0"));
+
+        // subject: к какому объекту относится накопленная правка (для правок прошивки — её FwVersionId),
+        // чтобы карточка выдачи могла показать «правки этой прошивки ещё не на диске» точечно, а не
+        // угадывая по тексту описания. '' — правка без привязки к конкретной прошивке (тип/подтип/
+        // контроллер и т.п.), она и не должна подсвечивать никакую карточку. См. Database.SyncPending.cs.
+        AddColumnsIfMissing("sync_pending_changes", ("subject", "TEXT NOT NULL DEFAULT ''"));
     }
 
     /// <summary>Assigns a stable GUID to any row left with an empty sync_id — either a brand-new

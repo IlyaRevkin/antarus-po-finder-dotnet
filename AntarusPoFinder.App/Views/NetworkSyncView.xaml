@@ -76,6 +76,16 @@
                         <TextBlock x:Name="ConflictStatusText" Text="" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
                         <Button Content="Показать и решить" Style="{StaticResource SecondaryButton}" Click="ShowConflicts_Click"/>
                     </StackPanel>
+
+                    <!-- Подробный режим синхронизации — то, что оператор назвал «режимом отладки, чтобы
+                         отслеживать, что синхронится, а что нет». Опционально (по умолчанию выкл — без
+                         перегруза): когда включён, каждый фоновый тик приёма/отправки/тикетов пишет в
+                         статус-строку, ЧТО именно синхронизировалось. Индикатор синхры (пилюля в
+                         статус-строке) работает всегда, независимо от этого переключателя. -->
+                    <CheckBox x:Name="SyncVerboseCheck" Margin="0,14,0,0" Click="SyncVerbose_Click"
+                              Content="Подробный режим синхронизации (писать в статус-строку, что синхронизируется)"/>
+                    <TextBlock Text="Индикатор синхронизации в правом нижнем углу показывает состояние всегда: крутящиеся стрелки — идёт синхра, оранжевый знак — ошибка, стрелки цветом — есть неотправленное (правки, теги, тикеты)."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,4,0,0"/>
                 </StackPanel>
             </Border>
 

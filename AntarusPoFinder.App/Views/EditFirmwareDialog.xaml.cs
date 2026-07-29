@@ -353,7 +353,9 @@ public partial class EditFirmwareDialog : Window
         if (tagsChanged) parts.Add("теги");
         if (descChanged) parts.Add("описание");
         if (launchChanged) parts.Add("типы пуска");
-        host.PushCatalogChange($"Прошивка {o.VersionRaw}: изменены {string.Join(", ", parts)}");
+        // subjectKey = FwVersionId — чтобы карточка именно этой прошивки в выдаче показала «правки ещё
+        // не на диске», пока «Отправить всё» не унесёт накопитель (см. FirmwareCardFlags.TagsPending).
+        host.PushCatalogChange($"Прошивка {o.VersionRaw}: изменены {string.Join(", ", parts)}", o.Id?.ToString() ?? "");
         // Правка тегов/описания могла поменять и порядок/состав поисковой выдачи.
         host.InvalidateSearchResults();
     }

@@ -94,6 +94,9 @@ public partial class TicketsView : UserControl
         }
 
         ReloadGrid();
+        // Показали актуальный список (в т.ч. только что подтянутые с диска тикеты) — просим шелл
+        // сдвинуть watermark «просмотрено» и погасить бейдж на пункте меню.
+        _host.OnTicketsViewed();
     }
 
     private void ReloadGrid()
