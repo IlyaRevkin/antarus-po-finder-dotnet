@@ -31,6 +31,14 @@ public sealed record FirmwareCardFlags
     public bool HasInstructions { get; init; }
     public bool HasModbus { get; init; }
 
+    /// <summary>У инструкции есть исходный документ Word (.docx/.doc) — можно предложить «Редактировать
+    /// инструкцию». Считается тем же обходом, что и HasInstructions (см. SearchView.ResolveInstruction).</summary>
+    public bool HasInstructionDocx { get; init; }
+
+    /// <summary>Инструкцию есть чем печатать — готовый PDF рядом ЛИБО docx, из которого PDF соберётся по
+    /// первому требованию (см. DocxToPdfConverter). От этого зависят пункты «…для печати (PDF)» и «Печать».</summary>
+    public bool HasInstructionPrintable { get; init; }
+
     /// <summary>Расширение файла, который реально откроет «Открыть прошивку ПЛК» — считает
     /// PlcOpenResolver при обходе диска, тот же резолвер и открывает. Пишется на кнопке в скобках для
     /// ЛЮБОГО проекта, не только .psl/.lfs. null — обход ещё не дошёл до этой карточки, откроется
@@ -90,7 +98,17 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? MapRequested;
     public event EventHandler? ModbusMapRequested;
     public event EventHandler? ParamsRequested;
+    /// <summary>Открыть инструкцию как есть — запасной вариант для легаси-файла, у которого нет ни docx,
+    /// ни pdf (открывается самый свежий файл папки).</summary>
     public event EventHandler? InstructionsRequested;
+    public event EventHandler? OpenInstructionFolderRequested;
+    /// <summary>Открыть исходный docx для правки. После сохранения PDF пересоберётся при следующем
+    /// открытии «для печати»/«Печать» — см. SearchView.EnsureInstructionPdfAsync.</summary>
+    public event EventHandler? EditInstructionRequested;
+    /// <summary>Открыть PDF инструкции (собрать из docx, если тот правили).</summary>
+    public event EventHandler? OpenInstructionPdfRequested;
+    /// <summary>Отправить PDF инструкции на принтер по умолчанию.</summary>
+    public event EventHandler? PrintInstructionRequested;
     public event EventHandler? HistoryRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
@@ -229,8 +247,7 @@ public partial class FirmwareCard : UserControl
                 AddMenuItem("Карта modbus", () => ModbusMapRequested?.Invoke(this, EventArgs.Empty),
                     "Открывается самый свежий файл карты Modbus");
             if (flags.HasInstructions)
-                AddMenuItem("Инструкции", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
-                    "Открывается самый свежий файл инструкции");
+                AddInstructionItems(flags);
         }
 
         AddMenuHeader("Версия");
@@ -329,6 +346,30 @@ public partial class FirmwareCard : UserControl
         // Ни одного файла-спутника — строка не нужна вовсе, пустое «Файлы:» только занимает место.
         FilesLabel.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FilesLabel.Text = "Файлы: " + string.Join(" · ", parts);
+    }
+
+    /// <summary>Инструкция в меню «Ещё» — набор действий вместо одного «Инструкции»: папка, правка
+    /// исходного docx, PDF для печати и сразу «Печать». PDF собирается из docx по требованию и
+    /// пересобирается, если docx правили (см. SearchView). Пункты правки/печати показываются, только
+    /// когда для них реально есть файл; у легаси-инструкции без docx/pdf остаётся простое «Открыть».</summary>
+    private void AddInstructionItems(FirmwareCardFlags flags)
+    {
+        AddMenuItem("Открыть папку с инструкцией", () => OpenInstructionFolderRequested?.Invoke(this, EventArgs.Empty),
+            "Папка инструкции: исходный документ (docx) и PDF для печати");
+        if (flags.HasInstructionDocx)
+            AddMenuItem("Редактировать инструкцию (docx)", () => EditInstructionRequested?.Invoke(this, EventArgs.Empty),
+                "Открыть исходный документ Word для правки. После сохранения PDF для печати обновится сам");
+        if (flags.HasInstructionPrintable)
+        {
+            AddMenuItem("Открыть инструкцию для печати (PDF)", () => OpenInstructionPdfRequested?.Invoke(this, EventArgs.Empty),
+                "Открыть PDF (пересоберётся из docx, если тот правили)");
+            AddMenuItem("Печать инструкции", () => PrintInstructionRequested?.Invoke(this, EventArgs.Empty),
+                "Отправить PDF инструкции на принтер по умолчанию");
+        }
+        // Легаси-файл иного формата (не docx и не pdf) — печатать/править нечем, но открыть можно.
+        if (!flags.HasInstructionDocx && !flags.HasInstructionPrintable)
+            AddMenuItem("Открыть инструкцию", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
+                "Открывается самый свежий файл инструкции");
     }
 
     // ── Статус локальной копии ────────────────────────────────────────────

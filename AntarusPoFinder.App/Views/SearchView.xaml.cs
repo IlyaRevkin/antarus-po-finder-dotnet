@@ -573,6 +573,10 @@ public partial class SearchView : UserControl
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
             card.InstructionsRequested += (s, _) => OpenInstructions(((FirmwareCard)s!).Result);
+            card.OpenInstructionFolderRequested += (s, _) => OpenInstructionFolder(((FirmwareCard)s!).Result);
+            card.EditInstructionRequested += (s, _) => EditInstruction(((FirmwareCard)s!).Result);
+            card.OpenInstructionPdfRequested += (s, e) => { _ = OpenInstructionPdfAsync(((FirmwareCard)s!).Result); };
+            card.PrintInstructionRequested += (s, e) => { _ = PrintInstructionAsync(((FirmwareCard)s!).Result); };
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -610,7 +614,8 @@ public partial class SearchView : UserControl
     // рисуются сразу, а этот обход идёт следом в фоне и дорисовывает их по мере готовности.
 
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
-        bool HasIoMap, bool HasInstructions, bool HasModbus,
+        bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
+        bool HasModbus,
         string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
@@ -645,7 +650,12 @@ public partial class SearchView : UserControl
         // указывающий на существующий файл, ЛИБО непустая общая папка документа), а не просто
         // заполненное поле в БД. Тот же резолвер потом открывает самый свежий файл (см. OpenMap и др.).
         var hasIoMap = ResolveDocFile(result, result.IoMapPath, "Карта ВВ") is not null;
-        var hasInstructions = ResolveDocFile(result, result.InstructionsPath, "Инструкция") is not null;
+        // Инструкция разбирается детальнее прочих документов: у неё различаются исходный docx (для правки)
+        // и pdf (для печати), от чего зависят разные пункты меню карточки (см. FirmwareCard.AddInstructionItems).
+        var instr = ResolveInstruction(result);
+        var hasInstructions = instr.HasAny;
+        var hasInstrDocx = instr.Docx is not null;
+        var hasInstrPrintable = instr.CanPrint;
         var hasModbus = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus") is not null;
         // Расширение того файла, который реально откроет «Открыть прошивку ПЛК» — считается тем же
         // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
@@ -654,7 +664,8 @@ public partial class SearchView : UserControl
         // То же самое для панели: расширение считает HmiOpenResolver, он же потом и открывает (OpenHmi).
         // Только когда панель вообще есть — иначе это лишний обход папок ради подписи несуществующей кнопки.
         var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result)) : null;
-        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasModbus, plcExt, hmiExt, networkAlive);
+        return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
+            hasModbus, plcExt, hmiExt, networkAlive);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -684,6 +695,11 @@ public partial class SearchView : UserControl
     /// Ходит на диск — вызывать из фонового потока (ScanVersionFolder) или по клику, не в отрисовке.</summary>
     private static string? ResolveDocFile(HierarchyResult result, string? storedPath, string sharedFolderName) =>
         DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, sharedFolderName));
+
+    /// <summary>docx/pdf инструкции этой версии — папка «Инструкция» рядом с папкой контроллера
+    /// (см. InstructionDocResolver). Ходит на диск — из фонового обхода или по клику, не в отрисовке.</summary>
+    private static InstructionDoc ResolveInstruction(HierarchyResult result) =>
+        InstructionDocResolver.Resolve(result.InstructionsPath, FindSiblingFolder(result, "Инструкция"));
 
     /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
     /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
@@ -726,6 +742,8 @@ public partial class SearchView : UserControl
                 HasHmi = scan.HasHmi,
                 HasIoMap = scan.HasIoMap,
                 HasInstructions = scan.HasInstructions,
+                HasInstructionDocx = scan.HasInstructionDocx,
+                HasInstructionPrintable = scan.HasInstructionPrintable,
                 HasModbus = scan.HasModbus,
                 PlcOpenExtension = scan.PlcOpenExtension,
                 HmiOpenExtension = scan.HmiOpenExtension,
@@ -1710,6 +1728,103 @@ public partial class SearchView : UserControl
             return;
         }
         TryOpen(path);
+    }
+
+    private void OpenInstructionFolder(HierarchyResult result)
+    {
+        var doc = ResolveInstruction(result);
+        if (doc.Folder is not null && Directory.Exists(doc.Folder))
+            TryOpen(doc.Folder);
+        else
+            AppMessageBox.Show("Папка инструкции не найдена.", "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private void EditInstruction(HierarchyResult result)
+    {
+        var doc = ResolveInstruction(result);
+        if (doc.Docx is not null && File.Exists(doc.Docx))
+            TryOpen(doc.Docx);
+        else
+            AppMessageBox.Show("Исходный документ (docx) инструкции не найден — править нечего.",
+                "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private async Task OpenInstructionPdfAsync(HierarchyResult result)
+    {
+        var pdf = await EnsureInstructionPdfAsync(result);
+        if (pdf is not null) TryOpen(pdf);
+    }
+
+    private async Task PrintInstructionAsync(HierarchyResult result)
+    {
+        var pdf = await EnsureInstructionPdfAsync(result);
+        if (pdf is null) return;
+        PrintFile(pdf);
+        _host.ShowStatus("Инструкция отправлена на печать");
+    }
+
+    /// <summary>Готовый к печати PDF инструкции: если docx правили после последней сборки (или pdf ещё
+    /// нет), пересобирает его из docx рядом с исходником, иначе отдаёт уже лежащий PDF. Конвертация
+    /// небыстрая (поднимает Word/LibreOffice) — уводится в фон, окно не подвисает. null — печатать/
+    /// показывать нечего (сообщение об этом уже показано).</summary>
+    private async Task<string?> EnsureInstructionPdfAsync(HierarchyResult result)
+    {
+        var doc = ResolveInstruction(result);
+        if (doc.Pdf is not null && !doc.PdfStale) return doc.Pdf;
+        if (doc.Docx is null)
+        {
+            if (doc.Pdf is not null) return doc.Pdf;
+            AppMessageBox.Show("Инструкция для печати не найдена.", "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return null;
+        }
+
+        _host.ShowStatus("Готовим PDF инструкции…");
+        var made = await Task.Run(() => ConvertInstruction(doc));
+        _host.ShowStatus(made is not null ? "PDF инструкции готов" : "");
+        if (made is not null) return made;
+
+        // Конвертация не удалась. Устаревший PDF лучше, чем ничего; иначе честно говорим, что нужно.
+        if (doc.Pdf is not null) return doc.Pdf;
+        AppMessageBox.Show(
+            "Не удалось собрать PDF из документа Word.\n\nДля автоматической конвертации нужен установленный " +
+            "Microsoft Word или LibreOffice. Пока их нет — откройте и распечатайте исходный документ вручную " +
+            "пунктом «Редактировать инструкцию (docx)».",
+            "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
+        return null;
+    }
+
+    /// <summary>Собирает PDF рядом с docx (в папке конвертации). Если общая папка недоступна для записи
+    /// (только чтение сетевой шары) — во временную папку, чтобы хотя бы напечатать. null — конвертера нет
+    /// или документ не удалось преобразовать.</summary>
+    private static string? ConvertInstruction(InstructionDoc doc)
+    {
+        var made = DocxToPdfConverter.Convert(doc.Docx!, doc.ExpectedPdfPath!);
+        if (made is not null) return made;
+        try
+        {
+            var tmpDir = Path.Combine(Path.GetTempPath(), "AntarusInstr");
+            Directory.CreateDirectory(tmpDir);
+            var tmp = Path.Combine(tmpDir, Path.GetFileNameWithoutExtension(doc.Docx!) + ".pdf");
+            return DocxToPdfConverter.Convert(doc.Docx!, tmp);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Отправить файл на принтер по умолчанию через ассоциированное приложение (verb «print»).
+    /// Нет ассоциации/принтера — открываем файл, дальше оператор печатает сам.</summary>
+    private void PrintFile(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { Verb = "print", UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            TryOpen(path);
+        }
     }
 
     private void ShowHistory(HierarchyResult result)
