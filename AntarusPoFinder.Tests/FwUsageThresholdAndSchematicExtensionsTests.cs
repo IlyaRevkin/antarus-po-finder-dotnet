@@ -122,7 +122,47 @@ public class FwUsageThresholdAndSchematicExtensionsTests
         var row = Assert.Single(db.GetAllFwUsage());
         Assert.Equal(key, row.QueryKey);
         Assert.Equal("КНС", row.SubtypeName);
-        Assert.Equal(7, row.Uses); // 2 свой + 5 чужой
+        Assert.Equal(7, row.Uses);      // 2 свой + 5 чужой
+        Assert.Equal(2, row.LocalUses); // редактор правит только свой вклад — чужие 5 из показанного 7
+                                        // сдвинуть нельзя (SharedUses = Uses - LocalUses = 5).
+    }
+
+    /// <summary>Правка «Выборов» в таблице статистики бьёт по своему вкладу, а не по чужому снимку:
+    /// вводя итоговое число, ниже чужой доли не опустить — точь-в-точь логика редактора в SettingsView
+    /// (typed − SharedUses, не ниже нуля). Проверяем именно то, из-за чего казалось, что «не
+    /// сохраняется»: при чужом вкладе показанное после правки — свой + чужой.</summary>
+    [Fact]
+    public void GetAllFwUsage_LocalEditKeepsSharedFloor()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var id = AddVersion(db, "КНС", 1, "НГР");
+        var key = SearchService.UsageKey("НГР");
+        db.RecordFwUsage(key, id); // свой вклад = 1
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var mod = db.GetAllModifications().First(m => m.ControllerName == "SMH4");
+        var ctrlSyncId = db.GetAllControllerModels().First(c => c.Id == mod.ControllerId).SyncId;
+        db.ImportFwUsage(new[]
+        {
+            new SharedFwUsageRow("другая-машина", key, subtype.SyncId, ctrlSyncId,
+                "2.1.001.0001.20260101_0000", 5, ""),
+        }, db.UsageOriginId());
+
+        var before = Assert.Single(db.GetAllFwUsage());
+        var shared = before.Uses - before.LocalUses; // = 5
+
+        // Оператор вводит итог 8 → свой вклад = 8 − 5(чужой) = 3, показано снова 8.
+        db.SetLocalFwUsage(key, id, Math.Max(0, 8 - shared));
+        Assert.Equal(8, db.GetAllFwUsage().Single().Uses);
+
+        // Пытается опустить итог до 2 (ниже чужих 5) → свой уходит в 0, показано ровно чужие 5.
+        db.SetLocalFwUsage(key, id, Math.Max(0, 2 - shared));
+        var after = db.GetAllFwUsage().Single();
+        Assert.Equal(5, after.Uses);
+        Assert.Equal(0, after.LocalUses);
     }
 
     // ── Настраиваемые расширения поиска схем ──────────────────────────────

@@ -648,34 +648,52 @@ public partial class SettingsView : UserControl
         public string ControllerName { get; init; } = "";
         public string VersionRaw { get; init; } = "";
         public int Uses { get; set; }
-        /// <summary>Ручной вес под этот запрос — только для показа (правится адресно в модерации
-        /// прошивки), чтобы в таблице «что накопилось» вес не был невидим.</summary>
-        public int Weight { get; init; }
+        /// <summary>Ручной вес под этот запрос. Правится прямо в таблице (двойной клик) и адресно в
+        /// модерации прошивки — обе правки пишут одну строку (SetLocalFwWeight).</summary>
+        public int Weight { get; set; }
+        /// <summary>Доля чужого снимка в показанных Uses/Weight — её правкой не сдвинуть (синхронизация
+        /// вернёт назад), поэтому при правке своего вклада мы вычитаем именно её из введённого числа.</summary>
+        public int SharedUses { get; init; }
+        public int SharedWeight { get; init; }
         /// <summary>Локальная строка fw_versions, к которой относится эта пара запрос→версия — нужна
         /// для записи ручной правки веса. Null, если строка целиком чужая и локальной версии под неё
         /// нет (тогда править нечего — правка идёт у машины-источника).</summary>
         public int? LocalVersionId { get; init; }
     }
 
-    /// <summary>Ручная правка числа выборов прямо в таблице — задаёт вклад ЭТОЙ машины по паре
-    /// запрос→версия (SetLocalFwUsage). Отображаемое число — сумма своего и чужого вкладов, поэтому
-    /// после правки таблица перечитывается: при наличии чужого вклада показанное значение может
-    /// отличаться от введённого на его величину (для одиночной машины совпадает).</summary>
+    /// <summary>Ручная правка числа выборов или веса прямо в таблице — задаёт вклад ЭТОЙ машины по паре
+    /// запрос→версия (SetLocalFwUsage / SetLocalFwWeight). Значение берём напрямую из редактируемого
+    /// TextBox, а не из row.*: на момент CellEditEnding двусторонняя привязка ещё не записала введённое
+    /// в источник, поэтому опора на row дала бы старое число («не сохраняется»). Показанное — сумма
+    /// своего и чужого снимка, правим только свой вклад: вычитаем чужую долю, ниже неё не опускаем
+    /// (синхронизация всё равно вернёт её). Пусто = обнулить свой вклад; не-целое и отрицательное —
+    /// откат к тому, что в базе.</summary>
     private void FwUsageGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
         if (e.EditAction != DataGridEditAction.Commit || e.Row.Item is not FwUsageRow row) return;
         if (row.LocalVersionId is not int id) return;
+
+        var text = (e.EditingElement as System.Windows.Controls.TextBox)?.Text?.Trim() ?? "";
+        var isWeight = (e.Column?.Header as string) == "Вес";
+        int? typed = text.Length == 0 ? 0
+            : (int.TryParse(text, out var v) && v >= 0 ? v : (int?)null);
+
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            _services.Db.SetLocalFwUsage(row.QueryKey, id, row.Uses);
+            if (typed is int t)
+            {
+                var local = Math.Max(0, t - (isWeight ? row.SharedWeight : row.SharedUses));
+                if (isWeight) _services.Db.SetLocalFwWeight(row.QueryKey, id, local);
+                else _services.Db.SetLocalFwUsage(row.QueryKey, id, local);
+            }
             RefreshUsageStats();
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
-    /// <summary>Таблица просмотра накопленной статистики выборов — только чтение, сортировка по
-    /// убыванию числа выборов уже сделана в Database.GetAllFwUsage. Порог ранжирования здесь не
-    /// фильтрует строки: таблица показывает всё, что накопилось, а не только то, что уже двигает
-    /// выдачу (см. её doc-комментарий).</summary>
+    /// <summary>Таблица накопленной статистики выборов: столбцы «Выборов» и «Вес» правятся на месте
+    /// (FwUsageGrid_CellEditEnding), остальные — идентификаторы. Сортировка по убыванию числа выборов
+    /// уже сделана в Database.GetAllFwUsage. Порог ранжирования здесь не фильтрует строки: таблица
+    /// показывает всё, что накопилось, а не только то, что уже двигает выдачу (см. её doc-комментарий).</summary>
     private void RefreshFwUsageGrid()
     {
         FwUsageGrid.ItemsSource = _services.Db.GetAllFwUsage()
@@ -687,6 +705,8 @@ public partial class SettingsView : UserControl
                 VersionRaw = r.VersionRaw,
                 Uses = r.Uses,
                 Weight = r.Weight,
+                SharedUses = r.Uses - r.LocalUses,
+                SharedWeight = r.Weight - r.LocalWeight,
                 LocalVersionId = r.LocalVersionId,
             })
             .ToList();

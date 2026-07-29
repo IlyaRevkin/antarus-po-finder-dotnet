@@ -18,9 +18,12 @@ public record SharedFwUsageRow(string Origin, string QueryKey, string SubtypeSyn
 /// <summary>Одна строка таблицы просмотра статистики (Настройки → Общие) — накопленное число выборов
 /// по паре «запрос → конкретная версия», уже с человекочитаемым названием подтипа/контроллера вместо
 /// внутренних id. Uses — сумма своего вклада и уже известного чужого (см. GetAllFwUsage), то же самое
-/// сложение, что и в GetFwUsageForQuery, только сразу по всем запросам, а не по одному.</summary>
+/// сложение, что и в GetFwUsageForQuery, только сразу по всем запросам, а не по одному. LocalUses/
+/// LocalWeight — доля ИМЕННО этой машины из тех же сумм: ручная правка в таблице статистики трогает
+/// только свой вклад, поэтому редактору нужно знать, сколько из показанного числа своё, а сколько
+/// чужой снимок (его правкой не сдвинуть — синхронизация вернёт назад).</summary>
 public record FwUsageStatRow(string QueryKey, string SubtypeName, string ControllerName, string VersionRaw,
-    int Uses, string LastUsedAt, int? LocalVersionId = null, int Weight = 0);
+    int Uses, string LastUsedAt, int? LocalVersionId = null, int Weight = 0, int LocalUses = 0, int LocalWeight = 0);
 
 /// <summary>«По такому запросу обычно ставят вот эту версию» — счётчик выбора версии из выдачи
 /// поиска.
@@ -274,7 +277,7 @@ public partial class Database
         var byKey = new Dictionary<(string Query, int SubtypeId, int ControllerId, string VersionRaw), FwUsageStatRow>();
 
         void Add(string query, int subtypeId, int controllerId, string subtypeName, string controllerName,
-            string versionRaw, int uses, int weight, string lastUsedAt, int localVersionId)
+            string versionRaw, int uses, int weight, string lastUsedAt, int localVersionId, bool isLocal)
         {
             var key = (query, subtypeId, controllerId, versionRaw);
             if (byKey.TryGetValue(key, out var existing))
@@ -282,6 +285,10 @@ public partial class Database
                 {
                     Uses = existing.Uses + uses,
                     Weight = existing.Weight + weight,
+                    // Своя доля копится только из своего же читателя (fw_search_usage) — по ней редактор
+                    // отделяет правимый свой вклад от неприкасаемого чужого снимка.
+                    LocalUses = existing.LocalUses + (isLocal ? uses : 0),
+                    LocalWeight = existing.LocalWeight + (isLocal ? weight : 0),
                     LastUsedAt = string.CompareOrdinal(lastUsedAt, existing.LastUsedAt) > 0 ? lastUsedAt : existing.LastUsedAt,
                     // Локальный id одной и той же прошивки одинаков в обеих ветках (свой вклад и чужой
                     // резолвятся в одну строку fw_versions), поэтому берём первый ненулевой.
@@ -289,7 +296,7 @@ public partial class Database
                 };
             else
                 byKey[key] = new FwUsageStatRow(query, subtypeName, controllerName, versionRaw, uses, lastUsedAt,
-                    localVersionId > 0 ? localVersionId : null, weight);
+                    localVersionId > 0 ? localVersionId : null, weight, isLocal ? uses : 0, isLocal ? weight : 0);
         }
 
         using (var reader = ExecuteReader("""
@@ -305,7 +312,7 @@ public partial class Database
                 Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
                     GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
                     GetString(reader, "version_raw"), GetInt(reader, "uses"), GetInt(reader, "weight"),
-                    GetString(reader, "last_used_at"), GetInt(reader, "fw_id"));
+                    GetString(reader, "last_used_at"), GetInt(reader, "fw_id"), isLocal: true);
 
         using (var reader = ExecuteReader($"""
             SELECT u.query_key, fv.id AS fw_id, fv.subtype_id, fv.controller_id, es.name AS subtype_name, cm.name AS ctrl_name,
@@ -317,7 +324,7 @@ public partial class Database
                 Add(GetString(reader, "query_key"), GetInt(reader, "subtype_id"), GetInt(reader, "controller_id"),
                     GetString(reader, "subtype_name"), GetString(reader, "ctrl_name"),
                     GetString(reader, "version_raw"), GetInt(reader, "uses"), GetInt(reader, "weight"),
-                    GetString(reader, "last_used_at"), GetInt(reader, "fw_id"));
+                    GetString(reader, "last_used_at"), GetInt(reader, "fw_id"), isLocal: false);
 
         // Строки с нулевым и счётчиком, и весом сюда попасть не должны (пустая строка не хранится), но
         // на всякий случай отбрасываем их — «накопилось 0 выборов, 0 веса» показывать незачем.
