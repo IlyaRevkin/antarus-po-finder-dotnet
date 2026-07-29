@@ -187,6 +187,11 @@ public partial class Database
             })
             .ToList();
 
+        // Явные переписывания hw модификаций (см. ExportedHwRewrite / Database.HwRewriteLog.cs) —
+        // журнал последних операций, чтобы приёмник проиграл ещё не применённое как переименование,
+        // а не завёл дубликаты из-за смены version_raw.
+        data.HwRewrites = GetRecentHwRewrites();
+
         return data;
     }
 

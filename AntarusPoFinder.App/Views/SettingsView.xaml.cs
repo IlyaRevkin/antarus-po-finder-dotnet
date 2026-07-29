@@ -1515,6 +1515,21 @@ public partial class SettingsView : UserControl
                         "Переписать hw", MessageBoxButton.OK, MessageBoxImage.Warning);
                 _host.ShowStatus($"hw прошивок переписан: {res.UpdatedRows} версий (hw{row.HwVersion} → hw{dlg.HwVersion})",
                     category: NotificationCategory.Hierarchy);
+
+                // Рассылаем переписывание hw как ЯВНУЮ операцию-переименование: без этого смена hw
+                // едет как обычный дифф строк fw_versions (hw зашит в version_raw = натуральный ключ),
+                // и у коллег старая строка остаётся фантомом «нет папки на диске», а новая вставляется
+                // дублем (ровно то, на что жаловались). Событие проигрывают остальные машины у себя
+                // (ConfigSyncService.ReplayHwRewrites), переименовывая свои строки/папки, а не плодя
+                // дубли. Отметку времени тут же ставим и своим watermark — чтобы не проиграть своё же.
+                var ctrlSyncId = _services.Db.GetControllerSyncId(row.ControllerId);
+                if (!string.IsNullOrEmpty(ctrlSyncId))
+                {
+                    var ts = Database.NowIsoPreciseTs();
+                    _services.Db.RecordHwRewrite(ctrlSyncId, row.ControllerName, row.HwVersion, dlg.HwVersion, ts, _services.CurrentUserName);
+                    _services.Cfg.SetHwRewriteAppliedAt(ts);
+                    _host.PushCatalogChange($"Переписан hw прошивок: {row.ControllerName} hw{row.HwVersion} → hw{dlg.HwVersion} ({res.UpdatedRows} версий)");
+                }
             }
         }
 

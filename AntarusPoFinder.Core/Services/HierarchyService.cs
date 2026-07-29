@@ -211,6 +211,20 @@ public class HierarchyService
     /// только сама папка версии и колонки БД. Каждая запись обрабатывается независимо: сбой на одной
     /// (папка занята, конфликт имён) не мешает остальным. oldHw == newHw — пустая операция.</summary>
     public HwRewriteResult RewriteControllerHwVersion(string root, int controllerId, int oldHw, int newHw)
+        => RewriteHw(root, controllerId, oldHw, newHw, replay: false);
+
+    /// <summary>Проигрывание hw-переписывания, приехавшего через синхронизацию от коллеги (см.
+    /// ConfigSyncService.ReplayHwRewrites, ExportedHwRewrite). От прямого действия оператора отличается
+    /// только ТОЛЕРАНТНОСТЬЮ к диску: физическую папку версии/панели у себя уже переименовал тот, кто
+    /// правил hw (сетевой диск общий), поэтому «старой папки нет / новая уже на месте» здесь не ошибка,
+    /// а ожидаемое состояние — обновляем лишь запись БД, чтобы version_raw/disk_path у этой машины
+    /// совпали со снимком и импорт fw_versions не завёл дубликат. Идемпотентно: строк со старым hw уже
+    /// нет → пустая операция; целевой version_raw уже занят другой строкой (напр. дубль от старой
+    /// версии приложения) → эту строку не трогаем, чтобы не создать два ряда с одним ключом.</summary>
+    public HwRewriteResult ReplayControllerHwRewrite(string root, int controllerId, int oldHw, int newHw)
+        => RewriteHw(root, controllerId, oldHw, newHw, replay: true);
+
+    private HwRewriteResult RewriteHw(string root, int controllerId, int oldHw, int newHw, bool replay)
     {
         var renamed = new List<string>();
         var errors = new List<string>();
@@ -229,6 +243,12 @@ public class HierarchyService
             var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{parsed.SwVersion.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}";
             var newRaw = string.IsNullOrEmpty(parsed.DtStr) ? core : $"{core}.{parsed.DtStr}";
 
+            // Проигрывание: если строка с целевым ключом уже есть (идемпотентный повтор или дубль,
+            // залетевший ещё старой версией приложения), «старую» строку не переименовываем в него —
+            // иначе два ряда с одним version_raw. Оставляем как есть (не хуже, чем было).
+            if (replay && _db.FindFwVersionIdByNaturalKey(v.SubtypeId, controllerId, newRaw, v.Id!.Value) is not null)
+                continue;
+
             // disk_path в БД абсолютный и мог быть записан на машине КОЛЛЕГИ (та же шара, но у него
             // буква диска, у нас UNC — или наоборот). Проверяем существование и переименовываем
             // ЛОКАЛЬНУЮ форму пути (FirmwarePathLocalizer перецепляет хвост от «ПО» на наш корень) —
@@ -239,35 +259,52 @@ public class HierarchyService
             var localDisk = FirmwarePathLocalizer.Localize(v.DiskPath, root);
             var newDiskPath = localDisk;
 
-            // Запись с файлами на диске: папку надо переименовать. Если диск/шара недоступны — НЕ
-            // трогаем и БД тоже, иначе version_raw в базе разъедется с именем папки, когда шара
-            // вернётся. Запись без файлов (disk_path пуст) правится только в БД.
+            // Запись с файлами на диске: папку надо переименовать. Запись без файлов (disk_path пуст)
+            // правится только в БД.
             if (!string.IsNullOrWhiteSpace(v.DiskPath))
             {
-                if (!Directory.Exists(localDisk))
+                var parent = Path.GetDirectoryName(localDisk);
+                var candidate = parent is null ? newRaw : Path.Combine(parent, newRaw);
+
+                // Оператор: старой папки нет — НЕ трогаем и БД, иначе version_raw разъедется с именем
+                // папки, когда шара вернётся. При проигрывании старой папки обычно уже нет (её
+                // переименовал автор на общей шаре) — это норма, продолжаем.
+                if (!replay && !Directory.Exists(localDisk))
                 {
                     errors.Add($"{v.VersionRaw}: папка на диске недоступна — пропущено.");
                     continue;
                 }
-                var parent = Path.GetDirectoryName(localDisk);
-                var candidate = parent is null ? newRaw : Path.Combine(parent, newRaw);
+
                 if (!string.Equals(candidate, localDisk, StringComparison.OrdinalIgnoreCase))
                 {
                     if (Directory.Exists(candidate))
                     {
-                        errors.Add($"«{newRaw}» уже существует на диске — версия {v.VersionRaw} пропущена.");
-                        continue;
+                        // Целевая папка уже на месте. Для оператора это конфликт имён — прерываем;
+                        // при проигрывании ожидаемо (её переименовал автор правки) — просто
+                        // перецеливаем запись БД на неё.
+                        if (!replay)
+                        {
+                            errors.Add($"«{newRaw}» уже существует на диске — версия {v.VersionRaw} пропущена.");
+                            continue;
+                        }
                     }
-                    try
+                    else if (Directory.Exists(localDisk))
                     {
-                        Directory.Move(localDisk, candidate);
-                        renamed.Add($"{v.VersionRaw} → {newRaw}");
+                        try
+                        {
+                            Directory.Move(localDisk, candidate);
+                            renamed.Add($"{v.VersionRaw} → {newRaw}");
+                        }
+                        catch (Exception e)
+                        {
+                            errors.Add($"{v.VersionRaw}: {e.Message}");
+                            continue;
+                        }
                     }
-                    catch (Exception e)
-                    {
-                        errors.Add($"{v.VersionRaw}: {e.Message}");
-                        continue;
-                    }
+                    // else — только проигрывание: ни старой, ни новой папки на этой машине сейчас нет
+                    // (offline-шара или локально-закреплённая копия). Обновляем только БД канонической
+                    // новой строкой: папка на общей шаре у автора уже под новым именем, запись должна
+                    // с ней совпасть, иначе импорт снимка заведёт дубль.
                 }
                 newDiskPath = candidate;
             }
@@ -278,7 +315,8 @@ public class HierarchyService
             // надо переименовать и переписать hmi_path — иначе карточка навсегда покажет «HMI от версии
             // {старый hw}», хотя панель обновлять никто не обновлял (баг pixel2: hw 044→1321, а панель
             // осталась «2.4.044.0005_hmi»). Унаследованную от другой версии панель (имя ≠ этой версии)
-            // не трогаем — там пометка «от версии X» верна.
+            // не трогаем — там пометка «от версии X» верна. RenameOwnHmiFolder толерантен к уже
+            // переименованной папке (вернёт новый путь, если он есть) — годится и для проигрывания.
             // Панель тоже могла прийти с чужой формой пути: переименовываем локализованную папку HMI,
             // но перецеливаем hmi_path в БД от ИСХОДНОГО сохранённого значения — RepointHmiPath матчит
             // его у всех записей, унаследовавших эту же панель.

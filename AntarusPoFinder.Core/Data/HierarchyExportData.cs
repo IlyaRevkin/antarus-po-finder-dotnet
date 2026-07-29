@@ -129,6 +129,25 @@ public class ExportedAppUser
     [JsonPropertyName("role_updated_at")] public string RoleUpdatedAt { get; set; } = "";
 }
 
+/// <summary>Одно переписывание hw модификации контроллера (напр. PIXEL2 044 → 1321), сделанное
+/// оператором на своей машине и разосланное остальным как ЯВНАЯ операция-переименование (см.
+/// Database.HwRewriteLog.cs и ConfigSyncService.ReplayHwRewrites). Без этого события смена hw ехала
+/// бы как обычный дифф строк fw_versions: hw зашит в version_raw (натуральный ключ синхронизации),
+/// поэтому у получателя старая строка (044) оставалась фантомом «нет папки на диске», а новая (1321)
+/// вставлялась дублем. Событие адресует контроллер переносимо (sync_id — локальные id на машинах
+/// разные) и несёт отметку времени, по которой каждая машина проигрывает только то, чего ещё не
+/// применяла (watermark hw_rewrite_applied_at). Nullable-список без дефолта в HierarchyExportData по
+/// той же причине, что Tags/FwUsage: экспорт со старой версии приложения ключа не содержит вовсе.</summary>
+public class ExportedHwRewrite
+{
+    [JsonPropertyName("controller_sync_id")] public string ControllerSyncId { get; set; } = "";
+    [JsonPropertyName("controller_name")] public string ControllerName { get; set; } = "";
+    [JsonPropertyName("old_hw")] public int OldHw { get; set; }
+    [JsonPropertyName("new_hw")] public int NewHw { get; set; }
+    [JsonPropertyName("ts")] public string Ts { get; set; } = "";
+    [JsonPropertyName("author")] public string Author { get; set; } = "";
+}
+
 /// <summary>Вклад одной машины в общую статистику выборов прошивки — см. Database.FwUsage.cs.
 /// Прошивка адресуется переносимо (sync_id подтипа и модели контроллера + version_raw): локальные id
 /// на разных машинах разные.</summary>
@@ -180,6 +199,13 @@ public class HierarchyExportData
     /// без дефолта по той же причине, что Tags/AllowedExtensions: экспорт со старой версии приложения
     /// ключа не содержит вовсе, и это «источник о ней не знает», а не «у источника её ноль».</summary>
     [JsonPropertyName("fw_usage")] public List<ExportedFwUsage>? FwUsage { get; set; }
+
+    /// <summary>Явные переписывания hw модификаций контроллеров (см. ExportedHwRewrite) — журнал
+    /// последних операций, чтобы каждая машина проиграла у себя ещё не применённые (по отметке
+    /// времени) и переименовала свои строки/папки прошивок, а не завела дубли. Nullable без дефолта:
+    /// экспорт со старой версии приложения ключа не содержит, и приём тогда просто ничего не
+    /// проигрывает (fw_versions едут как раньше).</summary>
+    [JsonPropertyName("hw_rewrites")] public List<ExportedHwRewrite>? HwRewrites { get; set; }
 
     /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
     /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой

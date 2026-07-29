@@ -215,6 +215,22 @@ public partial class Database : IDisposable
                  sync_id         TEXT    NOT NULL DEFAULT ''
              );
 
+             -- Журнал явных переписываний hw модификаций контроллеров (напр. PIXEL2 044 → 1321),
+             -- сделанных оператором на рабочем месте. Едет в общий конфиг как операция-переименование,
+             -- чтобы каждая машина проиграла её у себя (переименовала строки/папки прошивок), а не
+             -- получила дубликат из-за смены version_raw (см. Database.HwRewriteLog.cs,
+             -- ExportedHwRewrite, ConfigSyncService.ReplayHwRewrites). ts — точная отметка времени
+             -- (см. Database.HwRewriteLog.cs), по ней получатель применяет только ещё не проигранное.
+             CREATE TABLE IF NOT EXISTS hw_rewrite_log (
+                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                 controller_sync_id TEXT    NOT NULL DEFAULT '',
+                 controller_name    TEXT    NOT NULL DEFAULT '',
+                 old_hw             INTEGER NOT NULL DEFAULT 0,
+                 new_hw             INTEGER NOT NULL DEFAULT 0,
+                 ts                 TEXT    NOT NULL DEFAULT '',
+                 author             TEXT    NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS layout_fallback_feedback (
                  query_key  TEXT    PRIMARY KEY,
                  yes_count  INTEGER NOT NULL DEFAULT 0,

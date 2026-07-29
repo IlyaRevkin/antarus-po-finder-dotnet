@@ -214,6 +214,15 @@ public class ConfigService
     public string FwUsageResetAppliedAt() => Get("fw_usage_reset_applied_at");
     public void SetFwUsageResetAppliedAt(string iso) => Set("fw_usage_reset_applied_at", iso);
 
+    /// <summary>Отметка времени самого свежего переписывания hw модификации (см. hw_rewrite_log /
+    /// ExportedHwRewrite), которое ЭТА машина уже проиграла у себя — локальный watermark, ровно как
+    /// FwUsageResetAppliedAt рядом. По нему ConfigSyncService.ReplayHwRewrites берёт из общего снимка
+    /// только строго более новые события и переименовывает свои строки прошивок, вместо того чтобы
+    /// получить дубли. На машине оператора-автора продвигается сразу при самой правке (чтобы не
+    /// проигрывать своё же). Per-machine — в общий конфиг не уезжает (SkipSettingsKeys).</summary>
+    public string HwRewriteAppliedAt() => Get("hw_rewrite_applied_at");
+    public void SetHwRewriteAppliedAt(string iso) => Set("hw_rewrite_applied_at", iso);
+
     /// <summary>Сколько раз версию должны выбрать по ОДНОМУ И ТОМУ ЖЕ запросу, прежде чем эта частота
     /// начнёт двигать выдачу поиска (см. Database.SearchFwVersions/EffectiveUsage). По смыслу — тот же
     /// вид настройки, что и LayoutFallbackThreshold выше (числовой порог чувствительности к

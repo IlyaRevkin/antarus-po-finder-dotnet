@@ -142,6 +142,11 @@ public static class ConfigSyncService
         // уехавшая отметка «сброс применён» отменяла бы сам сброс на остальных машинах.
         // Сама отметка сброса (fw_usage_reset_at) — наоборот, синхронизируемая, её здесь нет.
         Core.Data.Database.UsageOriginSettingKey, "fw_usage_reset_applied_at",
+        // Докуда эта машина проиграла чужие hw-переписывания (см. ConfigService.HwRewriteAppliedAt /
+        // ReplayHwRewrites ниже) — локальный watermark ровно как fw_usage_reset_applied_at слева.
+        // Уехав в общий конфиг, он навязал бы всем чужую отметку и часть машин пропустила бы
+        // переименования (или проиграла их не в том порядке).
+        "hw_rewrite_applied_at",
         // «Делиться ли своим ручным весом» — решение КАЖДОЙ машины за свой вес, поэтому per-machine
         // (см. ConfigService.FwWeightShared). Уехав в общий конфиг, оно навязало бы всем чужой выбор.
         // Заметь: fw_usage_multiplier здесь СОЗНАТЕЛЬНО НЕТ — множитель популярности синхронизируемый
@@ -416,6 +421,13 @@ public static class ConfigSyncService
         // что было до сброса, потом принимаем то, что накопилось после него.
         ApplyUsageResetMark(services);
 
+        // Проигрываем чужие переписывания hw модификаций ДО импорта fw_versions — это ключевой момент.
+        // Автор правки уже переименовал строку 044 → 1321 у себя и на общей шаре; здесь мы так же
+        // переименовываем СВОЮ строку 044 → 1321 на месте, чтобы натуральный ключ совпал с тем, что
+        // несёт снимок. Сделай это ПОСЛЕ ImportHierarchyData — снимок вставил бы новую строку 1321
+        // (наша 044 ещё цела), и получился бы дубль + фантом «нет папки на диске» (ровно та жалоба).
+        ReplayHwRewrites(services, snap.Hierarchy, currentRoot);
+
         var counts = services.Db.ImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
@@ -444,6 +456,45 @@ public static class ConfigSyncService
                 u.SubtypeSyncId, u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt, u.Weight)), services.Db.UsageOriginId());
         }
         catch { /* статистика — вспомогательная вещь, срывать из-за неё синхронизацию нельзя */ }
+    }
+
+    /// <summary>Проигрывает приехавшие в снимке переписывания hw модификаций (см. ExportedHwRewrite,
+    /// HierarchyService.ReplayControllerHwRewrite) — по одному разу на машину. Применяет только события
+    /// строго новее локального watermark (ConfigService.HwRewriteAppliedAt): у событий точная ISO-
+    /// отметка времени, сравнение строковое (лексикографически = хронологически при фиксированной
+    /// ширине), тот же приём, что у fw_usage_reset_at. Пустой watermark (первый запуск / только что
+    /// обновлённое приложение — как раз момент выката этой фичи) означает «применить все недавние»:
+    /// переигрывание идемпотентно и семантически корректно — hw есть свойство модификации контроллера,
+    /// значит ВСЕ строки этого контроллера со старым hw и должны переехать на новый; строк со старым hw
+    /// нет — пустая операция.
+    ///
+    /// Контроллер резолвится по sync_id; если он на этой машине ещё не заведён/не соотнесён (самый
+    /// первый контакт — sync_id проставит ImportHierarchyData ниже) — событие пропускаем: fw_versions
+    /// приедут корректными прямо из снимка, переигрывать нечего. Watermark всё равно продвигаем до
+    /// самого свежего события в снимке (включая пропущенные) — их результат уже отражён в снимке.</summary>
+    private static void ReplayHwRewrites(AppServices services, HierarchyExportData hierarchy, string currentRoot)
+    {
+        var incoming = hierarchy.HwRewrites;
+        if (incoming is null || incoming.Count == 0) return;
+
+        var watermark = services.Cfg.HwRewriteAppliedAt();
+
+        var withTs = incoming.Where(e => !string.IsNullOrEmpty(e.Ts)).ToList();
+        if (withTs.Count == 0) return;
+        var maxTs = withTs.Select(e => e.Ts).Max(StringComparer.Ordinal)!;
+
+        foreach (var e in withTs
+                     .Where(e => string.CompareOrdinal(e.Ts, watermark) > 0)
+                     .OrderBy(e => e.Ts, StringComparer.Ordinal))
+        {
+            var ctrlId = services.Db.GetControllerIdBySyncId(e.ControllerSyncId);
+            if (ctrlId is null) continue;
+            try { services.Hierarchy.ReplayControllerHwRewrite(currentRoot, ctrlId.Value, e.OldHw, e.NewHw); }
+            catch { /* одно переигрывание не должно валить всю синхронизацию */ }
+        }
+
+        if (string.CompareOrdinal(maxTs, watermark) > 0)
+            services.Cfg.SetHwRewriteAppliedAt(maxTs);
     }
 
     /// <summary>Сброс статистики, сделанный на другой машине. Отметка времени сброса едет в общем
