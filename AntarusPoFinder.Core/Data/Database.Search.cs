@@ -204,15 +204,23 @@ public partial class Database
         return Deduplicate(scored, usageThreshold, usageMultiplier);
     }
 
-    /// <summary>Обычный поиск: каждое слово запроса (>= 2 символов) ищется подстрокой в полях
-    /// названия и тегах, а тип пуска сверяется целым значением. Очки складываются по всем словам —
-    /// чем больше слов запроса совпало, тем выше версия. Полное совпадение нормализованного запроса
-    /// с ОДНИМ тегом добавляет крупный бонус, поднимая точно поименованную прошивку в самый верх, не
-    /// отсекая при этом остальное — обычный поиск остаётся широким.</summary>
+    /// <summary>Обычный (не «в кавычках») поиск — модель «как в Гугле»: находит широко по отдельным
+    /// словам, а порядок выдачи определяют два принципа, которые и просил наладчик — «чем больше слов
+    /// запроса совпало и чем ближе они к тому, как написано в запросе, тем выше».
+    ///   1. Число СОВПАВШИХ СЛОВ доминирует (MatchedTokenWeight): версия, где нашлись 3 слова из 3,
+    ///      всегда выше той, где нашлись 2, — сколько бы «весомых» тегов ни было у второй.
+    ///   2. Внутри равного числа слов вес полей (тег > название > тип пуска) и точность фразы решают
+    ///      порядок: все слова запроса совпали (AllTokensBonus), слова стоят рядом и в том же
+    ///      порядке, что в запросе (PhraseAdjacencyBonus), запрос целиком равен одному тегу
+    ///      (PhraseTagBonus — прямое указание на конкретную прошивку). Всё это ПОДНИМАЕТ, но НЕ
+    ///      отсекает — обычный поиск остаётся широким (сужает — только галочка «в кавычках»).</summary>
     private List<ScoredFwVersion> SearchByKeywords(List<FwVersionRecord> rows, string[] qTokens, string phrase,
         IReadOnlyDictionary<int, (int Uses, int Weight)> usage)
     {
         var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
+        // Фраза для проверки соседства слов — со схлопнутыми пробелами, но сохранёнными
+        // дефисами/точками и порядком, ровно как в точном поиске (см. SearchOrdered).
+        var orderedPhrase = CollapseForOrdered(string.IsNullOrEmpty(phrase) ? string.Join(" ", qTokens) : phrase);
         var scored = new List<ScoredFwVersion>();
 
         foreach (var row in rows)
@@ -221,31 +229,61 @@ public partial class Database
             var tags = TagString.Parse(row.Tags);
             var launchTypes = row.LaunchTypes ?? new List<string>();
 
-            int score = 0;
+            int matchedTokens = 0;
+            int weighted = 0;
             foreach (var token in qTokens)
             {
-                if (fields.Any(f => TokenMatches(token, f, false))) score += 1;
+                bool hit = false;
+                if (fields.Any(f => TokenMatches(token, f, false))) { weighted += 1; hit = true; }
                 // Тег весит больше названия папки: тег проставлен человеком осознанно, совпадение в
                 // названии подтипа может быть случайным.
-                if (tags.Any(t => TokenMatches(token, t, false))) score += 2;
+                if (tags.Any(t => TokenMatches(token, t, false))) { weighted += 2; hit = true; }
                 // Сравнение целым значением, а не подстрокой: список типов пуска закрытый
                 // (ConfigService.LaunchTypes), и почти каждый короткий в нём — подстрока длинного
                 // («ПЧ» в «КПЧ», «ПП» в «УПП»). Подстрочно «НГР ПЧ» поднимало ещё и шкафы с КПЧ —
                 // тип пуска не то поле, где полезно угадывать.
                 if (launchTypes.Any(lt => string.Equals(lt, token, StringComparison.OrdinalIgnoreCase)))
-                    score += 2;
+                { weighted += 2; hit = true; }
+                if (hit) matchedTokens++;
             }
 
-            // Запрос целиком совпал с ОДНИМ тегом — прямое указание на конкретную прошивку: она
-            // всплывает наверх, но выдача не сужается (для «ровно одна прошивка» есть точный поиск).
+            if (matchedTokens == 0) continue;
+
+            // «Больше совпавших слов → выше»: число совпавших слов доминирует над вкладом весов полей.
+            int score = matchedTokens * MatchedTokenWeight + weighted;
+
+            // «Точнее запрос → выше» — три ступени точности, каждая только поднимает:
+            // (а) совпали ВСЕ слова запроса — уверенное попадание, а не случайное пересечение по одному слову;
+            if (qTokens.Length > 1 && matchedTokens == qTokens.Length) score += AllTokensBonus;
+
+            // (б) слова стоят рядом и в том же порядке, что в запросе, — самый точный из широких результатов;
+            if (orderedPhrase.Length >= 2)
+            {
+                var tagText = CollapseForOrdered(string.Join(" ", tags));
+                if (OrderedContains(orderedPhrase, tagText) || OrderedContains(orderedPhrase, BuildOrderedHaystack(row, tags)))
+                    score += PhraseAdjacencyBonus;
+            }
+
+            // (в) запрос целиком равен ОДНОМУ тегу — прямое указание на конкретную прошивку: в самый
+            // верх, но выдача не сужается (для «ровно одна прошивка» есть галочка «в кавычках»).
             if (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase))
                 score += PhraseTagBonus;
 
-            if (score == 0) continue;
             scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage)));
         }
 
         return scored;
+    }
+
+    /// <summary>Общий «стог» для позиционных проверок: название группы/подтипа/папки/контроллера +
+    /// теги + типы пуска, склеенные через пробел и приведённые к CollapseForOrdered. Собран одним
+    /// местом, чтобы обычный и точный поиск считали соседство слов одинаково.</summary>
+    private static string BuildOrderedHaystack(FwVersionRecord row, IReadOnlyList<string> tags)
+    {
+        var parts = new List<string?> { row.GroupName, row.SubtypeName, row.SubtypeFolder, row.CtrlName };
+        parts.AddRange(tags);
+        parts.AddRange(row.LaunchTypes ?? new List<string>());
+        return CollapseForOrdered(string.Join(" ", parts.Where(p => !string.IsNullOrEmpty(p))));
     }
 
     /// <summary>Точный (позиционный) поиск. Запрос как есть — со схлопнутыми пробелами, но с
@@ -266,11 +304,7 @@ public partial class Database
         {
             var tags = TagString.Parse(row.Tags);
             var tagText = CollapseForOrdered(string.Join(" ", tags));
-
-            var parts = new List<string?> { row.GroupName, row.SubtypeName, row.SubtypeFolder, row.CtrlName };
-            parts.AddRange(tags);
-            parts.AddRange(row.LaunchTypes ?? new List<string>());
-            var haystack = CollapseForOrdered(string.Join(" ", parts.Where(p => !string.IsNullOrEmpty(p))));
+            var haystack = BuildOrderedHaystack(row, tags);
 
             var inTag = OrderedContains(phraseUpper, tagText);
             if (!inTag && !OrderedContains(phraseUpper, haystack)) continue;
@@ -292,6 +326,20 @@ public partial class Database
 
     /// <summary>Совпадение запроса с тегом целиком весит больше любого набора отдельных слов.</summary>
     private const int PhraseTagBonus = 10;
+
+    /// <summary>Вес одного совпавшего слова запроса в обычном поиске. Держится заведомо выше суммы
+    /// весов полей за одно слово (тег 2 + название 1 + тип пуска 2 = 5 максимум), чтобы «совпало
+    /// больше слов запроса» почти всегда перевешивало «слово нашлось в более весомом поле» —
+    /// это и есть «больше совпадений → выше».</summary>
+    private const int MatchedTokenWeight = 8;
+
+    /// <summary>Бонус за то, что совпали ВСЕ слова многословного запроса (а не часть).</summary>
+    private const int AllTokensBonus = 4;
+
+    /// <summary>Бонус за то, что слова запроса стоят в выдаче рядом и в том же порядке, что в запросе
+    /// (позиционное совпадение фразы). Ниже PhraseTagBonus: точное равенство одному тегу — сильнее,
+    /// чем просто соседство слов.</summary>
+    private const int PhraseAdjacencyBonus = 6;
 
     private static int UsesOf(FwVersionRecord row, IReadOnlyDictionary<int, (int Uses, int Weight)> usage) =>
         row.Id is int id && usage.TryGetValue(id, out var e) ? e.Uses : 0;
