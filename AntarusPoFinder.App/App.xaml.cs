@@ -93,20 +93,32 @@ public partial class App : Application
         // role is already persisted (cfg.CurrentRole()) — same as if this setting were off. Closing
         // the dialog without a successful login (Cancel/X/Alt+F4) exits the app entirely rather than
         // opening MainWindow half-authenticated.
-        if (services.Cfg.AdRequireLogin() && !AdSessionService.IsValid(services.Db, services.Cfg.AdLastLogin(), DateTime.Now))
+        if (services.Cfg.AdRequireLogin())
         {
-            // Default ShutdownMode (OnLastWindowClose) would otherwise auto-shutdown the moment this
-            // dialog — the only open window so far — closes, whether it succeeded or not, racing the
-            // MainWindow this method still needs to create right below on success. Restored to the
-            // normal OnLastWindowClose just before MainWindow.Show() so closing IT still exits the
-            // app exactly as before this gate existed.
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-            var loginDialog = new AdStartupLoginDialog(services);
-            if (loginDialog.ShowDialog() != true)
+            if (!AdSessionService.IsValid(services.Db, services.Cfg.AdLastLogin(), DateTime.Now))
             {
-                Shutdown();
-                return;
+                // Default ShutdownMode (OnLastWindowClose) would otherwise auto-shutdown the moment this
+                // dialog — the only open window so far — closes, whether it succeeded or not, racing the
+                // MainWindow this method still needs to create right below on success. Restored to the
+                // normal OnLastWindowClose just before MainWindow.Show() so closing IT still exits the
+                // app exactly as before this gate existed.
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+                var loginDialog = new AdStartupLoginDialog(services);
+                if (loginDialog.ShowDialog() != true)
+                {
+                    Shutdown();
+                    return;
+                }
+                // AdStartupLoginDialog уже проставило CurrentAdLogin на успешном входе.
+            }
+            else
+            {
+                // Запомненная AD-сессия ещё действует — гейт пропущен, но КТО залогинен всё равно
+                // известно (последний вошедший на этой машине логин). Проставляем его, чтобы «кто
+                // залогинен» слева сверху и автор тикетов показывали AD-логин, а не общий Windows-
+                // аккаунт смены (см. AppServices.CurrentUserName).
+                services.CurrentAdLogin = services.Cfg.AdLastLogin();
             }
         }
 

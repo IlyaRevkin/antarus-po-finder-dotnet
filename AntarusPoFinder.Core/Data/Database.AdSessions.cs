@@ -37,6 +37,13 @@ public partial class Database
         });
     }
 
+    /// <summary>Забыть сохранённый вход этого логина на ЭТОМ компьютере — используется кнопкой
+    /// «Выход»: после неё стартовый гейт (App.OnStartup) снова потребует вход по AD, как будто
+    /// «Запомнить» ни разу не выбирали. Логин без сессии — просто ничего не удаляет.</summary>
+    public void DeleteAdLoginSession(string normalizedLogin) =>
+        ExecuteNonQuery("DELETE FROM ad_login_sessions WHERE ad_login=@l COLLATE NOCASE",
+            cmd => cmd.Parameters.AddWithValue("@l", normalizedLogin));
+
     private static AdLoginSession ReadAdLoginSession(SqliteDataReader r) => new(
         r.GetString(0),
         System.Enum.TryParse<AdSessionMode>(r.GetString(1), true, out var mode) ? mode : AdSessionMode.Default,

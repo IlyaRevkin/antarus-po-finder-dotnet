@@ -276,6 +276,42 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Кнопка «Выход» слева сверху. Забывает сохранённый на этом компьютере вход (чтобы
+    /// стартовый гейт снова спросил AD) и тут же показывает окно входа — чтобы под этим же
+    /// компьютером мог войти другой человек, не перезапуская программу. Отмена/крестик в окне
+    /// входа = выйти из приложения, ровно как при отказе от входа на старте (App.OnStartup).</summary>
+    private void LogOutButton_Click(object sender, RoutedEventArgs e)
+    {
+        var who = _services.CurrentUserName;
+        var confirm = AppMessageBox.Show(
+            $"Выйти из учётной записи «{who}»?\n\nПотребуется снова войти по логину и паролю AD.",
+            "Выход", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        // Забыть «Запомнить вход» именно для текущего логина + сбросить «последний вошедший», иначе
+        // валидная сессия молча пропустила бы гейт при повторном показе окна и «выход» был бы
+        // бутафорским (см. AdSessionService.IsValid / App.OnStartup).
+        var login = _services.CurrentAdLogin;
+        if (!string.IsNullOrEmpty(login))
+            _services.Db.DeleteAdLoginSession(login);
+        _services.Cfg.SetAdLastLogin("");
+        _services.CurrentAdLogin = null;
+
+        var loginDialog = new AdStartupLoginDialog(_services) { Owner = this };
+        if (loginDialog.ShowDialog() == true && loginDialog.SelectedRole is not null)
+        {
+            // AdStartupLoginDialog уже проставил CurrentAdLogin и роль; SwitchRole → ApplyRole
+            // перерисует доступные страницы и обновит «кто залогинен» слева сверху.
+            _vm.SwitchRole(loginDialog.SelectedRole);
+        }
+        else
+        {
+            // Вошёл — отказался. Как и на старте, полу-авторизованным окно не оставляем — выходим.
+            ForceRealExit = true;
+            Application.Current.Shutdown();
+        }
+    }
+
     private void GitHubLink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {
         Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });

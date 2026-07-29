@@ -1863,8 +1863,17 @@ public partial class SearchView : UserControl
             return null;
         }
 
-        _host.ShowStatus("Готовим PDF инструкции…");
-        var made = await Task.Run(() => ConvertInstruction(doc));
+        // Сборка PDF поднимает Word/LibreOffice — на сетевом диске это легко несколько секунд, а то
+        // и десятки. Одной мелькающей строки статуса мало: оператор жаловался, что после клика
+        // «ничего не происходит» и кажется, что программа зависла. Показываем ПОСТОЯННЫЙ индикатор
+        // фоновой работы внизу окна (BusyTracker, крутится всё время конвертации) — он виден, пока
+        // using не закрыт, а не гаснет через несколько секунд, как ShowStatus.
+        string? made;
+        using (_host.BeginBusy("Готовим PDF инструкции для печати — открывается Word/LibreOffice, это может занять несколько секунд…"))
+        {
+            _host.ShowStatus("Готовим PDF инструкции для печати…", 8000);
+            made = await Task.Run(() => ConvertInstruction(doc));
+        }
         _host.ShowStatus(made is not null ? "PDF инструкции готов" : "");
         if (made is not null) return made;
 

@@ -59,6 +59,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private bool _suppressThemeToggleHandler;
 
     [ObservableProperty] private string _roleLabel = "";
+    /// <summary>Кто сейчас залогинен — показывается слева сверху вместо роли (по просьбе оператора):
+    /// AD-логин, если вход был по AD, иначе имя учётной записи Windows (см. AppServices.CurrentUserName,
+    /// тот же источник, что и автор тикетов). Обновляется в ApplyRole (старт + смена роли) и после
+    /// повторного входа через кнопку «Выход».</summary>
+    [ObservableProperty] private string _currentUserLabel = "";
     [ObservableProperty] private bool _isDarkTheme;
     [ObservableProperty] private string _statusMessage = "";
     [ObservableProperty] private string _diskStatusText = "Диск: …";
@@ -224,6 +229,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     {
         CurrentRole = role;
         RoleLabel = RolesConfig.RoleLabel(role);
+        CurrentUserLabel = _services.CurrentUserName;
         var allowed = RolesConfig.RoleAccess.GetValueOrDefault(role, new HashSet<string>());
         foreach (var item in NavItems)
             item.IsVisible = allowed.Contains(item.PageId);

@@ -10,7 +10,7 @@
         <TextBlock Text="Домен:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
-        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: revkin.i, revkin.i@Elita или Elita\revkin.i"
+        <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: ivanov.i, ivanov.i@Elita или Elita\ivanov.i"
                  LostFocus="AdLoginInput_LostFocus"/>
         <TextBlock Text="Пароль AD:" Margin="0,0,0,4"/>
         <PasswordBox x:Name="AdPasswordInput" Margin="0,0,0,10"/>

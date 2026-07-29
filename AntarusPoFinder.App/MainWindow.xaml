@@ -173,11 +173,24 @@
                         <TextBlock Text="Antarus ПО Finder" FontWeight="SemiBold" FontSize="14"
                                    VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
                     </StackPanel>
+                    <!-- Слева сверху показываем КТО залогинен (AD-логин или учётка Windows), а не роль —
+                         по просьбе оператора: на общем компьютере важнее видеть, под кем ты вошёл (это
+                         же имя уходит в автора тикетов), чем название роли. Сама роль осталась в
+                         подсказке к имени и в подсказке кнопки смены роли. Рядом — кнопка «Выход»:
+                         забывает сохранённый вход и снова спрашивает логин AD (см. LogOutButton_Click). -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding RoleLabel}" VerticalAlignment="Center" Style="{StaticResource MutedText}"/>
+                        <TextBlock Text="{Binding CurrentUserLabel}" VerticalAlignment="Center" Style="{StaticResource MutedText}"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="140"
+                                   ToolTip="{Binding RoleLabel, StringFormat=Роль: {0}}"/>
                         <Button x:Name="RoleSwitchNavButton" Style="{StaticResource IconButton}" Width="18" Height="18" Padding="0"
                                 Margin="4,0,0,0" ToolTip="Сменить роль" Click="RoleSwitchButton_Click">
                             <TextBlock Text="&#8635;" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"/>
+                        </Button>
+                        <Button x:Name="LogOutNavButton" Style="{StaticResource SecondaryButton}" Padding="7,1"
+                                Margin="6,0,0,0" VerticalAlignment="Center"
+                                ToolTip="Выйти из учётной записи — потребуется снова войти по логину и паролю AD"
+                                Click="LogOutButton_Click">
+                            <TextBlock Text="Выход" FontSize="10" Foreground="{DynamicResource TextMutedBrush}"/>
                         </Button>
                     </StackPanel>
                 </StackPanel>

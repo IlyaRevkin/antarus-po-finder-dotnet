@@ -118,4 +118,24 @@ public class AdSessionServiceTests
         }
         finally { Cleanup(path); }
     }
+
+    [Fact]
+    public void DeleteAdLoginSession_ForgetsRememberedLogin_SoGateAsksAgain()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var now = new DateTime(2026, 1, 1);
+            AdSessionService.RecordLogin(db, "ivanov.i", AdSessionMode.Always, customDays: 0, defaultDays: 14, now: now);
+            Assert.True(AdSessionService.IsValid(db, "ivanov.i", now.AddDays(999)));
+
+            // Кнопка «Выход» забывает вход на этой машине — сессии больше нет, гейт снова спросит AD.
+            db.DeleteAdLoginSession("IVANOV.I"); // регистр не важен (COLLATE NOCASE)
+
+            Assert.Null(db.GetAdLoginSession("ivanov.i"));
+            Assert.False(AdSessionService.IsValid(db, "ivanov.i", now));
+        }
+        finally { Cleanup(path); }
+    }
 }
