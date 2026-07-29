@@ -62,6 +62,11 @@ public partial class AddModificationDialog : Window
             AppMessageBox.Show("hw_version должен быть целым числом.", "Модификация", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        if (hw < 0 || hw > 9999)
+        {
+            AppMessageBox.Show("hw_version должен быть от 0 до 9999 (не больше 4 цифр).", "Модификация", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         if (ControllerPanel.Visibility == Visibility.Visible && ControllerCombo.SelectedItem is not ControllerModel)
         {
             AppMessageBox.Show("Выберите тип контроллера.", "Модификация", MessageBoxButton.OK, MessageBoxImage.Warning);

@@ -204,6 +204,73 @@ public class EndToEndSyncTests
         Assert.Single(paramFilesB); // must stay exactly one row after 3 repeated sync rounds, not grow
     }
 
+    /// <summary>Жалоба пользователя: «поставил тег (точное название шкафа), коллега по нему прошивку
+    /// не находит — тегов в синхронизации нет». Корень — тег почти всегда добавляют УЖЕ существующей,
+    /// давно разошедшейся по машинам прошивке, а строка fw_versions.tags писалась только при
+    /// первичном INSERT: на уже совпавшей записи импорт её не трогал вовсе (обновлял только
+    /// status/released/HMI/описание/типы пуска). Поэтому тег так и оставался локальным. Здесь: A
+    /// заводит прошивку → синхра на B → A ставит тег → повторная синхра → тег обязан оказаться на B,
+    /// причём объединением (свои теги B не теряет).</summary>
+    [Fact]
+    public void TagAddedToAlreadySyncedFirmware_ReachesOtherMachine_AsUnion()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        var dbA = m.DbA; var dbB = m.DbB;
+        var hierA = m.HierA;
+
+        var groupA = dbA.GetAllEquipmentGroups().First(g => g.Name == "ПЖ");
+        var subtypeA = dbA.GetSubtypesForGroup(groupA.Id!.Value).First(s => s.Name == "ХП");
+        var ctrl = dbA.GetAllControllerModels().First(c => c.Name == "SMH4");
+        var mod = dbA.GetAllModifications().First(md => md.ControllerName == "SMH4");
+
+        var fwFolder = hierA.FwPath(root, groupA.Name, "ХП", "SMH4", "тег.тест.1");
+        Directory.CreateDirectory(fwFolder);
+        File.WriteAllText(Path.Combine(fwFolder, "firmware.psl"), "fake plc firmware");
+
+        var fwId = dbA.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtypeA.Id!.Value, ControllerId = ctrl.Id!.Value,
+            EqPrefix = groupA.Prefix, SubPrefix = subtypeA.Prefix, HwVersion = mod.HwVersion, SwVersion = 1,
+            DtStr = "20260729_1200", VersionRaw = "тег.тест.1",
+            Filename = "firmware.psl", DiskPath = fwFolder,
+            Description = "проверка синхры тегов", Changelog = "проверка синхры тегов",
+            Status = "active",
+        });
+        Assert.True(fwId > 0);
+
+        // ── Круг 1: прошивка (пока без тега) уезжает на B ──
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var update1 = ConfigSyncService.CheckForUpdate(m.SvcB, out var err1);
+        Assert.True(err1 is null, err1);
+        ConfigSyncService.Apply(m.SvcB, update1!.ConfigPath, root);
+        var fwBefore = dbB.GetAllFwVersionsWithNames(includeArchived: true).First(f => f.VersionRaw == "тег.тест.1");
+        Assert.Empty(TagString.Parse(fwBefore.Tags));
+
+        // B ставит СВОЙ тег локально — он не должен потеряться при объединении.
+        var fwIdB = fwBefore.Id!.Value;
+        dbB.UpdateFwVersion(fwIdB, tags: TagString.Join(new[] { "локальный тег B" }));
+
+        // ── Круг 2: A ставит тег «точное название шкафа» уже существующей прошивке и экспортирует ──
+        System.Threading.Thread.Sleep(1100); // exported_at посекундный, см. соседние тесты
+        dbA.UpdateFwVersion(fwId, tags: TagString.Join(new[] { "шкаф управления пожарными насосами Антарус ПЖ-ПП-2" }));
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var update2 = ConfigSyncService.CheckForUpdate(m.SvcB, out var err2);
+        Assert.True(err2 is null, err2);
+        ConfigSyncService.Apply(m.SvcB, update2!.ConfigPath, root);
+
+        // Тег с A доехал до B, локальный тег B при этом уцелел (объединение множеств).
+        var fwAfter = dbB.GetAllFwVersionsWithNames(includeArchived: true).First(f => f.VersionRaw == "тег.тест.1");
+        Assert.True(TagString.Contains(fwAfter.Tags, "шкаф управления пожарными насосами Антарус ПЖ-ПП-2"));
+        Assert.True(TagString.Contains(fwAfter.Tags, "локальный тег B"));
+
+        // Поиск на B по слову из тега теперь находит прошивку (собственно жалоба). «пожарными»
+        // встречается только в теге — ни в названии подтипа (ХП), ни типа (ПЖ) его нет.
+        var found = dbB.SearchFwVersionsByTokens(new[] { "пожарными" });
+        Assert.Contains(found, f => f.VersionRaw == "тег.тест.1");
+    }
+
     /// <summary>Две повторные жалобы пользователя одним сценарием: «добавил производителей ПЧ/УПП —
     /// у коллеги их нет» и «удалил тип шкафа, а он никуда не делся». Обе — про общий справочник,
     /// и обе проверяются здесь через реальный Export/CheckForUpdate/Apply, а не через

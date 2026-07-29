@@ -329,6 +329,33 @@ public partial class EditFirmwareDialog : Window
     {
         ReportAttachments(dlg.AttachmentsResult, host);
         ReportSubtypes(dlg.SubtypeLinkResult, host);
+        ReportMetadataEdits(dlg, host);
+    }
+
+    /// <summary>Описание/теги/типы пуска применяет ВЫЗЫВАЮЩИЙ код (UpdateFwVersion), но до сих пор
+    /// эти правки нигде не отмечались как изменение справочника: накопитель синхронизации
+    /// (SyncPendingChange) о них не узнавал, плашка «Отправить всё» не поднималась — и поставленный
+    /// тег («точное название шкафа») так и оставался в локальной базе. Отсюда жалоба «добавил тег,
+    /// а коллега по нему прошивку не находит»: изменение просто не уезжало на диск. Отмечаем правку
+    /// здесь, одним местом на все четыре точки открытия диалога. Теги/типы пуска сравниваем
+    /// множествами — порядок значения не имеет.</summary>
+    private static void ReportMetadataEdits(EditFirmwareDialog dlg, IAppHost host)
+    {
+        var o = dlg._record;
+        bool tagsChanged = !new HashSet<string>(TagString.Parse(o.Tags), StringComparer.OrdinalIgnoreCase)
+            .SetEquals(TagString.Parse(dlg.ResultTags));
+        bool descChanged = (o.Description ?? "") != (dlg.ResultDescription ?? "");
+        bool launchChanged = !new HashSet<string>(o.LaunchTypes ?? new(), StringComparer.OrdinalIgnoreCase)
+            .SetEquals(dlg.ResultLaunchTypes);
+        if (!tagsChanged && !descChanged && !launchChanged) return;
+
+        var parts = new List<string>();
+        if (tagsChanged) parts.Add("теги");
+        if (descChanged) parts.Add("описание");
+        if (launchChanged) parts.Add("типы пуска");
+        host.PushCatalogChange($"Прошивка {o.VersionRaw}: изменены {string.Join(", ", parts)}");
+        // Правка тегов/описания могла поменять и порядок/состав поисковой выдачи.
+        host.InvalidateSearchResults();
     }
 
     private static void ReportSubtypes(FirmwareSubtypeLinkService.ApplyResult? result, IAppHost host)

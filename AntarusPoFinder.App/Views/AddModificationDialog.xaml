@@ -18,7 +18,7 @@
         <TextBox x:Name="NameInput" Margin="0,0,0,12" ToolTip="напр. PIXEL2-1020"/>
 
         <TextBlock Text="hw_version:" Margin="0,0,0,4"/>
-        <TextBox x:Name="HwVersionInput" Margin="0,0,0,4" ToolTip="целое число — ревизия платы, напр. 1020"/>
+        <TextBox x:Name="HwVersionInput" Margin="0,0,0,4" MaxLength="4" ToolTip="целое число до 4 цифр (0–9999) — ревизия платы, напр. 1020"/>
         <TextBlock x:Name="HwHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
                    Visibility="Collapsed"/>
 

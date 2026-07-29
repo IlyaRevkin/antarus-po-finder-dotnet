@@ -1048,7 +1048,7 @@ public partial class Database
                 """
                 SELECT id, status, released, io_map_path, instructions_path, hmi_path,
                        executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
-                       description, launch_types
+                       description, launch_types, tags
                 FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
                 """, cmd =>
                 {
@@ -1058,18 +1058,18 @@ public partial class Database
                 });
             (int Id, string Status, int Released, string IoMapPath, string InstructionsPath, string HmiPath,
                 string ExecutableHint, string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
-                string Description, string LaunchTypes)? existingRow = null;
+                string Description, string LaunchTypes, string Tags)? existingRow = null;
             using (existing)
                 if (existing.Read())
                     existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"),
                         GetString(existing, "io_map_path"), GetString(existing, "instructions_path"), GetString(existing, "hmi_path"),
                         GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"),
                         GetString(existing, "deleted_at"), GetString(existing, "disk_path"),
-                        GetString(existing, "description"), GetString(existing, "launch_types", "[]"));
+                        GetString(existing, "description"), GetString(existing, "launch_types", "[]"), GetString(existing, "tags"));
 
             if (existingRow is not null)
             {
-                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath, localDesc, localLaunchTypes) = existingRow.Value;
+                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath, localDesc, localLaunchTypes, localTags) = existingRow.Value;
 
                 // Rule 1 — already deleted here: permanent, never revived by an incoming row that
                 // just hasn't caught up yet (see class doc above).
@@ -1138,9 +1138,22 @@ public partial class Database
                 var newLaunchTypes = IsBlankLaunchTypes(localLaunchTypes) && !IsBlankLaunchTypes(fv.LaunchTypes)
                     ? fv.LaunchTypes : localLaunchTypes;
 
+                // Теги — объединение, а не Backfill: тег («точное название шкафа») почти всегда
+                // добавляют УЖЕ существующей, давно разошедшейся по машинам прошивке, а раньше строка
+                // tags писалась только при первичном INSERT — на уже совпавшей записи её не трогали
+                // вовсе, и добавленный тег к коллегам не доезжал (поиск по нему ничего не находил).
+                // Объединяем множества (без учёта регистра, порядок локальных сохраняем, новые в конец),
+                // чтобы добавленный где угодно тег доехал везде и ни одна машина не теряла своих.
+                // Удаление тега при этом не распространяется — та же аддитивная логика, что и у всей
+                // остальной синхронизации fw_versions (отсутствие ≠ «удалить»).
+                var localTagList = Services.TagString.Parse(localTags);
+                var haveTags = new HashSet<string>(localTagList, StringComparer.OrdinalIgnoreCase);
+                var addedTags = Services.TagString.Parse(fv.Tags).Where(t => haveTags.Add(t)).ToList();
+                var newTags = addedTags.Count == 0 ? localTags : Services.TagString.Join(localTagList.Concat(addedTags));
+
                 var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
                                     newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
-                                    newDesc != localDesc || newLaunchTypes != localLaunchTypes;
+                                    newDesc != localDesc || newLaunchTypes != localLaunchTypes || newTags != localTags;
 
                 var advances = (localStatus == "active" && incomingStatus != "active") ||
                                (localReleased == 0 && fv.Released != 0) || fieldsChanged;
@@ -1151,12 +1164,13 @@ public partial class Database
                 ExecuteNonQuery("""
                     UPDATE fw_versions SET status=@st, released=@rel, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
-                        description=@desc, launch_types=@lt
+                        description=@desc, launch_types=@lt, tags=@tags
                     WHERE id=@id
                     """, cmd =>
                 {
                     cmd.Parameters.AddWithValue("@desc", newDesc);
                     cmd.Parameters.AddWithValue("@lt", newLaunchTypes);
+                    cmd.Parameters.AddWithValue("@tags", newTags);
                     cmd.Parameters.AddWithValue("@st", localStatus == "active" ? incomingStatus : localStatus);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
                     cmd.Parameters.AddWithValue("@io", newIoMap);
