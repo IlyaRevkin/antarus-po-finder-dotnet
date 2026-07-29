@@ -228,21 +228,30 @@ public class HierarchyService
             // Пересобираем строку версии с новым hw, сохраняя точный суффикс даты/времени (может быть пуст).
             var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{parsed.SwVersion.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}";
             var newRaw = string.IsNullOrEmpty(parsed.DtStr) ? core : $"{core}.{parsed.DtStr}";
-            var newDiskPath = v.DiskPath;
+
+            // disk_path в БД абсолютный и мог быть записан на машине КОЛЛЕГИ (та же шара, но у него
+            // буква диска, у нас UNC — или наоборот). Проверяем существование и переименовываем
+            // ЛОКАЛЬНУЮ форму пути (FirmwarePathLocalizer перецепляет хвост от «ПО» на наш корень) —
+            // иначе Directory.Exists на чужом пути всегда ложь и правка hw падает «папка на диске
+            // недоступна», хотя папка на месте (тот же класс бага, что localizer чинит в поиске/
+            // истории/обновлениях). Записанный disk_path тоже кладём в локальной форме — она
+            // корректно локализуется у всех, а для матчинга при синхронизации disk_path не участвует.
+            var localDisk = FirmwarePathLocalizer.Localize(v.DiskPath, root);
+            var newDiskPath = localDisk;
 
             // Запись с файлами на диске: папку надо переименовать. Если диск/шара недоступны — НЕ
             // трогаем и БД тоже, иначе version_raw в базе разъедется с именем папки, когда шара
             // вернётся. Запись без файлов (disk_path пуст) правится только в БД.
             if (!string.IsNullOrWhiteSpace(v.DiskPath))
             {
-                if (!Directory.Exists(v.DiskPath))
+                if (!Directory.Exists(localDisk))
                 {
                     errors.Add($"{v.VersionRaw}: папка на диске недоступна — пропущено.");
                     continue;
                 }
-                var parent = Path.GetDirectoryName(v.DiskPath);
+                var parent = Path.GetDirectoryName(localDisk);
                 var candidate = parent is null ? newRaw : Path.Combine(parent, newRaw);
-                if (!string.Equals(candidate, v.DiskPath, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(candidate, localDisk, StringComparison.OrdinalIgnoreCase))
                 {
                     if (Directory.Exists(candidate))
                     {
@@ -251,7 +260,7 @@ public class HierarchyService
                     }
                     try
                     {
-                        Directory.Move(v.DiskPath, candidate);
+                        Directory.Move(localDisk, candidate);
                         renamed.Add($"{v.VersionRaw} → {newRaw}");
                     }
                     catch (Exception e)
@@ -270,8 +279,12 @@ public class HierarchyService
             // {старый hw}», хотя панель обновлять никто не обновлял (баг pixel2: hw 044→1321, а панель
             // осталась «2.4.044.0005_hmi»). Унаследованную от другой версии панель (имя ≠ этой версии)
             // не трогаем — там пометка «от версии X» верна.
-            var newHmiPath = RenameOwnHmiFolder(v.HmiPath, v.VersionRaw, newRaw, errors);
-            if (!string.Equals(newHmiPath, v.HmiPath, StringComparison.Ordinal))
+            // Панель тоже могла прийти с чужой формой пути: переименовываем локализованную папку HMI,
+            // но перецеливаем hmi_path в БД от ИСХОДНОГО сохранённого значения — RepointHmiPath матчит
+            // его у всех записей, унаследовавших эту же панель.
+            var localHmi = FirmwarePathLocalizer.Localize(v.HmiPath, root);
+            var newHmiPath = RenameOwnHmiFolder(localHmi, v.VersionRaw, newRaw, errors);
+            if (!string.Equals(newHmiPath, localHmi, StringComparison.Ordinal))
                 _db.RepointHmiPath(v.HmiPath, newHmiPath);
 
             _db.UpdateFwVersionHw(v.Id!.Value, newHw, newRaw, newDiskPath);

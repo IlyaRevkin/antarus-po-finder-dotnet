@@ -238,6 +238,103 @@ public class ControllerEditAndHwRewriteTests
         Assert.Equal("2.1.0044.0003", row.VersionRaw);
     }
 
+    // Прошивка коллеги: disk_path в БД записан с ЕГО формой шары (напр. UNC \\ant_srv\...), а у нас
+    // та же папка лежит под ЛОКАЛЬНЫМ корнем. Правка hw обязана локализовать путь перед проверкой —
+    // иначе Directory.Exists на чужом пути = ложь и версия падает «папка на диске недоступна»
+    // (симптом «пиксель ищет, но при синхроне не находит папку с старым hw»).
+    [Fact]
+    public void RewriteControllerHwVersion_LocalizesForeignDiskPath_BeforeRenaming()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var tmpRoot = new TempRoot();
+        var svc = new HierarchyService(db);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var ctrl = db.GetAllControllerModels().First(c => c.Name == "SMH4");
+
+        var oldRaw = "2.1.0044.0005";
+        // Папка реально лежит под нашим ЛОКАЛЬНЫМ корнем...
+        var localDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4", oldRaw);
+        Directory.CreateDirectory(localDir);
+        File.WriteAllText(Path.Combine(localDir, "fw.psl"), "test");
+        // ...а в БД disk_path сохранён с ЧУЖИМ корнем коллеги (иначе смонтированная шара).
+        var foreignDir = Path.Combine(@"\\ant_srv\Software\Antarus", "ПО", "НГР", "КНС", "SMH4", oldRaw);
+
+        var fwId = db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl.Id!.Value,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 44, SwVersion = 5, DtStr = "",
+            VersionRaw = oldRaw, Filename = "fw.psl", DiskPath = foreignDir,
+            Description = "test", Status = "active",
+        });
+
+        var res = svc.RewriteControllerHwVersion(tmpRoot.Path, ctrl.Id!.Value, 44, 1321);
+
+        Assert.True(res.Ok, string.Join("; ", res.Errors));
+        Assert.Equal(1, res.UpdatedRows);
+
+        var newRaw = "2.1.1321.0005";
+        var newDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4", newRaw);
+        Assert.False(Directory.Exists(localDir));
+        Assert.True(Directory.Exists(newDir));
+        Assert.True(File.Exists(Path.Combine(newDir, "fw.psl")));
+
+        var row = db.GetFwVersionById(fwId)!;
+        Assert.Equal(1321, row.HwVersion);
+        Assert.Equal(newRaw, row.VersionRaw);
+        Assert.Equal(newDir, row.DiskPath); // перезаписан в локальной форме
+    }
+
+    // То же для панели HMI, пришедшей с чужой формой пути: локализуем и переименовываем «свою» папку.
+    [Fact]
+    public void RewriteControllerHwVersion_LocalizesForeignHmiPath_BeforeRenaming()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var tmpRoot = new TempRoot();
+        var svc = new HierarchyService(db);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var ctrl = db.GetAllControllerModels().First(c => c.Name == "SMH4");
+
+        var oldRaw = "2.1.0044.0005";
+        var ctrlDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4");
+        var localDir = Path.Combine(ctrlDir, oldRaw);
+        Directory.CreateDirectory(localDir);
+        File.WriteAllText(Path.Combine(localDir, "fw.psl"), "test");
+        var localHmiDir = Path.Combine(ctrlDir, "HMI", $"{oldRaw}_hmi");
+        Directory.CreateDirectory(localHmiDir);
+        File.WriteAllText(Path.Combine(localHmiDir, "panel.dpj"), "hmi");
+
+        // В БД оба пути — с чужим корнем.
+        var foreignRoot = @"\\ant_srv\Software\Antarus";
+        var foreignDir = Path.Combine(foreignRoot, "ПО", "НГР", "КНС", "SMH4", oldRaw);
+        var foreignHmiDir = Path.Combine(foreignRoot, "ПО", "НГР", "КНС", "SMH4", "HMI", $"{oldRaw}_hmi");
+
+        var fwId = db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl.Id!.Value,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 44, SwVersion = 5, DtStr = "",
+            VersionRaw = oldRaw, Filename = "fw.psl", DiskPath = foreignDir, HmiPath = foreignHmiDir,
+            Description = "test", Status = "active",
+        });
+
+        var res = svc.RewriteControllerHwVersion(tmpRoot.Path, ctrl.Id!.Value, 44, 1321);
+        Assert.True(res.Ok, string.Join("; ", res.Errors));
+
+        var newRaw = "2.1.1321.0005";
+        var newHmiDir = Path.Combine(ctrlDir, "HMI", $"{newRaw}_hmi");
+        Assert.False(Directory.Exists(localHmiDir));
+        Assert.True(Directory.Exists(newHmiDir));
+        Assert.True(File.Exists(Path.Combine(newHmiDir, "panel.dpj")));
+        Assert.Equal(newHmiDir, db.GetFwVersionById(fwId)!.HmiPath); // локальная форма новой папки
+    }
+
     [Fact]
     public void RenameControllerFolders_MovesFoldersAcrossTree_AndRemapsStoredPaths()
     {
