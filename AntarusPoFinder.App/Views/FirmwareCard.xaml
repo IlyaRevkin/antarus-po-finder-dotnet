@@ -4,13 +4,21 @@
              xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,10">
         <StackPanel>
-            <StackPanel Orientation="Horizontal" Cursor="Hand" MouseLeftButtonUp="Header_Click"
-                        ToolTip="Нажмите, чтобы скопировать номер версии (имя файла на диске)">
-                <TextBlock x:Name="NameLabel" FontWeight="Bold" FontSize="14"/>
-                <TextBlock Text="   "/>
-                <TextBlock x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
-            </StackPanel>
-            <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0"/>
+            <!-- Grid, а не горизонтальный StackPanel: у длинного наименования подтипа (напр. полное
+                 «шкаф управления пожарными насосами…») в StackPanel'е не было предела ширины — имя и
+                 номер версии уезжали за правый край карточки и обрезались в узком окне (жалоба
+                 «категория/название не влезает»). Теперь имя в колонке «*» переносится по словам, а
+                 номер версии остаётся справа отдельной Auto-колонкой и не обрезается. -->
+            <Grid Cursor="Hand" MouseLeftButtonUp="Header_Click"
+                  ToolTip="Нажмите, чтобы скопировать номер версии (имя файла на диске)">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
             <!-- Что реально лежит рядом с версией (LFS/PSL/HMI/параметры/документы). Раньше это было
                  видно только по тому, есть ли пункт в меню «Ещё» — то есть «есть ли LFS» приходилось
                  выяснять, открыв меню и не найдя там строки. -->
@@ -25,7 +33,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" x:Name="SoftwareNameLabel" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="0" x:Name="SoftwareNameLabel" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
                 <Button Grid.Column="1" x:Name="CopyButton" Content="Копировать" Style="{StaticResource SecondaryButton}" Click="Copy_Click"/>
             </Grid>
 
