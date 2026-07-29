@@ -263,10 +263,56 @@ public class HierarchyService
                 newDiskPath = candidate;
             }
 
+            // Панель (HMI) лежит НЕ в папке версии, а в общей папке HMI контроллера под именем
+            // «{версия}_hmi», поэтому переименование папки версии выше её не задело. Если эта панель
+            // принадлежит именно ЭТОЙ версии (имя папки начинается со старой строки версии), её тоже
+            // надо переименовать и переписать hmi_path — иначе карточка навсегда покажет «HMI от версии
+            // {старый hw}», хотя панель обновлять никто не обновлял (баг pixel2: hw 044→1321, а панель
+            // осталась «2.4.044.0005_hmi»). Унаследованную от другой версии панель (имя ≠ этой версии)
+            // не трогаем — там пометка «от версии X» верна.
+            var newHmiPath = RenameOwnHmiFolder(v.HmiPath, v.VersionRaw, newRaw, errors);
+            if (!string.Equals(newHmiPath, v.HmiPath, StringComparison.Ordinal))
+                _db.RepointHmiPath(v.HmiPath, newHmiPath);
+
             _db.UpdateFwVersionHw(v.Id!.Value, newHw, newRaw, newDiskPath);
             updated++;
         }
         return new HwRewriteResult(errors.Count == 0, updated, renamed, errors);
+    }
+
+    /// <summary>Переименовывает папку/файл HMI со старой строки версии на новую при правке hw и
+    /// возвращает новый hmi_path. Трогает только «свою» панель — ту, чьё имя начинается с
+    /// «{oldRaw}_hmi» (её сделали вместе с этой версией); унаследованную от другой версии возвращает
+    /// без изменений. На диске переименовывает, только если исходное есть, а целевого ещё нет — иначе
+    /// hmi_path в базе оставляем прежним, чтобы он не разошёлся с тем, что реально лежит на диске.</summary>
+    private static string RenameOwnHmiFolder(string hmiPath, string oldRaw, string newRaw, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(hmiPath)) return hmiPath;
+
+        var trimmed = hmiPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        var prefix = $"{oldRaw}_hmi";
+        // Панель унаследована от другой версии (имя не про эту версию) либо путь непонятного вида — не трогаем.
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return hmiPath;
+
+        var newName = $"{newRaw}_hmi" + name[prefix.Length..]; // сохраняем расширение файла-панели, если было
+        var parent = Path.GetDirectoryName(trimmed);
+        var newPath = parent is null ? newName : Path.Combine(parent, newName);
+        if (string.Equals(newPath, trimmed, StringComparison.OrdinalIgnoreCase)) return hmiPath;
+
+        try
+        {
+            if (Directory.Exists(newPath) || File.Exists(newPath)) return newPath; // уже переименовано (напр. общая с другой версией папка)
+            if (Directory.Exists(trimmed)) Directory.Move(trimmed, newPath);
+            else if (File.Exists(trimmed)) File.Move(trimmed, newPath);
+            else return hmiPath; // на диске нет ни старого, ни нового — путь не выдумываем
+        }
+        catch (Exception e)
+        {
+            errors.Add($"HMI {oldRaw}: {e.Message}");
+            return hmiPath;
+        }
+        return newPath;
     }
 
     private static void TryRenameFolder(string oldPath, string newPath, List<string> errors)

@@ -87,6 +87,94 @@ public class ControllerEditAndHwRewriteTests
         Assert.Equal(newDir, row.DiskPath);
     }
 
+    // Баг pixel2: правка hw 044→1321 переименовывала папку версии и version_raw, но папку панели
+    // «{версия}_hmi» (лежит в отдельной папке HMI контроллера, не внутри версии) не трогала. Из-за
+    // этого карточка показывала «HMI от версии 2.4.044.0005», хотя панель принадлежит этой же версии.
+    [Fact]
+    public void RewriteControllerHwVersion_RenamesOwnHmiFolder_AndRepointsHmiPath()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var tmpRoot = new TempRoot();
+        var svc = new HierarchyService(db);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var ctrl = db.GetAllControllerModels().First(c => c.Name == "SMH4");
+
+        var oldRaw = "2.1.0044.0001.20260101_1200";
+        var ctrlDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4");
+        var oldDir = Path.Combine(ctrlDir, oldRaw);
+        Directory.CreateDirectory(oldDir);
+        File.WriteAllText(Path.Combine(oldDir, "fw.psl"), "test");
+
+        // Папка панели — сосед папки версии, в HMI-папке контроллера, названа по старой версии.
+        var oldHmiDir = Path.Combine(ctrlDir, "HMI", $"{oldRaw}_hmi");
+        Directory.CreateDirectory(oldHmiDir);
+        File.WriteAllText(Path.Combine(oldHmiDir, "panel.dpj"), "hmi");
+
+        var fwId = db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl.Id!.Value,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 44, SwVersion = 1, DtStr = "20260101_1200",
+            VersionRaw = oldRaw, Filename = "fw.psl", DiskPath = oldDir, HmiPath = oldHmiDir,
+            Description = "test", Status = "active",
+        });
+
+        var res = svc.RewriteControllerHwVersion(tmpRoot.Path, ctrl.Id!.Value, 44, 1321);
+        Assert.True(res.Ok, string.Join("; ", res.Errors));
+
+        var newRaw = "2.1.1321.0001.20260101_1200";
+        var newHmiDir = Path.Combine(ctrlDir, "HMI", $"{newRaw}_hmi");
+        Assert.False(Directory.Exists(oldHmiDir));
+        Assert.True(Directory.Exists(newHmiDir));
+        Assert.True(File.Exists(Path.Combine(newHmiDir, "panel.dpj")));
+        Assert.Equal(newHmiDir, db.GetFwVersionById(fwId)!.HmiPath);
+    }
+
+    // Панель, унаследованную от ДРУГОЙ версии (её имя — про старую версию, не про правимую), трогать
+    // нельзя: пометка «HMI от версии X» на карточке верна, и переименование сломало бы её у той версии.
+    [Fact]
+    public void RewriteControllerHwVersion_LeavesInheritedHmiFolderUntouched()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var tmpRoot = new TempRoot();
+        var svc = new HierarchyService(db);
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var ctrl = db.GetAllControllerModels().First(c => c.Name == "SMH4");
+
+        var ownRaw = "2.1.0044.0002";
+        var ctrlDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4");
+        var ownDir = Path.Combine(ctrlDir, ownRaw);
+        Directory.CreateDirectory(ownDir);
+        File.WriteAllText(Path.Combine(ownDir, "fw.psl"), "test");
+
+        // Панель осталась от более ранней версии 0001 — её имя не про правимую версию 0002.
+        var inheritedHmiDir = Path.Combine(ctrlDir, "HMI", "2.1.0044.0001_hmi");
+        Directory.CreateDirectory(inheritedHmiDir);
+        File.WriteAllText(Path.Combine(inheritedHmiDir, "panel.dpj"), "hmi");
+
+        var fwId = db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl.Id!.Value,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 44, SwVersion = 2, DtStr = "",
+            VersionRaw = ownRaw, Filename = "fw.psl", DiskPath = ownDir, HmiPath = inheritedHmiDir,
+            Description = "test", Status = "active",
+        });
+
+        var res = svc.RewriteControllerHwVersion(tmpRoot.Path, ctrl.Id!.Value, 44, 1321);
+        Assert.True(res.Ok, string.Join("; ", res.Errors));
+
+        // Папка панели и hmi_path не изменились — она принадлежит версии 0001, а не правимой 0002.
+        Assert.True(Directory.Exists(inheritedHmiDir));
+        Assert.Equal(inheritedHmiDir, db.GetFwVersionById(fwId)!.HmiPath);
+    }
+
     [Fact]
     public void RewriteControllerHwVersion_RecordWithoutDiskFiles_UpdatesDbOnly()
     {

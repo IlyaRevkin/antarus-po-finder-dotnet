@@ -119,6 +119,20 @@ public class AdSessionServiceTests
         finally { Cleanup(path); }
     }
 
+    // Диалог входа поднимаем ТОЛЬКО когда обязательный вход включён и живой сессии нет. При выключенном
+    // гейте (дефолт) окно не показываем — а «кто залогинен» всё равно восстанавливаем из последнего
+    // входа (App.OnStartup), чтобы логин переживал перезапуск/авто-обновление (жалоба «после обновления
+    // слетает логин»).
+    [Theory]
+    [InlineData(false, false, false)] // гейт выкл — не спрашиваем (сессия неважна)
+    [InlineData(false, true, false)]  // гейт выкл — не спрашиваем
+    [InlineData(true, true, false)]   // гейт вкл, сессия жива — не спрашиваем
+    [InlineData(true, false, true)]   // гейт вкл, сессии нет — спрашиваем
+    public void ShouldPromptAtStartup_OnlyWhenGateOnAndNoValidSession(bool gateEnabled, bool sessionValid, bool expected)
+    {
+        Assert.Equal(expected, AdSessionService.ShouldPromptAtStartup(gateEnabled, sessionValid));
+    }
+
     [Fact]
     public void DeleteAdLoginSession_ForgetsRememberedLogin_SoGateAsksAgain()
     {

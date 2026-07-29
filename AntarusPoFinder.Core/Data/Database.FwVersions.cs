@@ -436,6 +436,21 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@id", fwVersionId);
             });
 
+    /// <summary>Перецелить hmi_path со старой папки/файла HMI на новую — используется при правке hw
+    /// (HierarchyService.RewriteControllerHwVersion): папка HMI лежит НЕ внутри папки версии, а в общей
+    /// папке HMI контроллера под именем «{версия}_hmi», поэтому переименование папки версии её не
+    /// задевает и hmi_path надо переписать отдельно. Обновляет ВСЕ записи, ссылающиеся ровно на старый
+    /// путь, — не только «свою» версию, но и те, что унаследовали эту же панель (их hmi_path указывает
+    /// на ту же папку), иначе после переименования папки их кнопка «Открыть HMI проект» упрётся в
+    /// несуществующий путь.</summary>
+    public void RepointHmiPath(string oldHmiPath, string newHmiPath) =>
+        ExecuteNonQuery("UPDATE fw_versions SET hmi_path=@n WHERE hmi_path=@o",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@n", newHmiPath);
+                cmd.Parameters.AddWithValue("@o", oldHmiPath);
+            });
+
     /// <summary>Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
     /// currently-open reservations (see Database.FwVersionReservations.cs) for this exact
     /// (subtype, controller, hw_version) combo. Including reservations here is what makes the live

@@ -24,6 +24,14 @@ public static class AdSessionService
 {
     private const string IsoFormat = "yyyy-MM-ddTHH:mm:ss";
 
+    /// <summary>Надо ли на запуске поднимать окно входа по AD: только когда обязательный вход включён
+    /// И запомненной живой сессии нет. Во всех остальных случаях (гейт выключен — это дефолт, либо
+    /// сессия ещё действует) диалог не показываем, но «кто залогинен» всё равно восстанавливаем из
+    /// последнего входа (см. App.OnStartup) — иначе после перезапуска/авто-обновления логин молча
+    /// откатывался бы на аккаунт Windows смены. Вынесено из App.OnStartup, чтобы это правило
+    /// проверялось тестом без поднятия WPF.</summary>
+    public static bool ShouldPromptAtStartup(bool gateEnabled, bool sessionValid) => gateEnabled && !sessionValid;
+
     public static bool IsValid(Database db, string normalizedLogin, DateTime now)
     {
         if (string.IsNullOrWhiteSpace(normalizedLogin)) return false;
