@@ -1,3 +1,4 @@
+using System;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 
@@ -11,7 +12,9 @@ public interface IAppHost
     /// an explicit category where it's known (see NotificationCategory) so the user's Настройки →
     /// Уведомления filter can actually apply to it. If the category is disabled, the message is
     /// fully suppressed: no status-bar flash, no history entry (see MainWindowViewModel.ShowStatus).</summary>
-    void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General);
+    /// <summary>reopen (необязателен) — действие кнопки «Показать» у записи в истории уведомлений:
+    /// напр. перейти на страницу «Тикеты». Без него запись без кнопки, как и раньше.</summary>
+    void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General, Action? reopen = null);
 
     /// <summary>Открывает индикатор фоновой работы внизу окна (рядом с «Диск: …») до Dispose.
     /// Обязателен для всего, что ходит на сетевой диск дольше мгновения: страница сама может

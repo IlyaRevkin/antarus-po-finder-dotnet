@@ -22,6 +22,13 @@ public class FirmwareAttachmentsRequest
     public string? InstructionsSourcePath { get; set; }
     public string? ModbusMapSourcePath { get; set; }
     public string? HmiSourcePath { get; set; }
+
+    /// <summary>Файл прошивки ПЛК (.lfs / .psl и т.п.), который надо ДОЛОЖИТЬ в саму папку версии
+    /// (disk_path) — не в общую папку контроллера, как «карты»/инструкция, а именно рядом с самой
+    /// прошивкой, потому что по файлам этой папки карточка и считает флаги LFS/PSL. Тикет коллеги:
+    /// «к уже загруженной прошивке доложить .lfs, если его нет, либо .psl для Segnetics». null — не
+    /// трогать; файлы не заменяются массово, кладётся ровно выбранный файл (перезаписью одноимённого).</summary>
+    public string? PlcFileSourcePath { get; set; }
 }
 
 /// <summary>Applied — человекочитаемые названия того, что реально изменилось (для статуса/тоста),
@@ -106,6 +113,43 @@ public static class FirmwareAttachmentsService
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     warnings.Add($"HMI-проект: {ex.Message}");
+                }
+            }
+        }
+
+        // Файл прошивки ПЛК (.lfs/.psl) — в саму папку версии (disk_path), а не в общие папки контроллера.
+        // Независим от доп. файлов выше: не пишет ничего в БД (флаги LFS/PSL карточка считает по факту
+        // файлов в папке при следующем поиске), поэтому идёт до раннего выхода про UpdateFwVersionAttachments.
+        // Путь версии мог быть записан коллегой в его форме диска — приводим к нашей (FirmwarePathLocalizer),
+        // тот же приём, что при правке hw/поиске.
+        if (!string.IsNullOrEmpty(request.PlcFileSourcePath))
+        {
+            var src = request.PlcFileSourcePath!;
+            if (!File.Exists(src))
+            {
+                warnings.Add($"Файл прошивки: путь не найден — {src}");
+            }
+            else
+            {
+                var versionFolder = FirmwarePathLocalizer.Localize(record.DiskPath, root);
+                // disk_path мог указывать на одиночный файл (не папку) — тогда «папка версии» это его родитель.
+                if (!Directory.Exists(versionFolder)) versionFolder = Path.GetDirectoryName(versionFolder) ?? "";
+                if (string.IsNullOrEmpty(versionFolder) || !Directory.Exists(versionFolder))
+                {
+                    warnings.Add("Файл прошивки: папка версии на диске недоступна — файл не добавлен.");
+                }
+                else
+                {
+                    try
+                    {
+                        File.Copy(src, Path.Combine(versionFolder, Path.GetFileName(src)), overwrite: true);
+                        var ext = Path.GetExtension(src).ToLowerInvariant();
+                        applied.Add(string.IsNullOrEmpty(ext) ? "Файл прошивки" : $"Файл прошивки ({ext})");
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        warnings.Add($"Файл прошивки: {ex.Message}");
+                    }
                 }
             }
         }

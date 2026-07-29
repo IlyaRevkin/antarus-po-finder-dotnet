@@ -487,7 +487,13 @@ public static class ConfigSyncService
                      .Where(e => string.CompareOrdinal(e.Ts, watermark) > 0)
                      .OrderBy(e => e.Ts, StringComparer.Ordinal))
         {
-            var ctrlId = services.Db.GetControllerIdBySyncId(e.ControllerSyncId);
+            // sync_id — основной ключ, имя — запасной: sync_id контроллера приёмник перенимает у
+            // отправителя только ВНУТРИ ImportHierarchyData, а это проигрывание идёт РАНЬШЕ него (см.
+            // ApplyToDatabase). На первой же синхронизации, где переименование и важно, по sync_id
+            // контроллер ещё не находится — тогда матчим по имени (у всех машин оно одно и то же),
+            // иначе строка навсегда осталась бы фантомом. См. Database.GetControllerIdByName.
+            var ctrlId = services.Db.GetControllerIdBySyncId(e.ControllerSyncId)
+                         ?? services.Db.GetControllerIdByName(e.ControllerName);
             if (ctrlId is null) continue;
             try { services.Hierarchy.ReplayControllerHwRewrite(currentRoot, ctrlId.Value, e.OldHw, e.NewHw); }
             catch { /* одно переигрывание не должно валить всю синхронизацию */ }

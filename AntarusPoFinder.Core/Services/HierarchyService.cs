@@ -243,11 +243,23 @@ public class HierarchyService
             var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{parsed.SwVersion.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}";
             var newRaw = string.IsNullOrEmpty(parsed.DtStr) ? core : $"{core}.{parsed.DtStr}";
 
-            // Проигрывание: если строка с целевым ключом уже есть (идемпотентный повтор или дубль,
-            // залетевший ещё старой версией приложения), «старую» строку не переименовываем в него —
-            // иначе два ряда с одним version_raw. Оставляем как есть (не хуже, чем было).
+            // Проигрывание: строка с целевым ключом (новым hw) уже есть. Это либо идемпотентный
+            // повтор, либо у получателя одновременно остались и старая строка (фантом), и приехавший
+            // дублем новый ряд — ровно жалоба «локальная папка старого hw не затирается». Старую в
+            // целевой ключ не переименовываем (было бы два ряда с одним version_raw), но если её
+            // файлов на реально доступном диске УЖЕ нет (папку переименовал автор правки на общей
+            // шаре), то это фантом завершённого переименования — убираем его локально, чтобы дубль
+            // исчез. Диск недоступен / папка ещё на месте — не трогаем (не хуже, чем было).
             if (replay && _db.FindFwVersionIdByNaturalKey(v.SubtypeId, controllerId, newRaw, v.Id!.Value) is not null)
+            {
+                if (IsStaleAfterRewrite(v, root))
+                {
+                    _db.DeleteFwVersion(v.Id!.Value);
+                    renamed.Add($"{v.VersionRaw} → {newRaw} (убран дубль)");
+                    updated++;
+                }
                 continue;
+            }
 
             // disk_path в БД абсолютный и мог быть записан на машине КОЛЛЕГИ (та же шара, но у него
             // буква диска, у нас UNC — или наоборот). Проверяем существование и переименовываем
@@ -364,6 +376,19 @@ public class HierarchyService
             return hmiPath;
         }
         return newPath;
+    }
+
+    /// <summary>Старая (до-переписывания) строка версии — фантом завершённого переименования: её
+    /// файлов на реально доступном диске уже нет. Используется только проигрыванием, только когда
+    /// целевой ключ (новый hw) уже занят, чтобы решить, можно ли безопасно убрать оставшийся дубль.
+    /// Диск обязан быть доступен: offline-шара «нет папки» ≠ «папку удалили» — тогда возвращаем false
+    /// и ничего не сносим. Запись без файлов (disk_path пуст) — метаданные без диска, тоже фантом.</summary>
+    private static bool IsStaleAfterRewrite(Domain.FwVersionRecord v, string root)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return false;
+        if (string.IsNullOrWhiteSpace(v.DiskPath)) return true;
+        var localDisk = FirmwarePathLocalizer.Localize(v.DiskPath, root);
+        return !Directory.Exists(localDisk);
     }
 
     private static void TryRenameFolder(string oldPath, string newPath, List<string> errors)

@@ -69,6 +69,23 @@ public partial class Database
             cmd => cmd.Parameters.AddWithValue("@s", controllerSyncId)) is long id ? (int)id : (int?)null;
     }
 
+    /// <summary>Локальный id контроллера по ИМЕНИ — запасной путь для проигрывания hw-переписывания,
+    /// когда sync_id ещё не совпал. Это реальный, а не гипотетический случай: sync_id контроллера
+    /// приёмник перенимает у отправителя внутри ImportHierarchyData, а ReplayHwRewrites выполняется
+    /// РАНЬШЕ него в том же Apply (переименовать свою строку надо ДО импорта fw_versions, иначе он
+    /// заведёт дубль). Значит на самой первой синхронизации, где это событие и важно, GetControllerId-
+    /// BySyncId ещё вернул бы null (у приёмника пока свой, другой sync_id), переписывание бы не
+    /// проиграло, а на следующем тике watermark уже ушёл вперёд — и старая строка навсегда осталась бы
+    /// фантомом (ровно жалоба «папка не затирается»). Имя контроллера у всех машин одно и то же (по
+    /// нему же приёмник и перенимает sync_id), поэтому оно — надёжный запасной ключ. Null, если такого
+    /// имени нет.</summary>
+    public int? GetControllerIdByName(string controllerName)
+    {
+        if (string.IsNullOrEmpty(controllerName)) return null;
+        return ExecuteScalar("SELECT id FROM controller_models WHERE name=@n",
+            cmd => cmd.Parameters.AddWithValue("@n", controllerName)) is long id ? (int)id : (int?)null;
+    }
+
     /// <summary>id строки fw_versions с заданным натуральным ключом (подтип+контроллер+version_raw),
     /// не считая <paramref name="excludeId"/> — используется проигрыванием hw-переписывания, чтобы не
     /// переименовать «старую» строку в уже существующий ключ (иначе два ряда с одним version_raw). Null,

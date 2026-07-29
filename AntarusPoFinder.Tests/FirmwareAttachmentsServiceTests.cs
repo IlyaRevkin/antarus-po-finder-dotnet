@@ -187,6 +187,35 @@ public class FirmwareAttachmentsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Apply_AddsPlcFile_IntoVersionFolderItself()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Тикет коллеги: доложить недостающий .lfs (или .psl для Segnetics) к уже загруженной версии.
+        request.PlcFileSourcePath = WriteSourceFile("доложенная.lfs");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.Contains(result.Applied, a => a.Contains("Файл прошивки"));
+        // Лёг в САМУ папку версии (disk_path), а не в общие папки контроллера — по файлам этой папки
+        // карточка и считает флаги LFS/PSL.
+        Assert.True(File.Exists(Path.Combine(record.DiskPath, "доложенная.lfs")));
+    }
+
+    [Fact]
+    public void Apply_PlcFileMissingSource_WarnsAndAddsNothing()
+    {
+        var (record, request) = SeedUploadedVersion();
+        request.PlcFileSourcePath = Path.Combine(Root, "нет-такого.lfs");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.False(result.AnythingChanged);
+        Assert.Single(result.Warnings);
+        Assert.Contains("Файл прошивки", result.Warnings[0]);
+    }
+
+    [Fact]
     public void Apply_UnavailableRoot_ChangesNothing()
     {
         var (record, request) = SeedUploadedVersion();

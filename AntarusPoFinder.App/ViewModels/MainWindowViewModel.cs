@@ -108,6 +108,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _incomingChangesBannerVisible;
     [ObservableProperty] private string _incomingChangesBannerText = "";
     [ObservableProperty] private int _unseenNotificationsCount;
+    /// <summary>Сумма бейджей компактных пунктов (Тикеты/Сетевые диски), спрятанных в свёрнутой по
+    /// умолчанию секции «ДОПОЛНИТЕЛЬНО». Всплывает на её заголовок, пока секция не раскрыта — иначе
+    /// пришедший тикет ставит бейдж на пункт, которого на экране НЕТ, и оператор его не видит (ровно
+    /// жалоба «не вижу, когда прилетают новые тикеты»). Раскрыл секцию — виден сам бейдж пункта, тогда
+    /// заголовочный прячется (см. MainWindow.xaml).</summary>
+    [ObservableProperty] private int _moreSectionBadgeCount;
 
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
     /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
@@ -299,13 +305,21 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeen) > 0);
 
             item.BadgeCount = unseen;
+            RecomputeMoreSectionBadge();
 
             if (notify && _lastUnseenTickets.HasValue && unseen > _lastUnseenTickets.Value && unseen > 0)
-                ShowStatus(unseen == 1 ? "Новый тикет" : $"Новые тикеты/изменения: {unseen}", 8000, NotificationCategory.General);
+                ShowStatus(unseen == 1 ? "Новый тикет — нажмите «Показать»" : $"Новые тикеты/изменения: {unseen} — нажмите «Показать»",
+                    8000, NotificationCategory.General, reopen: () => Navigate("tickets"));
             _lastUnseenTickets = unseen;
         }
         catch { /* best effort — бейдж просто не обновится в этот раз */ }
     }
+
+    /// <summary>Сумма непросмотренных по всем компактным (спрятанным в «ДОПОЛНИТЕЛЬНО») пунктам —
+    /// заголовок секции показывает её, пока секция свёрнута. Сейчас бейдж есть только у «Тикеты», но
+    /// суммируем по всем компактным на случай будущих.</summary>
+    private void RecomputeMoreSectionBadge() =>
+        MoreSectionBadgeCount = NavItems.Where(n => n.IsCompact && n.IsVisible).Sum(n => n.BadgeCount);
 
     /// <summary>IAppHost — TicketsView зовёт после того, как показал страницу (и подтянул новые
     /// события с диска), чтобы пометка «просмотрено» ставилась по актуальному списку.</summary>
@@ -501,12 +515,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>If the category is disabled in Настройки → Уведомления, the message is fully
     /// suppressed — no status-bar flash, no history entry — per the user's explicit request that a
     /// muted category shouldn't show up anywhere, not just skip the history.</summary>
-    public void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General)
+    public void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General, Action? reopen = null)
     {
         if (!_services.Cfg.IsNotificationCategoryEnabled(category)) return;
 
         StatusMessage = message;
-        if (!string.IsNullOrEmpty(message)) AddNotification(message, category);
+        if (!string.IsNullOrEmpty(message)) AddNotification(message, category, reopen);
         _statusClearTimer?.Stop();
         _statusClearTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
         _statusClearTimer.Tick += (_, _) =>
@@ -525,7 +539,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Callers that raise a banner directly (app/firmware update) rather than going through
     /// ShowStatus must check IsNotificationCategoryEnabled themselves before calling this AND before
     /// setting their *BannerVisible flag — this only guards the history entry, not the banner.</summary>
-    private void AddNotification(string text, NotificationCategory category, Action? reopen = null)
+    private void AddNotification(string text, NotificationCategory category, Action? reopen = null, bool reopenIsModal = false)
     {
         // Same text as the entry already on top (e.g. the operator clicking "Сохранить папку
         // осмотра" several times in a row) — refresh its timestamp instead of piling up identical
@@ -537,7 +551,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             return;
         }
 
-        NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, category, reopen));
+        NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, category, reopen) { ReopenIsModal = reopenIsModal });
         while (NotificationHistory.Count > NotificationHistoryLimit)
             NotificationHistory.RemoveAt(NotificationHistory.Count - 1);
         if (_services.Cfg.IsNotificationCategoryCountedUnread(category))
@@ -878,7 +892,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             _services.Cfg.AddAppChangelogEntry(current, body, DateTime.Now);
             AddNotification($"Обновление до версии {current}. Нажмите «Показать», чтобы посмотреть, что нового.",
                 NotificationCategory.AppUpdates,
-                reopen: () => Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", body));
+                reopen: () => Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", body),
+                reopenIsModal: true);
         }
 
         // Свёрнутый в трей старт (Настройки → Общие → «Запускать свёрнутым») — модальное окно не

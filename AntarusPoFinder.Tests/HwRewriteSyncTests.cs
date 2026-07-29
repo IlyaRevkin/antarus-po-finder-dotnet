@@ -156,4 +156,74 @@ public class HwRewriteSyncTests
         Assert.Single(db.GetFwVersionsByControllerAndHw(ctrl, 44));
         Assert.Single(db.GetFwVersionsByControllerAndHw(ctrl, 1321));
     }
+
+    /// <summary>Самоизлечение уже возникшего дубля (жалоба «локальная папка старого hw не затирается»):
+    /// у машины ОДНОВРЕМЕННО есть и приехавшая дублем новая строка hw1321, и старая hw44, чья папка на
+    /// общей шаре уже удалена/переименована автором правки. Проигрывание должно убрать фантом hw44,
+    /// оставив ровно одну строку hw1321 — а не оставлять его навсегда (диск доступен, папки нет = удалили).</summary>
+    [Fact]
+    public void ReplayControllerHwRewrite_TargetKeyExistsAndOldFolderGone_RemovesPhantomDuplicate()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var tmpRoot = new TempRoot();
+        var svc = new HierarchyService(db);
+
+        SeedFwAtHw44(db, svc, tmpRoot.Path, out var ctrl, out var oldDir);
+
+        // Дубль hw1321 уже приехал в снимке и лежит рядом со старой фантомной hw44.
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var newDir = Path.Combine(tmpRoot.Path, "ПО", "НГР", "КНС", "SMH4", NewRaw);
+        Directory.CreateDirectory(newDir);
+        db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 1321, SwVersion = 1, DtStr = "20260101_1200",
+            VersionRaw = NewRaw, Filename = "fw.psl", DiskPath = newDir,
+            Description = "приехало дублем", Status = "active",
+        });
+
+        // Автор правки уже удалил папку старого hw на общей шаре — hw44 стал фантомом.
+        Directory.Delete(oldDir, recursive: true);
+
+        var res = svc.ReplayControllerHwRewrite(tmpRoot.Path, ctrl, 44, 1321);
+        Assert.True(res.Ok, string.Join("; ", res.Errors));
+        Assert.Equal(1, res.UpdatedRows);
+
+        // Фантома hw44 больше нет, целевая ровно одна.
+        Assert.Empty(db.GetFwVersionsByControllerAndHw(ctrl, 44));
+        Assert.Single(db.GetFwVersionsByControllerAndHw(ctrl, 1321));
+
+        // Диск НЕдоступен (папки старого hw нет, но и корень пропал) — фантом трогать нельзя. Проверяем
+        // на пустом корне: строку не удаляем, чтобы offline-шара не снесла живую запись.
+        db.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtype.Id!.Value, ControllerId = ctrl,
+            EqPrefix = group.Prefix, SubPrefix = subtype.Prefix,
+            HwVersion = 44, SwVersion = 1, DtStr = "20260101_1200",
+            VersionRaw = OldRaw, Filename = "fw.psl", DiskPath = oldDir,
+            Description = "фантом", Status = "active",
+        });
+        var offline = svc.ReplayControllerHwRewrite("", ctrl, 44, 1321);
+        Assert.Equal(0, offline.UpdatedRows);
+        Assert.Single(db.GetFwVersionsByControllerAndHw(ctrl, 44));
+    }
+
+    /// <summary>Запасной резолв контроллера по имени, когда sync_id ещё не совпал (первый контакт —
+    /// приёмник перенимает sync_id отправителя лишь внутри ImportHierarchyData, а ReplayHwRewrites идёт
+    /// раньше). Без него событие переписывания пропускалось бы, а watermark ушёл вперёд — и старая
+    /// строка навсегда осталась бы фантомом.</summary>
+    [Fact]
+    public void GetControllerIdByName_ResolvesController_WhenSyncIdUnknown()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var ctrl = db.GetAllControllerModels().First(c => c.Name == "SMH4");
+        Assert.Null(db.GetControllerIdBySyncId("несуществующий-sync-id"));
+        Assert.Equal(ctrl.Id!.Value, db.GetControllerIdByName("SMH4"));
+        Assert.Null(db.GetControllerIdByName("нет такого контроллера"));
+    }
 }

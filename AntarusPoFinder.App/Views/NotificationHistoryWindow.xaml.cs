@@ -96,11 +96,19 @@ public partial class NotificationHistoryWindow : Window
 
     private void Reopen_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as Button)?.DataContext is NotificationEntry entry)
+        if ((sender as Button)?.DataContext is not NotificationEntry entry) return;
+
+        // Модальные подробности (напр. «Что нового») показываются поверх этого окна — после их
+        // закрытия оператор остаётся в списке и может открыть следующее уведомление, поэтому окно
+        // истории НЕ закрываем. Баннер-reopen (обновление/синхронизация) рисуется на главном окне, за
+        // этим модальным окном его не видно — тогда закрываем, как и раньше, чтобы баннер стал виден.
+        if (entry.ReopenIsModal)
         {
             entry.Reopen?.Invoke();
-            Close();
+            return;
         }
+        entry.Reopen?.Invoke();
+        Close();
     }
 
     private void ClearAll_Click(object sender, RoutedEventArgs e)

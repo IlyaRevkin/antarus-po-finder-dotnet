@@ -28,6 +28,7 @@ public partial class EditFirmwareDialog : Window
     private readonly FilePickerRow _instrPicker;
     private readonly FilePickerRow _modbusPicker;
     private readonly FilePickerRow _hmiPicker;
+    private readonly FilePickerRow _plcFilePicker;
 
     public string ResultDescription { get; private set; } = "";
     public string ResultTags { get; private set; } = "";
@@ -104,6 +105,11 @@ public partial class EditFirmwareDialog : Window
             fileDialogTitle: "Выбрать файл HMI-проекта",
             fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
             folderDialogTitle: "Выбрать папку HMI-проекта");
+        // Только файл (папку класть в саму папку версии нельзя — она общая для файлов прошивки);
+        // фильтр по .lfs/.psl, но с «Все файлы» на случай другого расширения прошивки.
+        _plcFilePicker = new FilePickerRow(p => PlcFileInput.Text = p, () => PlcFileInput.Text = "",
+            fileDialogTitle: "Выбрать файл прошивки ПЛК",
+            fileDialogFilter: "Прошивка ПЛК (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*");
 
         // Блок доп. файлов имеет смысл только когда известно, куда их класть: нужны имена группы/
         // подтипа/контроллера (в записи из поиска их нет — доносим из БД) и доступный сетевой диск.
@@ -260,6 +266,9 @@ public partial class EditFirmwareDialog : Window
     private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFolder();
     private void HmiClear_Click(object sender, RoutedEventArgs e) => _hmiPicker.Clear();
 
+    private void PlcFileBrowse_Click(object sender, RoutedEventArgs e) => _plcFilePicker.BrowseFile();
+    private void PlcFileClear_Click(object sender, RoutedEventArgs e) => _plcFilePicker.Clear();
+
     private void ApplyAttachments()
     {
         if (_names is null || _record.Id is null) return;
@@ -273,6 +282,7 @@ public partial class EditFirmwareDialog : Window
             ModbusMapSourcePath = ModbusMapInput.Text.Trim(),
             InstructionsSourcePath = InstructionsInput.Text.Trim(),
             HmiSourcePath = HmiInput.Text.Trim(),
+            PlcFileSourcePath = PlcFileInput.Text.Trim(),
         };
         var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request);
         if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;
