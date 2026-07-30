@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Loader;
 
@@ -40,6 +41,30 @@ public static class LoaderFiles
     {
         foreach (var dir in dirs)
             if (Find(dir, extension) is { } hit) return hit;
+        return null;
+    }
+
+    /// <summary>Файл прошивки с учётом выбора оператора в модерации (FwVersionRecord.ExecutableHint).
+    ///
+    /// Когда в ОДНОЙ папке версии лежит несколько прошивок (например, пачка .lfs пожарных шкафов),
+    /// «первый найденный» — не обязательно тот, что нужен. Оператор указывает нужный файл в модерации,
+    /// и «Открыть прошивку ПЛК» его уже уважает (см. PlcOpenResolver) — а заливка в контроллер и
+    /// кнопки «Открыть LFS/PSL» брали первый попавшийся, отсюда жалоба «залил не ту прошивку».
+    ///
+    /// Подсказка используется, только если указывает на файл с одним из <paramref name="extensions"/>
+    /// (для заливки — .lfs, затем .psl; для «Открыть LFS» — только .lfs): подсказка на .psl не должна
+    /// подставляться там, где ждут именно .lfs. Если подсказки нет или она указывает на файл другого
+    /// расширения — прежний поиск «первый по списку расширений».</summary>
+    public static string? ResolvePreferHint(IEnumerable<string> dirs, string? executableHint, params string[] extensions)
+    {
+        var dirList = dirs as IReadOnlyList<string> ?? dirs.ToList();
+        if (ExecutableHintResolver.Normalize(executableHint) is not null)
+            foreach (var dir in dirList)
+                if (ExecutableHintResolver.Resolve(dir, executableHint) is { } hinted
+                    && extensions.Any(e => HasExt(hinted, e)))
+                    return hinted;
+        foreach (var ext in extensions)
+            if (FindIn(dirList, ext) is { } hit) return hit;
         return null;
     }
 

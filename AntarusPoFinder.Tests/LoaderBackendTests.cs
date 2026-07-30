@@ -199,4 +199,47 @@ public class LoaderBackendTests
         Assert.Equal(Path.Combine(disk, "prog.lfs"),
             LoaderFiles.FindIn(new[] { Path.Combine(root.Path, "нет"), disk }, LoaderFiles.LfsExtension));
     }
+
+    [Fact]
+    public void ResolvePreferHint_UsesOperatorChosenLfs_NotFirstFound()
+    {
+        // Несколько прошивок в одной папке (пачка пожарных шкафов) — оператор указал в модерации
+        // нужный файл; заливка обязана взять именно его, а не первый попавшийся.
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_1.lfs"), "a");
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_2.lfs"), "b");
+
+        Assert.Equal(Path.Combine(root.Path, "шкаф_2.lfs"),
+            LoaderFiles.ResolvePreferHint(new[] { root.Path }, "шкаф_2.lfs",
+                LoaderFiles.LfsExtension, LoaderFiles.PslExtension));
+    }
+
+    [Fact]
+    public void ResolvePreferHint_IgnoresHintOfWrongExtension()
+    {
+        // «Открыть LFS» ждёт именно .lfs — подсказка на .psl не должна подставляться, берём первый .lfs.
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "proj.psl"), "psl");
+        File.WriteAllText(Path.Combine(root.Path, "prog.lfs"), "lfs");
+
+        Assert.Equal(Path.Combine(root.Path, "prog.lfs"),
+            LoaderFiles.ResolvePreferHint(new[] { root.Path }, "proj.psl", LoaderFiles.LfsExtension));
+    }
+
+    [Fact]
+    public void ResolvePreferHint_NoHint_FallsBackToLfsThenPsl()
+    {
+        // Без подсказки — прежнее поведение: сначала .lfs, а нет — .psl (лоадер соберёт сам).
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "proj.psl"), "psl");
+
+        Assert.Equal(Path.Combine(root.Path, "proj.psl"),
+            LoaderFiles.ResolvePreferHint(new[] { root.Path }, "",
+                LoaderFiles.LfsExtension, LoaderFiles.PslExtension));
+
+        File.WriteAllText(Path.Combine(root.Path, "prog.lfs"), "lfs");
+        Assert.Equal(Path.Combine(root.Path, "prog.lfs"),
+            LoaderFiles.ResolvePreferHint(new[] { root.Path }, "",
+                LoaderFiles.LfsExtension, LoaderFiles.PslExtension));
+    }
 }

@@ -100,6 +100,9 @@ public partial class FirmwareCard : UserControl
     public HierarchyResult Result { get; private set; } = null!;
 
     public event EventHandler? OpenFolderRequested;
+    /// <summary>Открыть папку версии ИМЕННО на сетевом диске (не локальную копию) — чтобы наладчик мог
+    /// вручную почистить лишние файлы (напр. несколько .lfs в одной папке), которые правит модерация.</summary>
+    public event EventHandler? OpenServerFolderRequested;
     /// <summary>Открыть прошивку ПЛК / HMI-проект. Какой именно файл открывается — решает SearchView
     /// (подсказка исполняемого файла у записи, отдельная папка HMI-проекта, старый детект по
     /// расширениям); карточка про эти варианты не знает и рисует по одной кнопке на каждый.</summary>
@@ -232,6 +235,12 @@ public partial class FirmwareCard : UserControl
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
+        // Папка на сетевом диске, а не локальная копия — чтобы вручную почистить лишние файлы (напр.
+        // несколько .lfs пожарных шкафов в одной папке). Пункт есть, только когда путь на диске
+        // записан: у прошивки без папки на сервере открывать нечего.
+        if (!string.IsNullOrEmpty(result.FirmwareDir))
+            AddMenuItem("Открыть папку на сервере", () => OpenServerFolderRequested?.Invoke(this, EventArgs.Empty),
+                "Папка версии на сетевом диске (не локальная копия) — чтобы вручную поправить или удалить лишние файлы");
         // Когда основная кнопка — «Загрузить», «открыть прошивку» остаётся доступной здесь.
         if (showLoad)
             AddMenuItem(openExt is null ? "Открыть прошивку ПЛК" : $"Открыть прошивку ПЛК ({openExt})",

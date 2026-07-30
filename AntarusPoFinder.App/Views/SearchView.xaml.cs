@@ -574,6 +574,7 @@ public partial class SearchView : UserControl
             // Выбор версии засчитывается на действиях «взял эту прошивку» — открыл проект/файл,
             // залил в контроллер, скачал локально (см. RecordUsage).
             card.OpenFolderRequested += (s, _) => OpenFirmwareFolder(((FirmwareCard)s!).Result);
+            card.OpenServerFolderRequested += (s, _) => OpenServerFolder(((FirmwareCard)s!).Result);
             card.OpenPlcRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenPlc(((FirmwareCard)s!).Result); };
             card.OpenHmiRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenHmi(((FirmwareCard)s!).Result); };
             card.OpenLfsRequested += (s, _) =>
@@ -1673,9 +1674,28 @@ public partial class SearchView : UserControl
             Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{target}\"") { UseShellExecute = true });
     }
 
+    /// <summary>Открыть папку версии именно на сетевом диске (result.FirmwareDir уже приведён к нашей
+    /// форме диска в SearchService через FirmwarePathLocalizer) — в отличие от «Открыть папку с
+    /// файлами», которая предпочитает локальную копию. Нужно, чтобы наладчик вручную почистил лишние
+    /// файлы (несколько .lfs в одной папке) прямо там, где их видят коллеги.</summary>
+    private void OpenServerFolder(HierarchyResult result)
+    {
+        var dir = result.FirmwareDir ?? "";
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+        {
+            AppMessageBox.Show(
+                string.IsNullOrEmpty(dir)
+                    ? "У этой версии не записан путь к папке на диске."
+                    : $"Папка версии не найдена на сетевом диске:\n{dir}",
+                "Открыть папку на сервере", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
+    }
+
     private void OpenLoaderFile(HierarchyResult result, string extension, string label)
     {
-        var path = LoaderFiles.FindIn(VersionFolders(result), extension);
+        var path = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint, extension);
         if (path is null)
         {
             AppMessageBox.Show($"Файл {label} не найден ни в локальной копии, ни в папке версии на диске.",
@@ -1695,16 +1715,18 @@ public partial class SearchView : UserControl
         var loaderExe = SegneticsLoaderResolver.Resolve(_services.Cfg.LoaderExePath());
         if (loaderExe is null)
         {
-            var src = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension) ?? "";
+            var src = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint, LoaderFiles.LfsExtension) ?? "";
             LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg, versionName, src);
             return;
         }
 
-        // Заливается .lfs; если его нет — отдаём .psl (Segnetics Loader соберёт сам). Файл сначала
-        // копируется на эту машину: лоадер не должен читать прошивку по сетевой шаре — обрыв SMB
-        // посреди загрузки превращается в наполовину записанный контроллер.
-        var file = LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.LfsExtension)
-                   ?? LoaderFiles.FindIn(VersionFolders(result), LoaderFiles.PslExtension);
+        // Заливается .lfs; если его нет — отдаём .psl (Segnetics Loader соберёт сам). Когда в папке
+        // версии несколько прошивок, берётся именно та, что указал оператор в модерации, а не первая
+        // попавшаяся (ResolvePreferHint) — иначе в контроллер уезжала не та. Файл сначала копируется
+        // на эту машину: лоадер не должен читать прошивку по сетевой шаре — обрыв SMB посреди загрузки
+        // превращается в наполовину записанный контроллер.
+        var file = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint,
+            LoaderFiles.LfsExtension, LoaderFiles.PslExtension);
 
         string? localFile = null;
         try
