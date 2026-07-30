@@ -59,12 +59,24 @@ public class ConfigService
         ["theme"] = "light",
         ["keep_archives"] = "false",
         ["image_server_port"] = "9876",
-        ["ad_domain"] = "",
+        // Домен предприятия по умолчанию — Elita: единственный домен, в котором приложение реально
+        // работает, поэтому оператору на первом входе достаточно логина и пароля, а поле домена
+        // спрятано в «Дополнительные параметры» (AdStartupLoginDialog). Если строка домена уже
+        // сохранена (кто-то вписал свой), фолбэк не перебивает — как и у всех остальных ключей.
+        ["ad_domain"] = "Elita",
         ["ad_group_administrator"] = "",
         ["ad_group_programmer"] = "",
         ["ad_group_naladchik"] = "",
-        ["ad_auth_mode"] = "ldap",
-        ["ad_http_url"] = "",
+        // «Оба» по умолчанию: сначала LDAP (прямой бинд к контроллеру домена), и только если домен
+        // недоступен по сети — HTTP-запрос к ad_http_url ниже как запасной путь (см.
+        // CombinedAdCredentialValidator/AdCredentialValidatorFactory). Наладчику за пределами
+        // офисной сети LDAP не достучится, а внутренний веб-сервер по HTTPS — достучится.
+        ["ad_auth_mode"] = "both",
+        // Адрес внутреннего веб-сервера для способа №2 (HTTP-проверка пароля, см.
+        // HttpAdCredentialValidator). Предустановлен рабочий адрес диска предприятия; администратор
+        // может сменить его в Настройки → Общие или в «Доп. параметрах» окна входа, если IT поменяет
+        // формат. Ключ per-machine, как и весь AD-блок (ConfigSyncService.SkipSettingsKeys).
+        ["ad_http_url"] = "https://disk.antarus.su/cloud",
         ["sync_interval_min"] = "5",
         ["quick_apps"] = "[]",
         ["app_update_path"] = "",
@@ -115,7 +127,13 @@ public class ConfigService
         // true — вес уезжает в общий конфиг и складывается с весом других. Сам переключатель
         // per-machine (в SkipSettingsKeys): каждая машина решает за свой вес.
         ["fw_weight_shared"] = "false",
-        ["ad_require_login"] = "false",
+        // Вход по AD при запуске включён по умолчанию: без авторизации функционал недоступен (гейт
+        // App.OnStartup показывает AdStartupLoginDialog до главного окна). Раньше был выключен «чтобы
+        // существующие установки стартовали как прежде», но по требованию — единая политика для всех
+        // машин. Аварийный вход администратора (пароль «12345» из SeedDefaultAdminPasswordHash, пока
+        // не сменён) остаётся всегда, поэтому недоступный домен на новой машине никого не запирает.
+        // Явно сохранённое «false» на конкретной машине фолбэк не перебивает (как app_auto_update).
+        ["ad_require_login"] = "true",
         ["ad_require_login_default_days"] = "14",
         ["ad_last_login"] = "",
         ["search_auto_sync"] = "true",
@@ -346,9 +364,10 @@ public class ConfigService
     public void SetAdAuthMode(string mode) => Set("ad_auth_mode", mode is "http" or "both" ? mode : "ldap");
 
     /// <summary>Базовый URL внутреннего веб-сервера компании для способа №2 (HTTP-проверка пароля,
-    /// см. HttpAdCredentialValidator) — например https://disk.antarus.su/. Пусто по умолчанию:
-    /// реальный адрес НЕ хардкодится в код, администратор вписывает его сюда, когда IT подтвердит
-    /// рабочий формат (см. AdHttpUrlPlaceholder в SettingsView для подсказки в самом поле).</summary>
+    /// см. HttpAdCredentialValidator). По умолчанию предустановлен рабочий адрес диска предприятия
+    /// (https://disk.antarus.su/cloud, см. Defaults); администратор может сменить его в Настройки →
+    /// Общие или в «Доп. параметрах» окна входа, если IT поменяет формат (см. AdHttpUrlPlaceholder
+    /// в SettingsView для подсказки в самом поле).</summary>
     public string AdHttpUrl() => Get("ad_http_url");
     public void SetAdHttpUrl(string url) => Set("ad_http_url", url.Trim());
 
@@ -594,10 +613,12 @@ public class ConfigService
         Set("quick_apps_display_mode", mode is "top" or "top_labeled" ? mode : "sidebar");
 
     /// <summary>Administrator-only, per-machine (this computer's policy, like every other AD setting
-    /// below it — see ConfigSyncService.SkipSettingsKeys). Off by default so existing installs keep
-    /// starting exactly as before. On = App.OnStartup shows AdStartupLoginDialog before MainWindow
-    /// unless this machine already has a still-valid cached session (see AdSessionService) for
-    /// whichever login last authenticated here (AdLastLogin below).</summary>
+    /// below it — see ConfigSyncService.SkipSettingsKeys). On by default (единая политика для всех
+    /// машин): App.OnStartup shows AdStartupLoginDialog before MainWindow unless this machine already
+    /// has a still-valid cached session (see AdSessionService) for whichever login last authenticated
+    /// here (AdLastLogin below). A machine that explicitly saved "false" keeps it (fallback doesn't
+    /// override an explicit value); the administrator escape password is always available in the
+    /// gate, so a fresh machine with an unreachable domain is never locked out.</summary>
     public bool AdRequireLogin() => Get("ad_require_login").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetAdRequireLogin(bool value) => Set("ad_require_login", value ? "true" : "false");
 

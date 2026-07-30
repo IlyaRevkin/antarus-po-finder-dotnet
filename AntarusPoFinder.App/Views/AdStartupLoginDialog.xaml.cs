@@ -20,7 +20,11 @@ public partial class AdStartupLoginDialog : Window
 {
     private readonly AppServices _services;
     private readonly ConfigService _cfg;
-    private readonly IAdCredentialValidator _adValidator;
+    /// <summary>Ненулевой только в тестах: валидатор передали снаружи, тогда он и используется. В
+    /// боевом пути валидатор строится в AdAuth_Click по текущим полям домена/сервера (их могли
+    /// поправить в «Доп. параметрах»), а не фиксируется в конструкторе — иначе правка адреса сервера
+    /// не подхватилась бы до перезапуска.</summary>
+    private readonly IAdCredentialValidator? _injectedValidator;
 
     public string? SelectedRole { get; private set; }
 
@@ -29,9 +33,10 @@ public partial class AdStartupLoginDialog : Window
         InitializeComponent();
         _services = services;
         _cfg = services.Cfg;
-        _adValidator = adValidator ?? AdCredentialValidatorFactory.Create(_cfg);
+        _injectedValidator = adValidator;
 
         AdDomainInput.Text = _cfg.Get("ad_domain");
+        AdHttpUrlInput.Text = _cfg.AdHttpUrl();
 
         RememberCombo.ItemsSource = RememberOptions.All(_cfg.AdRequireLoginDefaultDays());
         RememberCombo.SelectedValuePath = "Key";
@@ -83,6 +88,7 @@ public partial class AdStartupLoginDialog : Window
         var domain = AdDomainInput.Text.Trim();
         var login = AdLoginInput.Text.Trim();
         var password = AdPasswordInput.Password;
+        var httpUrl = AdHttpUrlInput.Text.Trim();
 
         if (string.IsNullOrEmpty(domain) || string.IsNullOrEmpty(login))
         {
@@ -90,7 +96,15 @@ public partial class AdStartupLoginDialog : Window
             return;
         }
 
-        if (!_adValidator.Validate(domain, login, password, out var authError))
+        // Правки домена/сервера (из «Доп. параметров») сохраняем ДО проверки: во-первых, их подхватит
+        // фабрика валидатора ниже (иначе новый адрес HTTP-сервера заработал бы только после
+        // перезапуска), во-вторых, они закрепляются на этой машине — оператору не придётся вписывать
+        // их заново при следующем входе, если дефолт не подошёл. Per-machine, как весь AD-блок.
+        _cfg.Set("ad_domain", domain);
+        _cfg.SetAdHttpUrl(httpUrl);
+
+        var validator = _injectedValidator ?? AdCredentialValidatorFactory.Create(_cfg);
+        if (!validator.Validate(domain, login, password, out var authError))
         {
             ShowError(authError ?? "Не удалось войти — проверьте логин и пароль.");
             return;

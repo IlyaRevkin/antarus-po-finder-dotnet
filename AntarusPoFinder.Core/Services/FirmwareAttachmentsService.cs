@@ -23,12 +23,19 @@ public class FirmwareAttachmentsRequest
     public string? ModbusMapSourcePath { get; set; }
     public string? HmiSourcePath { get; set; }
 
-    /// <summary>Файл прошивки ПЛК (.lfs / .psl и т.п.), который надо ДОЛОЖИТЬ в саму папку версии
-    /// (disk_path) — не в общую папку контроллера, как «карты»/инструкция, а именно рядом с самой
-    /// прошивкой, потому что по файлам этой папки карточка и считает флаги LFS/PSL. Тикет коллеги:
-    /// «к уже загруженной прошивке доложить .lfs, если его нет, либо .psl для Segnetics». null — не
-    /// трогать; файлы не заменяются массово, кладётся ровно выбранный файл (перезаписью одноимённого).</summary>
+    /// <summary>Загрузочная прошивка ПЛК (.lfs, а для не-Segnetics — сам файл/проект прошивки),
+    /// которую надо ДОЛОЖИТЬ в саму папку версии (disk_path) — не в общую папку контроллера, как
+    /// «карты»/инструкция, а именно рядом с самой прошивкой, потому что по файлам этой папки карточка
+    /// и считает флаги LFS/PSL. Тикет коллеги: «к уже загруженной прошивке доложить .lfs, если его
+    /// нет». null — не трогать; файлы не заменяются массово, кладётся ровно выбранный файл
+    /// (перезаписью одноимённого).</summary>
     public string? PlcFileSourcePath { get; set; }
+
+    /// <summary>Исходный проект Segnetics (.psl) — НЕ загрузочный, отдельно от .lfs выше: у Segnetics
+    /// это два разных файла (исходник SMLogix и собранный файл заливки), и оператор в модерации может
+    /// доложить любой из них. Кладётся в ту же папку версии тем же способом, что и PlcFileSourcePath;
+    /// разведены только ради ясности в UI (см. EditFirmwareDialog). null — не трогать.</summary>
+    public string? PslFileSourcePath { get; set; }
 }
 
 /// <summary>Applied — человекочитаемые названия того, что реально изменилось (для статуса/тоста),
@@ -117,42 +124,14 @@ public static class FirmwareAttachmentsService
             }
         }
 
-        // Файл прошивки ПЛК (.lfs/.psl) — в саму папку версии (disk_path), а не в общие папки контроллера.
-        // Независим от доп. файлов выше: не пишет ничего в БД (флаги LFS/PSL карточка считает по факту
-        // файлов в папке при следующем поиске), поэтому идёт до раннего выхода про UpdateFwVersionAttachments.
-        // Путь версии мог быть записан коллегой в его форме диска — приводим к нашей (FirmwarePathLocalizer),
-        // тот же приём, что при правке hw/поиске.
-        if (!string.IsNullOrEmpty(request.PlcFileSourcePath))
-        {
-            var src = request.PlcFileSourcePath!;
-            if (!File.Exists(src))
-            {
-                warnings.Add($"Файл прошивки: путь не найден — {src}");
-            }
-            else
-            {
-                var versionFolder = FirmwarePathLocalizer.Localize(record.DiskPath, root);
-                // disk_path мог указывать на одиночный файл (не папку) — тогда «папка версии» это его родитель.
-                if (!Directory.Exists(versionFolder)) versionFolder = Path.GetDirectoryName(versionFolder) ?? "";
-                if (string.IsNullOrEmpty(versionFolder) || !Directory.Exists(versionFolder))
-                {
-                    warnings.Add("Файл прошивки: папка версии на диске недоступна — файл не добавлен.");
-                }
-                else
-                {
-                    try
-                    {
-                        File.Copy(src, Path.Combine(versionFolder, Path.GetFileName(src)), overwrite: true);
-                        var ext = Path.GetExtension(src).ToLowerInvariant();
-                        applied.Add(string.IsNullOrEmpty(ext) ? "Файл прошивки" : $"Файл прошивки ({ext})");
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        warnings.Add($"Файл прошивки: {ex.Message}");
-                    }
-                }
-            }
-        }
+        // Файлы прошивки (.lfs загрузочный и .psl исходник) — в саму папку версии (disk_path), а не
+        // в общие папки контроллера. Независимы от доп. файлов выше: ничего не пишут в БД (флаги
+        // LFS/PSL карточка считает по факту файлов в папке при следующем поиске), поэтому идут до
+        // раннего выхода про UpdateFwVersionAttachments. У Segnetics это два разных файла — оба
+        // ложатся одинаково, разведены только в UI (см. EditFirmwareDialog); у остальных заполняется
+        // одно поле PlcFileSourcePath.
+        CopyFirmwareFileIntoVersionFolder(record, root, request.PlcFileSourcePath, applied, warnings);
+        CopyFirmwareFileIntoVersionFolder(record, root, request.PslFileSourcePath, applied, warnings);
 
         if (ioMap is null && modbus is null && instr is null && hmi is null)
             return new FirmwareAttachmentsResult(applied, warnings);
@@ -164,6 +143,39 @@ public static class FirmwareAttachmentsService
         if (hmi is not null) record.HmiPath = hmi;
 
         return new FirmwareAttachmentsResult(applied, warnings);
+    }
+
+    /// <summary>Копирует один файл прошивки (.lfs/.psl или сам проект) в САМУ папку версии
+    /// (disk_path), а не в общие папки контроллера. Путь версии мог быть записан коллегой в его форме
+    /// диска — приводим к нашей (FirmwarePathLocalizer), тот же приём, что при правке hw/поиске.
+    /// null/пусто — ничего не делает (поле «не трогать»).</summary>
+    private static void CopyFirmwareFileIntoVersionFolder(FwVersionRecord record, string root,
+        string? src, List<string> applied, List<string> warnings)
+    {
+        if (string.IsNullOrEmpty(src)) return;
+        if (!File.Exists(src))
+        {
+            warnings.Add($"Файл прошивки: путь не найден — {src}");
+            return;
+        }
+        var versionFolder = FirmwarePathLocalizer.Localize(record.DiskPath, root);
+        // disk_path мог указывать на одиночный файл (не папку) — тогда «папка версии» это его родитель.
+        if (!Directory.Exists(versionFolder)) versionFolder = Path.GetDirectoryName(versionFolder) ?? "";
+        if (string.IsNullOrEmpty(versionFolder) || !Directory.Exists(versionFolder))
+        {
+            warnings.Add("Файл прошивки: папка версии на диске недоступна — файл не добавлен.");
+            return;
+        }
+        try
+        {
+            File.Copy(src, Path.Combine(versionFolder, Path.GetFileName(src)), overwrite: true);
+            var ext = Path.GetExtension(src).ToLowerInvariant();
+            applied.Add(string.IsNullOrEmpty(ext) ? "Файл прошивки" : $"Файл прошивки ({ext})");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add($"Файл прошивки: {ex.Message}");
+        }
     }
 
     /// <summary>Возвращает новое значение поля для записи в БД, или null — если менять нечего.</summary>

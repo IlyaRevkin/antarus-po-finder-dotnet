@@ -115,16 +115,39 @@
                     <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
 
-                <!-- Файл прошивки ПЛК (.lfs/.psl) кладётся в САМУ папку версии, а не в общие папки
-                     контроллера, как «карты»/инструкция: по файлам этой папки карточка и считает
-                     LFS/PSL. Тикет коллеги — доложить .lfs, если его нет, или .psl для Segnetics. -->
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Файл прошивки:" VerticalAlignment="Center" TextWrapping="Wrap"
-                           ToolTip="Файл прошивки ПЛК (.lfs — скомпилированный, .psl — исходный проект). Ложится прямо в папку версии рядом с прошивкой. Пригодится, чтобы доложить недостающий .lfs или .psl к уже загруженной версии."/>
+                <!-- Файл прошивки ПЛК кладётся в САМУ папку версии, а не в общие папки контроллера,
+                     как «карты»/инструкция: по файлам этой папки карточка и считает LFS/PSL. Для
+                     Segnetics подпись становится «Прошивка ПЛК (.lfs)» — загрузочный файл, а исходник
+                     .psl докладывается отдельным полем ниже (PlcFileLabel/PslFilePanel настраиваются
+                     в code-behind по SegneticsProject.IsRelevant). У остальных — одно поле. -->
+                <TextBlock Grid.Row="4" Grid.Column="0" x:Name="PlcFileLabel" Text="Файл прошивки:" VerticalAlignment="Center" TextWrapping="Wrap"
+                           ToolTip="Файл прошивки ПЛК — ложится прямо в папку версии рядом с прошивкой. Пригодится, чтобы доложить недостающий файл к уже загруженной версии."/>
                 <TextBox Grid.Row="4" Grid.Column="1" x:Name="PlcFileInput" Height="30" Margin="0,0,4,0"/>
-                <Button Grid.Row="4" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="PlcFileBrowse_Click" ToolTip="Выбрать файл прошивки (.lfs/.psl)">
+                <Button Grid.Row="4" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="PlcFileBrowse_Click" ToolTip="Выбрать файл прошивки">
                     <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
                 <Button Grid.Row="4" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="PlcFileClear_Click" ToolTip="Очистить">
+                    <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+            </Grid>
+
+            <!-- Исходный проект Segnetics (.psl) — отдельно от загрузочного .lfs выше. Видно только
+                 для Segnetics (см. code-behind): у KINCO и прочих такого файла нет, показывать поле
+                 незачем. Своя мини-сетка теми же колонками, чтобы поле/кнопки встали ровно под гридом. -->
+            <Grid x:Name="PslFilePanel" Visibility="Collapsed" Margin="0,6,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Исходник (.psl):" VerticalAlignment="Center" TextWrapping="Wrap"
+                           ToolTip="Исходный проект SMLogix (.psl) — НЕ загрузочный, из него собирается .lfs. Ложится в папку версии рядом с прошивкой; пригодится, чтобы доложить исходник к уже загруженной версии."/>
+                <TextBox Grid.Column="1" x:Name="PslFileInput" Height="30" Margin="0,0,4,0"/>
+                <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="PslFileBrowse_Click" ToolTip="Выбрать исходник (.psl)">
+                    <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                </Button>
+                <Button Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,0" Click="PslFileClear_Click" ToolTip="Очистить">
                     <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
             </Grid>
@@ -142,8 +165,8 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="Прошивка ПЛК:" VerticalAlignment="Center"
-                           ToolTip="Какой файл в папке версии открывать по кнопке «Открыть прошивку ПЛК»."/>
+                <TextBlock Grid.Column="0" Text="Открывать файл:" VerticalAlignment="Center"
+                           ToolTip="Какой файл в папке версии открывать по кнопке «Открыть прошивку ПЛК». Это НЕ загрузка файла — только выбор, что открывать из уже лежащих в папке."/>
                 <TextBlock Grid.Column="1" x:Name="PlcExecutableText" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
                 <Button Grid.Column="2" Content="Выбрать..." Style="{StaticResource SecondaryButton}" Click="PickPlcExecutable_Click"/>
             </Grid>

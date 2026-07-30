@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
@@ -29,6 +30,12 @@ public partial class EditFirmwareDialog : Window
     private readonly FilePickerRow _modbusPicker;
     private readonly FilePickerRow _hmiPicker;
     private readonly FilePickerRow _plcFilePicker;
+    private readonly FilePickerRow _pslFilePicker;
+
+    /// <summary>True — версия относится к Segnetics (см. SegneticsProject.IsRelevant): тогда файл
+    /// прошивки разведён на «Прошивка ПЛК (.lfs)» + отдельный «Исходник (.psl)». У остальных одно
+    /// поле «Файл прошивки», а поле .psl скрыто и в запрос не попадает.</summary>
+    private bool _isSegnetics;
 
     public string ResultDescription { get; private set; } = "";
     public string ResultTags { get; private set; } = "";
@@ -110,6 +117,9 @@ public partial class EditFirmwareDialog : Window
         _plcFilePicker = new FilePickerRow(p => PlcFileInput.Text = p, () => PlcFileInput.Text = "",
             fileDialogTitle: "Выбрать файл прошивки ПЛК",
             fileDialogFilter: "Прошивка ПЛК (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*");
+        _pslFilePicker = new FilePickerRow(p => PslFileInput.Text = p, () => PslFileInput.Text = "",
+            fileDialogTitle: "Выбрать исходник прошивки (.psl)",
+            fileDialogFilter: "Исходник Segnetics (*.psl)|*.psl|Все файлы (*.*)|*.*");
 
         // Блок доп. файлов имеет смысл только когда известно, куда их класть: нужны имена группы/
         // подтипа/контроллера (в записи из поиска их нет — доносим из БД) и доступный сетевой диск.
@@ -128,6 +138,39 @@ public partial class EditFirmwareDialog : Window
             }
             LoadSearchWeights(v.Id.Value);
         }
+
+        ConfigureFirmwareFileFields();
+    }
+
+    /// <summary>Разводит поля файла прошивки по типу проекта. У Segnetics — «Прошивка ПЛК (.lfs)»
+    /// (загрузочный) плюс отдельный «Исходник (.psl)» (не загрузочный): это два разных файла, и
+    /// оператор может доложить любой. У остальных остаётся одно поле «Файл прошивки». Тип определяется
+    /// тем же признаком, что и карточка в поиске (SegneticsProject.IsRelevant, вызывается только на
+    /// чтение): по .lfs/.psl в папке версии, затем по подсказке исполняемого файла, затем по имени
+    /// контроллера. Поля имеют смысл только когда показан блок доп. файлов (есть папка версии на
+    /// доступном диске) — иначе класть файл всё равно некуда.</summary>
+    private void ConfigureFirmwareFileFields()
+    {
+        if (AttachmentsPanel.Visibility != Visibility.Visible) return;
+
+        bool hasLfs = false, hasPsl = false;
+        if (_plcFolder is not null)
+        {
+            try
+            {
+                hasLfs = Directory.EnumerateFiles(_plcFolder, "*" + LoaderFiles.LfsExtension).Any();
+                hasPsl = Directory.EnumerateFiles(_plcFolder, "*" + LoaderFiles.PslExtension).Any();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+
+        _isSegnetics = SegneticsProject.IsRelevant(_record.CtrlName, _record.ExecutableHint, hasLfs, hasPsl);
+        if (!_isSegnetics) return; // не-Segnetics: одно поле «Файл прошивки», как было
+
+        PlcFileLabel.Text = "Прошивка ПЛК (.lfs):";
+        PlcFileLabel.ToolTip = "Загрузочный файл прошивки Segnetics (.lfs) — ложится в папку версии " +
+            "рядом с прошивкой. Исходный проект .psl докладывается отдельным полем ниже.";
+        PslFilePanel.Visibility = Visibility.Visible;
     }
 
     // ── Вес в поиске (по запросам) ────────────────────────────────────────────
@@ -269,6 +312,9 @@ public partial class EditFirmwareDialog : Window
     private void PlcFileBrowse_Click(object sender, RoutedEventArgs e) => _plcFilePicker.BrowseFile();
     private void PlcFileClear_Click(object sender, RoutedEventArgs e) => _plcFilePicker.Clear();
 
+    private void PslFileBrowse_Click(object sender, RoutedEventArgs e) => _pslFilePicker.BrowseFile();
+    private void PslFileClear_Click(object sender, RoutedEventArgs e) => _pslFilePicker.Clear();
+
     private void ApplyAttachments()
     {
         if (_names is null || _record.Id is null) return;
@@ -283,6 +329,8 @@ public partial class EditFirmwareDialog : Window
             InstructionsSourcePath = InstructionsInput.Text.Trim(),
             HmiSourcePath = HmiInput.Text.Trim(),
             PlcFileSourcePath = PlcFileInput.Text.Trim(),
+            // .psl-поле только у Segnetics; у остальных оно скрыто и в запрос не идёт.
+            PslFileSourcePath = PslFilePanel.Visibility == Visibility.Visible ? PslFileInput.Text.Trim() : null,
         };
         var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request);
         if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;

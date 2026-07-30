@@ -7,8 +7,6 @@
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
     <StackPanel Margin="16">
         <TextBlock Text="ВХОД ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
-        <TextBlock Text="Домен:" Margin="0,0,0,4"/>
-        <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: ivanov.i, ivanov.i@Elita или Elita\ivanov.i"
                  LostFocus="AdLoginInput_LostFocus"/>
@@ -20,6 +18,22 @@
         <TextBlock x:Name="RememberAlwaysWarning" Style="{StaticResource MutedText}" Foreground="{DynamicResource ErrorBrush}"
                    TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
                    Text="⚠ Вход по AD не будет запрашиваться повторно на этом компьютере, пока вы не выйдете вручную — менее безопасно, если к компьютеру есть доступ у посторонних."/>
+
+        <!-- Домен и адрес сервера уже предустановлены (см. ConfigService: Elita / disk.antarus.su) —
+             в обычном случае оператору достаточно логина и пароля, поэтому эти поля убраны под
+             раскрывающийся блок, чтобы не перегружать вход. Открываются, только если вход не проходит
+             и IT дали другие значения; введённое здесь сохраняется на этой машине (см. AdAuth_Click). -->
+        <Expander Header="Дополнительные параметры" Margin="0,0,0,8">
+            <StackPanel Margin="0,8,0,0">
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Обычно менять не нужно. Измените, только если вход не проходит и IT сообщили другой домен или адрес сервера."/>
+                <TextBlock Text="Домен:" Margin="0,0,0,4"/>
+                <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
+                <TextBlock Text="Сервер (проверка пароля по HTTP):" Margin="0,0,0,4"/>
+                <TextBox x:Name="AdHttpUrlInput" Margin="0,0,0,4"/>
+            </StackPanel>
+        </Expander>
+
         <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
         <Button Content="Войти" HorizontalAlignment="Right" Click="AdAuth_Click" IsDefault="True" Margin="0,0,0,4"/>
 

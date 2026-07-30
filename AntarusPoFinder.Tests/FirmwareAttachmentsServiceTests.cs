@@ -216,6 +216,35 @@ public class FirmwareAttachmentsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Apply_AddsPslSourceFile_IntoVersionFolderItself()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // У Segnetics исходник .psl докладывается ОТДЕЛЬНЫМ полем, тем же способом, что и загрузочный .lfs.
+        request.PslFileSourcePath = WriteSourceFile("исходник.psl");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.Contains(result.Applied, a => a.Contains("Файл прошивки"));
+        Assert.True(File.Exists(Path.Combine(record.DiskPath, "исходник.psl")));
+    }
+
+    [Fact]
+    public void Apply_AddsBothLfsAndPsl_InOneCall()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Segnetics: два разных файла за один заход — оба ложатся в саму папку версии.
+        request.PlcFileSourcePath = WriteSourceFile("сборка.lfs");
+        request.PslFileSourcePath = WriteSourceFile("исходник.psl");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.True(File.Exists(Path.Combine(record.DiskPath, "сборка.lfs")));
+        Assert.True(File.Exists(Path.Combine(record.DiskPath, "исходник.psl")));
+    }
+
+    [Fact]
     public void Apply_UnavailableRoot_ChangesNothing()
     {
         var (record, request) = SeedUploadedVersion();
