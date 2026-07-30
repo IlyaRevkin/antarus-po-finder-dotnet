@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
@@ -323,7 +324,7 @@ public partial class FirmwareCard : UserControl
     /// проекта называется «{номер версии}_hmi» (см. FirmwareAttachmentsService.CopyHmiProject) —
     /// отдельного поля «от какой версии панель» в базе нет и не нужно, имя папки это и есть.
     /// null — панель от этой же версии либо путь непонятного вида.</summary>
-    private static string? HmiSourceVersion(HierarchyResult result)
+    internal static string? HmiSourceVersion(HierarchyResult result)
     {
         if (string.IsNullOrEmpty(result.HmiPath)) return null;
         var folder = System.IO.Path.GetFileName(result.HmiPath.TrimEnd(System.IO.Path.DirectorySeparatorChar));
@@ -332,9 +333,35 @@ public partial class FirmwareCard : UserControl
         const string suffix = "_hmi";
         if (!folder.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return null;
         var version = folder[..^suffix.Length];
-        return string.Equals(version, result.VersionRaw, StringComparison.OrdinalIgnoreCase) || version.Length == 0
-            ? null
-            : version;
+        if (version.Length == 0 || string.Equals(version, result.VersionRaw, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Панель отличается от текущей версии ТОЛЬКО аппаратной цифрой (eq/sub/sw/дата совпадают) —
+        // это остаток hw-переписывания: программа та же самая, сменился только код железа, а папку
+        // панели «{старый hw}_hmi» переименовать не успели (правка hw не доиграла, диск был офлайн,
+        // либо старую версию удалили руками до того, как переименование доехало синхроном). Показывать
+        // «HMI от {старый hw}» тут вводит в заблуждение — панель ровно этой прошивки, ничего не
+        // «унаследовано». Поэтому такой случай гасим (карточка покажет просто «HMI ✓»), независимо от
+        // того, отработало ли когда-нибудь переименование. Настоящее наследование от другой сборки
+        // (иной sw/тип/дата) по-прежнему честно помечаем «от версии X».
+        if (DiffersOnlyInHw(version, result.VersionRaw)) return null;
+
+        return version;
+    }
+
+    /// <summary>true, если две строки версий парсятся и отличаются РОВНО одной аппаратной цифрой
+    /// (eq_prefix, sub_prefix, sw_version и суффикс даты/времени совпадают, hw_version — нет). Именно
+    /// такую пару даёт hw-переписывание одной и той же прошивки (напр. 2.4.044.0005 → 2.4.1321.0005).</summary>
+    private static bool DiffersOnlyInHw(string panelVersion, string currentVersion)
+    {
+        var p = FwVersionNumber.Parse(panelVersion);
+        var c = FwVersionNumber.Parse(currentVersion);
+        return p is not null && c is not null
+            && p.EqPrefix == c.EqPrefix
+            && p.SubPrefix == c.SubPrefix
+            && p.SwVersion == c.SwVersion
+            && string.Equals(p.DtStr, c.DtStr, StringComparison.Ordinal)
+            && p.HwVersion != c.HwVersion;
     }
 
     /// <summary>Строка «что лежит рядом с версией». У Segnetics LFS/PSL показываются с явным «нет» —
