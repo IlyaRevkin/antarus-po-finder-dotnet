@@ -9,145 +9,234 @@ using AntarusPoFinder.Tests.TestHelpers;
 
 namespace AntarusPoFinder.Tests;
 
-/// <summary>Заготовка лоадера и поиск .lfs/.psl. Заглушка обязана вести себя как настоящий лоадер
-/// по прогрессу/логу — и при этом нигде не притворяться, что что-то реально загрузила.</summary>
 public class LoaderBackendTests
 {
-    private static readonly StubFirmwareLoaderBackend Stub = new(stepDelay: TimeSpan.Zero);
-
-    /// <summary>Синхронный сбор отчётов: штатный <see cref="Progress{T}"/> доставляет их через
-    /// SynchronizationContext, и без UI-потока часть пришла бы уже после await — тесты плавали бы.</summary>
     private sealed class CollectingProgress : IProgress<LoaderProgress>
     {
         public List<LoaderProgress> Reports { get; } = new();
         public void Report(LoaderProgress value) => Reports.Add(value);
     }
 
-    private static LoaderRequest Request(string workspaceDir, LoaderOperation op = LoaderOperation.Flash,
-        bool format = false, bool kernel = false) => new()
-    {
-        Operation = op,
-        SourcePath = Path.Combine(workspaceDir, "src", "prog.lfs"),
-        WorkspaceDir = workspaceDir,
-        VersionName = "2.1.042",
-        Options = new LoaderOptions { Format = format, UpdateKernel = kernel, Target = "COM3" },
-    };
-
     [Fact]
-    public async Task Stub_ReportsMonotonicProgressUpTo100()
+    public void Resolver_AcceptsAutomationGuiAndDirectoryPaths()
     {
         using var root = new TempRoot();
+        var automation = Path.Combine(root.Path, SegneticsLoaderResolver.AutomationExeName);
+        var gui = Path.Combine(root.Path, SegneticsLoaderResolver.GuiExeName);
+        File.WriteAllText(automation, "MZ");
+        File.WriteAllText(gui, "MZ");
+
+        Assert.Equal(automation, SegneticsLoaderResolver.Resolve(automation));
+        Assert.Equal(automation, SegneticsLoaderResolver.Resolve(gui));
+        Assert.Equal(automation, SegneticsLoaderResolver.Resolve(root.Path));
+    }
+
+    [Fact]
+    public void Resolver_DoesNotReplaceInvalidConfiguredPathWithBundledCopy()
+    {
+        using var root = new TempRoot();
+        var unsupported = Path.Combine(root.Path, "another.exe");
+        File.WriteAllText(unsupported, "MZ");
+
+        Assert.Null(SegneticsLoaderResolver.Resolve(unsupported));
+        Assert.Null(SegneticsLoaderResolver.CandidatePath(unsupported));
+    }
+
+    [Fact]
+    public void Resolver_ReportsAutomationInsideMissingConfiguredDirectory()
+    {
+        using var root = new TempRoot();
+        var missingDirectory = Path.Combine(root.Path, "moved-loader");
+
+        Assert.Equal(
+            Path.Combine(missingDirectory, SegneticsLoaderResolver.AutomationExeName),
+            SegneticsLoaderResolver.CandidatePath(missingDirectory));
+        Assert.Null(SegneticsLoaderResolver.Resolve(missingDirectory));
+    }
+
+    [Fact]
+    public void Factory_ReturnsUnavailableBackendWithoutStubFallback()
+    {
+        using var root = new TempRoot();
+        var missing = Path.Combine(root.Path, SegneticsLoaderResolver.AutomationExeName);
+
+        var backend = FirmwareLoaderFactory.Create(missing);
+
+        Assert.False(backend.IsAvailable);
+        Assert.Equal("Segnetics Loader Automation", backend.Name);
+        Assert.Null(backend.DisplayVersion);
+        Assert.Contains("не найден", backend.UnavailableReason!);
+    }
+
+    [Theory]
+    [InlineData("2.8.3+aa5cb8943c391a7e4a1520ec3ca237b5bc8fe8a5", "2.8.3.0", "2.8.3")]
+    [InlineData(null, "2.8.3.0", "2.8.3")]
+    [InlineData("v2.9", null, "2.9")]
+    [InlineData("invalid", "invalid", null)]
+    public void AutomationBackend_NormalizesExecutableVersion(
+        string? productVersion,
+        string? fileVersion,
+        string? expected)
+    {
+        Assert.Equal(expected, SegneticsLoaderBackend.NormalizeDisplayVersion(productVersion, fileVersion));
+    }
+
+    [Fact]
+    public async Task AutomationBackend_TranslatesJsonlEventsAndCompletion()
+    {
+        using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.lfs");
+        File.WriteAllText(source, "payload");
+        var script = WriteScript(root.Path, """
+            $request = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            $id = $request.operationId
+            if ($request.action -ne 'deploy' -or $request.preparation -ne 'formatAndUpdateFirmware') { exit 9 }
+            function Emit($value) {
+                [Console]::Out.WriteLine(($value | ConvertTo-Json -Compress -Depth 8))
+                [Console]::Out.Flush()
+            }
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'started' })
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'plan'; artifactPath = $request.artifactPath; artifactType = 'lfs'; steps = @('deployLfs') })
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'progress'; percent = 55; message = 'Uploading' })
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'progress'; percent = 56 })
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'log'; level = 'warning'; message = 'Network warning' })
+            Emit ([ordered]@{ protocolVersion = 1; operationId = $id; event = 'completed'; message = 'Completed'; outputPath = $request.artifactPath; warnings = @('Result warning') })
+            $null = [Console]::In.ReadToEnd()
+            exit 0
+            """);
+        var backend = CreatePowerShellBackend(script);
         var progress = new CollectingProgress();
 
-        var result = await Stub.RunAsync(Request(root.Path), progress, CancellationToken.None);
+        var result = await backend.RunAsync(Request(source, formatAndUpdate: true), progress, CancellationToken.None);
 
         Assert.True(result.Success);
-        Assert.NotEmpty(progress.Reports);
-        Assert.Equal(100, progress.Reports[^1].Percent);
-        for (var i = 1; i < progress.Reports.Count; i++)
-            Assert.True(progress.Reports[i].Percent >= progress.Reports[i - 1].Percent, "прогресс не должен идти назад");
+        Assert.Equal("Completed", result.Message);
+        Assert.Equal(source, Assert.Single(result.Artifacts));
+        Assert.Contains(progress.Reports,
+            item => item.Percent == 55 && item.Message == "Uploading" && item.UpdatesStage);
+        Assert.Contains(progress.Reports,
+            item => item.Percent == 56 && item.Message == string.Empty && !item.UpdatesStage);
+        Assert.Contains(progress.Reports,
+            item => item.Level == LoaderLogLevel.Warning && item.Message == "Network warning" && !item.UpdatesStage);
+        Assert.Contains(progress.Reports, item => item.Level == LoaderLogLevel.Warning && item.Message == "Result warning");
     }
 
     [Fact]
-    public async Task Stub_NeverClaimsRealWork()
+    public async Task AutomationBackend_SendsOutputPathForPslDeploy()
     {
         using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.psl");
+        var outputPath = Path.Combine(root.Path, "out", "project.lfs");
+        File.WriteAllText(source, "project");
+        var script = WriteScript(root.Path, """
+            $request = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            if ($request.action -ne 'deploy' -or
+                $request.outputPath -eq $null -or
+                $request.overwriteOutput -ne $true) { exit 9 }
+            $event = [ordered]@{
+                protocolVersion = 1
+                operationId = $request.operationId
+                event = 'completed'
+                message = 'Completed'
+                outputPath = $request.outputPath
+            }
+            [Console]::Out.WriteLine(($event | ConvertTo-Json -Compress -Depth 8))
+            [Console]::Out.Flush()
+            $null = [Console]::In.ReadToEnd()
+            exit 0
+            """);
+        var backend = CreatePowerShellBackend(script);
+
+        var result = await backend.RunAsync(
+            Request(source, outputPath: outputPath),
+            new CollectingProgress(),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(Path.GetFullPath(outputPath), Assert.Single(result.Artifacts));
+    }
+
+    [Fact]
+    public async Task AutomationBackend_RejectsOutputPathForNonPslDeploy()
+    {
+        using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.lfs");
+        File.WriteAllText(source, "payload");
+        var script = WriteScript(root.Path, "exit 9");
+        var backend = CreatePowerShellBackend(script);
+
+        var result = await backend.RunAsync(
+            Request(source, outputPath: Path.Combine(root.Path, "out", "project.lfs")),
+            new CollectingProgress(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("только при загрузке PSL", result.Message);
+    }
+
+    [Fact]
+    public async Task AutomationBackend_ReturnsUserFailureAndDiagnosticLocation()
+    {
+        using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.lfs");
+        File.WriteAllText(source, "payload");
+        var script = WriteScript(root.Path, """
+            $request = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            $event = [ordered]@{
+                protocolVersion = 1
+                operationId = $request.operationId
+                event = 'failed'
+                error = [ordered]@{
+                    code = 'DEPLOY_FAILED'
+                    message = 'Deploy failed'
+                    details = 'Technical details'
+                    logDirectory = 'C:\logs\operation'
+                }
+            }
+            [Console]::Out.WriteLine(($event | ConvertTo-Json -Compress -Depth 8))
+            [Console]::Out.Flush()
+            $null = [Console]::In.ReadToEnd()
+            exit 1
+            """);
+        var backend = CreatePowerShellBackend(script);
         var progress = new CollectingProgress();
 
-        var result = await Stub.RunAsync(Request(root.Path), progress, CancellationToken.None);
+        var result = await backend.RunAsync(Request(source), progress, CancellationToken.None);
 
-        Assert.False(Stub.IsAvailable);
-        Assert.Contains("реальная сборка/загрузка не выполнялась", result.Message);
-        Assert.All(progress.Reports.Where(r => r.Message.Contains("контроллер", StringComparison.OrdinalIgnoreCase)),
-            r => Assert.StartsWith(StubFirmwareLoaderBackend.LogPrefix, r.Message));
-        // Вместо .lfs заглушка кладёт памятку — её нельзя перепутать с настоящей сборкой.
-        var marker = Path.Combine(root.Path, "out", StubFirmwareLoaderBackend.StubMarkerFileName);
-        Assert.True(File.Exists(marker));
-        Assert.DoesNotContain(Directory.EnumerateFiles(Path.Combine(root.Path, "out")),
-            f => f.EndsWith(".lfs", StringComparison.OrdinalIgnoreCase));
-        Assert.Empty(result.Artifacts);
+        Assert.False(result.Success);
+        Assert.Equal("Deploy failed", result.Message);
+        Assert.DoesNotContain(progress.Reports, item => item.Message.Contains("DEPLOY_FAILED"));
+        Assert.DoesNotContain(progress.Reports, item => item.Message == "Technical details");
+        Assert.Contains(progress.Reports, item => item.Message.Contains(@"C:\logs\operation"));
     }
 
     [Fact]
-    public async Task Stub_OptionsChangeTheStages()
+    public async Task AutomationBackend_SendsCancelCommandToSameProcess()
     {
         using var root = new TempRoot();
-        var withOptions = new CollectingProgress();
-        var withoutOptions = new CollectingProgress();
+        var source = Path.Combine(root.Path, "project.lfs");
+        File.WriteAllText(source, "payload");
+        var script = WriteScript(root.Path, """
+            $request = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            $started = [ordered]@{ protocolVersion = 1; operationId = $request.operationId; event = 'started' }
+            [Console]::Out.WriteLine(($started | ConvertTo-Json -Compress))
+            [Console]::Out.Flush()
+            $cancel = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            if ($cancel.action -eq 'cancel' -and $cancel.operationId -eq $request.operationId) {
+                $event = [ordered]@{ protocolVersion = 1; operationId = $request.operationId; event = 'cancelled'; message = 'Cancelled by client' }
+                [Console]::Out.WriteLine(($event | ConvertTo-Json -Compress))
+                [Console]::Out.Flush()
+                exit 2
+            }
+            exit 1
+            """);
+        var backend = CreatePowerShellBackend(script);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
-        await Stub.RunAsync(Request(root.Path, format: true, kernel: true), withOptions, CancellationToken.None);
-        await Stub.RunAsync(Request(root.Path), withoutOptions, CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            backend.RunAsync(Request(source), new CollectingProgress(), cancellation.Token));
 
-        Assert.Contains(withOptions.Reports, r => r.Message.Contains("Форматирование памяти"));
-        Assert.Contains(withOptions.Reports, r => r.Message.Contains("Обновление ядра контроллера"));
-        Assert.Contains(withoutOptions.Reports, r => r.Message.Contains("Форматирование отключено"));
-        Assert.Contains(withoutOptions.Reports, r => r.Message.Contains("Обновление ядра отключено"));
-    }
-
-    [Fact]
-    public async Task Stub_BuildAndFlash_HaveDifferentStages()
-    {
-        using var root = new TempRoot();
-        var build = new CollectingProgress();
-        var flash = new CollectingProgress();
-
-        await Stub.RunAsync(Request(root.Path, LoaderOperation.Build), build, CancellationToken.None);
-        await Stub.RunAsync(Request(root.Path), flash, CancellationToken.None);
-
-        Assert.Contains(build.Reports, r => r.Stage == "Сборка");
-        Assert.DoesNotContain(build.Reports, r => r.Stage == "Передача");
-        Assert.Contains(flash.Reports, r => r.Stage == "Передача");
-        Assert.DoesNotContain(flash.Reports, r => r.Stage == "Сборка");
-    }
-
-    [Fact]
-    public async Task Stub_HonoursCancellation()
-    {
-        using var root = new TempRoot();
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            Stub.RunAsync(Request(root.Path), new CollectingProgress(), cts.Token));
-    }
-
-    [Fact]
-    public void Factory_FallsBackToStub_WhenNoLoaderFound()
-    {
-        var noPath = FirmwareLoaderFactory.Create("");
-        var badPath = FirmwareLoaderFactory.Create(@"C:\нет\такого\loader.exe");
-
-        Assert.False(noPath.IsAvailable);
-        Assert.False(badPath.IsAvailable);
-        Assert.Contains("не задан", noPath.UnavailableReason!);
-        Assert.Contains("не найден", badPath.UnavailableReason!);
-    }
-
-    [Fact]
-    public void Factory_UsesRealBackend_WhenLoaderExeExists()
-    {
-        using var root = new TempRoot();
-        var exe = Path.Combine(root.Path, "SegneticsLoader.exe");
-        File.WriteAllText(exe, "MZ"); // важен только факт существования файла, не содержимое
-
-        var backend = FirmwareLoaderFactory.Create(exe);
-
-        Assert.True(backend.IsAvailable);
-        Assert.Equal("Segnetics Loader", backend.Name);
-        Assert.Null(backend.UnavailableReason);
-    }
-
-    [Fact]
-    public void Resolver_PrefersConfiguredExe_OtherwiseNull()
-    {
-        using var root = new TempRoot();
-        var exe = Path.Combine(root.Path, "SegneticsLoader.exe");
-        File.WriteAllText(exe, "MZ");
-
-        Assert.Equal(exe, SegneticsLoaderResolver.Resolve(exe));
-        // Нет встроенной копии рядом с тестом → несуществующий и пустой путь дают null.
-        Assert.Null(SegneticsLoaderResolver.Resolve(Path.Combine(root.Path, "нет.exe")));
-        Assert.Null(SegneticsLoaderResolver.Resolve(""));
+        Assert.Equal("Cancelled by client", exception.Message);
     }
 
     [Fact]
@@ -183,21 +272,52 @@ public class LoaderBackendTests
     }
 
     [Fact]
-    public void LoaderFiles_FindIn_TakesFirstFolderThatHasIt()
+    public void LoaderFiles_FindDeploymentFiles_UsesFolderPriorityForEachType()
     {
         using var root = new TempRoot();
         var local = Path.Combine(root.Path, "local");
         var disk = Path.Combine(root.Path, "disk");
         Directory.CreateDirectory(local);
         Directory.CreateDirectory(disk);
-        File.WriteAllText(Path.Combine(disk, "prog.lfs"), "disk");
-        File.WriteAllText(Path.Combine(local, "prog.lfs"), "local");
+        File.WriteAllText(Path.Combine(local, "project.lfs"), "local lfs");
+        File.WriteAllText(Path.Combine(disk, "project.lfs"), "disk lfs");
+        File.WriteAllText(Path.Combine(disk, "project.psl"), "disk psl");
 
-        // Порядок кандидатов задаёт вызывающий (SearchView: локальный кэш раньше сетевой папки).
-        Assert.Equal(Path.Combine(local, "prog.lfs"),
-            LoaderFiles.FindIn(new[] { local, disk }, LoaderFiles.LfsExtension));
-        Assert.Equal(Path.Combine(disk, "prog.lfs"),
-            LoaderFiles.FindIn(new[] { Path.Combine(root.Path, "нет"), disk }, LoaderFiles.LfsExtension));
+        var files = LoaderFiles.FindDeploymentFiles(new[] { local, disk });
+
+        Assert.Equal(Path.Combine(local, "project.lfs"), files.LfsPath);
+        Assert.Equal(Path.Combine(disk, "project.psl"), files.PslPath);
+    }
+
+    private static LoaderRequest Request(
+        string source,
+        bool formatAndUpdate = false,
+        string? outputPath = null) => new()
+    {
+        SourcePath = source,
+        WorkspaceDir = Path.GetDirectoryName(source)!,
+        OutputPath = outputPath,
+        VersionName = "2.1.042",
+        Options = new LoaderOptions { FormatAndUpdateFirmware = formatAndUpdate },
+    };
+
+    private static SegneticsLoaderBackend CreatePowerShellBackend(string scriptPath)
+    {
+        var executable = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+        Assert.True(File.Exists(executable), $"Windows PowerShell not found: {executable}");
+        return new SegneticsLoaderBackend(executable,
+            new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath });
+    }
+
+    private static string WriteScript(string directory, string content)
+    {
+        var path = Path.Combine(directory, $"fake-loader-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(path, content);
+        return path;
     }
 
     [Fact]

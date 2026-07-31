@@ -283,20 +283,26 @@ public class ConfigService
     public bool SearchAutoSync() => Get("search_auto_sync").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetSearchAutoSync(bool value) => Set("search_auto_sync", value ? "true" : "false");
 
-    /// <summary>Путь к исполняемому файлу лоадера. Пока не используется для реального запуска —
-    /// интеграции нет, — но уже сохраняется и показывается в диалоге загрузки, чтобы коллеге,
-    /// подключающему настоящий лоадер, не пришлось заново придумывать, где брать этот путь.
-    /// См. AntarusPoFinder.Core.Loader.FirmwareLoaderFactory.</summary>
+    /// <summary>Необязательный путь к папке Segnetics Loader, GUI exe или Automation exe.
+    /// Пустое значение выбирает Loader, поставляемый вместе с приложением.</summary>
     public string LoaderExePath() => Get("loader_exe_path");
     public void SetLoaderExePath(string path) => Set("loader_exe_path", path.Trim());
 
-    /// <summary>Значения галочек «Форматировать» / «Обновить ядро», предлагаемые при следующем
-    /// открытии диалога лоадера — оператор обычно грузит однотипные шкафы подряд.</summary>
+    /// <summary>Старые раздельные ключи сохраняются в конфигурации для совместимости. В текущем UI
+    /// они образуют одну атомарную опцию подготовки ПЛК.</summary>
     public bool LoaderFormatDefault() => Get("loader_format_default").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetLoaderFormatDefault(bool value) => Set("loader_format_default", value ? "true" : "false");
 
     public bool LoaderUpdateKernelDefault() => Get("loader_update_kernel_default").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetLoaderUpdateKernelDefault(bool value) => Set("loader_update_kernel_default", value ? "true" : "false");
+
+    public bool LoaderFormatAndUpdateDefault() => LoaderFormatDefault() && LoaderUpdateKernelDefault();
+
+    public void SetLoaderFormatAndUpdateDefault(bool value)
+    {
+        SetLoaderFormatDefault(value);
+        SetLoaderUpdateKernelDefault(value);
+    }
 
     /// <summary>Последний введённый порт/адрес контроллера — подставляется в диалог лоадера.</summary>
     public string LoaderLastTarget() => Get("loader_last_target");

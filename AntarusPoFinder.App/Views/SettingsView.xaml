@@ -267,18 +267,18 @@
                             <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
 
                             <TextBlock Text="ЛОАДЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Загрузка прошивки в контроллер («Установить прошивку на ПЛК» в результатах поиска). Сейчас подключена заготовка: диалог, параметры, прогресс и лог работают, реальной загрузки не происходит. Сборка и загрузка выполняются на этом компьютере, на диск попадает только готовый результат."
+                            <TextBlock Text="Загрузка проекта в ПЛК выполняется через локальный Automation API Segnetics Loader. Пустой путь выбирает Loader, установленный вместе с приложением. Можно указать папку Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" x:Name="LoaderExePathInput" Height="34" Margin="0,0,8,0"
-                                         ToolTip="Путь к исполняемому файлу лоадера — понадобится, когда интеграция будет подключена"/>
-                                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseLoaderExe_Click"/>
-                                <Button Grid.Column="2" Content="Сохранить" Click="SaveLoaderExePath_Click"/>
+                                         LostFocus="LoaderExePathInput_LostFocus"
+                                         ToolTip="Папка Segnetics Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe. Пусто — встроенная копия."/>
+                                <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource SecondaryButton}"
+                                        Click="BrowseLoaderExe_Click"/>
                             </Grid>
 
                             <!-- Единая drag&drop-зона ПЛК+HMI на странице «Загрузка прошивки» — бета,

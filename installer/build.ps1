@@ -16,6 +16,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $installerDir = Join-Path $root "installer"
 $publishDir = Join-Path $installerDir "publish"
 $appProject = Join-Path $root "AntarusPoFinder.App\AntarusPoFinder.App.csproj"
+$isolatedSmLogixPayloadDir = Join-Path $installerDir "loader\SMLogix isolated payload"
 
 # -Version used to be mandatory and entirely unrelated to <Version> in AntarusPoFinder.App.csproj —
 # easy to rebuild with a version that doesn't match what the exe itself reports (About/update-check
@@ -62,6 +63,13 @@ $msiName = "AntarusPoFinder-$Version-setup.msi"
 $msiPath = Join-Path $installerDir $msiName
 
 Write-Host "Building MSI installer $msiName..."
+$createdIsolatedPayloadPlaceholder = $false
+if (-not (Test-Path -LiteralPath $isolatedSmLogixPayloadDir)) {
+    # WiX 5 resolves the excluded directory before harvesting and expects it to exist.
+    New-Item -ItemType Directory -Path $isolatedSmLogixPayloadDir | Out-Null
+    $createdIsolatedPayloadPlaceholder = $true
+}
+
 Push-Location $installerDir
 try {
     wix build Package.wxs -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
@@ -70,6 +78,9 @@ try {
 } finally {
     Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue
     Remove-Item -Force (Join-Path $installerDir "$msiName".Replace(".msi", ".wixpdb")) -ErrorAction SilentlyContinue
+    if ($createdIsolatedPayloadPlaceholder) {
+        Remove-Item -LiteralPath $isolatedSmLogixPayloadDir -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }
 

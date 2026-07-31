@@ -1,134 +1,105 @@
-# Подключение реального лоадера
+# Интеграция с Segnetics Loader
 
-> ## ⛔ ЗОНА ЗАМОРОЖЕНА — НЕ ТРОГАТЬ (30.07.2026)
-> Коллега ведёт **интеграцию реального лоадера на базе v1.53**. До её завершения **любые агенты и
-> сессии не изменяют «зону лоадера»**, чтобы не поймать конфликт слияния и не сорвать чужую работу.
-> Замороженные файлы/папки:
-> - `AntarusPoFinder.Core/Loader/**` (весь каталог: `LoaderContracts.cs`, `LoaderFiles.cs`,
->   `LoaderWorkspace.cs`, `SegneticsLoaderResolver.cs`, `StubFirmwareLoaderBackend.cs`,
->   `SegneticsProject.cs`, `FirmwareLoaderFactory.cs` и т.д.);
-> - `AntarusPoFinder.App/Views/LoaderDialog.xaml(.cs)`;
-> - `installer/loader/**`;
-> - код запуска лоадера в `SearchView.xaml.cs` (`OpenLoader`) и настройки лоадера в `ConfigService`.
->
-> Правки в других частях приложения, лишь **вызывающие** лоадер по существующему контракту
-> (`IFirmwareLoaderBackend`), допустимы — менять сам контракт и реализацию нельзя. Если задача
-> требует тронуть зону — **сначала спросить Илью**.
+## Назначение
 
-> **Статус (v1.38.0): реальный лоадер подключён.** Вместе с приложением поставляется
-> **Segnetics Loader v2.6.0** (папка `installer/loader/`, инсталлятор кладёт её в
-> `<папка приложения>\Loader\`). Приложение находит его автоматически
-> (`SegneticsLoaderResolver`), и кнопка «Загрузить в ПЛК» открывает лоадер с уже подставленным
-> `.lfs`/`.psl`. Заготовка (`StubFirmwareLoaderBackend`) остаётся запасным вариантом на случай,
-> если лоадер не найден. Segnetics Loader — полноценное GUI-приложение без headless-режима,
-> поэтому интеграция построена на запуске его окна с файлом, а не на разборе вывода; оператор
-> доводит загрузку/сборку в его окне. Требуется установленный **.NET 8 Desktop Runtime (x64)**.
-> Ниже — исходный контракт на случай подключения другого лоадера.
+Searcher выполняет интерактивную загрузку проектов в ПЛК через локальный
+process API `SegneticsLoader.Automation.exe --stdio`. Окно Segnetics Loader не
+открывается: Searcher показывает параметры, прогресс и журнал операции, а
+production-пайплайн Loader определяет тип файла и выполняет требуемые действия.
 
-Документ для того, кто будет прикручивать настоящую загрузку прошивки в контроллер (форк
-репозитория). Исторически в приложении лежала **заготовка**: весь обвес написан и работает.
+Текущий сценарий запускается только по кнопке `Загрузить в ПЛК` на карточке
+версии. Загрузка нового PSL программистом в базу Searcher сохраняет файл без
+фонового запуска сборки.
 
-## Что уже сделано и трогать не нужно
+## Выбор файла
 
-| Готово | Где |
-|--------|-----|
-| Диалог с параметрами, прогресс-баром, логом, кнопкой «Остановить», сохранением лога | `AntarusPoFinder.App/Views/LoaderDialog.xaml(.cs)` |
-| Кнопка «Загрузить в ПЛК» в результатах поиска (подставляет найденный `.lfs`) | `AntarusPoFinder.App/Views/SearchView.xaml.cs` → `OpenLoader` |
-| Локальная рабочая область: копирование исходника на машину оператора, публикация результата на диск | `AntarusPoFinder.Core/Loader/LoaderWorkspace.cs` |
-| Поиск `.lfs`/`.psl` рядом с версией | `AntarusPoFinder.Core/Loader/LoaderFiles.cs` |
-| Путь к лоадеру в настройках (Настройки → Общие → «Лоадер») | `ConfigService.LoaderExePath()` |
-| Галочки «Форматировать»/«Обновить ядро», порт/адрес — с запоминанием последних значений | `ConfigService.LoaderFormatDefault/LoaderUpdateKernelDefault/LoaderLastTarget` |
+Карточка представляет версию ПО, поэтому Searcher проверяет артефакты этой
+версии в порядке `LFS -> PSL`:
 
-## Что нужно сделать
-
-1. Реализовать `IFirmwareLoaderBackend` (`AntarusPoFinder.Core/Loader/LoaderContracts.cs`).
-2. Вернуть свою реализацию из `FirmwareLoaderFactory.Create`
-   (`AntarusPoFinder.Core/Loader/StubFirmwareLoaderBackend.cs`) — это **единственное** место, где
-   приложение решает, чем грузить.
-
-Больше ничего менять не требуется: диалог, прогресс, лог и публикация уже завязаны на контракт.
-
-```csharp
-public interface IFirmwareLoaderBackend
-{
-    string Name { get; }                 // показывается оператору в диалоге
-    bool IsAvailable { get; }            // false = заготовка, диалог покажет предупреждение
-    string? UnavailableReason { get; }   // почему недоступен — текст для оператора
-    Task<LoaderResult> RunAsync(LoaderRequest request, IProgress<LoaderProgress> progress, CancellationToken ct);
-}
-```
-
-### Что приходит в `RunAsync`
-
-| Поле `LoaderRequest` | Что в нём |
+| Файлы версии | Действие |
 |---|---|
-| `Operation` | `Flash` — залить `.lfs` в контроллер; `Build` — собрать `.psl` → `.lfs` |
-| `SourcePath` | **локальный** путь к уже скопированному исходнику (никогда не сетевой) |
-| `WorkspaceDir` | локальная папка запуска; результат класть в её подпапку `out\` |
-| `PublishDir` | куда приложение опубликует содержимое `out\` после успеха (для `Build`); пусто — не публиковать |
-| `VersionName` | имя версии, только для логов/заголовков |
-| `Options.Format` | галочка «Форматировать память контроллера» |
-| `Options.UpdateKernel` | галочка «Обновить ядро контроллера» |
-| `Options.Target` | порт/адрес из поля диалога («COM3», IP и т.п.) — формат задаёте вы |
-| `Options.Extra` | словарь на будущее, чтобы новые флаги не ломали контракт |
+| Только LFS | Открыть диалог с готовым LFS |
+| Только PSL | Открыть диалог с PSL; Loader соберёт LFS и загрузит его |
+| LFS и PSL | Открыть диалог с готовым LFS |
 
-### Что нужно возвращать
+В основном диалоге путь можно заменить вручную до запуска операции.
 
-- `progress.Report(new LoaderProgress(percent, stage, message, level))` — на каждый заметный шаг.
-  `percent = -1`, если прогресс неизвестен (диалог покажет «бегущую» полосу). `stage` попадает в
-  подпись под прогресс-баром, `message` — в лог. `level` (`Info`/`Warning`/`Error`/`Success`)
-  задаёт цвет строки лога.
-- `LoaderResult.Ok(message, artifacts)` / `LoaderResult.Fail(message)` — итог. `artifacts` — пути к
-  собранным файлам (информационно; на диск публикуется содержимое `out\`).
-- `ct.ThrowIfCancellationRequested()` в местах, где загрузку можно оборвать — кнопка «Остановить»
-  отменяет именно этот токен. Прервали процесс — доведите до безопасного состояния сами: приложение
-  про контроллер ничего не знает.
-- Исключения не глотать: диалог покажет `ex.Message` в логе красным. Молча «успешно ничего не
-  сделать» — худший из вариантов.
+## Подготовка ПЛК
 
-### Пример каркаса
+Единственная опция Searcher называется `Форматировать проект и обновить ядро`.
+Она передаётся в запрос Automation атомарно:
 
-```csharp
-public sealed class RealLoaderBackend : IFirmwareLoaderBackend
-{
-    private readonly string _exePath;
-    public RealLoaderBackend(string exePath) => _exePath = exePath;
+| Состояние | `preparation` |
+|---|---|
+| Выключено | `none` |
+| Включено | `formatAndUpdateFirmware` |
 
-    public string Name => "Segnetics Loader";
-    public bool IsAvailable => File.Exists(_exePath);
-    public string? UnavailableReason => IsAvailable ? null : $"Лоадер не найден: {_exePath}";
+Адрес ПЛК, режим подключения, SSH-параметры и путь к прошивке Searcher не
+передаёт. Automation читает их из настроек Segnetics Loader:
 
-    public async Task<LoaderResult> RunAsync(LoaderRequest r, IProgress<LoaderProgress> progress, CancellationToken ct)
-    {
-        progress.Report(new LoaderProgress(5, "Подготовка", $"Файл: {r.SourcePath}"));
-        // запустить _exePath с нужными аргументами, читать stdout, транслировать в progress.Report(...)
-        // результат положить в Path.Combine(r.WorkspaceDir, "out")
-        return LoaderResult.Ok("Загрузка завершена");
-    }
-}
+```text
+%LOCALAPPDATA%\SegneticsLoader\settings.json
 ```
 
-## Обязательное правило: всё локально
+## Поиск Automation
 
-Приложение **не клиент-серверное**. Сетевой диск компании регулярно отваливается (см. историю в
-`README.md` и `NetworkPathHelper`), поэтому:
+Настройка Searcher может содержать:
 
-- лоадер получает только локальные пути — исходник копирует `LoaderWorkspace.Import` **до** запуска;
-- всё промежуточное пишется в локальную рабочую область (`%LocalAppData%\AntarusPOFinder\loader\…`);
-- на сетевой диск уезжает **только** результат успешной сборки, через `LoaderWorkspace.Publish`;
-- публикация докладывает файлы в папку версии и **не** удаляет то, что там уже лежит.
+1. пустое значение: используется
+   `<папка Searcher>\Loader\SegneticsLoader.Automation.exe`;
+2. папку Segnetics Loader: Automation ищется внутри неё;
+3. путь к `SegneticsLoader.exe`: Automation ищется рядом с GUI;
+4. путь к `SegneticsLoader.Automation.exe`: используется этот файл.
 
-Запускать лоадер напрямую по сетевому пути нельзя — обрыв сессии SMB посреди работы превращается в
-наполовину записанный контроллер.
+Если Automation отсутствует, Searcher показывает точный ожидаемый путь и не
+подменяет операцию заглушкой или запуском GUI.
 
-## Открытые вопросы к разработчику лоадера
+## Выполнение операции
 
-Публичного headless/CLI-режима у Segnetics Loader на момент анализа (v2.6.0) не нашли —
-`SegneticsLoader.exe` это GUI. Что нужно от него, чтобы интеграция стала возможной:
+1. Searcher создаёт рабочую область в
+   `%LOCALAPPDATA%\AntarusPOFinder\loader\<operation>`.
+2. Выбранный файл копируется в подпапку `src`.
+3. Searcher запускает `SegneticsLoader.Automation.exe --stdio`.
+4. В stdin передаётся запрос `deploy` с локальным путём. Для PSL также задаётся
+   `outputPath` в подпапке `out` рабочей области.
+5. Loader собирает и загружает PSL, затем сохраняет готовый LFS в `outputPath`
+   до отправки события `completed`.
+6. Searcher после `completed` публикует готовый LFS в папку выбранного исходного
+   PSL. При следующей загрузке он выбирается раньше PSL.
+7. События `started`, `plan`, `progress` и `log` обновляют прогресс и журнал.
+8. `completed`, `failed` или `cancelled` завершает операцию в диалоге.
+9. Кнопка `Остановить` передаёт JSONL-команду `cancel` в тот же процесс.
 
-1. Режим запуска без интерфейса: аргументы командной строки или папка-очередь (`queue/in` →
-   `queue/out`) для конвертации PSL → LFS.
-2. Машиночитаемый прогресс/итог (коды возврата, строки в stdout) — иначе прогресс-бар останется
-   «бегущим», а ошибки придётся вылавливать по тексту.
-3. Подтверждение, требует ли сборка интерактивной сессии Windows (процесс дёргает реальный
-   SMLogix.exe) — от этого зависит, можно ли вообще запускать её из-под службы/фоново.
+Лог Searcher сохраняется в рабочей области. Технические логи Loader находятся
+в каталоге, указанном полем `error.logDirectory` события `failed`.
+
+## Границы ответственности
+
+Searcher отвечает за выбор версии, выбор LFS с резервным переходом к PSL,
+локальную копию файла, публикацию успешно собранного LFS в папку проекта и
+отображение хода операции. Segnetics Loader отвечает за распознавание артефакта,
+сборку PSL, сохранение результата в локальную рабочую область Searcher,
+подключение к ПЛК, форматирование, обновление ядра и загрузку.
+
+Исходный код Loader в репозиторий Searcher не копируется. Инсталлятор Searcher
+содержит опубликованный framework-dependent runtime Loader без локального
+каталога `SMLogix isolated payload`. Перед изолированной сборкой Loader сам
+проверяет и при необходимости синхронизирует этот каталог из установленного
+SMLogix. Для Automation требуется установленный Microsoft .NET 8 Runtime x64.
+
+## Реализация
+
+| Компонент | Путь |
+|---|---|
+| Контракт UI/backend | `AntarusPoFinder.Core/Loader/LoaderContracts.cs` |
+| JSONL-клиент и resolver | `AntarusPoFinder.Core/Loader/SegneticsLoaderBackend.cs` |
+| Выбор backend | `AntarusPoFinder.Core/Loader/FirmwareLoaderFactory.cs` |
+| Поиск LFS/PSL | `AntarusPoFinder.Core/Loader/LoaderFiles.cs` |
+| Локальная рабочая область | `AntarusPoFinder.Core/Loader/LoaderWorkspace.cs` |
+| Окно операции | `AntarusPoFinder.App/Views/LoaderDialog.xaml(.cs)` |
+| Кнопка карточки | `AntarusPoFinder.App/Views/SearchView.xaml.cs` |
+
+Полный внешний контракт и архитектура Automation приложены рядом:
+
+- `docs/loader/LOADER_AUTOMATION_API.md`;
+- `docs/loader/LOADER_AUTOMATION_ARCHITECTURE.md`.
