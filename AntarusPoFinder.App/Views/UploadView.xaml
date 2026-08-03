@@ -332,23 +332,23 @@
                                  галочкой. Подсказка под ними краснеет, пока оба пусты, — чтобы отказ
                                  при загрузке не был неожиданностью. -->
                             <StackPanel x:Name="OpcFieldsPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                                <!-- Оба поля в ОДНОЙ сетке, а не в двух подряд: только так подписи
+                                     разной длины («Серийный номер шкафа:» и «Номер заявки:») делят
+                                     общую колонку и поля ввода начинаются на одной вертикали. -->
                                 <Grid Margin="0,0,0,6">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="Серийный номер шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" x:Name="CabinetSnLabel" Text="Серийный номер шкафа:" VerticalAlignment="Center" Margin="0,0,8,6"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="CabinetSnInput" Height="34" Margin="0,0,0,6"
                                              ToolTip="Заводской номер шкафа, напр. 42 — в имени файла станет SN00042" TextChanged="CabinetSn_Changed"/>
-                                </Grid>
-
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="Номер заявки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
+                                    <TextBlock Grid.Row="1" Grid.Column="0" x:Name="ReqNumLabel" Text="Номер заявки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="ReqNumInput" Height="34"
                                              ToolTip="Номер заявки, напр. 1312 — в имени файла станет (01312)" TextChanged="ReqNum_Changed"/>
                                 </Grid>
 
