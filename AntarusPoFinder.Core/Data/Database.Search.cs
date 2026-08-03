@@ -226,6 +226,9 @@ public partial class Database
         // Фраза для проверки соседства слов — со схлопнутыми пробелами, но сохранёнными
         // дефисами/точками и порядком, ровно как в точном поиске (см. SearchOrdered).
         var orderedPhrase = CollapseForOrdered(string.IsNullOrEmpty(phrase) ? string.Join(" ", qTokens) : phrase);
+        // Считается один раз на весь поиск, а не на каждую строку: подстановка в САМОМ запросе —
+        // редкий случай (ищут по шаблону), а её проверка иначе повторялась бы на каждой прошивке.
+        var queryHasWildcard = TagPattern.HasWildcard(normalizedPhrase) || TagPattern.HasWildcard(orderedPhrase);
         var scored = new List<ScoredFwVersion>();
 
         foreach (var row in rows)
@@ -252,6 +255,14 @@ public partial class Database
                 if (hit) matchedTokens++;
             }
 
+            // Тег-шаблон, совпавший с запросом ЦЕЛИКОМ (см. AnyTagMatchesWholeQuery), — это прямое
+            // попадание в конкретный шкаф, а не случайное пересечение по словам. Засчитываем его как
+            // «совпали все слова запроса»: иначе строка либо не попала бы в выдачу вовсе (буквальных
+            // совпадений может не быть ни одного — «(9-14А)» ни с чем в шаблоне «(*-*А)» посимвольно
+            // не совпадает), либо уехала бы под «Показать ещё» как слабое совпадение.
+            var wildcardTagHit = AnyTagMatchesWholeQuery(tags, queryHasWildcard, normalizedPhrase, orderedPhrase);
+            if (wildcardTagHit) matchedTokens = qTokens.Length;
+
             if (matchedTokens == 0) continue;
 
             // «Больше совпавших слов → выше»: число совпавших слов доминирует над вкладом весов полей.
@@ -271,7 +282,8 @@ public partial class Database
 
             // (в) запрос целиком равен ОДНОМУ тегу — прямое указание на конкретную прошивку: в самый
             // верх, но выдача не сужается (для «ровно одна прошивка» есть галочка «в кавычках»).
-            if (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase))
+            if (wildcardTagHit ||
+                (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase)))
                 score += PhraseTagBonus;
 
             scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage), matchedTokens));
@@ -348,6 +360,35 @@ public partial class Database
         return sb.ToString();
     }
 
+    /// <summary>Совпал ли запрос ЦЕЛИКОМ хотя бы с одним тегом строки С УЧЁТОМ ПОДСТАНОВКИ —
+    /// звёздочки в теге (или в самом запросе), см. <see cref="TagPattern"/>. Отвечает ровно за
+    /// шаблоны: обычное равенство «запрос = тег» проверяется отдельно и осталось прежним.
+    ///
+    /// Сверяем в двух нормализациях сразу, потому что запрос доезжает сюда в обеих и обе одинаково
+    /// осмысленны: <paramref name="normalizedPhrase"/> — как SearchService.Normalize (скобки и дефисы
+    /// заменены пробелами: «ПЖ-ПП-2-(9-14А)» → «ПЖ ПП 2 9 14А»), <paramref name="orderedPhrase"/> —
+    /// как CollapseForOrdered (разделители сохранены). Тег-шаблон «…(*-*А)…» совпадает с конкретным
+    /// названием шкафа в любой из них.
+    ///
+    /// Быстрый отсев: если звёздочки нет ни в запросе, ни в конкретном теге — сравнение вообще не
+    /// выполняется. Тегов без звёздочки подавляющее большинство, и на них поиск обязан стоить ровно
+    /// столько же, сколько стоил до появления шаблонов (полного перебора всех тегов регулярками, о
+    /// котором просили не делать, здесь нет вовсе — только IndexOf('*') на короткой строке).</summary>
+    private static bool AnyTagMatchesWholeQuery(IReadOnlyList<string> tags, bool queryHasWildcard,
+        string normalizedPhrase, string orderedPhrase)
+    {
+        if (tags.Count == 0) return false;
+        foreach (var tag in tags)
+        {
+            if (!queryHasWildcard && !TagPattern.HasWildcard(tag)) continue;
+            if (normalizedPhrase.Length > 0 && TagPattern.MatchesEither(SearchService.Normalize(tag), normalizedPhrase))
+                return true;
+            if (orderedPhrase.Length > 0 && TagPattern.MatchesEither(CollapseForOrdered(tag), orderedPhrase))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>Общий «стог» для позиционных проверок: название группы/подтипа/папки/контроллера +
     /// теги + типы пуска, склеенные через пробел и приведённые к CollapseForOrdered. Собран одним
     /// местом, чтобы обычный и точный поиск считали соседство слов одинаково.</summary>
@@ -372,6 +413,12 @@ public partial class Database
         var phraseUpper = CollapseForOrdered(string.IsNullOrEmpty(phrase) ? string.Join(" ", tokens) : phrase);
         if (phraseUpper.Length < 2) return new();
 
+        // Точное совпадение с тегом-ШАБЛОНОМ (см. AnyTagMatchesWholeQuery/TagPattern): наладчик
+        // вводит полное название шкафа в кавычках — и находит прошивку, помеченную тегом со
+        // звёздочкой вместо ампеража. Нормализованная форма запроса считается один раз на весь поиск.
+        var normalizedPhrase = string.IsNullOrEmpty(phrase) ? "" : SearchService.Normalize(phrase);
+        var queryHasWildcard = TagPattern.HasWildcard(normalizedPhrase) || TagPattern.HasWildcard(phraseUpper);
+
         var scored = new List<ScoredFwVersion>();
         foreach (var row in rows)
         {
@@ -379,7 +426,8 @@ public partial class Database
             var tagText = CollapseForOrdered(string.Join(" ", tags));
             var haystack = BuildOrderedHaystack(row, tags);
 
-            var inTag = OrderedContains(phraseUpper, tagText);
+            var inTag = OrderedContains(phraseUpper, tagText) ||
+                        AnyTagMatchesWholeQuery(tags, queryHasWildcard, normalizedPhrase, phraseUpper);
             if (!inTag && !OrderedContains(phraseUpper, haystack)) continue;
 
             var score = inTag ? PhraseTagBonus : 3;

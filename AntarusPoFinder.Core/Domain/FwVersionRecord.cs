@@ -56,6 +56,12 @@ public class FwVersionRecord
     /// одна версия.</summary>
     public bool ManualCurrent { get; set; }
 
+    /// <summary>Переносимый идентификатор строки для синхронизации между машинами (см. столбец
+    /// fw_versions.sync_id в Database.cs). Пустой при обычном заведении версии — его подставляет сама
+    /// Database.AddFwVersion; заполняется снаружи только импортом общего конфига, чтобы одна и та же
+    /// прошивка осталась одной строкой на всех машинах.</summary>
+    public string SyncId { get; set; } = "";
+
     // Populated by joins for display purposes (not stored on this table).
     /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа
     /// (Database.SearchFwVersionsByTokens): подтип у версии свой, а тип берётся через него.</summary>

@@ -18,7 +18,11 @@
                  VerticalScrollBarVisibility="Auto" Margin="0,0,0,12"/>
 
         <TextBlock Text="Теги:" Margin="0,0,0,4"/>
-        <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,12"/>
+        <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,4"/>
+        <!-- Подстановка в теге (см. Core/Services/TagPattern.cs): один тег вместо десятка почти
+             одинаковых названий шкафов, отличающихся только амперажом. -->
+        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Звёздочка в теге — подстановка любой части названия: тег «…ПЖ-ПП-2-(*-*А)-АВР-FD-Ст» находится и по «(9-14А)», и по «(20-25А)»."/>
 
         <TextBlock Text="Тип пуска:" Margin="0,0,0,4"/>
         <!-- WrapPanel, не горизонтальный StackPanel: пятый тип пуска («Отсутствует», см.

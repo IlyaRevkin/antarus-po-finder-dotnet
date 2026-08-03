@@ -438,6 +438,15 @@
 
                             <TextBlock Text="ТЕГИ" Style="{StaticResource MutedText}" FontSize="11" Margin="0,0,0,4"/>
                             <views:TagBubbleEditor x:Name="TagsEditor"/>
+                            <!-- Звёздочка в теге — подстановка (см. Core/Services/TagPattern.cs): один
+                                 тег на десяток шкафов, отличающихся только амперажом. -->
+                            <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="Звёздочка в теге — подстановка: «…ПЖ-ПП-2-(*-*А)-АВР-FD-Ст» найдётся и по «(9-14А)», и по «(20-25А)»."/>
+                            <!-- Наследование тегов с предыдущей версии этого шкафа — показывается ДО
+                                 загрузки (UploadView.UpdateInheritedTagsHint), чтобы перенос был виден
+                                 заранее, а не всплывал сюрпризом в сообщении об успехе. -->
+                            <TextBlock x:Name="InheritedTagsHint" Style="{StaticResource MutedText}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Expander>
 
