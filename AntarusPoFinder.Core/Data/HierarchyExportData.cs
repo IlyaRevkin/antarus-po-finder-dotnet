@@ -74,6 +74,12 @@ public class ExportedFwVersion
     /// (подтип + контроллер + version_raw) только когда его нет. Пустая строка = экспорт со старой
     /// версии приложения, поведение тогда ровно прежнее. Подробности — Database.cs, столбец sync_id.</summary>
     [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    /// <summary>Имя конфигурации шкафа (fw_versions.config_name) — '' у обычной записи. Входит в
+    /// натуральный ключ сопоставления наравне с подтипом/контроллером/version_raw: у всех конфигураций
+    /// одной прошивки эти три поля совпадают, и без имени приёмник считал бы их одной строкой и
+    /// схлопывал бы заготовленные варианты в один. Пусто в снимке со старой версии приложения — тогда
+    /// поведение ровно прежнее.</summary>
+    [JsonPropertyName("config_name")] public string ConfigName { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }

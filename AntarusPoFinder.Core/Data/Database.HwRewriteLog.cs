@@ -90,16 +90,24 @@ public partial class Database
     /// не считая <paramref name="excludeId"/> — используется проигрыванием hw-переписывания, чтобы не
     /// переименовать «старую» строку в уже существующий ключ (иначе два ряда с одним version_raw). Null,
     /// если такой строки нет. Удалённые (deleted_at) не учитываются.</summary>
-    public int? FindFwVersionIdByNaturalKey(int subtypeId, int controllerId, string versionRaw, int excludeId)
+    /// <param name="configName">Имя конфигурации шкафа (см. столбец config_name в Database.cs), если
+    /// ключ надо сверять точно, вместе с ним. null — не различать конфигурации: так работает
+    /// проигрывание hw-переписывания, которому важно «есть ли ХОТЬ КАКАЯ-ТО строка с этим номером
+    /// версии» (переименовывать в занятый номер нельзя в любом случае, вариант там или нет).</param>
+    public int? FindFwVersionIdByNaturalKey(int subtypeId, int controllerId, string versionRaw, int excludeId,
+        string? configName = null)
     {
-        var found = ExecuteScalar(
-            $"SELECT id FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v AND id<>@x AND {NotDeleted()}",
+        var sql = $"SELECT id FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v AND id<>@x AND {NotDeleted()}";
+        if (configName is not null) sql += " AND COALESCE(config_name,'') = @cfg";
+
+        var found = ExecuteScalar(sql,
             cmd =>
             {
                 cmd.Parameters.AddWithValue("@s", subtypeId);
                 cmd.Parameters.AddWithValue("@c", controllerId);
                 cmd.Parameters.AddWithValue("@v", versionRaw ?? "");
                 cmd.Parameters.AddWithValue("@x", excludeId);
+                if (configName is not null) cmd.Parameters.AddWithValue("@cfg", configName);
             });
         return found is long id ? (int)id : (int?)null;
     }

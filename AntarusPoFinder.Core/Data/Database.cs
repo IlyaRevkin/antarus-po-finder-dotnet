@@ -105,7 +105,10 @@ public partial class Database : IDisposable
                  manual_current    INTEGER NOT NULL DEFAULT 0,
                  -- Переносимый идентификатор строки для синхронизации между машинами — см.
                  -- EnsureColumnsExist ниже (там же ALTER TABLE для уже существующих баз).
-                 sync_id           TEXT    NOT NULL DEFAULT ''
+                 sync_id           TEXT    NOT NULL DEFAULT '',
+                 -- Имя КОНФИГУРАЦИИ шкафа: '' — обычная запись прошивки, непустое — заранее
+                 -- заготовленный вариант той же самой прошивки. См. EnsureColumnsExist ниже.
+                 config_name       TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -450,6 +453,20 @@ public partial class Database : IDisposable
         // натуральный ключ (снимок со старой версии приложения ключа не содержит вовсе). Заполняется
         // BackfillSyncIds ниже — как и всем остальным таблицам.
         AddColumnsIfMissing("fw_versions", ("sync_id", "TEXT NOT NULL DEFAULT ''"));
+
+        // config_name: КОНФИГУРАЦИЯ шкафа — заранее заготовленный вариант одной и той же прошивки.
+        // Одна прошивка обслуживает шкафы, различающиеся только комплектацией (два насоса; два насоса
+        // плюс жокей и задвижка; без задвижек вовсе) — программа внутри одна, а вот название шкафа, по
+        // которому её ищет наладчик, у каждого варианта своё. Вариант — это ОТДЕЛЬНАЯ СТРОКА
+        // fw_versions с тем же disk_path и version_raw (файлы на диске одни, второй копии не заводится
+        // — шара WebDAV и медленная, а вариантов у прошивки бывает десяток) и СВОИМ набором тегов;
+        // имя варианта лежит здесь. См. FirmwareConfigService.
+        //
+        // Пустое значение = обычная запись прошивки, поведение ровно как раньше. Столбец входит в
+        // натуральный ключ синхронизации (подтип+контроллер+version_raw+config_name) — без этого все
+        // конфигурации одной прошивки выглядели бы для приёмника ОДНОЙ И ТОЙ ЖЕ строкой и схлопывались
+        // в неё с объединением тегов (см. FindFwVersionRow в Database.ConfigExchange.cs).
+        AddColumnsIfMissing("fw_versions", ("config_name", "TEXT NOT NULL DEFAULT ''"));
 
         // Задел (Задача 7): «сохранить у себя, не выгружать» — строка с is_local_only=1 просто
         // пропускается ExportHierarchyData (см. Database.ConfigExchange.cs), т.е. никогда не попадёт

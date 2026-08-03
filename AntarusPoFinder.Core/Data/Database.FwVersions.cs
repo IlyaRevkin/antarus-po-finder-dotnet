@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using AntarusPoFinder.Core.Domain;
@@ -17,15 +18,18 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status,sync_id)
+                upload_date,tags,author_id,status,sync_id,config_name)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status,@sync_id)
+                @upload_date,@tags,@author_id,@status,@sync_id,@config_name)
             """, cmd =>
         {
+            // Пусто у обычной загрузки; непустым его заводит только FirmwareConfigService (вариант
+            // шкафа) — см. столбец config_name в Database.cs.
+            cmd.Parameters.AddWithValue("@config_name", v.ConfigName ?? "");
             // sync_id проставляется сразу при заведении строки, а не откладывается до ближайшего
             // BackfillSyncIds на старте приложения: между загрузкой прошивки и следующим запуском
             // помещается и синхронизация, и вывод из модерации, и удаление — всё то, чему этот
@@ -159,6 +163,32 @@ public partial class Database
             cmd.Parameters.AddWithValue("@id", id);
         });
 
+    /// <summary>Свободное имя конфигурации для этой прошивки — «Конфигурация 2», «Конфигурация 3»…
+    /// Нумерация с двойки осознанно: сама прошивка (строка с пустым config_name) и есть «конфигурация
+    /// 1», поэтому первый заведённый вариант — второй по счёту.</summary>
+    private string NextConfigName(string diskPath, string versionRaw)
+    {
+        var taken = new HashSet<string>(
+            GetFwVersionConfigs(diskPath, versionRaw).Select(c => c.ConfigName), StringComparer.OrdinalIgnoreCase);
+        for (var n = 2; ; n++)
+        {
+            var candidate = $"Конфигурация {n}";
+            if (taken.Add(candidate)) return candidate;
+        }
+    }
+
+    /// <summary>«Дублировать» из Настройки → Прошивки. Копия — это ВАРИАНТ той же самой прошивки:
+    /// файлы на диске не копируются (disk_path и version_raw общие), отличаться копия будет только
+    /// тегами, которые оператор ей потом проставит. Ровно то, ради чего дублирование и заводили:
+    /// «одна прошивка с разными настройками — типа 1 или 2 задвижки, или вообще нет, а прошивка та же».
+    ///
+    /// Поэтому копия получает НЕПУСТОЕ имя конфигурации (см. столбец config_name в Database.cs и
+    /// FirmwareConfigService). Без него две записи с одинаковым натуральным ключом (подтип+контроллер+
+    /// version_raw) были бы для синхронизации ОДНОЙ И ТОЙ ЖЕ строкой: у коллеги они схлопывались в одну
+    /// с объединёнными тегами, и все заготовленные варианты пропадали. Заодно копия перестаёт засорять
+    /// историю версий и очередь модерации десятком одинаковых строк (см. NotConfig).
+    ///
+    /// Копия конфигурации — тоже конфигурация, со своим свободным именем.</summary>
     public int DuplicateFwVersion(int versionId)
     {
         var row = GetFwVersionById(versionId);
@@ -171,18 +201,22 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,sync_id)
+                upload_date,tags,sync_id,config_name,released)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@sync_id)
+                @upload_date,@tags,@sync_id,@config_name,@released)
             """, cmd =>
         {
             // Копия — самостоятельная строка, поэтому свой собственный sync_id, а не унаследованный
             // от оригинала: иначе синхронизация считала бы их одной и той же записью.
             cmd.Parameters.AddWithValue("@sync_id", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@config_name", NextConfigName(row.DiskPath, row.VersionRaw));
+            // Состояние модерации наследуется от исходной записи: вариант уже выпущенной прошивки —
+            // та же самая прошивка, проверять в нём нечего, и всплывать в модерации он не должен.
+            cmd.Parameters.AddWithValue("@released", row.Released ? 1 : 0);
             cmd.Parameters.AddWithValue("@subtype_id", row.SubtypeId);
             cmd.Parameters.AddWithValue("@controller_id", row.ControllerId);
             cmd.Parameters.AddWithValue("@eq_prefix", row.EqPrefix);
@@ -227,6 +261,23 @@ public partial class Database
     /// with the alias baked into the condition text does not work for both cases at once.</summary>
     private static string NotDeleted(string alias = "") =>
         $"({(alias.Length > 0 ? alias + "." : "")}deleted_at IS NULL OR {(alias.Length > 0 ? alias + "." : "")}deleted_at = '')";
+
+    /// <summary>«Только основные записи прошивок, без строк-конфигураций» (см. столбец config_name в
+    /// Database.cs). Конфигурация — это НЕ отдельная прошивка и не отдельная версия: та же папка на
+    /// диске, тот же номер, отличается только набор тегов. Поэтому там, где перечисляются ПРОШИВКИ или
+    /// ВЕРСИИ — очередь модерации и история версий, — конфигурации показывать нельзя: десять вариантов
+    /// одного шкафа превратили бы историю в десять одинаковых строк, а модерацию — в десять записей,
+    /// которые всё равно выпускаются одним действием (MarkFwVersionReleasedWithLinked снимает модерацию
+    /// со всех записей, делящих файлы). Управляются конфигурации там, где их и заводят, — в модерации
+    /// самой прошивки (EditFirmwareDialog, FirmwareConfigService).
+    ///
+    /// Поиску, наоборот, нужны именно они — там каждая конфигурация ищется своими тегами (см.
+    /// Database.Search.cs), а выдача схлопывает их в одну строку сама.</summary>
+    private static string NotConfig(string alias = "")
+    {
+        var prefix = alias.Length > 0 ? alias + "." : "";
+        return $"({prefix}config_name IS NULL OR {prefix}config_name = '')";
+    }
 
     public List<FwVersionRecord> GetAllFwVersionsWithNames(bool includeArchived = false)
     {
@@ -286,6 +337,7 @@ public partial class Database
             JOIN equipment_groups   eg ON es.group_id     = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
             WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0 AND {NotDeleted("fv")}
+              AND {NotConfig("fv")}
               AND {NotSuperseded("fv")}
             ORDER BY fv.upload_date DESC
             """;
@@ -318,6 +370,33 @@ public partial class Database
         using var reader = ExecuteReader($"""
             SELECT * FROM fw_versions
             WHERE disk_path=@d AND version_raw=@v AND archived=0 AND {NotDeleted()}
+            ORDER BY id
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", diskPath);
+            cmd.Parameters.AddWithValue("@v", versionRaw);
+        });
+        while (reader.Read())
+            result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>Строки-КОНФИГУРАЦИИ этой прошивки — заранее заготовленные варианты одного и того же
+    /// ПО под разные комплектации шкафа (см. столбец config_name в Database.cs и FirmwareConfigService).
+    /// Опознаются той же парой disk_path + version_raw, что и все записи, делящие файлы, но в отличие
+    /// от копий под другие подтипы шкафа (FirmwareSubtypeLinkService — у тех config_name пуст) несут
+    /// непустое имя варианта.
+    ///
+    /// Только живые: удалённая конфигурация — это конфигурация, которую убрали, и возвращать её как
+    /// действующую нельзя. Порядок по id — тот же, в каком их заводили.</summary>
+    public List<FwVersionRecord> GetFwVersionConfigs(string diskPath, string versionRaw)
+    {
+        if (string.IsNullOrWhiteSpace(diskPath)) return new();
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader($"""
+            SELECT * FROM fw_versions
+            WHERE disk_path=@d AND version_raw=@v AND archived=0 AND {NotDeleted()}
+              AND config_name IS NOT NULL AND config_name <> ''
             ORDER BY id
             """, cmd =>
         {
@@ -362,7 +441,7 @@ public partial class Database
         var result = ExecuteScalar($"""
             SELECT COUNT(*) FROM fw_versions fv
             WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
-              AND {NotDeleted("fv")} AND {NotSuperseded("fv")}
+              AND {NotDeleted("fv")} AND {NotConfig("fv")} AND {NotSuperseded("fv")}
             """);
         return result is long l ? (int)l : 0;
     }
@@ -455,14 +534,39 @@ public partial class Database
     /// причине, что и панель: шкаф один, ревизия железа у него может смениться.
     ///
     /// Откатанные, архивные и удалённые версии не в счёт: их теги — это как раз то, от чего отказались.
+    /// Строки-КОНФИГУРАЦИИ тоже не в счёт (NotConfig): их теги — названия конкретных комплектаций
+    /// шкафа, и на новую версию они переносятся не «в общую кучу», а целыми конфигурациями (см.
+    /// FirmwareConfigService.CarryOver). Здесь нужны базовые теги самой прошивки.
     /// Возвращает null, если у шкафа ещё не было ни одной версии с тегами.</summary>
+    /// <summary>Последняя живая ОСНОВНАЯ запись этого шкафа (подтип+контроллер) — та, с которой новая
+    /// загрузка наследует набор конфигураций (см. FirmwareConfigService.CarryOver). Порядок и отборы
+    /// те же, что у GetLatestTagsForFirmware/GetLatestHmiForFirmware рядом: шкаф один, ревизия железа
+    /// у него может смениться, а откатанные/архивные/удалённые версии не в счёт.
+    /// <paramref name="exceptId"/> — исключить строку, которую только что завели сами (иначе новая
+    /// версия оказалась бы «предыдущей» сама себе).</summary>
+    public FwVersionRecord? GetLatestPrimaryFwVersion(int subtypeId, int controllerId, int exceptId = 0)
+    {
+        using var reader = ExecuteReader($"""
+            SELECT * FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND id<>@x
+              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()} AND {NotConfig()}
+            ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+            cmd.Parameters.AddWithValue("@x", exceptId);
+        });
+        return reader.Read() ? ReadFwVersion(reader) : null;
+    }
+
     public (string Tags, string VersionRaw)? GetLatestTagsForFirmware(int subtypeId, int controllerId)
     {
         using var reader = ExecuteReader($"""
             SELECT tags, version_raw FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c
               AND tags IS NOT NULL AND TRIM(tags) != ''
-              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
+              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()} AND {NotConfig()}
             ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
             """, cmd =>
         {
@@ -736,7 +840,7 @@ public partial class Database
             SELECT fv.*, cm.name AS ctrl_name
             FROM fw_versions fv
             JOIN controller_models cm ON fv.controller_id = cm.id
-            WHERE fv.subtype_id=@s AND fv.controller_id=@c AND {NotDeleted("fv")}
+            WHERE fv.subtype_id=@s AND fv.controller_id=@c AND {NotDeleted("fv")} AND {NotConfig("fv")}
             """;
         if (!includeArchived) sql += " AND fv.archived=0";
         sql += " ORDER BY fv.dt_str DESC, fv.hw_version DESC, fv.sw_version DESC, fv.id DESC";
@@ -774,6 +878,7 @@ public partial class Database
             JOIN equipment_groups   eg ON es.group_id    = eg.id
             JOIN controller_models  cm ON fv.controller_id = cm.id
             WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND {NotDeleted("fv")}
+              AND {NotConfig("fv")}
             ORDER BY fv.id DESC
             """))
         {
@@ -845,6 +950,7 @@ public partial class Database
             Released = GetBool(r, "released"),
             ManualCurrent = GetBool(r, "manual_current"),
             SyncId = GetString(r, "sync_id"),
+            ConfigName = GetString(r, "config_name"),
         };
     }
 }

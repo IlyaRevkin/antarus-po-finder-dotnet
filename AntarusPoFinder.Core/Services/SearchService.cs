@@ -30,6 +30,16 @@ public class HierarchyResult
     public string VersionRaw { get; init; } = "";
     public string Description { get; init; } = "";
     public string Tags { get; init; } = "";
+
+    /// <summary>Имя КОНФИГУРАЦИИ шкафа, если выдача попала именно в неё (см. столбец config_name в
+    /// Database.cs и FirmwareConfigService). Пусто — обычная прошивка, показывать нечего.
+    ///
+    /// Конфигурация — не отдельная прошивка: файлы, номер версии и папка на диске те же самые,
+    /// отличается только комплектация шкафа, под которую вариант заранее заготовлен («2 насоса»,
+    /// «2 насоса + жокей и задвижка»). Выдача поиска отдаёт одну строку на прошивку — ту конфигурацию,
+    /// чьи теги совпали с запросом, — поэтому карточке нужно показать, ЧТО ИМЕННО совпало: без пометки
+    /// наладчик видит обычную карточку прошивки и не понимает, почему у неё «не те» теги.</summary>
+    public string ConfigName { get; init; } = "";
     public DateTime? UploadDate { get; init; }
     public int Score { get; init; }
     public int FwVersionId { get; init; }
@@ -193,6 +203,7 @@ public static class SearchService
             VersionRaw = row.VersionRaw,
             Description = row.Description,
             Tags = row.Tags,
+            ConfigName = row.ConfigName,
             UploadDate = uploadDate,
             Score = score,
             UsageCount = usageCount,
