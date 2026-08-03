@@ -121,29 +121,36 @@ public sealed class SegneticsLoaderBackend : IFirmwareLoaderBackend
         if (!IsAvailable)
             return LoaderResult.Fail(UnavailableReason ?? "Segnetics Loader Automation недоступен.");
 
-        if (request.Operation != LoaderOperation.Deploy)
-            return LoaderResult.Fail("Searcher поддерживает только интерактивную загрузку проекта в ПЛК.");
+        if (request.Operation is not (LoaderOperation.Deploy or LoaderOperation.Build))
+            return LoaderResult.Fail("Searcher поддерживает только загрузку проекта в ПЛК и сборку LFS.");
 
         if (!File.Exists(request.SourcePath))
             return LoaderResult.Fail($"Файл проекта не найден: {request.SourcePath}");
 
+        var isBuild = request.Operation == LoaderOperation.Build;
+        var isPslSource = string.Equals(
+            Path.GetExtension(request.SourcePath), LoaderFiles.PslExtension, StringComparison.OrdinalIgnoreCase);
         var operationId = $"finder-{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}";
-        if (!string.IsNullOrWhiteSpace(request.OutputPath) &&
-            !string.Equals(Path.GetExtension(request.SourcePath), ".psl", StringComparison.OrdinalIgnoreCase))
-        {
+        if (isBuild && !isPslSource)
+            return LoaderResult.Fail("Собрать LFS можно только из PSL-проекта.");
+        if (!string.IsNullOrWhiteSpace(request.OutputPath) && !isPslSource)
             return LoaderResult.Fail("Сохранение выходного LFS поддерживается только при загрузке PSL-проекта.");
-        }
 
+        // Для build поле preparation по контракту Automation должно отсутствовать (или быть "none"):
+        // сборка к ПЛК не подключается, форматировать и обновлять ядро там нечему.
         var startRequest = new Dictionary<string, object?>
         {
             ["protocolVersion"] = ProtocolVersion,
             ["operationId"] = operationId,
-            ["action"] = "deploy",
+            ["action"] = isBuild ? "build" : "deploy",
             ["artifactPath"] = request.SourcePath,
-            ["preparation"] = request.Options.FormatAndUpdateFirmware
-                ? "formatAndUpdateFirmware"
-                : "none",
         };
+        if (!isBuild)
+        {
+            startRequest["preparation"] = request.Options.FormatAndUpdateFirmware
+                ? "formatAndUpdateFirmware"
+                : "none";
+        }
         if (!string.IsNullOrWhiteSpace(request.OutputPath))
         {
             startRequest["outputPath"] = Path.GetFullPath(request.OutputPath);
@@ -264,7 +271,7 @@ public sealed class SegneticsLoaderBackend : IFirmwareLoaderBackend
                         terminalSeen = true;
                         var completedMessage = TryReadString(root, "message", out var completed)
                             ? completed
-                            : "Проект загружен в ПЛК.";
+                            : isBuild ? "LFS собран." : "Проект загружен в ПЛК.";
                         ReportWarnings(root, progress);
                         var artifacts = TryReadString(root, "outputPath", out var outputPath)
                             ? new[] { outputPath }

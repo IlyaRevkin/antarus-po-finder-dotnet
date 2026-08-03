@@ -289,11 +289,93 @@ public class LoaderBackendTests
         Assert.Equal(Path.Combine(disk, "project.psl"), files.PslPath);
     }
 
+    [Fact]
+    public void LoaderFiles_FindDeploymentFiles_HonoursOperatorChoicePerType()
+    {
+        // Пачка прошивок в одной папке версии: оператор выбрал в модерации конкретный .lfs — заливка
+        // обязана взять именно его. Подсказка на .psl при этом не должна подменять поиск .lfs.
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_1.lfs"), "a");
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_2.lfs"), "b");
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_1.psl"), "c");
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_2.psl"), "d");
+
+        var chosenLfs = LoaderFiles.FindDeploymentFiles(new[] { root.Path }, "шкаф_2.lfs");
+        Assert.Equal(Path.Combine(root.Path, "шкаф_2.lfs"), chosenLfs.LfsPath);
+        Assert.Equal(Path.Combine(root.Path, "шкаф_1.psl"), chosenLfs.PslPath);
+
+        var chosenPsl = LoaderFiles.FindDeploymentFiles(new[] { root.Path }, "шкаф_2.psl");
+        Assert.Equal(Path.Combine(root.Path, "шкаф_1.lfs"), chosenPsl.LfsPath);
+        Assert.Equal(Path.Combine(root.Path, "шкаф_2.psl"), chosenPsl.PslPath);
+    }
+
+    [Fact]
+    public void LoaderFiles_LfsNameFor_KeepsProjectName()
+    {
+        Assert.Equal("проект.lfs", LoaderFiles.LfsNameFor(@"C:\версия\проект.psl"));
+    }
+
+    [Fact]
+    public async Task AutomationBackend_BuildSendsBuildActionWithoutPreparation()
+    {
+        // Сборка .psl → .lfs идёт действием build: к ПЛК не подключается, поле preparation по
+        // контракту Automation в запросе отсутствовать обязано.
+        using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.psl");
+        var outputPath = Path.Combine(root.Path, "out", "project.lfs");
+        File.WriteAllText(source, "project");
+        var script = WriteScript(root.Path, """
+            $request = ([Console]::In.ReadLine() | ConvertFrom-Json)
+            if ($request.action -ne 'build' -or
+                $request.PSObject.Properties.Name -contains 'preparation' -or
+                $request.outputPath -eq $null) { exit 9 }
+            $event = [ordered]@{
+                protocolVersion = 1
+                operationId = $request.operationId
+                event = 'completed'
+                outputPath = $request.outputPath
+            }
+            [Console]::Out.WriteLine(($event | ConvertTo-Json -Compress -Depth 8))
+            [Console]::Out.Flush()
+            $null = [Console]::In.ReadToEnd()
+            exit 0
+            """);
+        var backend = CreatePowerShellBackend(script);
+
+        var result = await backend.RunAsync(
+            Request(source, outputPath: outputPath, operation: LoaderOperation.Build),
+            new CollectingProgress(),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("LFS собран.", result.Message);
+        Assert.Equal(Path.GetFullPath(outputPath), Assert.Single(result.Artifacts));
+    }
+
+    [Fact]
+    public async Task AutomationBackend_RefusesToBuildFromLfs()
+    {
+        using var root = new TempRoot();
+        var source = Path.Combine(root.Path, "project.lfs");
+        File.WriteAllText(source, "payload");
+        var backend = CreatePowerShellBackend(WriteScript(root.Path, "exit 9"));
+
+        var result = await backend.RunAsync(
+            Request(source, operation: LoaderOperation.Build),
+            new CollectingProgress(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("только из PSL", result.Message);
+    }
+
     private static LoaderRequest Request(
         string source,
         bool formatAndUpdate = false,
-        string? outputPath = null) => new()
+        string? outputPath = null,
+        LoaderOperation operation = LoaderOperation.Deploy) => new()
     {
+        Operation = operation,
         SourcePath = source,
         WorkspaceDir = Path.GetDirectoryName(source)!,
         OutputPath = outputPath,
