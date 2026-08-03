@@ -28,13 +28,15 @@
                 <TextBlock Grid.Column="0" Text="Папка осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <TextBlock Grid.Column="1" x:Name="ProtoPathLabel" Text="не задана" Style="{StaticResource MutedText}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"/>
+                <Button Grid.Column="2" Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OpenProtocolFolder_Click"
+                        ToolTip="Открыть папку осмотра в проводнике"/>
                 <Button Grid.Column="3" Content="Сканировать" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="ScanDocument_Click"
                         ToolTip="Использует сохранённое качество сканирования — настраивается ниже, в «Настройки осмотра»."/>
                 <!-- Redundant "Очистить папку осмотра" button removed from here — same action lives in
                      the settings drawer below, right next to the auto-cleanup interval it's a manual
                      override of, which is a more natural place for it than the main toolbar. -->
-                <Button Grid.Column="5" x:Name="InspectionSettingsToggle" Content="⚙ Настройки осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="InspectionSettingsToggle_Click"/>
+                <Button Grid.Column="5" x:Name="InspectionSettingsToggle" Content="⚙ Настройки осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="InspectionSettingsToggle_Click"
+                        ToolTip="Качество сканирования и автоочистка папки осмотра"/>
             </Grid>
 
             <!-- Автоочистка/качество сканирования — редко трогаемые настройки "один раз задал и забыл",
@@ -57,14 +59,17 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Автоочистка папки осмотра:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="InspectionCleanupDaysInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Дни"/>
+                        <TextBox x:Name="InspectionCleanupDaysInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Дни"
+                                 LostFocus="InspectionCleanup_LostFocus" KeyDown="InspectionCleanup_KeyDown"/>
                         <TextBlock Text="дн." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="InspectionCleanupHoursInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Часы"/>
+                        <TextBox x:Name="InspectionCleanupHoursInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Часы"
+                                 LostFocus="InspectionCleanup_LostFocus" KeyDown="InspectionCleanup_KeyDown"/>
                         <TextBlock Text="ч." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="InspectionCleanupMinutesInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Минуты"/>
+                        <TextBox x:Name="InspectionCleanupMinutesInput" Width="40" Height="30" VerticalContentAlignment="Center" Margin="0,0,2,0" ToolTip="Минуты"
+                                 LostFocus="InspectionCleanup_LostFocus" KeyDown="InspectionCleanup_KeyDown"/>
                         <TextBlock Text="мин." VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveInspectionCleanupDays_Click"/>
-                        <Button Content="Очистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ClearProtocolFolder_Click"/>
+                        <Button Content="Очистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ClearProtocolFolder_Click"
+                                ToolTip="Удалить накопленные файлы из папки осмотра прямо сейчас, не дожидаясь автоочистки"/>
                     </StackPanel>
                     <TextBlock Text="0/0/0 — отключено. Иначе файлы старше указанного времени периодически удаляются автоматически (при запуске и вместе с фоновой синхронизацией)."
                                Style="{StaticResource MutedText}" FontStyle="Italic" TextWrapping="Wrap" Margin="0,6,0,0"/>
@@ -143,7 +148,8 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" x:Name="PreviewTitleText" Text="Предпросмотр" Style="{StaticResource SubtitleText}" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="Удалить файл" Style="{StaticResource DangerButton}" Click="DeleteFile_Click"/>
+                    <Button Grid.Column="1" Content="Удалить файл" Style="{StaticResource DangerButton}" Click="DeleteFile_Click"
+                            ToolTip="Удалить выбранные файлы из папки осмотра безвозвратно"/>
                 </Grid>
 
                 <!-- Image toolbar: only shown while an image is selected (see FilesList_SelectionChanged).

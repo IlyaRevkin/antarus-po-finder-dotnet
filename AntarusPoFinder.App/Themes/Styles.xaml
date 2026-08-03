@@ -18,6 +18,12 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
     </Style>
 
+    <!-- Внешний вид подсказок. Скорость их появления задаётся НЕ здесь: ToolTipService.
+         InitialShowDelay/ShowDuration — присоединённые свойства ЭЛЕМЕНТА-владельца (любого
+         FrameworkElement), а не самого ToolTip, и неявным стилем их на всё приложение не выставить —
+         пришлось бы перечислять каждый тип контрола, включая Border и RadioButton, у которых своего
+         неявного стиля здесь нет. Поэтому они переопределены разом для FrameworkElement в
+         App.OnStartup (см. ApplyToolTipTiming) — единственный способ накрыть всё приложение. -->
     <Style TargetType="{x:Type ToolTip}">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>

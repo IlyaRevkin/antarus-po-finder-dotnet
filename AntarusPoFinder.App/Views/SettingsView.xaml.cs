@@ -298,15 +298,30 @@ public partial class SettingsView : UserControl
 
     private void RefreshReservations_Click(object sender, RoutedEventArgs e) => LoadReservationsTab();
 
-    private void SaveReservationTtl_Click(object sender, RoutedEventArgs e)
+    private void ReservationTtl_LostFocus(object sender, RoutedEventArgs e) => SaveReservationTtl();
+
+    private void ReservationTtl_KeyDown(object sender, KeyEventArgs e)
     {
-        if (!int.TryParse(ReservationTtlInput.Text.Trim(), out var hours) || hours < 0)
+        if (e.Key == Key.Enter) SaveReservationTtl();
+    }
+
+    /// <summary>Автосохранение вместо кнопки «Сохранить» (см. SettingsAutoSave): мусорный ввод не
+    /// открывает модальное окно — поле возвращается к сохранённому значению, причина уходит в нижнюю
+    /// строку состояния.</summary>
+    private void SaveReservationTtl()
+    {
+        var edit = SettingsAutoSave.ParseNumber(ReservationTtlInput.Text, _services.Cfg.ReservationTtlHours(), min: 0,
+            "Срок резерва: нужно целое число часов (0 — без ограничения)");
+        if (edit.Invalid)
         {
-            AppMessageBox.Show("Введите целое число часов (0 — без ограничения).", "Резервация номеров", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ReservationTtlInput.Text = edit.Value.ToString();
+            _host.ShowStatus(edit.Message, category: NotificationCategory.FirmwareAndParams);
             return;
         }
-        _services.Cfg.SetReservationTtlHours(hours);
-        _host.ShowStatus(hours == 0 ? "Резервация номеров больше не истекает по умолчанию" : $"Срок резерва по умолчанию: {hours} ч", category: NotificationCategory.FirmwareAndParams);
+        if (!edit.Save) return;
+
+        _services.Cfg.SetReservationTtlHours(edit.Value);
+        _host.ShowStatus(edit.Value == 0 ? "Резервация номеров больше не истекает по умолчанию" : $"Срок резерва по умолчанию: {edit.Value} ч", category: NotificationCategory.FirmwareAndParams);
     }
 
     private void CancelReservation_Click(object sender, RoutedEventArgs e)
@@ -447,14 +462,26 @@ public partial class SettingsView : UserControl
 
     // ── Общие ─────────────────────────────────────────────────────────────────
 
+    /// <summary>true, пока LoadGeneral раскладывает сохранённые значения по контролам. Все поля
+    /// вкладки «Общие» теперь автосохраняются по изменению, и без этого флага само наполнение формы
+    /// поднимало бы Checked/SelectionChanged и писало в конфиг то, что только что из него прочитало.
+    /// Сами обработчики и так не сохраняют неизменившееся значение (SettingsAutoSave), флаг — второй
+    /// рубеж и защита от лишней записи в общий конфиг.</summary>
+    private bool _loadingGeneral;
+
     private void LoadGeneral()
     {
+        _loadingGeneral = true;
+        try { LoadGeneralCore(); }
+        finally { _loadingGeneral = false; }
+    }
+
+    private void LoadGeneralCore()
+    {
         // Пароли хранятся хешированными (см. ConfigService.SetAdminPassword/SetProgrammerPassword) —
-        // хеш нельзя развернуть обратно в исходный пароль, поэтому поля больше не подставляют
-        // «текущий пароль», как раньше (когда там реально лежал открытый текст). SavePasswords_Click
-        // ниже трактует пустое поле АДМИНИСТРАТОРА как «не менять» именно из-за этого — иначе первое
-        // же открытие Настроек и нажатие «Сохранить пароли» без единого изменения тихо обнулило бы
-        // его пароль. Пустое поле ПРОГРАММИСТА трактуется иначе — как «очистить» (см. её комментарий).
+        // хеш нельзя развернуть обратно в исходный пароль, поэтому поля не подставляют «текущий
+        // пароль». Именно поэтому SavePassword ниже игнорирует пустое поле («не трогать»), а убрать
+        // пароль программиста можно только явной кнопкой (см. ClearProgrammerPassword_Click).
         AdminPwdInput.Password = "";
         ProgPwdInput.Password = "";
 
@@ -501,8 +528,17 @@ public partial class SettingsView : UserControl
 
     // ── Поиск и лоадер ─────────────────────────────────────────────────────
 
-    private void SearchAutoSync_Changed(object sender, RoutedEventArgs e) =>
-        _services.Cfg.SetSearchAutoSync(SearchAutoSyncCheck.IsChecked == true);
+    private void SearchAutoSync_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        var on = SearchAutoSyncCheck.IsChecked == true;
+        if (on == _services.Cfg.SearchAutoSync()) return;
+
+        _services.Cfg.SetSearchAutoSync(on);
+        _host.ShowStatus(on
+            ? "Найденные прошивки будут подтягиваться в локальную копию автоматически"
+            : "Автоподтягивание найденных прошивок выключено");
+    }
 
     private void BrowseLoaderExe_Click(object sender, RoutedEventArgs e)
     {
@@ -514,19 +550,26 @@ public partial class SettingsView : UserControl
         if (dlg.ShowDialog() != true) return;
 
         LoaderExePathInput.Text = dlg.FileName;
-        SaveLoaderExePath(showStatus: true);
+        SaveLoaderExePath();
     }
 
-    private void LoaderExePathInput_LostFocus(object sender, RoutedEventArgs e) =>
-        SaveLoaderExePath(showStatus: false);
+    private void LoaderExePathInput_LostFocus(object sender, RoutedEventArgs e) => SaveLoaderExePath();
 
-    private void SaveLoaderExePath(bool showStatus)
+    private void LoaderExePathInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveLoaderExePath();
+    }
+
+    /// <summary>Сообщение в статус-строку выводится всегда, а не только после «Обзор…»: сохранение
+    /// происходит лишь когда путь реально изменился (SettingsAutoSave.PathChanged), так что молчание
+    /// при обычном проходе фокусом по форме обеспечивается само собой.</summary>
+    private void SaveLoaderExePath()
     {
         var path = LoaderExePathInput.Text.Trim();
-        if (string.Equals(path, _services.Cfg.LoaderExePath(), StringComparison.OrdinalIgnoreCase)) return;
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.LoaderExePath())) return;
 
         _services.Cfg.SetLoaderExePath(path);
-        if (showStatus) _host.ShowStatus("Путь к лоадеру сохранён");
+        _host.ShowStatus(path.Length == 0 ? "Будет использован встроенный Segnetics Loader" : "Путь к лоадеру сохранён");
     }
 
     /// <summary>Как SearchAutoSync_Changed выше — сохраняется сразу по щелчку, без отдельной кнопки
@@ -534,8 +577,17 @@ public partial class SettingsView : UserControl
     /// при каждом переходе на страницу «Загрузка прошивки» (см. UploadView.ReloadCombos), так что
     /// уже открытая где-то в фоне вкладка Загрузки подхватит новое значение не мгновенно, а при
     /// следующем возврате на неё — см. комментарий у самой галочки в XAML.</summary>
-    private void UnifiedPlcHmiZone_Changed(object sender, RoutedEventArgs e) =>
-        _services.Cfg.SetUnifiedPlcHmiZoneEnabled(UnifiedPlcHmiZoneCheck.IsChecked == true);
+    private void UnifiedPlcHmiZone_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        var on = UnifiedPlcHmiZoneCheck.IsChecked == true;
+        if (on == _services.Cfg.UnifiedPlcHmiZoneEnabled()) return;
+
+        _services.Cfg.SetUnifiedPlcHmiZoneEnabled(on);
+        _host.ShowStatus(on
+            ? "Единая зона ПЛК+HMI включена — применится при следующем открытии «Загрузки прошивки»"
+            : "Вернулись к раздельным зонам ПЛК и HMI");
+    }
 
     // ── Раскладка клавиатуры (обучение подсказки поиска) ────────────────────
 
@@ -796,15 +848,34 @@ public partial class SettingsView : UserControl
 
     private void AppUpdatePathInput_LostFocus(object sender, RoutedEventArgs e) => SaveAppUpdatePath();
 
+    private void AppUpdatePath_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveAppUpdatePath();
+    }
+
     private void SaveAppUpdatePath()
     {
+        if (_loadingGeneral) return;
         var path = AppUpdatePathInput.Text.Trim();
-        if (string.Equals(path, _services.Cfg.AppUpdatePath(), StringComparison.OrdinalIgnoreCase)) return;
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.AppUpdatePath())) return;
 
         _services.Cfg.SetAppUpdatePath(path);
+        // Формулировка учитывает общую папку: очистка личного пути не означает «теперь GitHub» —
+        // сначала пробуется общая папка (см. UpdateFolderResolver).
         _host.ShowStatus(path.Length == 0
                 ? "Папка обновлений этой машины очищена — будет использована общая папка или GitHub"
                 : $"Папка обновлений сохранена: {path}",
+            category: NotificationCategory.AppUpdates);
+    }
+
+    private void AppAutoUpdate_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        var on = AppAutoUpdateCheck.IsChecked == true;
+        if (on == _services.Cfg.AppAutoUpdate()) return;
+
+        _services.Cfg.SetAppAutoUpdate(on);
+        _host.ShowStatus(on ? "Обновления будут ставиться автоматически при запуске" : "Автоустановка обновлений выключена",
             category: NotificationCategory.AppUpdates);
     }
 
@@ -817,16 +888,6 @@ public partial class SettingsView : UserControl
         _host.ShowStatus(path.Length == 0
                 ? "Общая папка обновлений очищена"
                 : $"Общая папка обновлений сохранена: {path} (уедет на другие машины со следующей отправкой конфига)",
-            category: NotificationCategory.AppUpdates);
-    }
-
-    private void AppAutoUpdate_Changed(object sender, RoutedEventArgs e)
-    {
-        var value = AppAutoUpdateCheck.IsChecked == true;
-        if (value == _services.Cfg.AppAutoUpdate()) return;
-
-        _services.Cfg.SetAppAutoUpdate(value);
-        _host.ShowStatus(value ? "Автообновление включено" : "Автообновление выключено",
             category: NotificationCategory.AppUpdates);
     }
 
@@ -946,60 +1007,137 @@ public partial class SettingsView : UserControl
         UpdateFirmwareActionState();
     }
 
-    /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
-    /// развернуть обратно). Пустое поле АДМИНИСТРАТОРА трактуется как «не менять этот пароль» —
-    /// иначе открыть Настройки и нажать «Сохранить пароли», не тронув оба поля, тихо обнулило бы
-    /// пароль администратора до пустой строки (единственный аварийный вход при проблемах с AD, его
-    /// нельзя сносить случайно). Пустое поле ПРОГРАММИСТА, наоборот, трактуется как «очистить» —
-    /// раньше для этого была отдельная кнопка «Очистить пароль программиста», её убрали (не нужна
-    /// пользователю), и явное сохранение с пустым полем — единственный оставшийся способ вернуть
-    /// пароль программиста в состояние «не задан» (ConfigService.SetProgrammerPassword("") хранит
-    /// пустую строку как есть, не хешируя её, — VerifyProgrammerPassword трактует это как «пароль не
-    /// требуется», см. её комментарий). Асимметрия между полями — намеренная: у пароля программиста
-    /// нет того же риска «случайно открыть вход кому угодно» одним нажатием, что у администратора,
-    /// потому что нажатие «Сохранить пароли» — явное действие пользователя, а не побочный эффект
-    /// открытия вкладки.</summary>
-    private void SavePasswords_Click(object sender, RoutedEventArgs e)
-    {
-        if (!string.IsNullOrEmpty(AdminPwdInput.Password))
-            _services.Cfg.SetAdminPassword(AdminPwdInput.Password);
-        _services.Cfg.SetProgrammerPassword(ProgPwdInput.Password);
+    private void Password_LostFocus(object sender, RoutedEventArgs e) => SavePassword(sender as PasswordBox);
 
-        AdminPwdInput.Password = "";
-        ProgPwdInput.Password = "";
-        _host.ShowStatus("Пароли сохранены");
+    private void Password_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SavePassword(sender as PasswordBox);
     }
 
-    private void SaveAdGroups_Click(object sender, RoutedEventArgs e)
+    /// <summary>Поля не подставляются текущим паролем при загрузке (см. LoadGeneral — хеш нельзя
+    /// развернуть обратно), поэтому пустое поле здесь означает «не трогать этот пароль», а не
+    /// «сделать пароль пустым»: иначе обычный проход фокусом по вкладке молча снёс бы пароль
+    /// администратора — единственный аварийный вход при проблемах с доменом.
+    ///
+    /// Кнопки «Сохранить пароли» больше нет — набранный пароль уезжает в конфиг по уходу из поля и
+    /// по Enter. Убрать пароль программиста совсем можно только явным действием, кнопкой
+    /// «Убрать пароль программиста» (ConfigService.SetProgrammerPassword("") хранит пустую строку как
+    /// есть, не хешируя её, — VerifyProgrammerPassword трактует это как «пароль не требуется»).
+    /// Само поле после сохранения очищается: показывать набранный пароль дальше незачем.</summary>
+    private void SavePassword(PasswordBox? box)
     {
-        _services.Cfg.Set("ad_domain", AdDomainInput.Text.Trim());
-        _services.Cfg.Set("ad_group_administrator", AdGroupAdminInput.Text.Trim());
-        _services.Cfg.Set("ad_group_programmer", AdGroupProgInput.Text.Trim());
-        _services.Cfg.Set("ad_group_naladchik", AdGroupNaladchikInput.Text.Trim());
-        _services.Cfg.SetAdHttpUrl(AdHttpUrlInput.Text);
-        _services.Cfg.SetAdAuthMode(AdModeHttpRadio.IsChecked == true ? "http" : AdModeBothRadio.IsChecked == true ? "both" : "ldap");
+        if (box is null || box.Password.Length == 0) return;
 
-        _services.Cfg.SetAdRequireLogin(AdRequireLoginCheck.IsChecked == true);
-        if (int.TryParse(AdRequireLoginDaysInput.Text.Trim(), out var days) && days > 0)
-            _services.Cfg.SetAdRequireLoginDefaultDays(days);
+        if (ReferenceEquals(box, AdminPwdInput))
+        {
+            _services.Cfg.SetAdminPassword(box.Password);
+            _host.ShowStatus("Пароль администратора сохранён");
+        }
+        else
+        {
+            _services.Cfg.SetProgrammerPassword(box.Password);
+            _host.ShowStatus("Пароль программиста сохранён");
+        }
+        box.Password = "";
+    }
 
-        _host.ShowStatus("Группы и способ проверки пароля AD сохранены");
+    private void ClearProgrammerPassword_Click(object sender, RoutedEventArgs e)
+    {
+        var reply = AppMessageBox.Show(
+            "Убрать пароль программиста?\n\nРоль «Программист» перестанет его спрашивать — переключиться на неё сможет любой, кто открыл приложение.",
+            "Пароли доступа", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _services.Cfg.SetProgrammerPassword("");
+        ProgPwdInput.Password = "";
+        _host.ShowStatus("Пароль программиста убран — роль больше его не спрашивает");
+    }
+
+    private void AdSettings_LostFocus(object sender, RoutedEventArgs e) => SaveAdSettings();
+
+    private void AdSettings_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveAdSettings();
+    }
+
+    private void AdSettings_Changed(object sender, RoutedEventArgs e) => SaveAdSettings();
+
+    /// <summary>Весь AD-блок сохраняется сам, без кнопки «Сохранить группы и способ»: текстовые поля —
+    /// по уходу фокуса и по Enter, переключатель способа и галочка «требовать вход» — сразу по выбору.
+    /// Пишем только те ключи, что реально изменились, и сообщаем в статус-строку одним сообщением —
+    /// иначе каждое открытие вкладки и каждый переход между полями сыпали бы уведомления.
+    ///
+    /// Срок повторного входа (AdRequireLoginDaysInput) здесь НЕ трогается — у него своё поле и своё
+    /// автосохранение (SaveAdRequireLoginDays), видимое всем ролям, а этот блок целиком скрыт от
+    /// наладчика/программиста (см. ApplyRoleVisibility).</summary>
+    private void SaveAdSettings()
+    {
+        if (_loadingGeneral) return;
+
+        var changed = new List<string>();
+        void SaveKey(string key, string value, string label)
+        {
+            if (!SettingsAutoSave.TextChanged(value, _services.Cfg.Get(key))) return;
+            _services.Cfg.Set(key, value.Trim());
+            changed.Add(label);
+        }
+
+        SaveKey("ad_domain", AdDomainInput.Text, "домен");
+        SaveKey("ad_group_administrator", AdGroupAdminInput.Text, "группа администратора");
+        SaveKey("ad_group_programmer", AdGroupProgInput.Text, "группа программиста");
+        SaveKey("ad_group_naladchik", AdGroupNaladchikInput.Text, "группа наладчика");
+
+        var url = AdHttpUrlInput.Text.Trim();
+        if (SettingsAutoSave.TextChanged(url, _services.Cfg.AdHttpUrl()))
+        {
+            _services.Cfg.SetAdHttpUrl(url);
+            changed.Add("URL веб-сервера");
+        }
+
+        var mode = AdModeHttpRadio.IsChecked == true ? "http" : AdModeBothRadio.IsChecked == true ? "both" : "ldap";
+        if (mode != _services.Cfg.AdAuthMode())
+        {
+            _services.Cfg.SetAdAuthMode(mode);
+            changed.Add("способ проверки пароля");
+        }
+
+        var requireLogin = AdRequireLoginCheck.IsChecked == true;
+        if (requireLogin != _services.Cfg.AdRequireLogin())
+        {
+            _services.Cfg.SetAdRequireLogin(requireLogin);
+            changed.Add(requireLogin ? "вход по AD включён" : "вход по AD выключен");
+        }
+
+        if (changed.Count == 0) return;
+        _host.ShowStatus("Настройки AD сохранены: " + string.Join(", ", changed));
+    }
+
+    private void AdRequireLoginDays_LostFocus(object sender, RoutedEventArgs e) => SaveAdRequireLoginDays();
+
+    private void AdRequireLoginDays_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveAdRequireLoginDays();
     }
 
     /// <summary>The one AD-related field naladchik/programmer can see (see ApplyRoleVisibility) —
     /// saves only the "TTL days" value, without touching domain/groups/mode/URL/the require-login
     /// switch itself, since those controls aren't even in the visual tree for those two roles.
-    /// Administrator has this same button too (redundant with "Сохранить группы и способ" above,
-    /// which also writes this field) — harmless, just an extra way to save the one value.</summary>
-    private void SaveAdRequireLoginDays_Click(object sender, RoutedEventArgs e)
+    /// Сохраняется само, по уходу фокуса и по Enter (кнопки «Сохранить» больше нет).</summary>
+    private void SaveAdRequireLoginDays()
     {
-        if (!int.TryParse(AdRequireLoginDaysInput.Text.Trim(), out var days) || days <= 0)
+        if (_loadingGeneral) return;
+        var edit = SettingsAutoSave.ParseNumber(AdRequireLoginDaysInput.Text, _services.Cfg.AdRequireLoginDefaultDays(), min: 1,
+            "Срок повторного входа по AD: нужно целое число дней больше нуля");
+        if (edit.Invalid)
         {
-            AppMessageBox.Show("Введите целое число дней больше нуля.", "Срок повторного входа по AD", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AdRequireLoginDaysInput.Text = edit.Value.ToString();
+            _host.ShowStatus(edit.Message);
             return;
         }
-        _services.Cfg.SetAdRequireLoginDefaultDays(days);
-        _host.ShowStatus($"Срок повторного входа по AD: {days} дн.");
+        if (!edit.Save) return;
+
+        _services.Cfg.SetAdRequireLoginDefaultDays(edit.Value);
+        _host.ShowStatus($"Срок повторного входа по AD: {edit.Value} дн.");
     }
 
     // ── Пользователи (собственный AD-ростер, Часть 2/3) ────────────────────────
@@ -1095,10 +1233,14 @@ public partial class SettingsView : UserControl
         _host.ShowStatus($"Пользователь «{row.AdLogin}» удалён");
     }
 
-    private void SaveMisc_Click(object sender, RoutedEventArgs e)
+    private void KeepArchives_Changed(object sender, RoutedEventArgs e)
     {
-        _services.Cfg.Set("keep_archives", KeepArchivesCheck.IsChecked == true ? "true" : "false");
-        _host.ShowStatus("Настройки сохранены");
+        if (_loadingGeneral) return;
+        var on = KeepArchivesCheck.IsChecked == true;
+        if (on == _services.Cfg.KeepArchives()) return;
+
+        _services.Cfg.Set("keep_archives", on ? "true" : "false");
+        _host.ShowStatus(on ? "Архивы будут храниться после извлечения" : "Архивы будут удаляться после извлечения");
     }
 
     // ── Иерархия ──────────────────────────────────────────────────────────────
@@ -2292,20 +2434,31 @@ public partial class SettingsView : UserControl
         if (dlg.ShowDialog() != true) return;
         if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
 
-        apps.Add(new AppRow { Name = Path.GetFileNameWithoutExtension(dlg.FileName), Path = dlg.FileName });
+        var name = Path.GetFileNameWithoutExtension(dlg.FileName);
+        apps.Add(new AppRow { Name = name, Path = dlg.FileName });
+        SaveApps($"Добавлено в быстрый доступ: {name}");
     }
 
     private void DeleteApp_Click(object sender, RoutedEventArgs e)
     {
         if (AppsGrid.SelectedItem is not AppRow row) return;
         (AppsGrid.ItemsSource as ObservableCollection<AppRow>)?.Remove(row);
+        SaveApps($"Убрано из быстрого доступа: {row.Name}");
     }
 
-    private void SaveApps_Click(object sender, RoutedEventArgs e)
+    /// <summary>Правка названия/пути прямо в таблице сохраняется по окончании строки. WPF записывает
+    /// отредактированное значение в объект строки уже ПОСЛЕ этого события, поэтому сохранение
+    /// откладывается на следующий проход диспетчера — иначе в конфиг ушло бы предыдущее значение
+    /// (тот же приём, что в LayoutFallbackGrid_CellEditEnding выше).</summary>
+    private void AppsGrid_RowEditEnding(object sender, DataGridRowEditEndingEventArgs e)
     {
-        AppsGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-        AppsGrid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (e.EditAction != DataGridEditAction.Commit) return;
+        Dispatcher.BeginInvoke(new Action(() => SaveApps("Быстрый доступ сохранён")),
+            System.Windows.Threading.DispatcherPriority.Background);
+    }
 
+    private void SaveApps(string statusMessage)
+    {
         if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
         var list = apps
             .Where(a => !string.IsNullOrWhiteSpace(a.Name) || !string.IsNullOrWhiteSpace(a.Path))
@@ -2313,6 +2466,6 @@ public partial class SettingsView : UserControl
             .ToList();
         _services.Cfg.SetQuickApps(list);
         _host.ReloadSidebarApps();
-        _host.ShowStatus("Быстрые приложения сохранены");
+        _host.ShowStatus(statusMessage);
     }
 }

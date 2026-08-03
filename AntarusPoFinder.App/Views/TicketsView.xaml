@@ -34,7 +34,8 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" Content="Прикрепить файлы…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AttachFiles_Click"/>
+                    <Button Grid.Column="0" Content="Прикрепить файлы…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AttachFiles_Click"
+                            ToolTip="Скриншот, лог или любой файл, поясняющий проблему — уедет вместе с тикетом"/>
                     <Button Grid.Column="1" x:Name="ClearAttachmentsBtn" Content="Очистить вложения" Style="{StaticResource SecondaryButton}"
                             Margin="0,0,8,0" Visibility="Collapsed" Click="ClearAttachments_Click"/>
                     <TextBlock Grid.Column="2" x:Name="AttachmentsSummaryText" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextWrapping="Wrap"/>
@@ -65,14 +66,19 @@
         </DataGrid>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal">
-            <Button Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"/>
-            <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"/>
+            <Button Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"
+                    ToolTip="Полный текст тикета и вложения — то же, что двойной клик по строке"/>
+            <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"
+                    ToolTip="Перечитать список — тикеты с других машин приезжают синхронизацией"/>
             <Button x:Name="TakeInProgressBtn" Content="Взять в работу" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
-                    Click="SetStatus_Click" Tag="in_progress" Visibility="Collapsed"/>
+                    Click="SetStatus_Click" Tag="in_progress" Visibility="Collapsed"
+                    ToolTip="Отметить, что тикетом занимаются — автор увидит это у себя"/>
             <Button x:Name="CloseTicketBtn" Content="Закрыть" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
-                    Click="SetStatus_Click" Tag="closed" Visibility="Collapsed"/>
+                    Click="SetStatus_Click" Tag="closed" Visibility="Collapsed"
+                    ToolTip="Пометить тикет решённым"/>
             <Button x:Name="ReopenTicketBtn" Content="Переоткрыть" Style="{StaticResource SecondaryButton}"
-                    Click="SetStatus_Click" Tag="open" Visibility="Collapsed"/>
+                    Click="SetStatus_Click" Tag="open" Visibility="Collapsed"
+                    ToolTip="Вернуть закрытый тикет в работу"/>
         </StackPanel>
     </Grid>
 </UserControl>
