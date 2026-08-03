@@ -151,6 +151,11 @@ public class FirmwareUploadResult
     public List<string> InheritedTags { get; init; } = new();
     public string InheritedTagsFromVersion { get; init; } = "";
 
+    /// <summary>Имена КОНФИГУРАЦИЙ шкафа, перенесённых с предыдущей версии на эту (см.
+    /// FirmwareConfigService.CarryOver). Пусто — у предыдущей версии их не было. Не предупреждение:
+    /// вызывающий просто сообщает оператору, что заготовленный ряд комплектаций никуда не делся.</summary>
+    public List<string> CarriedOverConfigs { get; init; } = new();
+
     public bool IsSuccess => Outcome == FirmwareUploadOutcome.Success;
 
     private static FirmwareUploadResult Fail(string message) =>
@@ -576,6 +581,18 @@ public static class FirmwareUploadService
         var newFwId = db.AddFwVersion(record);
         record.Id = newFwId;
 
+        // Конфигурации шкафа (заранее заготовленные комплектации — см. FirmwareConfigService)
+        // переезжают на новую версию так же, как теги и HMI-проект: они описывают ШКАФЫ, а не сборку
+        // программы, и шкафы от обновления прошивки никуда не деваются. Без этого «запараметрировать
+        // прошивку заранее» работало бы ровно до первого обновления.
+        var carriedConfigs = new List<string>();
+        if (newFwId > 0)
+        {
+            var previous = db.GetLatestPrimaryFwVersion(subOption.Id!.Value, mod.ControllerId, newFwId);
+            if (previous is not null)
+                carriedConfigs = FirmwareConfigService.CarryOver(db, previous, record);
+        }
+
         if (request.Reservation is not null && newFwId > 0)
             db.FulfillReservation(request.Reservation.Id!.Value, newFwId);
 
@@ -596,6 +613,7 @@ public static class FirmwareUploadService
             InheritedHmiFromVersion = inheritedHmiFrom,
             InheritedTags = plan.InheritedTags,
             InheritedTagsFromVersion = plan.InheritedTagsFromVersion,
+            CarriedOverConfigs = carriedConfigs,
         };
     }
 
