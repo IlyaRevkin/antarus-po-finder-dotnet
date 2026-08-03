@@ -624,6 +624,8 @@ public partial class UploadView : UserControl
             CtrlCombo.SelectedItem is not ControllerModification mod)
         {
             PreviewLabel.Text = "—";
+            // Наследовать теги не от чего, пока не выбраны шкаф и контроллер.
+            InheritedTagsHint.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -654,6 +656,26 @@ public partial class UploadView : UserControl
         string filename = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
 
         PreviewLabel.Text = $"{pathStr}\n{filename}";
+        UpdateInheritedTagsHint(subtype, mod);
+    }
+
+    /// <summary>Подсказка «теги предыдущей версии перенесутся» — считается тем же запросом, что и сама
+    /// загрузка (FirmwareUploadService.PreviousVersionTags), поэтому список в подсказке ровно тот,
+    /// который потом и допишется. Показывается только то, чего оператор ещё не ввёл сам: набранное им
+    /// вручную наследование не трогает.</summary>
+    private void UpdateInheritedTagsHint(EquipmentSubType subtype, ControllerModification mod)
+    {
+        var previous = FirmwareUploadService.PreviousVersionTags(_services.Db, subtype.Id!.Value, mod.ControllerId);
+        var own = new HashSet<string>(TagsEditor.Tags, StringComparer.OrdinalIgnoreCase);
+        var inherited = TagString.Parse(previous?.Tags ?? "").Where(t => !own.Contains(t)).ToList();
+
+        if (inherited.Count == 0)
+        {
+            InheritedTagsHint.Visibility = Visibility.Collapsed;
+            return;
+        }
+        InheritedTagsHint.Text = $"Перенесутся теги версии {previous!.Value.VersionRaw}: {string.Join(", ", inherited)}";
+        InheritedTagsHint.Visibility = Visibility.Visible;
     }
 
     // ── File selection ────────────────────────────────────────────────────────
@@ -975,6 +997,10 @@ public partial class UploadView : UserControl
                 // ярлык), поэтому явно говорим, сколько записей завелось помимо основной.
                 if (result.ExtraFwVersionIds.Count > 0)
                     msg += $"\n\nТа же версия добавлена ещё для {result.ExtraFwVersionIds.Count} подтип(ов) — ярлыком, без копирования файлов.";
+                // Наследование тегов с предыдущей версии — то же правило, что и у подтипов выше: молча
+                // дописанный тег легко потерять из виду, поэтому называем и сами теги, и версию-источник.
+                if (result.InheritedTags.Count > 0)
+                    msg += $"\n\nПеренесены теги версии {result.InheritedTagsFromVersion}: {string.Join(", ", result.InheritedTags)}";
                 if (result.Warnings.Count > 0)
                     msg += "\n\nПредупреждения:\n" + string.Join("\n", result.Warnings);
                 AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
