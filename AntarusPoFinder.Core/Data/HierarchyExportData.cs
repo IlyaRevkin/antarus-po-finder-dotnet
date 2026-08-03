@@ -69,6 +69,11 @@ public class ExportedReservation
 
 public class ExportedFwVersion
 {
+    /// <summary>Переносимый идентификатор строки прошивки (fw_versions.sync_id) — по нему импорт
+    /// в первую очередь и опознаёт «ту же самую» запись, откатываясь на прежний натуральный ключ
+    /// (подтип + контроллер + version_raw) только когда его нет. Пустая строка = экспорт со старой
+    /// версии приложения, поведение тогда ровно прежнее. Подробности — Database.cs, столбец sync_id.</summary>
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }
@@ -284,6 +289,12 @@ public class ImportCounts
     /// SubtypesRemoved/ControllersRemoved above, just for a table that can't use plain absence to
     /// mean "deleted" (fw_versions is additive-only otherwise).</summary>
     public int FwVersionsRemoved { get; set; }
+    /// <summary>Строки fw_versions, опознанные по sync_id, у которых разошёлся натуральный ключ, —
+    /// то есть версию на машине-источнике переименовали (переписали hw) или переназначили другому
+    /// контроллеру, и мы применили это НА МЕСТЕ вместо того, чтобы завести рядом дубликат (см.
+    /// ImportHierarchyDataCore). Отдельно от FwVersions: это правка тождества строки, а не её
+    /// содержимого, и в отчёте синхронизации её полезно видеть отдельно.</summary>
+    public int FwVersionsRenamed { get; set; }
     public int ParamFiles { get; set; }
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
@@ -300,6 +311,6 @@ public class ImportCounts
         ModificationsAdded + ModificationsUpdated + ModificationsRemoved + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
         ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
-        ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
+        ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + FwVersionsRenamed + ParamFiles +
         AppUsersAdded + AppUsersUpdated;
 }

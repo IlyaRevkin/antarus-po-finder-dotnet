@@ -102,7 +102,10 @@ public partial class Database : IDisposable
                  author_id         INTEGER REFERENCES users(id),
                  status            TEXT    NOT NULL DEFAULT 'active',
                  released          INTEGER NOT NULL DEFAULT 0,
-                 manual_current    INTEGER NOT NULL DEFAULT 0
+                 manual_current    INTEGER NOT NULL DEFAULT 0,
+                 -- Переносимый идентификатор строки для синхронизации между машинами — см.
+                 -- EnsureColumnsExist ниже (там же ALTER TABLE для уже существующих баз).
+                 sync_id           TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -339,8 +342,12 @@ public partial class Database : IDisposable
              );
              """);
 
-        EnsureIndexes();
+        // Порядок важен: EnsureColumnsExist сначала — индексы строятся по колонкам, которых на старой
+        // базе может ещё не быть (idx_fw_versions_sync_id по свежедобавленному fw_versions.sync_id;
+        // раньше все индексируемые колонки существовали в CREATE TABLE выше с самого начала, и порядок
+        // роли не играл).
         EnsureColumnsExist();
+        EnsureIndexes();
         SeedHierarchyDefaults();
         SeedAllowedExtensionsDefaults();
         SeedAllowedExtensionsHmiDefaults();
@@ -370,6 +377,7 @@ public partial class Database : IDisposable
     private void EnsureIndexes() => Exec("""
         CREATE INDEX IF NOT EXISTS idx_fw_versions_subtype_ctrl ON fw_versions(subtype_id, controller_id);
         CREATE INDEX IF NOT EXISTS idx_fw_versions_version_raw  ON fw_versions(version_raw);
+        CREATE INDEX IF NOT EXISTS idx_fw_versions_sync_id      ON fw_versions(sync_id);
         CREATE INDEX IF NOT EXISTS idx_param_files_subtype      ON param_files(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
         CREATE INDEX IF NOT EXISTS idx_fw_search_usage_version  ON fw_search_usage(fw_version_id);
@@ -426,6 +434,22 @@ public partial class Database : IDisposable
         // ExportHierarchyData/ImportHierarchyDataCore (kept IN the sync payload so the deletion itself
         // reaches every other machine, not just this one).
         AddColumnsIfMissing("fw_versions", ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
+
+        // sync_id: переносимый идентификатор строки прошивки — ровно тот же приём, что у
+        // equipment_groups/equipment_subtypes/controller_models выше, и по той же причине. До него
+        // синхронизация опознавала прошивку ТОЛЬКО натуральным ключом (подтип + контроллер +
+        // version_raw), а он не вечен: «переназначить версию другому контроллеру»
+        // (ReassignFwVersionController) меняет controller_id, переписывание hw — version_raw. После
+        // такой правки строка на машине-авторе и её копия у коллеги переставали быть «одной и той же»
+        // строкой: приехавшее удаление/вывод из модерации не находили, куда примениться, у коллеги
+        // вставлялся дубликат, а его исходная запись навсегда оставалась висеть в очереди модерации
+        // (жалоба «у коллеги старые удалённые прошивки висят на модерации»). sync_id переживает любую
+        // такую правку, поэтому состояние модерации и надгробие теперь доезжают до ТОЙ ЖЕ строки.
+        //
+        // Пустое значение = поведение ровно как раньше: и экспорт, и импорт откатываются на прежний
+        // натуральный ключ (снимок со старой версии приложения ключа не содержит вовсе). Заполняется
+        // BackfillSyncIds ниже — как и всем остальным таблицам.
+        AddColumnsIfMissing("fw_versions", ("sync_id", "TEXT NOT NULL DEFAULT ''"));
 
         // Задел (Задача 7): «сохранить у себя, не выгружать» — строка с is_local_only=1 просто
         // пропускается ExportHierarchyData (см. Database.ConfigExchange.cs), т.е. никогда не попадёт
@@ -505,7 +529,12 @@ public partial class Database : IDisposable
     /// instead of looking like a delete+insert.</summary>
     private void BackfillSyncIds()
     {
-        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications" })
+        // fw_versions здесь наравне со справочниками: у уже загруженных прошивок sync_id ещё нет, а
+        // без него импорт продолжал бы опознавать их только натуральным ключом. Разойтись машины при
+        // этом не могут: на первой же синхронизации строки совпадают по натуральному ключу, и
+        // получатель перенимает sync_id отправителя (см. ImportHierarchyDataCore) — дальше они
+        // связаны уже им.
+        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "fw_versions" })
         {
             var ids = QueryInts($"SELECT id FROM {table} WHERE sync_id IS NULL OR sync_id = ''");
             foreach (var id in ids)

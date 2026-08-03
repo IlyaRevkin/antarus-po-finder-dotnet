@@ -17,15 +17,21 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status)
+                upload_date,tags,author_id,status,sync_id)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status)
+                @upload_date,@tags,@author_id,@status,@sync_id)
             """, cmd =>
         {
+            // sync_id проставляется сразу при заведении строки, а не откладывается до ближайшего
+            // BackfillSyncIds на старте приложения: между загрузкой прошивки и следующим запуском
+            // помещается и синхронизация, и вывод из модерации, и удаление — всё то, чему этот
+            // идентификатор и нужен. Своё значение снаружи (v.SyncId) задаёт только импорт конфига,
+            // чтобы строка у всех машин осталась одной и той же.
+            cmd.Parameters.AddWithValue("@sync_id", string.IsNullOrEmpty(v.SyncId) ? Guid.NewGuid().ToString() : v.SyncId);
             cmd.Parameters.AddWithValue("@subtype_id", v.SubtypeId);
             cmd.Parameters.AddWithValue("@controller_id", v.ControllerId);
             cmd.Parameters.AddWithValue("@eq_prefix", v.EqPrefix);
@@ -165,15 +171,18 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags)
+                upload_date,tags,sync_id)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags)
+                @upload_date,@tags,@sync_id)
             """, cmd =>
         {
+            // Копия — самостоятельная строка, поэтому свой собственный sync_id, а не унаследованный
+            // от оригинала: иначе синхронизация считала бы их одной и той же записью.
+            cmd.Parameters.AddWithValue("@sync_id", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@subtype_id", row.SubtypeId);
             cmd.Parameters.AddWithValue("@controller_id", row.ControllerId);
             cmd.Parameters.AddWithValue("@eq_prefix", row.EqPrefix);
@@ -402,6 +411,65 @@ public partial class Database
         while (reader.Read())
             result.Add(ReadFwVersion(reader));
         return result;
+    }
+
+    /// <summary>Номера версий, которые для этой пары подтип/контроллер уже ЗАВОДИЛИСЬ — включая
+    /// удалённые (deleted_at) и откатанные. Именно этот список досмотр диска (HierarchyService.
+    /// PlanFwSync/ScanFwDisk) считает «уже известными» и не заводит по ним новых записей.
+    ///
+    /// Ключевое отличие от GetFwVersions — надгробия. Раньше досмотр брал известные номера через
+    /// GetFwVersions, а тот удалённые строки отфильтровывает: удалённая прошивка, папка которой на
+    /// сетевом диске по любой причине уцелела (удаление файлов — best effort: занятый файл, нет прав
+    /// на чужую папку, шара отвалилась ровно в этот момент), заводилась ближайшим досмотром ЗАНОВО —
+    /// новой строкой, с released = 0, то есть прямиком в очередь модерации. Со стороны это и выглядело
+    /// как жалоба «старые удалённые прошивки висят на модерации у коллеги»: удаление уехало и
+    /// применилось правильно, а следом диск воскресил запись. Надгробие постоянно (см.
+    /// ImportHierarchyDataCore, правило 1) — значит и досмотр обязан его уважать.
+    ///
+    /// <paramref name="controllerId"/> = null — все контроллеры подтипа (нужно для ОПЦ-папки, которая
+    /// общая на весь подтип, см. PlanFwSync).</summary>
+    public HashSet<string> GetKnownVersionRaws(int subtypeId, int? controllerId)
+    {
+        var sql = "SELECT version_raw FROM fw_versions WHERE subtype_id=@s";
+        if (controllerId is not null) sql += " AND controller_id=@c";
+
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        using var reader = ExecuteReader(sql, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            if (controllerId is not null) cmd.Parameters.AddWithValue("@c", controllerId.Value);
+        });
+        while (reader.Read())
+            result.Add(reader.GetString(0));
+        return result;
+    }
+
+    /// <summary>Теги последней известной версии этого же шкафа — ровно тот же приём и тот же порядок,
+    /// что у GetLatestHmiForFirmware выше, только для тегов.
+    ///
+    /// Теги описывают ШКАФ («Шкаф управления пожарными насосами АМПЕРУС ПЖ-ПП-2-…»), а не конкретную
+    /// сборку программы: новая версия того же ПЛК ставится в те же самые шкафы. До этого каждая новая
+    /// загрузка начинала с чистого листа — программист заново набивал десяток названий шкафов или (что
+    /// и происходило) не набивал, и свежая версия переставала находиться по тем запросам, по которым
+    /// находилась предыдущая. Ищется по паре подтип/контроллер без привязки к hw_version — по той же
+    /// причине, что и панель: шкаф один, ревизия железа у него может смениться.
+    ///
+    /// Откатанные, архивные и удалённые версии не в счёт: их теги — это как раз то, от чего отказались.
+    /// Возвращает null, если у шкафа ещё не было ни одной версии с тегами.</summary>
+    public (string Tags, string VersionRaw)? GetLatestTagsForFirmware(int subtypeId, int controllerId)
+    {
+        using var reader = ExecuteReader($"""
+            SELECT tags, version_raw FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c
+              AND tags IS NOT NULL AND TRIM(tags) != ''
+              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
+            ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+        });
+        return reader.Read() ? (GetString(reader, "tags"), GetString(reader, "version_raw")) : null;
     }
 
     /// <summary>Все уже загруженные прошивки одного контроллера с заданным hw_version — любого статуса
@@ -776,6 +844,7 @@ public partial class Database
             Status = GetString(r, "status", "active"),
             Released = GetBool(r, "released"),
             ManualCurrent = GetBool(r, "manual_current"),
+            SyncId = GetString(r, "sync_id"),
         };
     }
 }

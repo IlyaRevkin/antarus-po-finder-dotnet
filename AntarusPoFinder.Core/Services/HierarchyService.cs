@@ -729,9 +729,10 @@ public class HierarchyService
                 var groupSubPath = sub.Name == "—" ? Path.Combine(root, FolderPo, g.Name) : Path.Combine(root, FolderPo, g.Name, sub.Name);
                 foreach (var ctrl in controllers)
                 {
-                    var known = new HashSet<string>(
-                        _db.GetFwVersions(sub.Id, ctrl.Id, includeArchived: true, includeRolledBack: true).Select(v => v.VersionRaw),
-                        StringComparer.Ordinal);
+                    // Через GetKnownVersionRaws, а НЕ GetFwVersions: сюда обязаны попасть и УДАЛЁННЫЕ
+                    // (помеченные надгробием) версии — см. док GetKnownVersionRaws о том, как иначе
+                    // досмотр диска воскрешал удалённую прошивку новой строкой прямо в модерацию.
+                    var known = _db.GetKnownVersionRaws(sub.Id!.Value, ctrl.Id!.Value);
                     targets.Add(new FwSyncTarget(sub.Id!.Value, ctrl.Id!.Value, g.Name, sub.Name, ctrl.Name,
                         Path.Combine(groupSubPath, ctrl.Name), known));
                 }
@@ -756,9 +757,8 @@ public class HierarchyService
                     }
                 foreach (var hw in ambiguousHw) byHw.Remove(hw);
 
-                var knownInSubtype = new HashSet<string>(
-                    _db.GetFwVersions(sub.Id, null, includeArchived: true, includeRolledBack: true).Select(v => v.VersionRaw),
-                    StringComparer.Ordinal);
+                // Та же поправка на надгробия, что и у обычных папок контроллеров выше.
+                var knownInSubtype = _db.GetKnownVersionRaws(sub.Id!.Value, null);
                 opcTargets.Add(new FwOpcSyncTarget(sub.Id!.Value, g.Name, sub.Name,
                     Path.Combine(groupSubPath, HierarchyFolders.Opc), byHw, knownInSubtype));
             }
