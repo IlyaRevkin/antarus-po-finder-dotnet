@@ -7,16 +7,20 @@
             <TextBlock Text="Эти настройки — про то, где лежат файлы и как часто общий конфиг (справочник оборудования, теги, резервы номеров) обновляется на этом компьютере. Доступны всем ролям, так как каждый настраивает свой компьютер сам."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,20"/>
 
+            <!-- Кнопок «Сохранить» здесь больше нет: путь сохраняется сам — сразу после выбора в
+                 «…», по уходу фокуса из поля и по Enter (см. NetworkSyncView.SaveRootPath и соседей).
+                 О сохранении сообщает нижняя строка состояния. -->
             <TextBlock Text="ПУТЬ К ДИСКУ (WEBDAV / СЕТЕВАЯ ПАПКА)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Grid.Column="0" x:Name="RootPathInput" Height="34" Margin="0,0,8,0"/>
-                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseRoot_Click"/>
-                <Button Grid.Column="2" Content="Сохранить" Click="SaveRoot_Click"/>
+                <TextBox Grid.Column="0" x:Name="RootPathInput" Height="34" Margin="0,0,8,0"
+                         LostFocus="RootPath_LostFocus" KeyDown="RootPath_KeyDown"
+                         ToolTip="Общий диск с папкой «ПО». Сохраняется сам — по уходу из поля или по Enter."/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseRoot_Click"
+                        ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
 
             <TextBlock Text="ВТОРОЙ ДИСК (ШКАФЫ И ЭЛЕКТРОСХЕМЫ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -24,11 +28,12 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Grid.Column="0" x:Name="SecondDiskInput" Height="34" Margin="0,0,8,0" ToolTip="Путь к папке с кабинетами (шкафами)"/>
-                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseSecondDisk_Click"/>
-                <Button Grid.Column="2" Content="Сохранить" Click="SaveSecondDisk_Click"/>
+                <TextBox Grid.Column="0" x:Name="SecondDiskInput" Height="34" Margin="0,0,8,0"
+                         LostFocus="SecondDisk_LostFocus" KeyDown="SecondDisk_KeyDown"
+                         ToolTip="Папка со шкафами и электросхемами — по ней ищет режим «Схемы»"/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseSecondDisk_Click"
+                        ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
 
             <TextBlock Text="ПАПКА ОСМОТРА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -38,11 +43,11 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Grid.Column="0" x:Name="InspectionFolderInput" Height="34" Margin="0,0,8,0"/>
-                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseInspectionFolder_Click"/>
-                <Button Grid.Column="2" Content="Сохранить" Click="SaveInspectionFolder_Click"/>
+                <TextBox Grid.Column="0" x:Name="InspectionFolderInput" Height="34" Margin="0,0,8,0"
+                         LostFocus="InspectionFolder_LostFocus" KeyDown="InspectionFolder_KeyDown"/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseInspectionFolder_Click"
+                        ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
 
             <!-- Автоочистка папки осмотра переехала в саму вкладку "Осмотр" (InspectionView) — логичнее
@@ -103,9 +108,10 @@
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                         <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"/>
-                        <TextBlock Text="минут" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Click="SavePushInterval_Click"/>
+                        <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"
+                                 LostFocus="PushInterval_LostFocus" KeyDown="PushInterval_KeyDown"
+                                 ToolTip="Целое число минут, 0 — автоотправка выключена. Сохраняется по уходу из поля или по Enter."/>
+                        <TextBlock Text="минут" VerticalAlignment="Center"/>
                     </StackPanel>
                     <TextBlock Text="0 — подстраховочная автоотправка отключена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,0,0,10"/>
