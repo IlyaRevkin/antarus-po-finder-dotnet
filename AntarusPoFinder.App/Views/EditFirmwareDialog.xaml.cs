@@ -59,6 +59,12 @@ public partial class EditFirmwareDialog : Window
     /// показать итог. Null, если блок подтипов вообще не показывался.</summary>
     public FirmwareSubtypeLinkService.ApplyResult? SubtypeLinkResult { get; private set; }
 
+    /// <summary>Что изменилось в наборе КОНФИГУРАЦИЙ шкафа — по той же причине, что и SubtypeLinkResult
+    /// выше: заведение/удаление строк применяется прямо здесь, вызывающему остаётся показать итог.
+    /// Null, если блок конфигураций не показывался (у версии нет папки на диске — вариантам нечего
+    /// делить).</summary>
+    public FirmwareConfigService.ApplyResult? ConfigResult { get; private set; }
+
     public EditFirmwareDialog(AppServices services, FwVersionRecord v, string title)
     {
         InitializeComponent();
@@ -144,6 +150,7 @@ public partial class EditFirmwareDialog : Window
                 HmiInput.Text = v.HmiPath;
                 AttachmentsPanel.Visibility = Visibility.Visible;
                 BuildSubtypeChecks();
+                BuildConfigs();
             }
             LoadSearchWeights(v.Id.Value);
         }
@@ -304,6 +311,66 @@ public partial class EditFirmwareDialog : Window
         SubtypesPanel.Visibility = Visibility.Visible;
     }
 
+    // ── Конфигурации шкафов ───────────────────────────────────────────────────
+
+    /// <summary>Показывает уже заведённые конфигурации в том же построчном виде, которым их вводят
+    /// (см. FirmwareConfigService.FormatBulk/ParseBulk). Блок не показывается вовсе, если у версии нет
+    /// папки на диске: вариант — это ссылка на ту же самую прошивку, делить ему тогда нечего.
+    ///
+    /// Показывается САМА прошивка, а не её вариант: у конфигурации своих конфигураций не бывает
+    /// (config_name у неё уже занят), и предлагать заводить их «внутри варианта» значило бы плодить
+    /// путаницу. Открытая на конфигурации карточка просто правит её теги обычным редактором выше.</summary>
+    private void BuildConfigs()
+    {
+        if (_record.Id is null || string.IsNullOrWhiteSpace(_record.DiskPath)) return;
+        if (!string.IsNullOrEmpty(_record.ConfigName))
+        {
+            ConfigsHint.Text = $"Это конфигурация «{_record.ConfigName}» — её теги правятся редактором выше.";
+            ConfigsHint.Visibility = Visibility.Visible;
+            ConfigsInput.Visibility = Visibility.Collapsed;
+            ConfigsPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _configsBefore = FirmwareConfigService.Current(_db, _record);
+        ConfigsInput.Text = FirmwareConfigService.FormatBulk(_configsBefore);
+        ConfigsHint.Text = _configsBefore.Count == 0
+            ? "Пока ни одной конфигурации — прошивка находится по своим тегам как обычно."
+            : $"Заведено конфигураций: {_configsBefore.Count}.";
+        ConfigsPanel.Visibility = Visibility.Visible;
+    }
+
+    private List<FirmwareConfigService.FirmwareConfig> _configsBefore = new();
+
+    private void ApplyConfigs()
+    {
+        if (ConfigsPanel.Visibility != Visibility.Visible || ConfigsInput.Visibility != Visibility.Visible) return;
+        if (_record.Id is null) return;
+
+        // Теги самой прошивки могли поменяться прямо в этом же диалоге (редактор выше), а базовые теги
+        // подмешиваются в каждую конфигурацию — берём уже НОВОЕ значение, иначе варианты остались бы
+        // с прежним набором до следующей правки.
+        var primary = new FwVersionRecord
+        {
+            Id = _record.Id, SubtypeId = _record.SubtypeId, ControllerId = _record.ControllerId,
+            EqPrefix = _record.EqPrefix, SubPrefix = _record.SubPrefix,
+            HwVersion = _record.HwVersion, SwVersion = _record.SwVersion, DtStr = _record.DtStr,
+            VersionRaw = _record.VersionRaw, Filename = _record.Filename,
+            DiskPath = _record.DiskPath, LocalPath = _record.LocalPath,
+            Description = ResultDescription, Changelog = _record.Changelog,
+            LaunchTypes = ResultLaunchTypes, IoMapPath = IoMapInput.Text, InstructionsPath = InstructionsInput.Text,
+            ModbusMapPath = ModbusMapInput.Text, HmiPath = HmiInput.Text,
+            ExecutableHint = _record.ExecutableHint, HmiExecutableHint = _record.HmiExecutableHint,
+            IsOpc = _record.IsOpc, RequestNum = _record.RequestNum, CabinetSn = _record.CabinetSn,
+            AuthorId = _record.AuthorId, Status = _record.Status, Released = _record.Released,
+            Tags = ResultTags,
+        };
+
+        var desired = FirmwareConfigService.ParseBulk(ConfigsInput.Text);
+        var result = FirmwareConfigService.Apply(_db, primary, desired);
+        if (result.Changed) ConfigResult = result;
+    }
+
     private void ApplySubtypeLinks()
     {
         if (_subtypeChecks.Count == 0 || _names is null || _record.Id is null) return;
@@ -397,6 +464,9 @@ public partial class EditFirmwareDialog : Window
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         ApplyAttachments();
         ApplySubtypeLinks();
+        // После ApplySubtypeLinks и после того, как ResultTags/ResultDescription уже посчитаны: базовые
+        // теги прошивки подмешиваются в каждую конфигурацию, и брать их надо уже НОВЫМИ.
+        ApplyConfigs();
         ApplySearchWeights();
         DialogResult = true;
     }
@@ -409,7 +479,28 @@ public partial class EditFirmwareDialog : Window
     {
         ReportAttachments(dlg.AttachmentsResult, host);
         ReportSubtypes(dlg.SubtypeLinkResult, host);
+        ReportConfigs(dlg, host);
         ReportMetadataEdits(dlg, host);
+    }
+
+    /// <summary>Итог правки набора конфигураций шкафа. Кладётся и в накопитель синхронизации — иначе
+    /// заготовленный ряд комплектаций остался бы в локальной базе и коллеги по названиям этих шкафов
+    /// ничего бы не нашли (та же причина, что и у ReportMetadataEdits ниже). Выдачу поиска сбрасываем:
+    /// конфигурации — полноправные строки поиска, их набор только что изменился.</summary>
+    private static void ReportConfigs(EditFirmwareDialog dlg, IAppHost host)
+    {
+        var r = dlg.ConfigResult;
+        if (r is null || !r.Changed) return;
+
+        var parts = new List<string>();
+        if (r.Added.Count > 0) parts.Add($"добавлено {r.Added.Count}");
+        if (r.Updated.Count > 0) parts.Add($"изменено {r.Updated.Count}");
+        if (r.Removed.Count > 0) parts.Add($"убрано {r.Removed.Count}");
+
+        var what = $"Прошивка {dlg._record.VersionRaw}: конфигурации шкафов — {string.Join(", ", parts)}";
+        host.ShowStatus(what, category: NotificationCategory.FirmwareAndParams);
+        host.PushCatalogChange(what, dlg._record.Id?.ToString() ?? "");
+        host.InvalidateSearchResults();
     }
 
     /// <summary>Описание/теги/типы пуска применяет ВЫЗЫВАЮЩИЙ код (UpdateFwVersion), но до сих пор

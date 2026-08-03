@@ -1001,6 +1001,10 @@ public partial class UploadView : UserControl
                 // дописанный тег легко потерять из виду, поэтому называем и сами теги, и версию-источник.
                 if (result.InheritedTags.Count > 0)
                     msg += $"\n\nПеренесены теги версии {result.InheritedTagsFromVersion}: {string.Join(", ", result.InheritedTags)}";
+                // Конфигурации шкафов (см. FirmwareConfigService) переезжают на новую версию целиком —
+                // говорим об этом прямо, иначе заготовленный ряд комплектаций выглядит как пропавший.
+                if (result.CarriedOverConfigs.Count > 0)
+                    msg += $"\n\nПеренесены конфигурации шкафов ({result.CarriedOverConfigs.Count}): {string.Join(", ", result.CarriedOverConfigs)}";
                 if (result.Warnings.Count > 0)
                     msg += "\n\nПредупреждения:\n" + string.Join("\n", result.Warnings);
                 AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
