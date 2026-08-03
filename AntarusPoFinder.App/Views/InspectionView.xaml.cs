@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
@@ -88,17 +89,32 @@ public partial class InspectionView : UserControl
     /// Round 34: days-only widened to days/hours/minutes (see ConfigService.
     /// InspectionAutoCleanupMinutes) so a short age like "2 hours" can actually be configured
     /// instead of rounding down to whole days.</summary>
-    private void SaveInspectionCleanupDays_Click(object sender, RoutedEventArgs e)
+    ///
+    /// Кнопки «Сохранить» здесь больше нет — три поля сохраняются сами, по уходу фокуса и по Enter
+    /// (как и остальные настройки приложения). Мусорный ввод не открывает модальное окно: поля
+    /// возвращаются к сохранённому значению, а причина уходит в нижнюю строку состояния.</summary>
+    private void InspectionCleanup_LostFocus(object sender, RoutedEventArgs e) => SaveInspectionCleanup();
+
+    private void InspectionCleanup_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveInspectionCleanup();
+    }
+
+    private void SaveInspectionCleanup()
     {
         if (!int.TryParse(InspectionCleanupDaysInput.Text.Trim(), out var d) || d < 0 ||
             !int.TryParse(InspectionCleanupHoursInput.Text.Trim(), out var h) || h < 0 ||
             !int.TryParse(InspectionCleanupMinutesInput.Text.Trim(), out var m) || m < 0)
         {
-            AppMessageBox.Show("Введите целые неотрицательные числа (0/0/0 — отключить автоочистку).", "Автоочистка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            LoadInspectionCleanupInputs();
+            _host.ShowStatus("Автоочистка папки осмотра: нужны целые неотрицательные числа (0/0/0 — отключить)",
+                category: NotificationCategory.Inspection);
             return;
         }
 
         var totalMinutes = d * 24 * 60 + h * 60 + m;
+        if (totalMinutes == _services.Cfg.InspectionAutoCleanupMinutes()) return;
+
         _services.Cfg.SetInspectionAutoCleanupMinutes(totalMinutes);
         _host.ShowStatus(totalMinutes == 0 ? "Автоочистка папки осмотра отключена" : $"Автоочистка папки осмотра: файлы старше {InspectionCleanupService.FormatAge(totalMinutes)}", category: NotificationCategory.Inspection);
     }

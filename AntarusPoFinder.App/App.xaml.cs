@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.Views;
@@ -43,9 +44,37 @@ public partial class App : Application
     private static readonly string ShowRequestEventName = "AntarusPoFinder_ShowRequest_5B2E1A" + InstanceIdSuffix;
     private static Mutex? _singleInstanceMutex;
 
+    /// <summary>Подсказки при наведении по умолчанию появляются через ~1 с и висят 5 с — за секунду
+    /// оператор успевает увести мышь и решить, что подсказки тут просто нет. Переопределяем разом на
+    /// всё приложение: показывать почти сразу и держать достаточно долго, чтобы длинную подсказку
+    /// успели дочитать. Через OverrideMetadata на FrameworkElement, а не неявными стилями в
+    /// Styles.xaml, — это присоединённые свойства владельца подсказки, и накрыть ими вообще все
+    /// контролы (включая Border/RadioButton, у которых своего неявного стиля нет) можно только так.
+    /// Элемент, которому явно задали своё ToolTipService.InitialShowDelay, останется при своём.</summary>
+    private static void ApplyToolTipTiming()
+    {
+        // OverrideMetadata допустим только до первого обращения к свойству — сюда мы приходим раньше
+        // любого окна, но цена ошибки несоразмерна: скорость всплывания подсказок не тот повод, из-за
+        // которого приложение имеет право не запуститься.
+        try
+        {
+            ToolTipService.InitialShowDelayProperty.OverrideMetadata(typeof(FrameworkElement),
+                new FrameworkPropertyMetadata(300));
+            ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement),
+                new FrameworkPropertyMetadata(30000));
+            // Пауза, в течение которой соседние подсказки показываются мгновенно: провёл мышью по ряду
+            // кнопок — вторая и третья подсказки появляются сразу, без повторного ожидания.
+            ToolTipService.BetweenShowDelayProperty.OverrideMetadata(typeof(FrameworkElement),
+                new FrameworkPropertyMetadata(1500));
+        }
+        catch { /* остаёмся на стандартных задержках WPF */ }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        ApplyToolTipTiming();
 
         _singleInstanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)
