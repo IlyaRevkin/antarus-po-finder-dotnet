@@ -45,9 +45,13 @@ public class FirmwareUploadRequest
     /// По умолчанию выключен — обычное поведение (инкремент) не меняется.</summary>
     public bool KeepSwVersion { get; set; }
 
-    public bool OpcRequestEnabled { get; set; }
+    /// <summary>Единственная галочка «ОПЦ» формы загрузки (раньше их было две — «ОПЦ заявка» и
+    /// «ОПЦ SN»). Включена — версия ложится в папку «ОПЦ», и обязательно заполнено хотя бы одно из
+    /// двух полей ниже, см. <see cref="OpcFields"/>.</summary>
+    public bool OpcEnabled { get; set; }
+    /// <summary>Номер заявки. Учитывается только при <see cref="OpcEnabled"/>.</summary>
     public string RequestNumRaw { get; set; } = "";
-    public bool OpcSnEnabled { get; set; }
+    /// <summary>Заводской серийный номер шкафа. Учитывается только при <see cref="OpcEnabled"/>.</summary>
     public string CabinetSnRaw { get; set; } = "";
 
     /// <summary>If set, consumes this reservation's EXACT locked-in version number instead of
@@ -298,6 +302,11 @@ public static class FirmwareUploadService
         if (string.IsNullOrEmpty(desc))
             return (null, FirmwareUploadResult.ValidationFailure("Укажите описание изменений в этой версии."));
 
+        // Одна галочка «ОПЦ» — два поля, хотя бы одно обязательно (см. OpcFields).
+        var opcError = OpcFields.Validate(request.OpcEnabled, request.CabinetSnRaw, request.RequestNumRaw);
+        if (opcError is not null)
+            return (null, FirmwareUploadResult.ValidationFailure(opcError));
+
         var root = request.RootPath;
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             return (null, FirmwareUploadResult.ValidationFailure("Сетевой диск недоступен. Проверьте настройки."));
@@ -333,9 +342,9 @@ public static class FirmwareUploadService
             }
         }
 
-        bool isOpc = request.OpcRequestEnabled || request.OpcSnEnabled;
-        var reqNumRaw = request.OpcRequestEnabled ? (request.RequestNumRaw ?? "").Trim() : "";
-        var cabinetSnRaw = request.OpcSnEnabled ? (request.CabinetSnRaw ?? "").Trim() : "";
+        bool isOpc = request.OpcEnabled;
+        var reqNumRaw = isOpc ? (request.RequestNumRaw ?? "").Trim() : "";
+        var cabinetSnRaw = isOpc ? (request.CabinetSnRaw ?? "").Trim() : "";
         var reqNum = Format5Digits(reqNumRaw);
         var cabinetSn = Format5Digits(cabinetSnRaw);
         int hwInt = mod.HwVersion;
@@ -350,7 +359,7 @@ public static class FirmwareUploadService
             fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
             swInt = fwv.SwVersion;
         }
-        else if (request.KeepSwVersion)
+        else if (request.KeepSwVersion && OpcFields.SwVersionChoiceApplies(isOpc))
         {
             // «Не увеличивать версию ПО (sw)» — берём номер текущей последней активной версии этой
             // группы вместо MAX+1. Если версий ещё не было (первая загрузка шкафа), вести себя как

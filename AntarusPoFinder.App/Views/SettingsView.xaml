@@ -112,17 +112,25 @@
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                                     <PasswordBox Grid.Row="0" Grid.Column="1" x:Name="AdminPwdInput" Height="34" Margin="0,0,0,8"
-                                                  ToolTip="Пустое поле при сохранении = не менять текущий пароль администратора."/>
+                                                  LostFocus="Password_LostFocus" KeyDown="Password_KeyDown"
+                                                  ToolTip="Новый пароль сохраняется, как только вы уйдёте из поля или нажмёте Enter. Пустое поле ничего не меняет."/>
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                                     <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="ProgPwdInput" Height="34" Margin="0,0,0,8"
-                                                  ToolTip="Пустое поле при сохранении = очистить пароль программиста (роль перестанет требовать пароль)."/>
+                                                  LostFocus="Password_LostFocus" KeyDown="Password_KeyDown"
+                                                  ToolTip="Новый пароль сохраняется, как только вы уйдёте из поля или нажмёте Enter. Убрать пароль совсем — кнопкой ниже."/>
                                 </Grid>
-                                <!-- Отдельной кнопки "Очистить пароль программиста" больше нет — пустое поле пароля
-                                     программиста при сохранении само означает "очистить" (в отличие от поля
-                                     администратора, где пустое = "не менять", см. SavePasswords_Click). -->
+                                <!-- Кнопки «Сохранить пароли» больше нет: набранный пароль сохраняется сам,
+                                     по уходу из поля и по Enter (см. SettingsView.SavePassword). Пустое поле
+                                     при этом НИЧЕГО не меняет — иначе один проход фокусом по форме молча
+                                     снёс бы пароль администратора, единственный аварийный вход при проблемах
+                                     с доменом. Поэтому «убрать пароль программиста» — отдельное явное
+                                     действие, кнопкой ниже. -->
                                 <StackPanel Orientation="Horizontal">
-                                    <Button Content="Сохранить пароли" Margin="0,0,8,0" Click="SavePasswords_Click"/>
+                                    <Button Content="Убрать пароль программиста" Style="{StaticResource SecondaryButton}" Click="ClearProgrammerPassword_Click"
+                                            ToolTip="Роль «Программист» перестанет спрашивать пароль. Пароль администратора не трогает."/>
                                 </StackPanel>
+                                <TextBlock Text="Пароли хранятся хешированными — показать текущий нельзя, можно только задать новый."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -149,31 +157,44 @@
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="напр. AntarusAdmins"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="Группа AD, дающая роль администратора — напр. AntarusAdmins. Пусто — группа для этой роли не используется."
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
                                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"/>
+                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
                                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"/>
+                                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
                                 </Grid>
 
                                 <TextBlock Text="Способ проверки пароля AD:" Margin="0,0,0,4"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"/>
-                                    <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"/>
-                                    <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"/>
+                                    <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"
+                                                 Checked="AdSettings_Changed" ToolTip="Пароль проверяется прямо в контроллере домена — нужен доступ к домену из этой сети"/>
+                                    <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"
+                                                 Checked="AdSettings_Changed" ToolTip="Пароль проверяется запросом к веб-серверу из поля ниже — работает там, где домен напрямую недоступен"/>
+                                    <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"
+                                                 Checked="AdSettings_Changed" ToolTip="Сначала домен, при неудаче — веб-сервер. Обычный выбор для ноутбуков вне офиса"/>
                                 </StackPanel>
                                 <TextBlock Text="URL веб-сервера для проверки пароля (способ HTTP):" Margin="0,0,0,4"/>
                                 <TextBox x:Name="AdHttpUrlInput" Height="34" Margin="0,0,0,4"
+                                         LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"
                                          ToolTip="Например: https://disk.antarus.su/ — точный адрес и формат подтверждает IT компании."/>
                                 <TextBlock Text="Пусто = способ HTTP не сможет сработать, даже если выбран выше. Логин/пароль передаются в веб-сервер как введено (без разбиения на домен), через Negotiate/NTLM."
                                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-                                <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход по AD при запуске приложения" Margin="0,4,0,4"/>
+                                <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход по AD при запуске приложения" Margin="0,4,0,4"
+                                          Checked="AdSettings_Changed" Unchecked="AdSettings_Changed"/>
                                 <TextBlock Text="Пока не включено — приложение запускается как обычно, без запроса входа. Включив, при каждом запуске (если нет ещё действующего запомненного входа на этом компьютере) появится окно входа по AD; пароль администратора остаётся аварийным входом, чтобы не оказаться заблокированным при проблеме с доменом или на самой первой настройке системы."
                                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                <Button Content="Сохранить группы и способ" HorizontalAlignment="Left" Click="SaveAdGroups_Click"/>
+                                <!-- Кнопки «Сохранить группы и способ» больше нет: поля сохраняются по
+                                     уходу фокуса и по Enter, переключатели — сразу по выбору (см.
+                                     SettingsView.SaveAdSettings). -->
+                                <TextBlock Text="Изменения сохраняются сразу — отдельной кнопки нет."
+                                           Style="{StaticResource MutedText}" FontStyle="Italic" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -194,9 +215,9 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="Не переспрашивать по умолчанию, дней:" VerticalAlignment="Center" Margin="0,0,12,0"/>
                                 <TextBox Grid.Column="1" x:Name="AdRequireLoginDaysInput" Height="34"
+                                         LostFocus="AdRequireLoginDays_LostFocus" KeyDown="AdRequireLoginDays_KeyDown"
                                          ToolTip="Значение для тех, кто в окне входа оставит «как задано администратором» — каждый может там же выбрать другой срок или «всегда» лично для себя."/>
                             </Grid>
-                            <Button x:Name="SaveAdDaysOnlyBtn" Content="Сохранить" HorizontalAlignment="Left" Click="SaveAdRequireLoginDays_Click"/>
                         </StackPanel>
                     </Border>
 
@@ -219,9 +240,10 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" x:Name="AppUpdatePathInput" Height="34" Margin="0,0,8,0"
-                                         LostFocus="AppUpdatePathInput_LostFocus"
+                                         LostFocus="AppUpdatePathInput_LostFocus" KeyDown="AppUpdatePath_KeyDown"
                                          ToolTip="Папка этой машины с файлами AntarusPoFinder-{версия}.exe. Если пусто — используется общая папка (ниже), а если и её нет — GitHub."/>
-                                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseAppUpdatePath_Click"/>
+                                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseAppUpdatePath_Click"
+                                        ToolTip="Выбрать папку — сохранится сразу"/>
                             </Grid>
                             <!-- Общая папка — единственная настройка обновлений, которая уезжает на все
                                  машины (см. UpdateFolderResolver и ConfigService.app_update_path_shared).
@@ -235,19 +257,22 @@
                                            Text="Задаётся один раз администратором и синхронизируется на все машины. Пишите путь относительно корня рабочего диска («Обновления») или в виде \\сервер\шара\… — абсолютный путь с буквой диска на других машинах может не совпасть. Поле выше (папка этой машины) при заполнении перебивает общее."/>
                             </StackPanel>
                             <CheckBox x:Name="AppAutoUpdateCheck" Content="Устанавливать найденные обновления автоматически при запуске" Margin="0,0,0,8"
-                                      Checked="AppAutoUpdate_Changed" Unchecked="AppAutoUpdate_Changed"/>
+                                      Checked="AppAutoUpdate_Changed" Unchecked="AppAutoUpdate_Changed"
+                                      ToolTip="Без вопросов ставить новую версию, если она нашлась при запуске"/>
                             <TextBlock x:Name="AppUpdateStatusText" Text="" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Content="Проверить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"
+                                <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"
                                         ToolTip="Опрашивает оба источника сразу: что лежит в папке обновлений, что есть на GitHub, что установлено и что из этого будет использовано."/>
-                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Margin="0,0,8,0" Click="InstallLatestUpdate_Click"/>
+                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Margin="0,0,8,0" Click="InstallLatestUpdate_Click"
+                                        ToolTip="Приложение закроется и перезапустится само. Доступно после проверки обновлений"/>
                                 <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Click="ShowConnectionStatus_Click"
                                         ToolTip="Диск, домен/сервер входа и источник обновлений — что доступно прямо сейчас и почему нет."/>
                             </StackPanel>
                             <!-- Постоянный журнал «что нового по версиям» — то же, что разовое окно после
                                  обновления, но к нему можно вернуться в любой момент (см. AppChangelogWindow). -->
                             <Button Content="История изменений программы" Style="{StaticResource SecondaryButton}"
-                                    HorizontalAlignment="Left" Margin="0,0,0,8" Click="ShowAppChangelog_Click"/>
+                                    HorizontalAlignment="Left" Margin="0,0,0,8" Click="ShowAppChangelog_Click"
+                                    ToolTip="Журнал «что нового» по всем установленным версиям"/>
                             <TextBlock Text="Откат на другую версию:" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -255,7 +280,8 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <ComboBox Grid.Column="0" x:Name="AppVersionsCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                                <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"/>
+                                <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"
+                                        ToolTip="Откатиться на выбранную версию или переустановить её — приложение перезапустится"/>
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -281,8 +307,9 @@
                                     HorizontalAlignment="Left" Margin="0,0,0,16" Click="SyncFwFromDisk_Click"
                                     ToolTip="Обойти рабочий диск и подтянуть в локальную базу все прошивки, которых в ней ещё нет (в т.ч. загруженные коллегами). Структуру дисков/иерархию не меняет."/>
 
-                            <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,8"/>
-                            <Button Content="Сохранить" HorizontalAlignment="Left" Margin="0,0,0,16" Click="SaveMisc_Click"/>
+                            <CheckBox x:Name="KeepArchivesCheck" Content="Хранить архивы после извлечения" Margin="0,0,0,16"
+                                      Checked="KeepArchives_Changed" Unchecked="KeepArchives_Changed"
+                                      ToolTip="Выключено — распакованный архив удаляется, остаётся только его содержимое"/>
 
                             <TextBlock Text="ЛОАДЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Загрузка проекта в ПЛК выполняется через локальный Automation API Segnetics Loader. Пустой путь выбирает Loader, установленный вместе с приложением. Можно указать папку Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe."
@@ -293,10 +320,10 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" x:Name="LoaderExePathInput" Height="34" Margin="0,0,8,0"
-                                         LostFocus="LoaderExePathInput_LostFocus"
+                                         LostFocus="LoaderExePathInput_LostFocus" KeyDown="LoaderExePathInput_KeyDown"
                                          ToolTip="Папка Segnetics Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe. Пусто — встроенная копия."/>
                                 <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource SecondaryButton}"
-                                        Click="BrowseLoaderExe_Click"/>
+                                        Click="BrowseLoaderExe_Click" ToolTip="Выбрать файл — сохранится сразу"/>
                             </Grid>
 
                             <!-- Единая drag&drop-зона ПЛК+HMI на странице «Загрузка прошивки» — бета,
@@ -341,8 +368,10 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Сбросить выбранное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetLayoutFallbackSelected_Click"/>
-                                <Button Content="Сбросить всё обучение" Style="{StaticResource SecondaryButton}" Click="ResetLayoutFallbackAll_Click"/>
+                                <Button Content="Сбросить выбранное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetLayoutFallbackSelected_Click"
+                                        ToolTip="Забыть ответы по выбранному запросу — вопрос про раскладку будет задан заново"/>
+                                <Button Content="Сбросить всё обучение" Style="{StaticResource SecondaryButton}" Click="ResetLayoutFallbackAll_Click"
+                                        ToolTip="Очистить таблицу целиком — программа снова спросит про раскладку по любому запросу"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -404,8 +433,10 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"/>
-                                <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"/>
+                                <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"
+                                        ToolTip="Обнулить счётчики выборов и ручные веса — на всех машинах, а не только на этой"/>
+                                <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"
+                                        ToolTip="Забыть накопленные ответы на «та ли это прошивка» — вопрос начнёт задаваться заново"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -431,9 +462,12 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                        <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"/>
-                        <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"/>
-                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"/>
+                        <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"
+                                ToolTip="Новый тип шкафа — заводится сразу с первым подтипом"/>
+                        <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"
+                                ToolTip="Новый подтип внутри выбранного в таблице типа шкафа"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"
+                                ToolTip="Удалить выбранный подтип. Вместе с последним подтипом удаляется и сам тип шкафа"/>
                     </StackPanel>
 
                     <TextBlock Text="КОНТРОЛЛЕРЫ И МОДИФИКАЦИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -573,8 +607,10 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal">
-                        <Button Content="Добавить теги" Margin="0,0,8,0" Click="ModerateFirmware_Click"/>
-                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshModeration_Click"/>
+                        <Button Content="Добавить теги" Margin="0,0,8,0" Click="ModerateFirmware_Click"
+                                ToolTip="Открыть карточку выбранной версии — теги, описание, вложения. То же, что двойной клик по строке"/>
+                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshModeration_Click"
+                                ToolTip="Перечитать список — новые загрузки коллег приезжают синхронизацией"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -688,9 +724,10 @@
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                 <TextBlock Text="Срок резерва по умолчанию:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="ReservationTtlInput" Width="64" Height="34" Margin="0,0,8,0"/>
-                <TextBlock Text="ч (0 — без ограничения)" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Click="SaveReservationTtl_Click"/>
+                <TextBox x:Name="ReservationTtlInput" Width="64" Height="34" Margin="0,0,8,0"
+                         LostFocus="ReservationTtl_LostFocus" KeyDown="ReservationTtl_KeyDown"
+                         ToolTip="Целое число часов, 0 — резерв не истекает. Сохраняется по уходу из поля или по Enter."/>
+                <TextBlock Text="ч (0 — без ограничения)" VerticalAlignment="Center"/>
             </StackPanel>
             <DataGrid Grid.Row="2" x:Name="ReservationsGrid" AutoGenerateColumns="False" MinHeight="120" Margin="0,0,0,10"
                       Style="{StaticResource RoomyDataGrid}">
@@ -733,16 +770,21 @@
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Text="Ярлыки для быстрого запуска (доступны наладчику в поиске)"
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-            <DataGrid Grid.Row="1" x:Name="AppsGrid" AutoGenerateColumns="False" IsReadOnly="False" MinHeight="100" Margin="0,0,0,10">
+            <!-- Кнопки «Сохранить» нет: список сохраняется сразу — после «Добавить», после «Удалить»
+                 и по окончании правки строки в таблице (см. SettingsView.SaveApps). -->
+            <DataGrid Grid.Row="1" x:Name="AppsGrid" AutoGenerateColumns="False" IsReadOnly="False" MinHeight="100" Margin="0,0,0,10"
+                      RowEditEnding="AppsGrid_RowEditEnding"
+                      ToolTip="Двойной клик по ячейке — переименовать ярлык или поправить путь. Изменения сохраняются сразу.">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Название" Binding="{Binding Name, Mode=TwoWay}" Width="200"/>
                     <DataGridTextColumn Header="Путь" Binding="{Binding Path, Mode=TwoWay}" Width="*"/>
                 </DataGrid.Columns>
             </DataGrid>
             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,20">
-                <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddApp_Click"/>
-                <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DeleteApp_Click"/>
-                <Button Content="Сохранить" Click="SaveApps_Click"/>
+                <Button Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddApp_Click"
+                        ToolTip="Выбрать программу — появится в списке и сохранится сразу"/>
+                <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteApp_Click"
+                        ToolTip="Убрать выбранный ярлык из списка"/>
             </StackPanel>
 
             <TextBlock Grid.Row="3" Text="ГДЕ ПОКАЗЫВАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -783,12 +825,15 @@
                     <ColumnDefinition Width="200"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <ComboBox Grid.Column="0" x:Name="UserRoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                <Button Grid.Column="1" Content="Сменить роль" Click="SetUserRole_Click"/>
+                <ComboBox Grid.Column="0" x:Name="UserRoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"
+                          ToolTip="Роль, которую получит выбранный в таблице пользователь"/>
+                <Button Grid.Column="1" Content="Сменить роль" Click="SetUserRole_Click"
+                        ToolTip="Назначить выбранному в таблице пользователю роль из списка слева"/>
             </Grid>
             <StackPanel Grid.Row="4" Orientation="Horizontal">
                 <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshUsers_Click"/>
-                <Button Content="Удалить пользователя" Style="{StaticResource SecondaryButton}" Click="DeleteUser_Click"/>
+                <Button Content="Удалить пользователя" Style="{StaticResource SecondaryButton}" Click="DeleteUser_Click"
+                        ToolTip="Убрать из ростера. При следующем входе по AD он заведётся заново с ролью «Наладчик»"/>
             </StackPanel>
         </Grid>
         </Grid>

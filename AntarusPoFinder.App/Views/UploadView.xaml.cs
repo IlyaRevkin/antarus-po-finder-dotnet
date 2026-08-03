@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -481,7 +482,11 @@ public partial class UploadView : UserControl
     /// не относится (тот же класс бага, что и у KeepSwVersionCheck в ResetForm).</summary>
     private void UpdateKeepSwVersionAvailability()
     {
-        bool available = KeepSwVersionAvailable(_services.Db, SubtypesSelect.MainSubtype, CtrlCombo.SelectedItem as ControllerModification);
+        // При включённой ОПЦ галочки нет вовсе: sw у разовой версии в форме не задаётся (OpcFields.
+        // SwVersionChoiceApplies — то же правило и в FirmwareUploadService.Prepare, чтобы поведение
+        // не зависело от того, успел ли интерфейс сбросить флажок).
+        bool available = OpcFields.SwVersionChoiceApplies(IsOpc)
+            && KeepSwVersionAvailable(_services.Db, SubtypesSelect.MainSubtype, CtrlCombo.SelectedItem as ControllerModification);
 
         KeepSwVersionCheck.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
         KeepSwVersionCheck.ToolTip = KeepSwVersionAvailableTooltip;
@@ -553,26 +558,47 @@ public partial class UploadView : UserControl
         _host.ShowStatus($"Зарезервирован номер: {fwv.Raw}", category: NotificationCategory.FirmwareAndParams);
     }
 
-    /// <summary>Заявка и SN независимы — наладчик/программист включает и заполняет только то, что
-    /// у него есть для конкретного нестандартного шкафа. Папка "ОПЦ" на диске (см. IsOpc) при этом
-    /// используется, если включён хотя бы один из двух.</summary>
-    private void OpcReqNum_Toggled(object sender, RoutedEventArgs e)
+    /// <summary>Одна галочка «ОПЦ» вместо прежних двух («ОПЦ заявка» и «ОПЦ SN»): включили — открылись
+    /// сразу оба поля, серийный номер шкафа и номер заявки, заполнить надо хотя бы одно (можно оба,
+    /// см. OpcFields). Выключили — поля прячутся, но введённое НЕ стирается: случайный клик по галочке
+    /// не должен терять уже набранный номер, а в загрузку эти поля всё равно уходят только при
+    /// включённой ОПЦ (см. BuildUploadRequest).</summary>
+    private void Opc_Toggled(object sender, RoutedEventArgs e)
     {
-        bool isChecked = OpcReqNumCheck.IsChecked == true;
-        ReqNumLabel.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
-        ReqNumInput.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
+        OpcFieldsPanel.Visibility = IsOpc ? Visibility.Visible : Visibility.Collapsed;
+        // Галочка «не увеличивать версию ПО (sw)» при ОПЦ не показывается — пересчитываем её здесь же.
+        UpdateKeepSwVersionAvailability();
+        UpdateOpcValidationUi();
         UpdatePreview();
     }
 
-    private void OpcSn_Toggled(object sender, RoutedEventArgs e)
-    {
-        bool isChecked = OpcSnCheck.IsChecked == true;
-        CabinetSnLabel.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
-        CabinetSnInput.Visibility = isChecked ? Visibility.Visible : Visibility.Collapsed;
-        UpdatePreview();
-    }
+    private bool IsOpc => OpcCheck?.IsChecked == true;
 
-    private bool IsOpc => OpcReqNumCheck.IsChecked == true || OpcSnCheck.IsChecked == true;
+    /// <summary>Оператор уже правил поля ОПЦ или пытался загрузить с пустыми — до этого момента
+    /// красной подсветки нет: только что открытая галочкой панель с двумя пустыми полями это ещё не
+    /// ошибка, а нормальное начальное состояние, и встречать её красной рамкой незачем.</summary>
+    private bool _opcTouched;
+
+    /// <summary>Подсветка «заполните хотя бы одно поле» — то же правило, что проверит загрузка
+    /// (OpcFields.Validate), но показанное заранее: как только оба поля оказались пусты после правки,
+    /// их рамки и подсказка под ними краснеют. Кнопку «Загрузить прошивку» это не блокирует — молчаливо
+    /// серая кнопка не объясняет, чего от оператора хотят; отказ придёт понятным сообщением.</summary>
+    private void UpdateOpcValidationUi()
+    {
+        if (OpcFieldsPanel is null) return;
+        bool bad = _opcTouched && !OpcFields.IsValid(IsOpc, CabinetSnInput.Text, ReqNumInput.Text);
+
+        foreach (var box in new[] { CabinetSnInput, ReqNumInput })
+        {
+            // ClearValue, а не присваивание «обычной» кисти: рамка полей приходит из темы
+            // (DynamicResource в стиле TextBox), и прибитое значение пережило бы смену темы.
+            if (bad) { box.BorderBrush = (Brush)FindResource("ErrorBrush"); box.BorderThickness = new Thickness(2); }
+            else { box.ClearValue(Control.BorderBrushProperty); box.ClearValue(Control.BorderThicknessProperty); }
+        }
+
+        if (bad) OpcHintLabel.Foreground = (Brush)FindResource("ErrorBrush");
+        else OpcHintLabel.ClearValue(TextBlock.ForegroundProperty);
+    }
 
     /// <summary>Формат для имени файла — "(01312)"/"SN00042": число дополняется нулями до 5 цифр.
     /// Не блокирует нечисловой ввод (возвращает как есть) — это косметика имени файла, а не строгая
@@ -584,9 +610,19 @@ public partial class UploadView : UserControl
         return int.TryParse(trimmed, out var n) && n is >= 0 and <= 99999 ? n.ToString("D5") : trimmed;
     }
 
-    private void ReqNum_Changed(object sender, TextChangedEventArgs e) => UpdatePreview();
+    private void ReqNum_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (IsOpc) _opcTouched = true;
+        UpdateOpcValidationUi();
+        UpdatePreview();
+    }
 
-    private void CabinetSn_Changed(object sender, TextChangedEventArgs e) => UpdatePreview();
+    private void CabinetSn_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (IsOpc) _opcTouched = true;
+        UpdateOpcValidationUi();
+        UpdatePreview();
+    }
 
     private void IncludeDate_Toggled(object sender, RoutedEventArgs e) => UpdatePreview();
 
@@ -651,8 +687,8 @@ public partial class UploadView : UserControl
         var subDisplay = subtype.Name == "—" ? "" : subtype.Name;
         var pathStr = string.Join(" / ", new[] { "ПО", group.Name, subDisplay, ctrlFolder, fwv.Raw }.Where(p => !string.IsNullOrEmpty(p)));
 
-        string reqNum = OpcReqNumCheck.IsChecked == true ? FirmwareUploadService.Format5Digits(ReqNumInput.Text) : "";
-        string cabinetSn = OpcSnCheck.IsChecked == true ? FirmwareUploadService.Format5Digits(CabinetSnInput.Text) : "";
+        string reqNum = isOpc ? FirmwareUploadService.Format5Digits(ReqNumInput.Text) : "";
+        string cabinetSn = isOpc ? FirmwareUploadService.Format5Digits(CabinetSnInput.Text) : "";
         string filename = FirmwareNaming.BuildFirmwareFilename(fwv, ext, reqNum, cabinetSn);
 
         PreviewLabel.Text = $"{pathStr}\n{filename}";
@@ -977,6 +1013,15 @@ public partial class UploadView : UserControl
                 var error = result.Errors.FirstOrDefault() ?? "Не удалось загрузить прошивку.";
                 AppMessageBox.Show(error, "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
                 if (error == "Укажите описание изменений в этой версии.") DescInput.Focus();
+                // Оба поля ОПЦ пусты — раскрываем «доп. настройки» (они могут быть свёрнуты) и ставим
+                // курсор в серийный номер, а не оставляем оператора искать, где именно не заполнено.
+                if (error == OpcFields.BothEmptyError)
+                {
+                    ExtrasExpander.IsExpanded = true;
+                    _opcTouched = true;
+                    UpdateOpcValidationUi();
+                    CabinetSnInput.Focus();
+                }
                 return;
 
             case FirmwareUploadOutcome.IoError:
@@ -1031,9 +1076,8 @@ public partial class UploadView : UserControl
             Description = DescInput.Text.Trim(),
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
-            OpcRequestEnabled = OpcReqNumCheck.IsChecked == true,
+            OpcEnabled = IsOpc,
             RequestNumRaw = ReqNumInput.Text,
-            OpcSnEnabled = OpcSnCheck.IsChecked == true,
             CabinetSnRaw = CabinetSnInput.Text,
             Reservation = GetSelectedReservation(),
             RootPath = _services.Cfg.RootPath(),
@@ -1062,10 +1106,11 @@ public partial class UploadView : UserControl
         SubtypesSelect.ClearAll();
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
-        OpcReqNumCheck.IsChecked = false;
-        OpcSnCheck.IsChecked = false;
+        OpcCheck.IsChecked = false;
         ReqNumInput.Text = "";
         CabinetSnInput.Text = "";
+        _opcTouched = false;
+        UpdateOpcValidationUi();
         // Одноразовый флажок на конкретную загрузку, а не общая привычка (в отличие от IncludeDateCheck,
         // который сознательно НЕ сбрасывается здесь) — оставленный включённым по инерции молча увёл бы
         // sw-номер СЛЕДУЮЩЕЙ, уже не связанной загрузки назад к прежнему значению.
