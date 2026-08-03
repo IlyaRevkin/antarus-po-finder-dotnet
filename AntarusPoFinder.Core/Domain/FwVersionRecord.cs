@@ -62,6 +62,13 @@ public class FwVersionRecord
     /// прошивка осталась одной строкой на всех машинах.</summary>
     public string SyncId { get; set; } = "";
 
+    /// <summary>Имя КОНФИГУРАЦИИ шкафа (столбец fw_versions.config_name). Пусто — обычная запись
+    /// прошивки; непусто — заранее заготовленный вариант той же самой прошивки под конкретную
+    /// комплектацию шкафа: файлы на диске те же (общий disk_path и version_raw), отличается только
+    /// набор тегов, то есть названия шкафов, по которым эта конфигурация находится поиском. См.
+    /// FirmwareConfigService.</summary>
+    public string ConfigName { get; set; } = "";
+
     // Populated by joins for display purposes (not stored on this table).
     /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа
     /// (Database.SearchFwVersionsByTokens): подтип у версии свой, а тип берётся через него.</summary>

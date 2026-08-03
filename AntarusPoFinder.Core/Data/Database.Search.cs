@@ -487,6 +487,16 @@ public partial class Database
         (int)Math.Round(Math.Min(EffectiveUsage(uses, usageThreshold), MaxUsageBonus) * Math.Max(0, usageMultiplier),
             MidpointRounding.AwayFromZero);
 
+    /// <summary>КОНФИГУРАЦИИ шкафа (см. столбец config_name в Database.cs) — это записи одной и той же
+    /// прошивки с разными наборами тегов, и схлопывает их в одну строку выдачи ровно тот же механизм,
+    /// что и всегда: одна строка на пару (подтип, контроллер), с максимальным рангом. Наладчик, вбивший
+    /// название своего шкафа, получает ту конфигурацию, чьи теги совпали, а не десяток одинаковых
+    /// прошивок — это и требовалось.
+    ///
+    /// Единственная добавка — предпочтение при РАВНОМ ранге: побеждает основная запись (config_name
+    /// пуст). На «общем» запросе («НГР SMH5», пустой запрос с фильтрами) все конфигурации набирают
+    /// одинаковые очки, и без этого правила наверх выходила бы произвольная из них — наладчик видел бы
+    /// комплектацию соседнего шкафа там, где вопрос о конкретной комплектации вообще не стоял.</summary>
     private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold,
         double usageMultiplier)
     {
@@ -494,8 +504,16 @@ public partial class Database
         foreach (var entry in scored)
         {
             var key = (entry.Row.SubtypeId, entry.Row.ControllerId);
-            if (!seen.TryGetValue(key, out var existing) ||
-                Rank(entry, usageThreshold, usageMultiplier) > Rank(existing, usageThreshold, usageMultiplier))
+            if (!seen.TryGetValue(key, out var existing))
+            {
+                seen[key] = entry;
+                continue;
+            }
+
+            var rank = Rank(entry, usageThreshold, usageMultiplier);
+            var existingRank = Rank(existing, usageThreshold, usageMultiplier);
+            if (rank > existingRank ||
+                (rank == existingRank && entry.Row.ConfigName.Length == 0 && existing.Row.ConfigName.Length > 0))
                 seen[key] = entry;
         }
 
