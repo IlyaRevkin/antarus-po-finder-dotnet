@@ -18,6 +18,28 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
     </Style>
 
+    <Style TargetType="{x:Type ToolTip}">
+        <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,5"/>
+        <Setter Property="MaxWidth" Value="480"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolTip}">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Separator never had an app style, so every one of them rendered with the OS's default Aero
          bevel chrome (a light-on-top/dark-on-bottom 3D groove) — designed for a light theme, so
          against this app's dark sidebar/cards it read as an odd bright sliver instead of a plain

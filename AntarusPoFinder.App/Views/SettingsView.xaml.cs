@@ -504,16 +504,25 @@ public partial class SettingsView : UserControl
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Исполняемый файл лоадера",
+            Title = "Segnetics Loader",
             Filter = "Программы (*.exe)|*.exe|Все файлы (*.*)|*.*",
         };
-        if (dlg.ShowDialog() == true) LoaderExePathInput.Text = dlg.FileName;
+        if (dlg.ShowDialog() != true) return;
+
+        LoaderExePathInput.Text = dlg.FileName;
+        SaveLoaderExePath(showStatus: true);
     }
 
-    private void SaveLoaderExePath_Click(object sender, RoutedEventArgs e)
+    private void LoaderExePathInput_LostFocus(object sender, RoutedEventArgs e) =>
+        SaveLoaderExePath(showStatus: false);
+
+    private void SaveLoaderExePath(bool showStatus)
     {
-        _services.Cfg.SetLoaderExePath(LoaderExePathInput.Text.Trim());
-        _host.ShowStatus("Путь к лоадеру сохранён");
+        var path = LoaderExePathInput.Text.Trim();
+        if (string.Equals(path, _services.Cfg.LoaderExePath(), StringComparison.OrdinalIgnoreCase)) return;
+
+        _services.Cfg.SetLoaderExePath(path);
+        if (showStatus) _host.ShowStatus("Путь к лоадеру сохранён");
     }
 
     /// <summary>Как SearchAutoSync_Changed выше — сохраняется сразу по щелчку, без отдельной кнопки
