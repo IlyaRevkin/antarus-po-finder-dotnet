@@ -1705,22 +1705,18 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>Открывает интерактивную загрузку через Automation API. Готовый LFS имеет приоритет;
-    /// при его отсутствии PSL собирается и загружается production-пайплайном Loader.</summary>
+    /// при его отсутствии PSL собирается и загружается production-пайплайном Loader, а собранный
+    /// файл уезжает в папку версии НА ДИСКЕ (LoaderJob.NetworkFolder) — чтобы следующий наладчик на
+    /// другой машине увидел готовый .lfs, а не собирал его заново.
+    /// Доступность Automation проверяет сам диалог (LoaderDialog.EnsureAvailable) — до открытия окна.</summary>
     private void OpenLoader(HierarchyResult result)
     {
         var versionName = $"{result.Name} {result.VersionRaw}".Trim();
-        var backend = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath());
-        if (!backend.IsAvailable)
-        {
-            AppMessageBox.Show(
-                backend.UnavailableReason ?? "Segnetics Loader Automation недоступен.",
-                "Segnetics Loader",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
+        if (!LoaderDialog.EnsureAvailable(Window.GetWindow(this), _services.Cfg)) return;
 
-        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result));
+        // Подсказка исполняемого файла из модерации: в папке версии может лежать пачка .lfs, и
+        // заливать надо именно выбранный оператором.
+        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result), result.ExecutableHint);
         if (!files.HasAny)
         {
             AppMessageBox.Show(
@@ -1731,9 +1727,13 @@ public partial class SearchView : UserControl
             return;
         }
 
-        var sourcePath = files.LfsPath ?? files.PslPath!;
-
-        LoaderDialog.ShowDeploy(Window.GetWindow(this), _services.Cfg, versionName, sourcePath);
+        LoaderDialog.ShowDeploy(Window.GetWindow(this), _services.Cfg, new LoaderJob
+        {
+            VersionName = versionName,
+            SourcePath = files.LfsPath ?? files.PslPath!,
+            NetworkFolder = result.FirmwareDir ?? "",
+            LocalFolder = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
+        });
     }
 
     /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с

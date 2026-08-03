@@ -14,54 +14,92 @@ using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
-/// <summary>Интерактивная загрузка проекта через Segnetics Loader Automation. Searcher хранит
-/// только UI операции и локальную копию исходника; подключение к ПЛК, сборку PSL и загрузку
-/// выполняет production-пайплайн Loader.</summary>
+/// <summary>Интерактивная загрузка проекта в ПЛК и отдельная сборка .psl → .lfs через Segnetics
+/// Loader Automation. Searcher хранит только UI операции и локальную копию исходника; подключение к
+/// ПЛК, сборку PSL и загрузку выполняет production-пайплайн Loader.
+///
+/// Окно КОМПАКТНОЕ и запускается САМО. Раньше оператор, нажав на карточке «Загрузить в ПЛК»,
+/// попадал в окно 760×610 с пятью кнопками внизу и обязан был нажать вторую кнопку «Загрузить» —
+/// притом что файл уже выбран карточкой и выбирать было нечего. Теперь работа стартует при
+/// открытии, всё необязательное (сменить файл, подготовка ПЛК, журнал) убрано под «Дополнительно» и
+/// «Подробности», а внизу максимум две кнопки: «Остановить» во время работы и «Закрыть» после.
+///
+/// Недоступность Automation проверяется ДО открытия окна (см. <see cref="EnsureAvailable"/>):
+/// пустое окно с красным баннером и неработающей кнопкой оператору ничего не объясняло.</summary>
 public partial class LoaderDialog : Window
 {
     private readonly ConfigService _cfg;
     private readonly IFirmwareLoaderBackend _backend;
-    private readonly string _versionName;
+    private readonly bool _isBuild;
     private readonly Stopwatch _operationStopwatch = new();
     private readonly DispatcherTimer _operationElapsedTimer;
 
+    private LoaderJob _job;
     private CancellationTokenSource? _cts;
     private LoaderWorkspace? _workspace;
     private readonly List<string> _logLines = new();
     private string? _lastLogMessage;
     private LoaderLogLevel _lastLogLevel;
     private DateTime _lastLogAtUtc;
+    private bool _running;
+    private bool _everStarted;
 
     private static readonly TimeSpan WorkspaceRetention = TimeSpan.FromDays(7);
     private static readonly TimeSpan ImmediateDuplicateWindow = TimeSpan.FromSeconds(1);
 
-    public LoaderDialog(ConfigService cfg, string versionName, string sourcePath)
+    /// <summary>Операция завершилась успехом. Для сборки это значит, что .lfs уже лежит в папке
+    /// версии (см. <see cref="PublishedLfs"/>) — вызывающий код может обновить свою выдачу.</summary>
+    public bool Succeeded { get; private set; }
+
+    /// <summary>Пути, по которым реально сохранён собранный .lfs.</summary>
+    public IReadOnlyList<string> PublishedLfs { get; private set; } = Array.Empty<string>();
+
+    public LoaderDialog(ConfigService cfg, LoaderJob job)
     {
         InitializeComponent();
+        _cfg = cfg;
+        _job = job;
+        _isBuild = job.Operation == LoaderOperation.Build;
+        _backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
+
         _operationElapsedTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(1),
         };
         _operationElapsedTimer.Tick += (_, _) => UpdateOperationElapsedText();
-        _cfg = cfg;
-        _versionName = versionName;
-        _backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
 
-        Title = string.IsNullOrEmpty(_backend.DisplayVersion)
-            ? "Загрузка через Segnetics Loader"
-            : $"Загрузка через Segnetics Loader v{_backend.DisplayVersion}";
-        HeaderLabel.Text = $"Загрузка в ПЛК: {versionName}";
-        UnavailableBanner.Visibility = _backend.IsAvailable ? Visibility.Collapsed : Visibility.Visible;
-        UnavailableReasonLabel.Text = _backend.UnavailableReason ?? "";
-        RunBtn.IsEnabled = _backend.IsAvailable;
+        var version = string.IsNullOrEmpty(_backend.DisplayVersion) ? "" : $" v{_backend.DisplayVersion}";
+        Title = _isBuild ? $"Сборка LFS через Segnetics Loader{version}" : $"Загрузка через Segnetics Loader{version}";
+        HeaderLabel.Text = _isBuild
+            ? $"Сборка LFS из PSL: {job.VersionName}"
+            : $"Загрузка в ПЛК: {job.VersionName}";
 
-        SourceInput.Text = sourcePath;
-        SourceInput.Loaded += (_, _) => ScrollSourcePathToEnd();
         PrepareControllerCheck.IsChecked = cfg.LoaderFormatAndUpdateDefault();
+        // Подготовка ПЛК относится только к заливке: сборка к контроллеру не подключается вообще.
+        if (_isBuild) PrepareControllerCheck.Visibility = Visibility.Collapsed;
 
-        AppendLog("Файл будет скопирован в локальную рабочую область перед запуском Loader.");
-        if (!_backend.IsAvailable && _backend.UnavailableReason is { Length: > 0 } reason)
-            AppendLog(reason, LoaderLogLevel.Error);
+        AdvancedExpander.Expanded += (_, _) => AdvancedArrow.Text = "▾";
+        AdvancedExpander.Collapsed += (_, _) => AdvancedArrow.Text = "▸";
+        DetailsExpander.Expanded += (_, _) => DetailsArrow.Text = "▾";
+        DetailsExpander.Collapsed += (_, _) => DetailsArrow.Text = "▸";
+
+        RefreshSourceLabels();
+        RefreshPreparationLabel();
+        SetRunning(false);
+
+        if (!_backend.IsAvailable)
+        {
+            ShowUnavailable();
+            return;
+        }
+
+        AppendLog(_isBuild
+            ? "Исходник будет скопирован в локальную рабочую область; на диск уедет только готовый LFS."
+            : "Файл будет скопирован в локальную рабочую область перед запуском Loader.");
+
+        // Старт сразу после первой отрисовки: оператор видит окно с прогрессом, а не пустую форму,
+        // которую надо «завести» второй кнопкой.
+        Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => _ = RunAsync()));
 
         Task.Run(() =>
         {
@@ -70,38 +108,62 @@ public partial class LoaderDialog : Window
         });
     }
 
-    public static void ShowDeploy(Window? owner, ConfigService cfg, string versionName, string sourcePath) =>
-        new LoaderDialog(cfg, versionName, sourcePath) { Owner = owner }.ShowDialog();
-
-    private async void Run_Click(object sender, RoutedEventArgs e)
+    /// <summary>Проверка доступности Automation ОДНИМ местом на всех вызывающих: причина
+    /// показывается до открытия окна, обычным сообщением, а не красным баннером внутри окна, из
+    /// которого всё равно ничего не запустить.</summary>
+    public static bool EnsureAvailable(Window? owner, ConfigService cfg)
     {
+        var backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
+        if (backend.IsAvailable) return true;
+        AppMessageBox.Show(
+            backend.UnavailableReason ?? "Segnetics Loader Automation недоступен.",
+            "Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Error);
+        return false;
+    }
+
+    /// <summary>Загрузка в ПЛК с карточки версии. Возвращает true, если Loader отчитался об успехе.</summary>
+    public static bool ShowDeploy(Window? owner, ConfigService cfg, LoaderJob job) =>
+        Run(owner, cfg, job with { Operation = LoaderOperation.Deploy });
+
+    /// <summary>Сборка .lfs из .psl без подключения к ПЛК (модерация, догрузка после выкладки).</summary>
+    public static bool ShowBuild(Window? owner, ConfigService cfg, LoaderJob job) =>
+        Run(owner, cfg, job with { Operation = LoaderOperation.Build });
+
+    private static bool Run(Window? owner, ConfigService cfg, LoaderJob job)
+    {
+        if (!EnsureAvailable(owner, cfg)) return false;
+        var dialog = new LoaderDialog(cfg, job) { Owner = owner };
+        dialog.ShowDialog();
+        return dialog.Succeeded;
+    }
+
+    // ── Запуск операции ───────────────────────────────────────────────────
+
+    private async Task RunAsync()
+    {
+        if (_running) return;
+
         if (!_backend.IsAvailable)
         {
-            AppMessageBox.Show(
-                _backend.UnavailableReason ?? "Segnetics Loader Automation недоступен.",
-                "Segnetics Loader",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ShowUnavailable();
             return;
         }
 
-        var source = SourceInput.Text.Trim();
-        if (string.IsNullOrEmpty(source))
+        var source = _job.SourcePath?.Trim() ?? "";
+        if (string.IsNullOrEmpty(source) || !File.Exists(source))
         {
-            AppMessageBox.Show("Укажите файл для загрузки.", "Segnetics Loader",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (!File.Exists(source))
-        {
-            AppMessageBox.Show($"Файл не найден:\n{source}", "Segnetics Loader",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            FinishWithError(string.IsNullOrEmpty(source)
+                ? "Файл для загрузки не выбран."
+                : $"Файл не найден:\n{source}");
             return;
         }
 
-        var prepareController = PrepareControllerCheck.IsChecked == true;
-        _cfg.SetLoaderFormatAndUpdateDefault(prepareController);
+        var prepareController = !_isBuild && PrepareControllerCheck.IsChecked == true;
+        if (!_isBuild && prepareController != _cfg.LoaderFormatAndUpdateDefault())
+            _cfg.SetLoaderFormatAndUpdateDefault(prepareController);
+        RefreshPreparationLabel();
 
+        _everStarted = true;
         SetRunning(true);
         _cts = new CancellationTokenSource();
         var cancellationToken = _cts.Token;
@@ -109,76 +171,8 @@ public partial class LoaderDialog : Window
 
         try
         {
-            var sourceDirectory = Path.GetDirectoryName(Path.GetFullPath(source))
-                ?? throw new InvalidDataException("Не удалось определить папку исходного проекта.");
-            var isPslSource = string.Equals(
-                Path.GetExtension(source),
-                ".psl",
-                StringComparison.OrdinalIgnoreCase);
-            var workspace = LoaderWorkspace.Create(ConfigService.LocalLoader, _versionName);
-            _workspace = workspace;
-            OpenWorkspaceBtn.IsEnabled = true;
-            AppendLog($"Рабочая область: {workspace.Dir}");
-
-            var localSource = await Task.Run(() => workspace.Import(source), cancellationToken);
-            AppendLog($"Локальная копия готова: {localSource}", LoaderLogLevel.Success);
-            var outputLfsPath = isPslSource
-                ? Path.Combine(
-                    workspace.OutputDir,
-                    $"{Path.GetFileNameWithoutExtension(source)}.lfs")
-                : null;
-
-            var request = new LoaderRequest
-            {
-                SourcePath = localSource,
-                WorkspaceDir = workspace.Dir,
-                OutputPath = outputLfsPath,
-                VersionName = _versionName,
-                Options = new LoaderOptions { FormatAndUpdateFirmware = prepareController },
-            };
-
-            var result = await _backend.RunAsync(request, progress, cancellationToken);
-            if (result.Success && outputLfsPath is not null)
-            {
-                if (!File.Exists(outputLfsPath) ||
-                    !result.Artifacts.Any(path => PathsEqual(path, outputLfsPath)))
-                {
-                    throw new InvalidDataException(
-                        "Проект загружен в ПЛК, но Loader не вернул сохранённый LFS-файл.");
-                }
-
-                IReadOnlyList<string> published;
-                try
-                {
-                    published = await Task.Run(() => workspace.Publish(sourceDirectory));
-                }
-                catch (Exception exception)
-                {
-                    throw new IOException(
-                        "Проект загружен в ПЛК, но собранный LFS не удалось сохранить в папке проекта.",
-                        exception);
-                }
-
-                foreach (var path in published)
-                {
-                    AppendLog($"Собранный LFS сохранён: {path}", LoaderLogLevel.Success);
-                }
-            }
-
-            AppendLog(result.Message, result.Success ? LoaderLogLevel.Success : LoaderLogLevel.Error);
-            if (result.Success)
-            {
-                Progress.IsIndeterminate = false;
-                Progress.Value = 100;
-                PercentLabel.Text = "100%";
-                StageLabel.Text = "Загрузка завершена";
-            }
-            else
-            {
-                Progress.IsIndeterminate = false;
-                PercentLabel.Text = "";
-                StageLabel.Text = "Ошибка";
-            }
+            if (_isBuild) await RunBuildAsync(progress, cancellationToken);
+            else await RunDeployAsync(source, prepareController, progress, cancellationToken);
         }
         catch (OperationCanceledException ex)
         {
@@ -193,9 +187,7 @@ public partial class LoaderDialog : Window
         catch (Exception ex)
         {
             AppendLog(ex.Message, LoaderLogLevel.Error);
-            Progress.IsIndeterminate = false;
-            PercentLabel.Text = "";
-            StageLabel.Text = "Ошибка";
+            ShowFailedState("Ошибка");
         }
         finally
         {
@@ -206,12 +198,266 @@ public partial class LoaderDialog : Window
         }
     }
 
+    private async Task RunDeployAsync(
+        string source, bool prepareController, IProgress<LoaderProgress> progress, CancellationToken cancellationToken)
+    {
+        var workspace = LoaderWorkspace.Create(ConfigService.LocalLoader, _job.VersionName);
+        _workspace = workspace;
+        AppendLog($"Рабочая область: {workspace.Dir}");
+
+        var localSource = await Task.Run(() => workspace.Import(source), cancellationToken);
+        AppendLog($"Локальная копия готова: {localSource}", LoaderLogLevel.Success);
+
+        var isPslSource = string.Equals(
+            Path.GetExtension(source), LoaderFiles.PslExtension, StringComparison.OrdinalIgnoreCase);
+        var outputLfsPath = isPslSource
+            ? Path.Combine(workspace.OutputDir, LoaderFiles.LfsNameFor(source))
+            : null;
+
+        var request = new LoaderRequest
+        {
+            Operation = LoaderOperation.Deploy,
+            SourcePath = localSource,
+            WorkspaceDir = workspace.Dir,
+            OutputPath = outputLfsPath,
+            VersionName = _job.VersionName,
+            Options = new LoaderOptions { FormatAndUpdateFirmware = prepareController },
+        };
+
+        var result = await _backend.RunAsync(request, progress, cancellationToken);
+
+        // Собранный по ходу заливки LFS сохраняем В ПАПКУ ВЕРСИИ НА ДИСКЕ, а не только в локальной
+        // копии — иначе следующий наладчик на другой машине снова увидит один .psl. Неудача
+        // публикации — предупреждение, а не провал операции: прошивка в контроллере уже лежит, и
+        // рисовать «Ошибка» после успешной заливки было бы прямой ложью.
+        if (result.Success && outputLfsPath is not null)
+        {
+            if (!File.Exists(outputLfsPath) || !result.Artifacts.Any(path => PathsEqual(path, outputLfsPath)))
+                AppendLog("Loader не вернул собранный LFS — в папке версии он не появится.", LoaderLogLevel.Warning);
+            else
+                await PublishBuiltLfsAsync(outputLfsPath);
+        }
+
+        AppendLog(result.Message, result.Success ? LoaderLogLevel.Success : LoaderLogLevel.Error);
+        if (result.Success)
+        {
+            Succeeded = true;
+            Progress.IsIndeterminate = false;
+            Progress.Value = 100;
+            PercentLabel.Text = "100%";
+            StageLabel.Text = "Загрузка завершена";
+        }
+        else
+        {
+            ShowFailedState("Ошибка");
+        }
+    }
+
+    private async Task RunBuildAsync(IProgress<LoaderProgress> progress, CancellationToken cancellationToken)
+    {
+        var plan = new LfsConversionPlan(_job.SourcePath, LfsPublisher.Plan(_job.NetworkFolder, _job.LocalFolder));
+        var result = await LfsConversionService.BuildAndPublishAsync(
+            _backend, plan, ConfigService.LocalLoader, _job.VersionName, progress, cancellationToken,
+            workspace => _workspace = workspace);
+
+        foreach (var warning in result.Warnings) AppendLog(warning, LoaderLogLevel.Warning);
+        PublishedLfs = result.Published;
+
+        switch (result.Status)
+        {
+            case LfsConversionStatus.Built:
+                Succeeded = true;
+                AppendLog(result.Message, LoaderLogLevel.Success);
+                Progress.IsIndeterminate = false;
+                Progress.Value = 100;
+                PercentLabel.Text = "100%";
+                StageLabel.Text = "LFS собран";
+                break;
+
+            case LfsConversionStatus.Cancelled:
+                AppendLog(result.Message, LoaderLogLevel.Warning);
+                Progress.IsIndeterminate = false;
+                PercentLabel.Text = "";
+                StageLabel.Text = "Остановлено";
+                break;
+
+            default:
+                AppendLog(result.Message, LoaderLogLevel.Error);
+                ShowFailedState("Ошибка сборки");
+                break;
+        }
+    }
+
+    private async Task PublishBuiltLfsAsync(string builtLfs)
+    {
+        var plan = LfsPublisher.Plan(_job.NetworkFolder, _job.LocalFolder);
+        var published = await Task.Run(() => LfsPublisher.PublishAll(builtLfs, plan));
+        PublishedLfs = published.Published;
+        foreach (var path in published.Published)
+            AppendLog($"Собранный LFS сохранён: {path}", LoaderLogLevel.Success);
+        foreach (var warning in published.Warnings)
+            AppendLog(warning, LoaderLogLevel.Warning);
+    }
+
+    // ── Состояние окна ────────────────────────────────────────────────────
+
+    private void SetRunning(bool running)
+    {
+        _running = running;
+        StopBtn.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        StopBtn.IsEnabled = running;
+        CloseBtn.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+        // «Рабочая папка» и «Сохранить журнал…» нужны только по итогу — до первого запуска их
+        // показывать нечему, во время работы они только отвлекают.
+        MoreBtn.Visibility = !running && _everStarted ? Visibility.Visible : Visibility.Collapsed;
+        OpenWorkspaceItem.IsEnabled = _workspace is not null && Directory.Exists(_workspace.Dir);
+        SaveLogItem.IsEnabled = _logLines.Count > 0;
+
+        ChangeSourceBtn.IsEnabled = !running;
+        RestartBtn.IsEnabled = !running && _backend.IsAvailable;
+        PrepareControllerCheck.IsEnabled = !running;
+
+        if (running)
+        {
+            StartOperationElapsedTimer();
+            Progress.IsIndeterminate = false;
+            Progress.Value = 0;
+            PercentLabel.Text = "0%";
+            StageLabel.Text = "Запуск…";
+        }
+        else
+        {
+            StopOperationElapsedTimer();
+        }
+    }
+
+    private void ShowUnavailable()
+    {
+        UnavailableBanner.Visibility = Visibility.Visible;
+        UnavailableReasonLabel.Text = _backend.UnavailableReason ?? "";
+        if (_backend.UnavailableReason is { Length: > 0 } reason) AppendLog(reason, LoaderLogLevel.Error);
+        StageLabel.Text = "Не запускалось";
+        PercentLabel.Text = "";
+        SetRunning(false);
+    }
+
+    /// <summary>Провал показывается сразу с раскрытым журналом: разбираться без него всё равно
+    /// невозможно, а лишний клик по «Подробности» в этот момент — издевательство.</summary>
+    private void ShowFailedState(string stage)
+    {
+        Progress.IsIndeterminate = false;
+        PercentLabel.Text = "";
+        StageLabel.Text = stage;
+        DetailsExpander.IsExpanded = true;
+    }
+
+    private void FinishWithError(string message)
+    {
+        AppendLog(message, LoaderLogLevel.Error);
+        ShowFailedState("Ошибка");
+        SetRunning(false);
+    }
+
+    private void RefreshSourceLabels()
+    {
+        var source = _job.SourcePath ?? "";
+        var name = string.IsNullOrEmpty(source) ? "не выбран" : Path.GetFileName(source);
+        SourceLabel.Text = $"Файл: {name}";
+        SourceLabel.ToolTip = string.IsNullOrEmpty(source) ? null : source;
+        AdvancedSourceLabel.Text = string.IsNullOrEmpty(source) ? "Файл не выбран." : $"Файл: {source}";
+    }
+
+    /// <summary>Строка про подготовку ПЛК. Авто-старт применяет ЗАПОМНЕННОЕ значение галки, поэтому
+    /// оператор обязан видеть его до и во время работы, а не узнавать по факту форматирования.</summary>
+    private void RefreshPreparationLabel()
+    {
+        if (_isBuild)
+        {
+            PreparationLabel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var prepare = PrepareControllerCheck.IsChecked == true;
+        PreparationLabel.Visibility = Visibility.Visible;
+        PreparationLabel.Text = prepare
+            ? "Подготовка ПЛК: форматирование проекта и обновление ядра — включено (запомненная настройка)."
+            : "Подготовка ПЛК: без форматирования и обновления ядра (запомненная настройка).";
+        PreparationLabel.SetResourceReference(
+            System.Windows.Controls.TextBlock.ForegroundProperty, prepare ? "WarningBrush" : "TextMutedBrush");
+    }
+
+    // ── Кнопки ────────────────────────────────────────────────────────────
+
     private void Stop_Click(object sender, RoutedEventArgs e)
     {
         _cts?.Cancel();
         StopBtn.IsEnabled = false;
         StageLabel.Text = "Отправляю команду отмены…";
     }
+
+    private void Restart_Click(object sender, RoutedEventArgs e) => _ = RunAsync();
+
+    private void ChangeSource_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выберите проект для загрузки",
+            Filter = _isBuild
+                ? "Исходник Segnetics (*.psl)|*.psl|Все файлы (*.*)|*.*"
+                : "Проекты Segnetics (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*",
+        };
+        var current = _job.SourcePath ?? "";
+        if (!string.IsNullOrEmpty(current))
+        {
+            var directory = Path.GetDirectoryName(current);
+            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
+                dialog.InitialDirectory = directory;
+        }
+        if (dialog.ShowDialog() != true) return;
+
+        _job = _job with { SourcePath = dialog.FileName };
+        RefreshSourceLabels();
+        AppendLog($"Выбран другой файл: {dialog.FileName}");
+    }
+
+    private void More_Click(object sender, RoutedEventArgs e)
+    {
+        if (MoreBtn.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = MoreBtn;
+        menu.IsOpen = true;
+    }
+
+    private void OpenWorkspace_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workspace is null || !Directory.Exists(_workspace.Dir)) return;
+        try { Process.Start(new ProcessStartInfo(_workspace.Dir) { UseShellExecute = true }); }
+        catch (Exception ex)
+        {
+            AppendLog($"Не удалось открыть папку: {ex.Message}", LoaderLogLevel.Warning);
+        }
+    }
+
+    private void SaveLog_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Сохранить журнал операции",
+            Filter = "Текстовый файл (*.txt)|*.txt|Все файлы (*.*)|*.*",
+            FileName = $"loader_{LoaderFileStem()}.txt",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try { File.WriteAllLines(dialog.FileName, _logLines); }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось сохранить файл:\n{ex.Message}", "Segnetics Loader",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ── Прогресс и журнал ─────────────────────────────────────────────────
 
     private void OnProgress(LoaderProgress value)
     {
@@ -233,28 +479,6 @@ public partial class LoaderDialog : Window
             AppendLog(value.Message, value.Level);
     }
 
-    private void SetRunning(bool running)
-    {
-        RunBtn.IsEnabled = !running && _backend.IsAvailable;
-        StopBtn.IsEnabled = running;
-        BrowseSourceBtn.IsEnabled = !running;
-        SourceInput.IsEnabled = !running;
-        PrepareControllerCheck.IsEnabled = !running;
-        SaveLogBtn.IsEnabled = _logLines.Count > 0;
-        if (running)
-        {
-            StartOperationElapsedTimer();
-            Progress.IsIndeterminate = false;
-            Progress.Value = 0;
-            PercentLabel.Text = "0%";
-            StageLabel.Text = "Запуск…";
-        }
-        else
-        {
-            StopOperationElapsedTimer();
-        }
-    }
-
     private void StartOperationElapsedTimer()
     {
         _operationElapsedTimer.Stop();
@@ -266,19 +490,13 @@ public partial class LoaderDialog : Window
 
     private void StopOperationElapsedTimer()
     {
-        if (_operationStopwatch.IsRunning)
-        {
-            _operationStopwatch.Stop();
-        }
-
+        if (_operationStopwatch.IsRunning) _operationStopwatch.Stop();
         _operationElapsedTimer.Stop();
         UpdateOperationElapsedText();
     }
 
-    private void UpdateOperationElapsedText()
-    {
+    private void UpdateOperationElapsedText() =>
         ElapsedLabel.Text = FormatOperationElapsed(_operationStopwatch.Elapsed);
-    }
 
     private static string FormatOperationElapsed(TimeSpan elapsed)
     {
@@ -291,9 +509,7 @@ public partial class LoaderDialog : Window
         try
         {
             return string.Equals(
-                Path.GetFullPath(left),
-                Path.GetFullPath(right),
-                StringComparison.OrdinalIgnoreCase);
+                Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception)
         {
@@ -332,7 +548,7 @@ public partial class LoaderDialog : Window
         });
         LogDocument.Blocks.Add(paragraph);
         LogBox.ScrollToEnd();
-        SaveLogBtn.IsEnabled = true;
+        SaveLogItem.IsEnabled = true;
     }
 
     private void SaveLogToWorkspace()
@@ -341,79 +557,16 @@ public partial class LoaderDialog : Window
         try { File.WriteAllLines(_workspace.LogPath, _logLines); }
         catch (Exception ex)
         {
-            AppendLog($"Не удалось сохранить лог в рабочую область: {ex.Message}", LoaderLogLevel.Warning);
-        }
-    }
-
-    private void SaveLog_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "Сохранить лог загрузки",
-            Filter = "Текстовый файл (*.txt)|*.txt|Все файлы (*.*)|*.*",
-            FileName = $"loader_{LoaderFileStem()}.txt",
-        };
-        if (dialog.ShowDialog() != true) return;
-
-        try { File.WriteAllLines(dialog.FileName, _logLines); }
-        catch (Exception ex)
-        {
-            AppMessageBox.Show($"Не удалось сохранить файл:\n{ex.Message}", "Segnetics Loader",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            AppendLog($"Не удалось сохранить журнал в рабочую область: {ex.Message}", LoaderLogLevel.Warning);
         }
     }
 
     private string LoaderFileStem()
     {
-        var stem = string.Join("_", _versionName.Split(
+        var stem = string.Join("_", _job.VersionName.Split(
             Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         return string.IsNullOrEmpty(stem) ? DateTime.Now.ToString("yyyyMMdd_HHmmss") : stem;
     }
-
-    private void BrowseSource_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "Выберите проект для загрузки",
-            Filter = "Проекты Segnetics (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*",
-        };
-        var current = SourceInput.Text.Trim();
-        if (!string.IsNullOrEmpty(current))
-        {
-            var directory = Path.GetDirectoryName(current);
-            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
-                dialog.InitialDirectory = directory;
-        }
-        if (dialog.ShowDialog() == true)
-        {
-            SourceInput.Text = dialog.FileName;
-            ScrollSourcePathToEnd();
-        }
-    }
-
-    private void ScrollSourcePathToEnd()
-    {
-        SourceInput.Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ContextIdle,
-            new Action(() =>
-            {
-                SourceInput.CaretIndex = SourceInput.Text.Length;
-                SourceInput.SelectionLength = 0;
-                SourceInput.ScrollToHorizontalOffset(SourceInput.ExtentWidth);
-            }));
-    }
-
-    private void OpenWorkspace_Click(object sender, RoutedEventArgs e)
-    {
-        if (_workspace is null || !Directory.Exists(_workspace.Dir)) return;
-        try { Process.Start(new ProcessStartInfo(_workspace.Dir) { UseShellExecute = true }); }
-        catch (Exception ex)
-        {
-            AppendLog($"Не удалось открыть папку: {ex.Message}", LoaderLogLevel.Warning);
-        }
-    }
-
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
