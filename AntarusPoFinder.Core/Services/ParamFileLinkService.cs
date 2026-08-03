@@ -125,23 +125,59 @@ public static class ParamFileLinkService
 
         foreach (var extra in list)
         {
-            var id = db.AddParamFile(new ParamFile
+            // Запись под этот подтип уже может существовать — так бывает при ПЕРЕЗАЛИВКЕ файла с теми
+            // же отметками подтипов: сюда приходит тот же набор, что и в прошлый раз. Раньше это был
+            // безусловный INSERT, и каждая перезаливка плодила ещё по одной строке на каждый
+            // дополнительный подтип (потом их схлопывал DedupeParamFiles, теряя свежие дату/описание).
+            // Теперь существующая строка ОБНОВЛЯЕТСЯ — и, что важнее, сохраняет свой sync_id, то есть
+            // для коллег остаётся той же самой записью.
+            var existing = extra.Subtype.Id is null
+                ? null
+                : db.FindLiveParamFile(extra.Subtype.Id.Value, primary.Manufacturer, primary.Filename);
+            if (existing?.Id is not null)
             {
-                SubtypeId = extra.Subtype.Id,
-                Manufacturer = primary.Manufacturer,
-                Filename = primary.Filename,
-                DiskPath = primary.DiskPath,
-                Description = primary.Description,
-                UploadDate = primary.UploadDate,
-            });
-            if (id > 0) created.Add(id);
+                db.UpdateParamFileUpload(existing.Id.Value, primary.DiskPath, primary.Description, primary.UploadDate);
+            }
+            else
+            {
+                var id = db.AddParamFile(new ParamFile
+                {
+                    SubtypeId = extra.Subtype.Id,
+                    Manufacturer = primary.Manufacturer,
+                    Filename = primary.Filename,
+                    DiskPath = primary.DiskPath,
+                    Description = primary.Description,
+                    UploadDate = primary.UploadDate,
+                });
+                if (id > 0) created.Add(id);
+            }
 
             try
             {
                 var folder = ShortcutFolder(hierarchy, rootPath, primary, extra);
+                var original = Path.Combine(primary.DiskPath, primary.Filename);
+
+                // Подтип, чья папка на диске совпадает с папкой основного (тот же тип шкафа + тот же
+                // производитель, разные подтипы с общей папкой), — ярлык на файл в той же папке был
+                // бы ярлыком «сам на себя». Запись заведена, файл под этим подтипом уже находится.
+                if (string.Equals(Path.GetFullPath(folder), Path.GetFullPath(primary.DiskPath), StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 Directory.CreateDirectory(folder);
-                shortcuts?.Create(Path.Combine(folder, primary.Filename + ".lnk"),
-                    Path.Combine(primary.DiskPath, primary.Filename),
+
+                // Страховка от главной жалобы: физический файл должен быть РОВНО ОДИН, в папке
+                // основного подтипа, а у остальных — только ярлык. Если в папке дополнительного
+                // подтипа уже лежит полная копия того же файла (её сюда мог положить старый клиент,
+                // ручное «сохранить как» или разрешение конфликта облачной синхронизацией диска),
+                // убираем её — но ТОЛЬКО при доказанном побайтовом совпадении, иначе оставляем и
+                // говорим об этом вслух.
+                var strayCopy = Path.Combine(folder, primary.Filename);
+                if (File.Exists(strayCopy) &&
+                    !ParamFileDuplicateCleanup.TryRemoveIdenticalCopy(original, strayCopy, out var strayReason) &&
+                    strayReason is not null)
+                    warnings.Add(strayReason);
+
+                shortcuts?.Create(Path.Combine(folder, primary.Filename + ".lnk"), original,
                     $"Параметры {primary.Filename} — файл общий с другим подтипом");
             }
             catch (Exception ex)

@@ -62,6 +62,10 @@ public static class ConfigSyncService
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
         "allowed_extensions", "allowed_extensions_hmi", "allowed_extensions_schematic", "fw_version_reservations", "fw_versions", "param_files", "app_users",
         "flat_list_state", "schema_version", "authoritative",
+        // Признак «снимок умеет sync_id/тумбстоуны у файлов параметров» (см.
+        // HierarchyExportData.ParamFilesHaveSync) — скалярный bool в корне файла, как authoritative
+        // выше, поэтому проверки «это не массив/объект» мало и имя обязано быть здесь.
+        "param_files_have_sync",
     };
 
     /// <summary>Версия формата общего конфига — сегодня меняется только вместе с реальной сменой
@@ -89,8 +93,13 @@ public static class ConfigSyncService
     /// промах, а исключение GetValue&lt;string&gt;() на всю проверку обновлений («The node must be of
     /// type 'JsonValue'») — то есть баннер обновления молча ломался целиком. Проверка по типу узла
     /// закрывает этот класс ошибок независимо от полноты списка.</summary>
+    /// Вторая половина той же страховки: настройка — это всегда СТРОКА (settings хранит строки), а
+    /// служебные скаляры выгрузки (authoritative, param_files_have_sync) — bool. Проверка «строка ли
+    /// это на самом деле» ловит забытое имя мягким промахом вместо того же исключения
+    /// GetValue&lt;string&gt;() («An element of type 'True' cannot be converted to a 'System.String'»).
     private static bool IsSetting(KeyValuePair<string, JsonNode?> kv) =>
-        kv.Value is null or JsonValue && !SkipKeys.Contains(kv.Key) && !SkipSettingsKeys.Contains(kv.Key);
+        (kv.Value is null || (kv.Value is JsonValue v && v.TryGetValue<string>(out _)))
+        && !SkipKeys.Contains(kv.Key) && !SkipSettingsKeys.Contains(kv.Key);
 
     /// <summary>Every plain setting key lives on either Настройки → Общие or Настройки → Быстрый
     /// доступ, and per the operator's decision both of those tabs are configured per-machine only —

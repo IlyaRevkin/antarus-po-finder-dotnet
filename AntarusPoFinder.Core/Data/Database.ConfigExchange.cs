@@ -145,13 +145,19 @@ public partial class Database
                     CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
 
+        // Файлы параметров выгружаются ЦЕЛИКОМ, вместе с архивными (archived=1) — они и есть
+        // тумбстоуны удаления. Раньше здесь стоял «WHERE pf.archived = 0», и снятая запись просто
+        // исчезала из снимка; для аддитивного импорта «исчезла» неотличимо от «эта машина о ней ещё
+        // не знает», поэтому удаление никогда не доезжало до коллег (жалоба «у меня 2 записи, у
+        // коллеги 4, и все не те»). Ровно та же логика, что у fw_versions.deleted_at выше.
+        data.ParamFilesHaveSync = true;
         using (var r = ExecuteReader("""
             SELECT pf.filename, pf.disk_path, pf.description, pf.upload_date, pf.archived, pf.manufacturer,
+                   pf.sync_id, pf.tags,
                    es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name
             FROM param_files pf
             JOIN equipment_subtypes es ON pf.subtype_id = es.id
             JOIN equipment_groups   eg ON es.group_id   = eg.id
-            WHERE pf.archived = 0
             ORDER BY pf.id
             """))
             while (r.Read())
@@ -159,6 +165,7 @@ public partial class Database
                 {
                     Filename = r.GetString(0), DiskPath = r.GetString(1), Description = r.GetString(2),
                     UploadDate = r.GetString(3), Archived = r.GetInt32(4), Manufacturer = r.GetString(5),
+                    SyncId = GetString(r, "sync_id"), Tags = GetString(r, "tags"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     GroupName = GetString(r, "group_name"),
                 });
@@ -282,9 +289,23 @@ public partial class Database
             DiffCategory("Разрешённые расширения поиска схем",
                 local.AllowedExtensionsSchematic ?? new(),
                 onDisk.AllowedExtensionsSchematic ?? new()),
+            // Файлы параметров — единственная категория здесь, которая относится не к справочнику, а
+            // к данным: эталонный снимок теперь снимает у получателей записи параметров, которых в
+            // нём нет (см. ImportParamFiles). Операция обратимая (запись архивируется, файл на диске
+            // остаётся), но человек обязан видеть список ДО отправки, а не узнавать постфактум.
+            // Только живые записи: архивные — это уже принятые всеми тумбстоуны, показывать их как
+            // «исчезнет» нечестно.
+            DiffCategory("Файлы параметров",
+                local.ParamFiles.Where(p => p.Archived == 0).Select(ParamFileDiffLabel),
+                onDisk.ParamFiles.Where(p => p.Archived == 0).Select(ParamFileDiffLabel)),
         };
         return new AuthoritativeSyncDiff(categories);
     }
+
+    /// <summary>Человекочитаемый адрес файла параметров для предпросмотра эталонной синхронизации:
+    /// одного имени файла мало (одноимённые файлы под разными подтипами/производителями — норма).</summary>
+    private static string ParamFileDiffLabel(ExportedParamFile p) =>
+        $"{p.GroupName} / {p.SubtypeName} / {p.Manufacturer} / {p.Filename}";
 
     /// <summary>Одна категория PreviewAuthoritativeDiff — множественная разница по строковым именам,
     /// регистронезависимо и с обрезкой пробелов, как и везде в плоских списках-справочниках этого
@@ -1307,45 +1328,149 @@ public partial class Database
             });
         }
 
+        ImportParamFiles(data, subtypeSyncToId, counts, apply, authoritative);
+
+        return counts;
+    }
+
+    /// <summary>Синхронизация файлов параметров. Раньше здесь было три строки: «нашли по тройке
+    /// (подтип + производитель + имя файла) → пропустить, не нашли → вставить». Из-за этого
+    /// (а) удаление/архивация записи не уезжали к коллегам вообще (в снимок архивные не попадали, а
+    /// для аддитивного импорта «строки нет» неотличимо от «эта машина о ней ещё не знает»),
+    /// (б) уже совпавшая строка не обновлялась никогда — ни свежая дата перезаливки, ни описание, ни
+    /// теги до коллег не доезжали, (в) переименование файла выглядело как новая запись, а старая
+    /// оставалась висеть. Итог у Ильи: «у меня 2 записи, а у коллеги 4, и все не те».
+    ///
+    /// Теперь ровно та же схема, что давно работает для иерархии:
+    ///   • соотнесение по sync_id; при первом контакте двух независимо заведённых баз (у обеих строк
+    ///     свои GUID) — откат на натуральный ключ и «усыновление» входящего sync_id, после чего
+    ///     стороны говорят об одной и той же строке уже по идентификатору;
+    ///   • архив (archived=1) — положительный тумбстоун: приезжает как «снято» и архивируется здесь;
+    ///   • локальная архивация постоянна и не воскрешается входящей «живой» копией с машины, которая
+    ///     об удалении ещё не знает (правило 1 у fw_versions, дословно);
+    ///   • совпавшая живая строка обновляется: дата/описание — от более свежей загрузки, теги —
+    ///     объединением (тег добавляют уже разошедшейся записи, поэтому именно union, а не замена).
+    ///
+    /// disk_path у совпавшей строки НЕ трогается: это абсолютный путь машины-источника, у получателя
+    /// свой корень/буква диска (см. FirmwarePathLocalizer). Он копируется только при вставке новой
+    /// строки — ровно как было до этой правки.</summary>
+    private void ImportParamFiles(HierarchyExportData data, Dictionary<string, int> subtypeSyncToId,
+        ImportCounts counts, bool apply, bool authoritative)
+    {
+        var incomingSyncIds = new HashSet<string>(StringComparer.Ordinal);
+        // sync_id локальных строк, которые этот проход уже «занял» под конкретную входящую запись —
+        // иначе две входящие строки с одинаковым натуральным ключом (такое бывает у снимка со старой
+        // версии, где тройка не была уникальной) обе усыновили бы одну и ту же локальную строку.
+        var claimed = new HashSet<int>();
+
         foreach (var pf in data.ParamFiles)
         {
+            if (!string.IsNullOrEmpty(pf.SyncId)) incomingSyncIds.Add(pf.SyncId);
+
             var subId = ResolveId("equipment_subtypes", pf.SubtypeSyncId, subtypeSyncToId, "name", pf.SubtypeName, pf.GroupName);
             if (subId is null) continue;
 
-            // Matched by (subtype, manufacturer, filename) only — NOT disk_path, which is an
-            // absolute path baked in on the EXPORTING machine (see HierarchyService.ParamsPath):
-            // two machines almost never share the exact same root path/drive letter, so a
-            // disk_path-inclusive match never hit and every sync cycle re-inserted the same file
-            // as a "new" row (178 rows for 2 real files, one per sync round). Mirrors how
-            // fw_versions is matched below (subtype_id+controller_id+version_raw, no path).
-            var exists = ExecuteScalar(
-                "SELECT 1 FROM param_files WHERE subtype_id=@s AND manufacturer=@m AND filename=@f", cmd =>
-                {
-                    cmd.Parameters.AddWithValue("@s", subId.Value);
-                    cmd.Parameters.AddWithValue("@m", pf.Manufacturer);
-                    cmd.Parameters.AddWithValue("@f", pf.Filename);
-                });
-            if (exists is not null) continue;
-
-            counts.ParamFiles++;
-            if (!apply) continue;
-
-            ExecuteNonQuery("""
-                INSERT INTO param_files(subtype_id, manufacturer, filename, disk_path, description, upload_date, archived)
-                VALUES(@s,@m,@f,@d,@desc,@u,@a)
-                """, cmd =>
+            var local = FindParamFileBySyncId(pf.SyncId);
+            var adoptSyncId = false;
+            if (local is null)
             {
-                cmd.Parameters.AddWithValue("@s", subId.Value);
-                cmd.Parameters.AddWithValue("@m", pf.Manufacturer);
-                cmd.Parameters.AddWithValue("@f", pf.Filename);
-                cmd.Parameters.AddWithValue("@d", pf.DiskPath);
-                cmd.Parameters.AddWithValue("@desc", pf.Description);
-                cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(pf.UploadDate) ? NowIso() : pf.UploadDate);
-                cmd.Parameters.AddWithValue("@a", pf.Archived);
-            });
+                // Первый контакт: соотносим по натуральному ключу. Тот же ключ, что и раньше, и
+                // намеренно БЕЗ disk_path — он абсолютный и на разных машинах разный, из-за чего
+                // старое сравнение с ним не совпадало никогда и каждый цикл синхронизации вставлял
+                // те же файлы заново (178 строк на 2 реальных файла).
+                local = FindLiveParamFile(subId.Value, pf.Manufacturer, pf.Filename);
+                if (local is not null && local.Id is not null && claimed.Contains(local.Id.Value)) local = null;
+                adoptSyncId = local is not null && !string.IsNullOrEmpty(pf.SyncId) && local.SyncId != pf.SyncId;
+            }
+
+            if (local is null)
+            {
+                // Строки нет и входящая уже снята — материализовать нечего: завести её только чтобы
+                // тут же спрятать под archived, значит показать коллеге фантом (та же логика, что у
+                // входящего tombstone'а fw_versions без локальной строки).
+                if (pf.Archived != 0) continue;
+
+                counts.ParamFiles++;
+                if (!apply) continue;
+                AddParamFile(new Domain.ParamFile
+                {
+                    SubtypeId = subId.Value,
+                    Manufacturer = pf.Manufacturer,
+                    Filename = pf.Filename,
+                    DiskPath = pf.DiskPath,
+                    Description = pf.Description,
+                    UploadDate = string.IsNullOrEmpty(pf.UploadDate) ? NowIso() : pf.UploadDate,
+                    Tags = pf.Tags,
+                    SyncId = pf.SyncId,
+                });
+                continue;
+            }
+
+            var localId = local.Id!.Value;
+            claimed.Add(localId);
+            if (apply && adoptSyncId) SetParamFileSyncId(localId, pf.SyncId);
+
+            // Локальная архивация постоянна: снятую здесь запись не воскрешает входящая живая копия.
+            if (local.Archived) continue;
+
+            if (pf.Archived != 0)
+            {
+                counts.ParamFilesRemoved++;
+                if (apply) DeleteParamFile(localId);
+                continue;
+            }
+
+            var incomingNewer = string.CompareOrdinal(pf.UploadDate, local.UploadDate) > 0;
+            var newDescription = local.Description;
+            if (!string.IsNullOrWhiteSpace(pf.Description) &&
+                (incomingNewer || string.IsNullOrWhiteSpace(local.Description)))
+                newDescription = pf.Description;
+            var newUploadDate = incomingNewer ? pf.UploadDate : local.UploadDate;
+
+            // Теги — объединение, а не замена: тег почти всегда навешивают уже разошедшейся по
+            // машинам записи, и ни одна машина не должна терять свои (дословно как у fw_versions).
+            var localTagList = Services.TagString.Parse(local.Tags);
+            var haveTags = new HashSet<string>(localTagList, StringComparer.OrdinalIgnoreCase);
+            var addedTags = Services.TagString.Parse(pf.Tags).Where(t => haveTags.Add(t)).ToList();
+            var newTags = addedTags.Count == 0 ? local.Tags : Services.TagString.Join(localTagList.Concat(addedTags));
+
+            if (newDescription == local.Description && newUploadDate == local.UploadDate && newTags == local.Tags)
+                continue;
+
+            counts.ParamFilesUpdated++;
+            if (!apply) continue;
+            UpdateParamFileUpload(localId, local.DiskPath, newDescription, newUploadDate);
+            if (newTags != local.Tags) UpdateParamFileTags(localId, newTags);
         }
 
-        return counts;
+        // ── Эталонная синхронизация: записи параметров, которых в ПОЛНОМ снимке отправителя нет
+        //    вовсе (ни живых, ни архивных) — та же механика, что уже есть у подтипов/типов/
+        //    контроллеров/модификаций выше. Закрывает ровно тот случай, который тумбстоуном не
+        //    закрывается в принципе: мусорная строка завелась на чужой машине, «эталонная» её никогда
+        //    не видела, поэтому надгробия для неё нет и быть не может.
+        //    Архивируем, а не удаляем: файл на диске остаётся, запись просто перестаёт мешаться, и
+        //    решение уезжает дальше тумбстоуном.
+        //    ParamFilesHaveSync — обязательный предохранитель: снимок со старой версии приложения не
+        //    содержит ни sync_id, ни архивных строк, и принять его за полный означало бы вычистить у
+        //    всех получателей всю таблицу параметров разом.
+        if (!authoritative || !data.ParamFilesHaveSync) return;
+
+        var localLive = new List<(int Id, string SyncId)>();
+        using (var r = ExecuteReader("SELECT id, sync_id FROM param_files WHERE archived = 0 AND sync_id IS NOT NULL AND sync_id != ''"))
+            while (r.Read())
+                localLive.Add((r.GetInt32(0), r.GetString(1)));
+
+        foreach (var (id, syncId) in localLive)
+        {
+            // claimed — строки, которые цикл выше уже соотнёс с входящей записью. Проверять только
+            // incomingSyncIds нельзя: при первом контакте строка совпадает по натуральному ключу и
+            // усыновляет чужой sync_id, а в режиме предпросмотра (apply=false) усыновление физически
+            // не выполняется — без этой проверки предпросмотр показывал бы «будет снято» для строк,
+            // которые на самом деле спокойно совпали.
+            if (incomingSyncIds.Contains(syncId) || claimed.Contains(id)) continue;
+            counts.ParamFilesRemoved++;
+            if (apply) DeleteParamFile(id);
+        }
     }
 
     // ── Sync-id-aware lookup helpers ─────────────────────────────────────────
