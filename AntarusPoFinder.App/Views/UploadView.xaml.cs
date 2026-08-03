@@ -574,28 +574,30 @@ public partial class UploadView : UserControl
 
     private bool IsOpc => OpcCheck?.IsChecked == true;
 
+    /// <summary>Оператор уже правил поля ОПЦ или пытался загрузить с пустыми — до этого момента
+    /// красной подсветки нет: только что открытая галочкой панель с двумя пустыми полями это ещё не
+    /// ошибка, а нормальное начальное состояние, и встречать её красной рамкой незачем.</summary>
+    private bool _opcTouched;
+
     /// <summary>Подсветка «заполните хотя бы одно поле» — то же правило, что проверит загрузка
-    /// (OpcFields.Validate), но показанное заранее: пока оба поля пусты, их рамки и подсказка под
-    /// ними красные. Молчаливой блокировки кнопки нет — отказ придёт сообщением, а это лишь
-    /// предупреждение заранее.</summary>
+    /// (OpcFields.Validate), но показанное заранее: как только оба поля оказались пусты после правки,
+    /// их рамки и подсказка под ними краснеют. Кнопку «Загрузить прошивку» это не блокирует — молчаливо
+    /// серая кнопка не объясняет, чего от оператора хотят; отказ придёт понятным сообщением.</summary>
     private void UpdateOpcValidationUi()
     {
         if (OpcFieldsPanel is null) return;
-        bool ok = OpcFields.IsValid(IsOpc, CabinetSnInput.Text, ReqNumInput.Text);
+        bool bad = _opcTouched && !OpcFields.IsValid(IsOpc, CabinetSnInput.Text, ReqNumInput.Text);
 
         foreach (var box in new[] { CabinetSnInput, ReqNumInput })
         {
             // ClearValue, а не присваивание «обычной» кисти: рамка полей приходит из темы
             // (DynamicResource в стиле TextBox), и прибитое значение пережило бы смену темы.
-            if (ok) { box.ClearValue(Control.BorderBrushProperty); box.ClearValue(Control.BorderThicknessProperty); }
-            else { box.BorderBrush = (Brush)FindResource("ErrorBrush"); box.BorderThickness = new Thickness(2); }
+            if (bad) { box.BorderBrush = (Brush)FindResource("ErrorBrush"); box.BorderThickness = new Thickness(2); }
+            else { box.ClearValue(Control.BorderBrushProperty); box.ClearValue(Control.BorderThicknessProperty); }
         }
 
-        OpcHintLabel.Text = ok
-            ? "Заполните хотя бы одно поле — можно оба."
-            : OpcFields.BothEmptyError;
-        if (ok) OpcHintLabel.ClearValue(TextBlock.ForegroundProperty);
-        else OpcHintLabel.Foreground = (Brush)FindResource("ErrorBrush");
+        if (bad) OpcHintLabel.Foreground = (Brush)FindResource("ErrorBrush");
+        else OpcHintLabel.ClearValue(TextBlock.ForegroundProperty);
     }
 
     /// <summary>Формат для имени файла — "(01312)"/"SN00042": число дополняется нулями до 5 цифр.
@@ -610,12 +612,14 @@ public partial class UploadView : UserControl
 
     private void ReqNum_Changed(object sender, TextChangedEventArgs e)
     {
+        if (IsOpc) _opcTouched = true;
         UpdateOpcValidationUi();
         UpdatePreview();
     }
 
     private void CabinetSn_Changed(object sender, TextChangedEventArgs e)
     {
+        if (IsOpc) _opcTouched = true;
         UpdateOpcValidationUi();
         UpdatePreview();
     }
@@ -992,6 +996,7 @@ public partial class UploadView : UserControl
                 if (error == OpcFields.BothEmptyError)
                 {
                     ExtrasExpander.IsExpanded = true;
+                    _opcTouched = true;
                     UpdateOpcValidationUi();
                     CabinetSnInput.Focus();
                 }
@@ -1074,6 +1079,7 @@ public partial class UploadView : UserControl
         OpcCheck.IsChecked = false;
         ReqNumInput.Text = "";
         CabinetSnInput.Text = "";
+        _opcTouched = false;
         UpdateOpcValidationUi();
         // Одноразовый флажок на конкретную загрузку, а не общая привычка (в отличие от IncludeDateCheck,
         // который сознательно НЕ сбрасывается здесь) — оставленный включённым по инерции молча увёл бы
