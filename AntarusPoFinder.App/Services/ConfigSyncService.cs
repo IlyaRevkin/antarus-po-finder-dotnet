@@ -147,6 +147,9 @@ public static class ConfigSyncService
         // Уехав в общий конфиг, он навязал бы всем чужую отметку и часть машин пропустила бы
         // переименования (или проиграла их не в том порядке).
         "hw_rewrite_applied_at",
+        // Докуда эта машина проиграла чужие переносы версий на другой контроллер — тот же локальный
+        // watermark, что hw_rewrite_applied_at слева, и по той же причине не синхронизируемый.
+        "ctrl_reassign_applied_at",
         // «Делиться ли своим ручным весом» — решение КАЖДОЙ машины за свой вес, поэтому per-machine
         // (см. ConfigService.FwWeightShared). Уехав в общий конфиг, оно навязало бы всем чужой выбор.
         // Заметь: fw_usage_multiplier здесь СОЗНАТЕЛЬНО НЕТ — множитель популярности синхронизируемый
@@ -428,6 +431,12 @@ public static class ConfigSyncService
         // (наша 044 ещё цела), и получился бы дубль + фантом «нет папки на диске» (ровно та жалоба).
         ReplayHwRewrites(services, snap.Hierarchy, currentRoot);
 
+        // Ровно по той же причине и ровно так же ДО импорта: контроллер входит в натуральный ключ
+        // синхронизации (подтип+контроллер+version_raw), поэтому перенос версии на другой контроллер,
+        // не проигранный заранее, выглядел бы для импорта как «под старым контроллером строка
+        // пропала, под новым появилась новая» — фантом плюс дубль.
+        ReplayCtrlReassigns(services, snap.Hierarchy, currentRoot);
+
         var counts = services.Db.ImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         // Must run AFTER ImportHierarchyData, not before: RemapFwPaths rewrites the oldRoot prefix on
@@ -501,6 +510,51 @@ public static class ConfigSyncService
 
         if (string.CompareOrdinal(maxTs, watermark) > 0)
             services.Cfg.SetHwRewriteAppliedAt(maxTs);
+    }
+
+    /// <summary>Проигрывает приехавшие в снимке переносы версий на другую модель контроллера (см.
+    /// ExportedCtrlReassign, HierarchyService.ReassignFwVersionToController) — по одному разу на
+    /// машину, по тому же watermark-принципу, что ReplayHwRewrites выше
+    /// (ConfigService.CtrlReassignAppliedAt, строгое «строго новее», сравнение строковое по точной
+    /// ISO-отметке). Пустой watermark (первый запуск / только что обновлённое приложение — момент
+    /// выката этой функции) означает «применить все недавние»: проигрывание идемпотентно, а версии,
+    /// которую уже перенесли, под старым контроллером просто нет — тогда это пустая операция.
+    ///
+    /// Подтип и КАЖДЫЙ из двух контроллеров резолвятся по sync_id с запасным резолвом по имени: sync_id
+    /// приёмник перенимает у отправителя лишь ВНУТРИ ImportHierarchyData, который идёт ПОСЛЕ этого
+    /// проигрывания (см. ReplayHwRewrites — там та же ловушка стоила фантомной строки навсегда).
+    /// Не нашли строку под старым контроллером — событие уже применено или версия сюда ещё не
+    /// доехала: в обоих случаях делать нечего, снимок принесёт корректную строку сам.</summary>
+    private static void ReplayCtrlReassigns(AppServices services, HierarchyExportData hierarchy, string currentRoot)
+    {
+        var incoming = hierarchy.CtrlReassignments;
+        if (incoming is null || incoming.Count == 0) return;
+
+        var watermark = services.Cfg.CtrlReassignAppliedAt();
+        var withTs = incoming.Where(e => !string.IsNullOrEmpty(e.Ts)).ToList();
+        if (withTs.Count == 0) return;
+        var maxTs = withTs.Select(e => e.Ts).Max(StringComparer.Ordinal)!;
+
+        foreach (var e in withTs
+                     .Where(e => string.CompareOrdinal(e.Ts, watermark) > 0)
+                     .OrderBy(e => e.Ts, StringComparer.Ordinal))
+        {
+            var subId = services.Db.GetSubtypeIdBySyncIdOrName(e.SubtypeSyncId, e.GroupName, e.SubtypeName);
+            var oldCtrlId = services.Db.GetControllerIdBySyncId(e.OldControllerSyncId)
+                            ?? services.Db.GetControllerIdByName(e.OldControllerName);
+            var newCtrlId = services.Db.GetControllerIdBySyncId(e.NewControllerSyncId)
+                            ?? services.Db.GetControllerIdByName(e.NewControllerName);
+            if (subId is null || oldCtrlId is null || newCtrlId is null) continue;
+
+            var fwId = services.Db.FindFwVersionIdByNaturalKey(subId.Value, oldCtrlId.Value, e.VersionRaw, excludeId: -1);
+            if (fwId is null) continue;
+
+            try { services.Hierarchy.ReassignFwVersionToController(currentRoot, fwId.Value, newCtrlId.Value, replay: true); }
+            catch { /* одно переигрывание не должно валить всю синхронизацию */ }
+        }
+
+        if (string.CompareOrdinal(maxTs, watermark) > 0)
+            services.Cfg.SetCtrlReassignAppliedAt(maxTs);
     }
 
     /// <summary>Сброс статистики, сделанный на другой машине. Отметка времени сброса едет в общем
@@ -768,6 +822,108 @@ public static class ConfigSyncService
         FileSystemHelpers.UnprotectForOwnWrite(path);
         File.WriteAllBytes(path, ConfigFileCrypto.Encrypt(rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
         FileSystemHelpers.ProtectFromExternalEdits(path);
+    }
+
+    /// <summary>Сколько последних решений модерации живёт в общем конфиге. Ограничение того же рода,
+    /// что MaxChangelogEntries: секция не должна расти в файле бесконечно, а машина, отставшая больше
+    /// чем на столько решений, получит верное состояние из самих строк fw_versions снимка.</summary>
+    private const int MaxModerationDecisions = 500;
+
+    /// <summary>Узкий канал доставки РЕШЕНИЙ МОДЕРАЦИИ с ЛЮБОЙ машины — сделан по образцу
+    /// PushAppUsersOnly выше и существует ровно по той же причине, только для другой беды.
+    ///
+    /// Полный экспорт (Export) — привилегия администратора: он перезаписывает ВЕСЬ общий снимок, и
+    /// случайная машина наладчика/программиста, отправив свою возможно устаревшую иерархию, стёрла бы
+    /// теги/производителей, которые уже есть у остальных. Побочный эффект этого ограничения:
+    /// fw_versions в общем снимке — это состояние базы машины-ЭКСПОРТЁРА, поэтому решение модерации
+    /// (вывод из модерации, архивирование, откат, удаление), принятое на машине наладчика, физически
+    /// не имело пути к коллегам: своего экспорта у неё нет, а в чужом её решения нет.
+    ///
+    /// Здесь читается существующий общий файл (если он есть), дописывается ТОЛЬКО секция
+    /// moderation_decisions (объединение того, что уже лежит на диске, и журнала этой машины,
+    /// дедупликация по ExportedModerationDecision.DedupKey, хвост обрезается до
+    /// MaxModerationDecisions), и файл пишется обратно — все остальные ключи остаются ровно такими,
+    /// какими были прочитаны. Ни иерархия, ни настройки этой машины наружу не уходят.
+    ///
+    /// Прав канал не выдаёт: он доставляет уже принятое решение, а кто вправе его принимать, решает
+    /// роль (страница «Модерация прошивок» — RolesConfig.RoleAccess) на стороне UI.
+    ///
+    /// В отличие от PushAppUsersOnly здесь ОБЯЗАТЕЛЬНО поднимается маркер ревизии: получатели с
+    /// версии, где появился маркер, до самого конфига вообще не доходят, пока revision не вырос (см.
+    /// ReadShared) — без этого решение лежало бы в файле мёртвым грузом до ближайшего экспорта
+    /// администратора, то есть задача «работает у всех» не решалась бы вовсе.
+    ///
+    /// Возвращает false и НИЧЕГО не пишет, если общего конфига на диске ещё нет вовсе: дописывать
+    /// решение некуда, а создавать файл с одной только своей секцией нельзя категорически — снимок с
+    /// пустой иерархией для получателя означает «на источнике этих типов/подтипов/контроллеров нет»,
+    /// и он честно зеркалит их удаление (см. блоки *Removed в ImportHierarchyDataCore — там оно
+    /// безусловное). Решение при этом уже лежит в местном журнале и уедет первым же полным
+    /// экспортом.</summary>
+    public static bool PushModerationOnly(AppServices services, string root, string exportedBy)
+    {
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            throw new DirectoryNotFoundException("Сетевой диск недоступен.");
+
+        var path = Path.Combine(root, "Конфиг", "po_finder_config.json");
+        if (!File.Exists(path)) return false;
+
+        var (rootNode, existingHierarchy) = Parse(path);
+        var onDisk = existingHierarchy.ModerationDecisions ?? new List<ExportedModerationDecision>();
+
+        // Чужое сохраняем как есть, своё дописываем; хвост режем с НАЧАЛА (там самые старые записи —
+        // журналы отдаются по возрастанию ts), чтобы в файле оставались самые свежие решения.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var merged = new List<ExportedModerationDecision>();
+        foreach (var d in onDisk.Concat(services.Db.GetRecentModerationDecisions(MaxModerationDecisions)))
+            if (!string.IsNullOrEmpty(d.VersionRaw) && seen.Add(d.DedupKey()))
+                merged.Add(d);
+        merged = merged
+            .OrderBy(d => d.Ts, StringComparer.Ordinal)
+            .Skip(Math.Max(0, merged.Count - MaxModerationDecisions))
+            .ToList();
+
+        rootNode["moderation_decisions"] = JsonSerializer.SerializeToNode(merged);
+        rootNode["exported_at"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+        rootNode["exported_by"] = exportedBy;
+
+        FileSystemHelpers.UnprotectForOwnWrite(path);
+        File.WriteAllBytes(path, ConfigFileCrypto.Encrypt(rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+        FileSystemHelpers.ProtectFromExternalEdits(path);
+
+        // Без этого получатели даже не заглянут в файл (revision-гейт в ReadShared) — см. class doc.
+        BumpRevisionMarkerCas(root, exportedBy, new[] { $"Модерация: решение от {exportedBy}" });
+        return true;
+    }
+
+    /// <summary>То, что зовёт UI сразу после принятого решения модерации: записать решение в местный
+    /// журнал (это делается ВСЕГДА — тогда его унесёт и обычный полный экспорт) и best-effort
+    /// дописать его в общий конфиг узким каналом выше, чтобы оно доехало до коллег с ЛЮБОЙ машины, а
+    /// не только с администраторской. Возвращает true, если решение реально ушло на диск; false —
+    /// решение сохранено локально и ждёт ближайшего обмена (диск недоступен, файл занят и т.п.).
+    /// Никогда не бросает: сорвать саму модерацию из-за недоступной шары нельзя.</summary>
+    public static bool RecordAndPushModeration(AppServices services, int fwVersionId, string author) =>
+        RecordAndPushModeration(services, new[] { fwVersionId }, author);
+
+    /// <summary>То же самое для нескольких записей сразу — одно решение модерации почти всегда
+    /// касается ещё и копий-ссылок этой же прошивки под другими подтипами шкафа (см.
+    /// Database.GetFwVersionIdsSharingFiles): в журнал они попадают каждая своей строкой, а на диск
+    /// уходят одной записью в общий конфиг.</summary>
+    public static bool RecordAndPushModeration(AppServices services, IEnumerable<int> fwVersionIds, string author)
+    {
+        try
+        {
+            foreach (var id in fwVersionIds)
+                services.Db.RecordModerationDecision(id, author);
+        }
+        catch { return false; }
+
+        try
+        {
+            var root = services.Cfg.RootPath();
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return false;
+            return PushModerationOnly(services, root, author);
+        }
+        catch { return false; }
     }
 
     private static int CountSettingsChanges(AppServices services, JsonObject rootNode)

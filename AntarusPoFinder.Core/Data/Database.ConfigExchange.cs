@@ -192,6 +192,15 @@ public partial class Database
         // а не завёл дубликаты из-за смены version_raw.
         data.HwRewrites = GetRecentHwRewrites();
 
+        // Решения модерации (см. ExportedModerationDecision / Database.ModerationLog.cs). В журнале
+        // лежат и СВОИ решения, и принятые с чужих машин (AbsorbModerationDecisions на приёме) —
+        // поэтому полный экспорт пересылает их дальше, а не стирает чужие, как было бы, выгружай он
+        // только своё. Та же логика, что у fw_usage выше.
+        data.ModerationDecisions = GetRecentModerationDecisions();
+
+        // Переносы версий на другую модель контроллера — см. ExportedCtrlReassign.
+        data.CtrlReassignments = GetRecentCtrlReassigns();
+
         return data;
     }
 
@@ -1085,30 +1094,7 @@ public partial class Database
                 {
                     counts.FwVersionsRemoved++;
                     if (!apply) continue;
-
-                    // Файлы — только если они больше никому не нужны. Прошивка, привязанная к
-                    // нескольким подтипам шкафов, лежит на диске ОДИН раз, а записей у неё несколько
-                    // (см. FirmwareSubtypeLinkService): отвязка лишнего подтипа приезжает сюда таким
-                    // же tombstone'ом, и без этой проверки она уносила бы саму прошивку у всех.
-                    var filesShared = IsDiskPathSharedByOtherVersions(localDiskPath, id);
-
-                    try { if (!filesShared && !string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath)) Infrastructure.FileSystemHelpers.RmtreeSafe(localDiskPath); }
-                    catch { /* best-effort, same as SettingsView.DeleteFirmware_Click */ }
-                    try
-                    {
-                        if (!filesShared && !string.IsNullOrEmpty(localHmi) && localHmi.Contains(fv.VersionRaw, StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (Directory.Exists(localHmi)) Infrastructure.FileSystemHelpers.RmtreeSafe(localHmi);
-                            else if (File.Exists(localHmi)) File.Delete(localHmi);
-                        }
-                    }
-                    // Same reasoning as the disk_path cleanup above: TombstoneFwVersion(id) right
-                    // below is the actual source of truth for "this version is deleted" (it's what
-                    // keeps propagating the tombstone to every other machine) — a leftover HMI folder
-                    // that failed to delete is a disk-space nit, not a correctness problem.
-                    catch { /* best-effort */ }
-
-                    TombstoneFwVersion(id);
+                    MirrorFwTombstone(id, localDiskPath, localHmi, fv.VersionRaw);
                     continue;
                 }
 
@@ -1242,6 +1228,11 @@ public partial class Database
             });
         }
 
+        // ── Узкий канал доставки решений модерации (см. ExportedModerationDecision). ИДЁТ ПОСЛЕ
+        //    блока fw_versions выше намеренно: решение может относиться к строке, которую этот же
+        //    импорт только что и вставил.
+        ApplyModerationDecisions(data.ModerationDecisions, counts, apply, subtypeSyncToId, controllerSyncToId);
+
         foreach (var pf in data.ParamFiles)
         {
             var subId = ResolveId("equipment_subtypes", pf.SubtypeSyncId, subtypeSyncToId, "name", pf.SubtypeName, pf.GroupName);
@@ -1320,6 +1311,118 @@ public partial class Database
         using var r2 = ExecuteReader("SELECT id, display_name, hw_version, sort_order, description, sync_id, updated_at FROM controller_modifications WHERE controller_id=@c AND display_name=@n",
             cmd => { cmd.Parameters.AddWithValue("@c", controllerId); cmd.Parameters.AddWithValue("@n", displayName); });
         return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), r2.GetString(4), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
+    }
+
+    /// <summary>Зеркалит приехавшее удаление прошивки: чистит файлы (best-effort) и ставит локальный
+    /// tombstone. Выделено из блока fw_versions, потому что ровно то же самое должен делать узкий
+    /// канал модерации (ApplyModerationDecisions ниже) — удаление, сделанное на машине наладчика,
+    /// обязано доезжать так же, как сделанное на машине администратора.
+    ///
+    /// Файлы — только если они больше никому не нужны. Прошивка, привязанная к нескольким подтипам
+    /// шкафов, лежит на диске ОДИН раз, а записей у неё несколько (см. FirmwareSubtypeLinkService):
+    /// отвязка лишнего подтипа приезжает таким же tombstone'ом, и без этой проверки она уносила бы
+    /// саму прошивку у всех. Оставшаяся неудалённой папка — это нехватка места на диске, а не
+    /// нарушение целостности: источник истины «версия удалена» — сам tombstone, он и продолжает
+    /// разъезжаться по машинам.</summary>
+    private void MirrorFwTombstone(int id, string localDiskPath, string localHmi, string versionRaw)
+    {
+        var filesShared = IsDiskPathSharedByOtherVersions(localDiskPath, id);
+
+        try { if (!filesShared && !string.IsNullOrEmpty(localDiskPath) && Directory.Exists(localDiskPath)) Infrastructure.FileSystemHelpers.RmtreeSafe(localDiskPath); }
+        catch { /* best-effort, same as SettingsView.DeleteFirmware_Click */ }
+        try
+        {
+            if (!filesShared && !string.IsNullOrEmpty(localHmi) && localHmi.Contains(versionRaw, StringComparison.OrdinalIgnoreCase))
+            {
+                if (Directory.Exists(localHmi)) Infrastructure.FileSystemHelpers.RmtreeSafe(localHmi);
+                else if (File.Exists(localHmi)) File.Delete(localHmi);
+            }
+        }
+        catch { /* best-effort */ }
+
+        TombstoneFwVersion(id);
+    }
+
+    /// <summary>Применяет приехавшие решения модерации (см. ExportedModerationDecision). Это ОТДЕЛЬНЫЙ
+    /// от fw_versions канал, и существует он ровно потому, что fw_versions в снимке — состояние базы
+    /// машины-ЭКСПОРТЁРА: полный снимок выгружает только администратор, поэтому решение, принятое
+    /// наладчиком у себя, до появления этой секции физически не имело пути к остальным машинам.
+    ///
+    /// Правила — те же, что у блока fw_versions выше, ни на йоту не шире:
+    /// • локальный tombstone постоянен: приехавшее решение никогда не воскрешает удалённую строку;
+    /// • приехавший tombstone зеркалится (MirrorFwTombstone) — включая уборку файлов;
+    /// • released 0→1, archived 0→1, status active→иной — только вперёд, назад никогда.
+    /// Из монотонности следует главное свойство: две машины, принявшие РАЗНЫЕ решения по одной
+    /// версии, сходятся на объединении решений независимо от порядка обмена, а повторное применение
+    /// того же снимка ничего не меняет.
+    ///
+    /// Прав этот канал не выдаёт: он доставляет уже принятое решение, а кто вправе его принимать,
+    /// решает роль на стороне UI (страница «Модерация прошивок», см. RolesConfig.RoleAccess).
+    ///
+    /// Строки, для которой решение, здесь ещё нет — пропускаем: она приедет обычным блоком
+    /// fw_versions (в снимке она уже с нужным состоянием, если экспортёр его к тому моменту принял),
+    /// а решение всё равно ляжет в местный журнал ниже и уедет дальше.</summary>
+    private void ApplyModerationDecisions(List<ExportedModerationDecision>? decisions, ImportCounts counts, bool apply,
+        Dictionary<string, int> subtypeSyncToId, Dictionary<string, int> controllerSyncToId)
+    {
+        if (decisions is null || decisions.Count == 0) return;
+
+        foreach (var d in decisions)
+        {
+            if (string.IsNullOrEmpty(d.VersionRaw)) continue;
+            var subId = ResolveId("equipment_subtypes", d.SubtypeSyncId, subtypeSyncToId, "name", d.SubtypeName, d.GroupName);
+            var ctrlId = ResolveId("controller_models", d.ControllerSyncId, controllerSyncToId, "name", d.ControllerName);
+            if (subId is null || ctrlId is null) continue;
+
+            (int Id, int Released, int Archived, string Status, string DeletedAt, string DiskPath, string HmiPath)? row = null;
+            using (var r = ExecuteReader("""
+                SELECT id, released, archived, status, deleted_at, disk_path, hmi_path
+                FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
+                """, cmd =>
+            {
+                cmd.Parameters.AddWithValue("@s", subId.Value);
+                cmd.Parameters.AddWithValue("@c", ctrlId.Value);
+                cmd.Parameters.AddWithValue("@v", d.VersionRaw);
+            }))
+                if (r.Read())
+                    row = (r.GetInt32(0), GetInt(r, "released"), GetInt(r, "archived"),
+                        GetString(r, "status", "active"), GetString(r, "deleted_at"),
+                        GetString(r, "disk_path"), GetString(r, "hmi_path"));
+            if (row is null) continue;
+
+            var (id, localReleased, localArchived, localStatusRaw, localDeletedAt, localDiskPath, localHmi) = row.Value;
+            if (!string.IsNullOrEmpty(localDeletedAt)) continue;
+
+            if (!string.IsNullOrEmpty(d.DeletedAt))
+            {
+                counts.ModerationApplied++;
+                if (apply) MirrorFwTombstone(id, localDiskPath, localHmi, d.VersionRaw);
+                continue;
+            }
+
+            var localStatus = string.IsNullOrEmpty(localStatusRaw) ? "active" : localStatusRaw;
+            var incomingStatus = string.IsNullOrEmpty(d.Status) ? "active" : d.Status;
+            var newReleased = localReleased != 0 || d.Released != 0 ? 1 : 0;
+            var newArchived = localArchived != 0 || d.Archived != 0 ? 1 : 0;
+            var newStatus = localStatus == "active" ? incomingStatus : localStatus;
+            if (newReleased == localReleased && newArchived == localArchived && newStatus == localStatus) continue;
+
+            counts.ModerationApplied++;
+            if (!apply) continue;
+            ExecuteNonQuery("UPDATE fw_versions SET released=@rel, archived=@arch, status=@st WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@rel", newReleased);
+                cmd.Parameters.AddWithValue("@arch", newArchived);
+                cmd.Parameters.AddWithValue("@st", newStatus);
+                cmd.Parameters.AddWithValue("@id", id);
+            });
+        }
+
+        // Принимаем решения в СВОЙ журнал — чтобы эта машина пересылала их дальше своим собственным
+        // экспортом, а не теряла в момент, когда администратор перезапишет общий конфиг целиком.
+        // Делается независимо от того, нашлась ли строка: версия могла ещё не доехать сюда, а решение
+        // по ней всё равно должно продолжить путь.
+        if (apply) AbsorbModerationDecisions(decisions);
     }
 
     /// <summary>Resolves a hierarchy row's local id: prefer the sync_id map built earlier in THIS

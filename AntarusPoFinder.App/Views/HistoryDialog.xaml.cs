@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -160,6 +161,9 @@ public partial class HistoryDialog : Window
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.TombstoneFwVersion(id);
+        // Решение модерации (удаление) уезжает узким каналом с любой машины — см.
+        // ConfigSyncService.PushModerationOnly.
+        ConfigSyncService.RecordAndPushModeration(_services, id, _services.CurrentUserName);
         Changed = true;
         _host.InvalidateSearchResults();
         // Версия удалена — показываем ту же историю без неё, выбор сбросится на первую оставшуюся.
@@ -172,34 +176,73 @@ public partial class HistoryDialog : Window
     {
         if (_selectedRecord is not { Id: int id } r) return;
 
-        var options = _services.Db.GetAllControllerModels()
-            .Where(c => c.Id is not null)
-            .Select(c => new PickOptionDialog.Option(c.Id!.Value, c.Name))
-            .ToList();
+        var models = _services.Db.GetAllControllerModels().Where(c => c.Id is not null).ToList();
+        var options = models.Select(c => new PickOptionDialog.Option(c.Id!.Value, c.Name)).ToList();
         if (options.Count == 0) return;
 
         var picked = PickOptionDialog.Pick(this, "Сменить контроллер",
             $"Контроллер для версии {r.VersionRaw}:", options, r.ControllerId);
         if (picked is not int newCtrl || newCtrl == r.ControllerId) return;
 
-        // Файлы на диске и папку не двигаем — как и откат, это «поправить запись». Предупреждаем, что
-        // папка версии осталась под старым контроллером.
+        // Папка версии на диске ПЕРЕЕЗЖАЕТ вместе с записью (см.
+        // HierarchyService.ReassignFwVersionToController): имя контроллера входит в путь, и правка
+        // одной лишь записи оставляла бы осиротевшую папку, которую ближайший досмотр диска заводил
+        // отдельной записью-фантомом — она тут же попадала в очередь модерации.
         var confirm = AppMessageBox.Show(
             $"Перенести версию {r.VersionRaw} на другой контроллер?\n\n" +
-            "Изменится только запись в каталоге. Файлы прошивки на диске останутся на месте — при " +
-            "необходимости перенесите их папку под новый контроллер вручную.",
+            "Вместе с записью переедет и папка версии на диске (а также приложенная к этой версии " +
+            "папка HMI, если она есть). Общие документы контроллера — Карта ВВ, Инструкция, Карта " +
+            "modbus — останутся на месте: на них могут ссылаться другие версии.",
             "Сменить контроллер", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (confirm != MessageBoxResult.Yes) return;
 
-        if (_services.Db.ReassignFwVersionController(id, newCtrl))
+        // Имена читаем ДО переноса: после него GetFwVersionNames вернёт уже новый контроллер.
+        var before = _services.Db.GetFwVersionNames(id);
+        var oldCtrlId = r.ControllerId;
+        var oldCtrlName = before?.ControllerName
+                          ?? models.FirstOrDefault(c => c.Id == oldCtrlId)?.Name ?? "";
+        var newCtrlName = models.FirstOrDefault(c => c.Id == newCtrl)?.Name ?? "";
+        var subtypeSyncId = _services.Db.GetSubtypeSyncId(r.SubtypeId);
+
+        var res = _services.Hierarchy.ReassignFwVersionToController(_services.Cfg.RootPath(), id, newCtrl);
+        if (!res.Ok)
         {
-            Changed = true;
-            _host.InvalidateSearchResults();
-            // Версия уехала на другой контроллер — в истории этой пары её больше нет.
-            Reload(selectVersionId: null);
-            _host.ShowStatus($"Версия {r.VersionRaw} перенесена на другой контроллер",
-                category: NotificationCategory.FirmwareAndParams);
+            AppMessageBox.Show(
+                res.Errors.Count > 0
+                    ? "Перенос не выполнен:\n" + string.Join("\n", res.Errors)
+                    : "Перенос не выполнен: версия не найдена или контроллер уже такой.",
+                "Сменить контроллер", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+
+        // Журнал переноса — чтобы у коллег это выглядело ПЕРЕНОСОМ (запись + папка), а не «удалили и
+        // завели заново»: контроллер входит в натуральный ключ синхронизации, см.
+        // ConfigSyncService.ReplayCtrlReassigns.
+        _services.Db.RecordCtrlReassign(new ExportedCtrlReassign
+        {
+            SubtypeSyncId = subtypeSyncId,
+            SubtypeName = before?.SubtypeName ?? r.SubtypeName,
+            GroupName = before?.GroupName ?? r.GroupName,
+            OldControllerSyncId = _services.Db.GetControllerSyncId(oldCtrlId),
+            OldControllerName = oldCtrlName,
+            NewControllerSyncId = _services.Db.GetControllerSyncId(newCtrl),
+            NewControllerName = newCtrlName,
+            VersionRaw = r.VersionRaw,
+            Ts = Database.NowIsoPreciseTs(),
+            Author = _services.CurrentUserName,
+        });
+        // Своё же событие проигрывать себе не надо — двигаем watermark сразу, как делает call-site
+        // переписывания hw в SettingsView.
+        _services.Cfg.SetCtrlReassignAppliedAt(Database.NowIsoPreciseTs());
+
+        Changed = true;
+        _host.InvalidateSearchResults();
+        // Версия уехала на другой контроллер — в истории этой пары её больше нет.
+        Reload(selectVersionId: null);
+        _host.PushCatalogChange($"Версия {r.VersionRaw} перенесена на контроллер {newCtrlName}");
+        if (res.Errors.Count > 0)
+            AppMessageBox.Show("Версия перенесена, но не всё удалось перенести на диске:\n" + string.Join("\n", res.Errors),
+                "Сменить контроллер", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void EditUsage_Click(object sender, RoutedEventArgs e)
@@ -256,6 +299,11 @@ public partial class HistoryDialog : Window
 
         if (_services.Db.RollbackFwVersion(id))
         {
+            // Откат — тоже решение модерации и тоже «только вперёд» (active → rolled_back), поэтому
+            // едет тем же узким каналом. Обратное действие («Вернуть в активные») выше НЕ едет: это
+            // движение назад, которого монотонная синхронизация статуса не выражает ни здесь, ни в
+            // обычном дифе fw_versions (см. Database.ApplyModerationDecisions).
+            ConfigSyncService.RecordAndPushModeration(_services, id, _services.CurrentUserName);
             Changed = true;
             _host.InvalidateSearchResults();
             Reload(selectVersionId: id);

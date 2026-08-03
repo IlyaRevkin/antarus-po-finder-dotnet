@@ -241,6 +241,12 @@ public class ConfigService
     public string HwRewriteAppliedAt() => Get("hw_rewrite_applied_at");
     public void SetHwRewriteAppliedAt(string iso) => Set("hw_rewrite_applied_at", iso);
 
+    /// <summary>Тот же локальный watermark, что HwRewriteAppliedAt выше, но для переносов версий на
+    /// другую модель контроллера (ctrl_reassign_log / ExportedCtrlReassign / ConfigSyncService.
+    /// ReplayCtrlReassigns). Per-machine — в общий конфиг не уезжает (SkipSettingsKeys).</summary>
+    public string CtrlReassignAppliedAt() => Get("ctrl_reassign_applied_at");
+    public void SetCtrlReassignAppliedAt(string iso) => Set("ctrl_reassign_applied_at", iso);
+
     /// <summary>Сколько раз версию должны выбрать по ОДНОМУ И ТОМУ ЖЕ запросу, прежде чем эта частота
     /// начнёт двигать выдачу поиска (см. Database.SearchFwVersions/EffectiveUsage). По смыслу — тот же
     /// вид настройки, что и LayoutFallbackThreshold выше (числовой порог чувствительности к
