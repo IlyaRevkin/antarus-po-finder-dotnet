@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
@@ -83,7 +84,7 @@ public partial class AdStartupLoginDialog : Window
     /// method's doc for why there are two paths) — duplicated rather than shared because this dialog
     /// additionally has to persist the resolved role itself (SetRole) before returning, since there
     /// is no MainWindowViewModel yet to hand it to at this point in startup.</summary>
-    private void AdAuth_Click(object sender, RoutedEventArgs e)
+    private async void AdAuth_Click(object sender, RoutedEventArgs e)
     {
         var domain = AdDomainInput.Text.Trim();
         var login = AdLoginInput.Text.Trim();
@@ -96,21 +97,48 @@ public partial class AdStartupLoginDialog : Window
             return;
         }
 
-        // Правки домена/сервера (из «Доп. параметров») сохраняем ДО проверки: во-первых, их подхватит
-        // фабрика валидатора ниже (иначе новый адрес HTTP-сервера заработал бы только после
-        // перезапуска), во-вторых, они закрепляются на этой машине — оператору не придётся вписывать
-        // их заново при следующем входе, если дефолт не подошёл. Per-machine, как весь AD-блок.
-        _cfg.Set("ad_domain", domain);
-        _cfg.SetAdHttpUrl(httpUrl);
+        // Вход идёт через IIdentityProvider (см. AdIdentityProvider) — слой «получи подтверждённую
+        // личность» вместо прямого «проверь логин+пароль». Поведение то же самое: провайдер внутри
+        // зовёт тот же самый IAdCredentialValidator, что вызывался здесь раньше. Смысл перехода —
+        // будущий OIDC, при котором приложение вообще не увидит пароль (docs/corporate-auth-and-network.md).
+        // Оба делегата ниже — это буквально те два действия, что стояли здесь до рефакторинга, и в том
+        // же порядке: сначала сохранить правки домена/сервера, потом собрать валидатор по текущим полям.
+        var provider = new AdIdentityProvider(
+            () =>
+            {
+                // Правки домена/сервера (из «Доп. параметров») сохраняем ДО проверки: во-первых, их
+                // подхватит фабрика валидатора ниже (иначе новый адрес HTTP-сервера заработал бы только
+                // после перезапуска), во-вторых, они закрепляются на этой машине — оператору не придётся
+                // вписывать их заново при следующем входе, если дефолт не подошёл. Per-machine, как весь AD-блок.
+                _cfg.Set("ad_domain", domain);
+                _cfg.SetAdHttpUrl(httpUrl);
+                return new AdCredentials(domain, login, password);
+            },
+            // Валидатор пересобирается на КАЖДОЕ нажатие по текущим настройкам — как и раньше
+            // (см. комментарий к _injectedValidator), а не фиксируется в конструкторе окна.
+            _ => _injectedValidator ?? AdCredentialValidatorFactory.Create(_cfg));
 
-        var validator = _injectedValidator ?? AdCredentialValidatorFactory.Create(_cfg);
-        if (!validator.Validate(domain, login, password, out var authError))
+        // SignInAsync у AD-провайдера возвращает уже завершённый Task (проверка пароля осталась
+        // синхронной), поэтому await продолжается в том же кадре — порядок действий ниже не меняется.
+        var identity = await provider.SignInAsync(CancellationToken.None);
+        if (!identity.Success)
         {
-            ShowError(authError ?? "Не удалось войти — проверьте логин и пароль.");
+            ShowError(identity.FailureReason ?? "Не удалось войти — проверьте логин и пароль.");
+            // Домен/сервер не ответили вовсе (не «неверный пароль») — под IPsec это штатная ситуация
+            // сразу после включения компьютера: туннель поднимается ПОЗЖЕ старта приложения. Даём явный
+            // повтор и диагностику вместо единственного исхода «не вошёл».
+            RetryPanel.Visibility = identity.Failure == IdentityFailureKind.Unavailable
+                ? Visibility.Visible : Visibility.Collapsed;
             return;
         }
+        RetryPanel.Visibility = Visibility.Collapsed;
 
         var normalized = AppUserAuthService.NormalizeAdLogin(login);
+        // ТОЧКА РАСШИРЕНИЯ ПОД OIDC (сейчас НЕ реализована, см. IIdentityProvider): у AD-провайдера
+        // identity.Groups пуст, и роль по-прежнему определяется прямым запросом групп в AD — ровно тем
+        // же вызовом, что и до появления слоя провайдеров. Когда появится OIDC-провайдер, группы
+        // придут в identity.Groups claim'ом, и здесь встанет ветка «если Groups непусты — сопоставить
+        // claim с ролью приложения по настраиваемой таблице», а этот вызов останется только для AD.
         var groupRole = WindowsGroupAuth.DetectRoleForUser(_cfg, domain, login, password);
 
         string role;
@@ -166,6 +194,15 @@ public partial class AdStartupLoginDialog : Window
         _cfg.SetRole("administrator");
         SelectedRole = "administrator";
         DialogResult = true;
+    }
+
+    /// <summary>Диагностика прямо из окна входа — до главного окна, где живут Настройки, здесь ещё
+    /// не дошли. Показывает, что именно недоступно (диск, домен/сервер входа, источник обновлений),
+    /// и даёт скопировать результат.</summary>
+    private void ShowConnectionStatus_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new ConnectionStatusDialog(_cfg) { Owner = this };
+        dlg.ShowDialog();
     }
 
     private void ShowError(string text)

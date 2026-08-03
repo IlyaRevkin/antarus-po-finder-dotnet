@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App;
 
@@ -22,7 +23,44 @@ public enum UpdateSourceKind { Folder, GitHub }
 /// целостности пропускается (обратная совместимость, см. DownloadReleaseAsync).</summary>
 public record UpdateRelease(Version Version, string FileName, UpdateSourceKind Source, string LocalPath = "", string DownloadUrl = "", long ExpectedSize = 0, string Sha256Url = "");
 
-public record UpdateCheckResult(UpdateSourceKind Source, string SourceLabel, List<UpdateRelease> Releases);
+/// <summary><paramref name="FolderProblem"/> — заполнено, только когда папка обновлений задана, но
+/// использовать её не вышло (шара недоступна, путь не существует): тогда источником стал GitHub, и
+/// это НЕ штатная ситуация, а повод сказать об этом вслух — иначе «обновления идут с GitHub» и
+/// «сетевая папка отвалилась» выглядят одинаково. null = папка не задана вовсе либо использована.</summary>
+public record UpdateCheckResult(UpdateSourceKind Source, string SourceLabel, List<UpdateRelease> Releases, string? FolderProblem = null);
+
+/// <summary>Состояние ОДНОГО источника обновлений — для окна «Состояние подключения» и для кнопки
+/// «Проверить» в Настройках, где надо показать обе стороны сразу: что нашлось в папке, что нашлось
+/// на GitHub, что установлено и что из этого будет использовано.</summary>
+/// <param name="Configured">Источник вообще настроен (для папки — путь задан; GitHub настроен всегда).</param>
+/// <param name="Available">До источника достучались и список версий получен.</param>
+/// <param name="Location">Куда именно ходили — путь папки или репозиторий.</param>
+/// <param name="LatestVersion">Самая новая найденная версия, null — если версий нет.</param>
+/// <param name="Problem">Почему источник недоступен, человекочитаемо. null, если доступен.</param>
+public record UpdateSourceStatus(bool Configured, bool Available, string Location, Version? LatestVersion, int ReleaseCount, string? Problem);
+
+/// <summary>Обе стороны сразу + что из них будет использовано. <see cref="EffectiveSource"/> считается
+/// по тому же правилу, что и в <see cref="AppUpdateService.CheckForUpdatesAsync"/> (папка приоритетнее
+/// GitHub), null — если недоступны оба, то есть новые версии на эту машину не придут никак.</summary>
+public record UpdateSourcesReport(UpdateSourceStatus Folder, UpdateSourceStatus GitHub, UpdateSourceKind? EffectiveSource, Version CurrentVersion);
+
+/// <summary>Ни папка обновлений, ни GitHub не ответили. Отдельный тип исключения, а не «просто
+/// сетевая ошибка GitHub», по прямому требованию: обе недоступности сразу — это ЯВНАЯ ошибка
+/// («обновления на эту машину не придут»), а не «обновлений нет». Сообщение перечисляет обе
+/// причины, чтобы разбор жалобы не начинался с угадывания, какая половина отвалилась.</summary>
+public sealed class UpdateSourcesUnavailableException : Exception
+{
+    public string FolderPath { get; }
+    public string FolderProblem { get; }
+
+    public UpdateSourcesUnavailableException(string folderPath, string folderProblem, Exception gitHubError)
+        : base($"Ни один источник обновлений недоступен. Папка «{folderPath}» — {folderProblem}. " +
+               $"GitHub — {AppUpdateService.DescribeError(gitHubError)}", gitHubError)
+    {
+        FolderPath = folderPath;
+        FolderProblem = folderProblem;
+    }
+}
 
 /// <summary>Проверка и установка версий приложения (Настройки → Общие → Обновление приложения),
 /// используется как оттуда, так и автоматической проверкой при запуске (см.
@@ -98,15 +136,164 @@ public static class AppUpdateService
 
     /// <summary>Единая точка проверки обновлений: папка, если указана и доступна, иначе GitHub.
     /// Возвращает источник (для отображения пользователю) и все найденные релизы по убыванию
-    /// версии — первый элемент используется как «последняя версия», остальные — для отката.</summary>
+    /// версии — первый элемент используется как «последняя версия», остальные — для отката.
+    ///
+    /// Два случая, которые раньше были неотличимы от штатной работы и теперь видны явно:
+    /// • папка задана, но недоступна, а GitHub жив — результат приходит с заполненным
+    ///   <see cref="UpdateCheckResult.FolderProblem"/> (источник молча подменился запасным);
+    /// • недоступны ОБА — бросается <see cref="UpdateSourcesUnavailableException"/> с обеими
+    ///   причинами сразу, а не «просто ошибка GitHub».</summary>
     public static async Task<UpdateCheckResult> CheckForUpdatesAsync(string? folderPath)
     {
-        if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
-            return new UpdateCheckResult(UpdateSourceKind.Folder, $"папка обновлений ({folderPath})", ListFolderReleases(folderPath));
+        var folderConfigured = !string.IsNullOrWhiteSpace(folderPath);
+        var folderProblem = folderConfigured ? DescribeFolderProblem(folderPath!) : null;
 
-        var releases = await ListGitHubReleasesAsync();
-        return new UpdateCheckResult(UpdateSourceKind.GitHub, GitHubSourceLabel, releases);
+        if (folderConfigured && folderProblem is null)
+            return new UpdateCheckResult(UpdateSourceKind.Folder, FolderSourceLabel(folderPath!), ListFolderReleases(folderPath!));
+
+        List<UpdateRelease> releases;
+        try
+        {
+            releases = await ListGitHubReleasesAsync();
+        }
+        catch (Exception ex) when (folderConfigured)
+        {
+            // Обе половины отвалились: папка задана, но недоступна, и GitHub не отвечает. Раньше сюда
+            // прилетала «просто ошибка GitHub» — про недоступную папку в ней не было ни слова, хотя
+            // именно она и была настроенным источником. Явная ошибка вместо тихого «обновлений нет»
+            // — прямое требование: под будущим ограничением исходящих соединений по IP GitHub
+            // отвалится насовсем, и молчание здесь означало бы, что машина годами сидит на старой
+            // версии, а никто об этом не знает.
+            throw new UpdateSourcesUnavailableException(folderPath!, folderProblem!, ex);
+        }
+        return new UpdateCheckResult(UpdateSourceKind.GitHub, GitHubSourceLabel, releases, folderProblem);
     }
+
+    private static string FolderSourceLabel(string folderPath) => $"папка обновлений ({folderPath})";
+
+    /// <summary>null — папкой можно пользоваться; иначе человекочитаемая причина, почему нельзя.
+    /// Ходит на диск (на отвалившейся сетевой шаре Directory.Exists сам по себе отвечает секундами),
+    /// поэтому вызывать её на потоке UI напрямую нельзя — см. ProbeSourcesAsync/ConnectionStatusService.</summary>
+    internal static string? DescribeFolderProblem(string folderPath)
+    {
+        try
+        {
+            if (Directory.Exists(folderPath)) return null;
+            return "папка недоступна (сетевой диск не подключён, путь не существует или нет прав)";
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>Опрашивает ОБА источника сразу и ничего не бросает — в отличие от
+    /// <see cref="CheckForUpdatesAsync"/>, который спрашивает только тот источник, который реально
+    /// будет использован. Нужен там, где показывают состояние, а не устанавливают обновление:
+    /// кнопка «Проверить» в Настройках и экран «Состояние подключения». Оба похода ограничены
+    /// <paramref name="timeout"/> — на неотвечающей шаре/через режущий трафик прокси проверка иначе
+    /// висит десятками секунд.</summary>
+    public static async Task<UpdateSourcesReport> ProbeSourcesAsync(string? folderPath, TimeSpan timeout)
+    {
+        var folderTask = ProbeFolderAsync(folderPath, timeout);
+        var gitHubTask = ProbeGitHubAsync(timeout);
+        await Task.WhenAll(folderTask, gitHubTask);
+
+        var folder = folderTask.Result;
+        var gitHub = gitHubTask.Result;
+
+        UpdateSourceKind? effective =
+            folder is { Configured: true, Available: true } ? UpdateSourceKind.Folder :
+            gitHub.Available ? UpdateSourceKind.GitHub :
+            null;
+
+        return new UpdateSourcesReport(folder, gitHub, effective, CurrentVersion);
+    }
+
+    private static async Task<UpdateSourceStatus> ProbeFolderAsync(string? folderPath, TimeSpan timeout)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+            return new UpdateSourceStatus(false, false, "не задана", null, 0, "папка обновлений не настроена");
+
+        var path = folderPath.Trim();
+        var work = Task.Run(() =>
+        {
+            var problem = DescribeFolderProblem(path);
+            if (problem is not null) return new UpdateSourceStatus(true, false, path, null, 0, problem);
+            try
+            {
+                var releases = ListFolderReleases(path);
+                return new UpdateSourceStatus(true, true, path, releases.Count > 0 ? releases[0].Version : null, releases.Count, null);
+            }
+            catch (Exception ex)
+            {
+                return new UpdateSourceStatus(true, false, path, null, 0, ex.Message);
+            }
+        });
+
+        var finished = await Task.WhenAny(work, Task.Delay(timeout));
+        if (finished != work)
+            return new UpdateSourceStatus(true, false, path, null, 0,
+                $"папка не ответила за {timeout.TotalSeconds:0} с (сетевой диск не отвечает)");
+        return work.Result;
+    }
+
+    private static async Task<UpdateSourceStatus> ProbeGitHubAsync(TimeSpan timeout)
+    {
+        using var cts = new System.Threading.CancellationTokenSource(timeout);
+        try
+        {
+            var releases = await ListGitHubReleasesAsync(cts.Token);
+            return new UpdateSourceStatus(true, true, GitHubSourceLabel, releases.Count > 0 ? releases[0].Version : null, releases.Count, null);
+        }
+        catch (Exception ex)
+        {
+            var problem = cts.IsCancellationRequested
+                ? $"GitHub не ответил за {timeout.TotalSeconds:0} с"
+                : DescribeError(ex);
+            return new UpdateSourceStatus(true, false, GitHubSourceLabel, null, 0, problem);
+        }
+    }
+
+    /// <summary>Человекочитаемый отчёт по обоим источникам — то, что показывает кнопка «Проверить» в
+    /// Настройках и что попадает в буфер обмена из «Состояния подключения» (Илье этот текст надо
+    /// уметь просто переслать).</summary>
+    public static string DescribeSources(UpdateSourcesReport report)
+    {
+        var lines = new List<string>
+        {
+            $"Установлена версия: {report.CurrentVersion.ToString(3)}",
+        };
+
+        lines.Add(report.Folder.Configured
+            ? report.Folder.Available
+                ? $"Папка обновлений ({report.Folder.Location}): доступна, {DescribeFound(report.Folder)}."
+                : $"Папка обновлений ({report.Folder.Location}): НЕДОСТУПНА — {report.Folder.Problem}."
+            : "Папка обновлений: не настроена.");
+
+        lines.Add(report.GitHub.Available
+            ? $"GitHub ({GitHubSourceLabel}): доступен, {DescribeFound(report.GitHub)}."
+            : $"GitHub: НЕДОСТУПЕН — {report.GitHub.Problem}.");
+
+        lines.Add(report.EffectiveSource switch
+        {
+            UpdateSourceKind.Folder => "Будет использована папка обновлений.",
+            UpdateSourceKind.GitHub => "Будет использован GitHub.",
+            _ => "Ни один источник обновлений не доступен — новые версии на эту машину сейчас не придут.",
+        });
+
+        return string.Join("\n", lines);
+    }
+
+    private static string DescribeFound(UpdateSourceStatus status) =>
+        status.LatestVersion is null
+            ? "версий не найдено"
+            : $"последняя версия {FormatVersion(status.LatestVersion)} (всего версий: {status.ReleaseCount})";
+
+    /// <summary>Трёхкомпонентный вид, как у <see cref="CurrentVersionText"/>, но безопасный: тег
+    /// релиза в принципе может разобраться в двухкомпонентную версию («v1.2»), а Version.ToString(3)
+    /// на такой бросает исключение — отчёт о состоянии не должен падать из-за формата чужого тега.</summary>
+    private static string FormatVersion(Version version) => version.Build >= 0 ? version.ToString(3) : version.ToString();
 
     private static List<UpdateRelease> ListFolderReleases(string updatePath)
     {
@@ -125,9 +312,9 @@ public static class AppUpdateService
     /// файл — первый .exe-ассет релиза. Релизы без .exe-ассета или без разбираемого тега
     /// пропускаются. Публикация нового релиза: <c>gh release create v1.2.0 publish/AntarusPoFinder.App.exe</c>
     /// (переименовав в AntarusPoFinder-{версия}.exe для единообразия с папочным источником).</summary>
-    private static async Task<List<UpdateRelease>> ListGitHubReleasesAsync()
+    private static async Task<List<UpdateRelease>> ListGitHubReleasesAsync(System.Threading.CancellationToken ct = default)
     {
-        var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases");
+        var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases", ct);
         using var doc = JsonDocument.Parse(json);
 
         var releases = new List<UpdateRelease>();
@@ -311,11 +498,46 @@ public static class AppUpdateService
         return Convert.ToHexString(SHA256.HashData(stream));
     }
 
+    /// <summary>Журнал проверок обновлений — рядом с базой приложения (ConfigService.AppData), а не в
+    /// %TEMP%: его читают, когда разбирают жалобу «новые версии не приходят», и он должен пережить
+    /// чистку временных файлов. Пишется только неудача (успешная проверка молчит), поэтому файл
+    /// растёт медленно; при превышении лимита старая половина отбрасывается.
+    ///
+    /// Существует именно потому, что Debug.WriteLine в релизной сборке не выполняется вовсе, а
+    /// уведомление в истории сообщается один раз «на переходе» — по нему не видно, повторяется ли
+    /// отказ каждые полчаса или был разовым.</summary>
+    public static string UpdateCheckLogPath => Path.Combine(ConfigService.AppData, "update-check.log");
+
+    private const long UpdateCheckLogMaxBytes = 256 * 1024;
+
+    /// <summary>Никогда не бросает: журнал — вспомогательная вещь, и невозможность в него записать не
+    /// должна ломать саму проверку обновлений.</summary>
+    public static void LogSourceFailure(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(ConfigService.AppData);
+            var path = UpdateCheckLogPath;
+            if (File.Exists(path) && new FileInfo(path).Length > UpdateCheckLogMaxBytes)
+            {
+                var lines = File.ReadAllLines(path);
+                File.WriteAllLines(path, lines.Skip(lines.Length / 2));
+            }
+            File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+        }
+        catch { /* см. doc — журнал не имеет права мешать работе */ }
+    }
+
     /// <summary>Turns a raw exception from CheckForUpdatesAsync/InstallAndRestartAsync into a
     /// message that actually points at a likely cause on a locked-down work PC, instead of a raw
     /// .NET exception string a naladchik/программист can't act on.</summary>
     public static string DescribeError(Exception ex)
     {
+        // Проверяется ПЕРВЫМ: у этого исключения внутри лежит сетевая ошибка GitHub, и без этой
+        // ветки разбор цепочки ниже вернул бы «не удалось соединиться с GitHub», потеряв главное —
+        // что настроенная папка обновлений тоже недоступна и почему.
+        if (ex is UpdateSourcesUnavailableException) return ex.Message;
+
         var chain = new List<Exception>();
         for (var e = ex; e is not null; e = e.InnerException) chain.Add(e);
 
