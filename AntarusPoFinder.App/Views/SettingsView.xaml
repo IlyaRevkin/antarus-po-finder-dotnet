@@ -243,16 +243,20 @@
                                         ToolTip="Выбрать папку — сохранится сразу"/>
                             </Grid>
                             <CheckBox x:Name="AppAutoUpdateCheck" Content="Устанавливать найденные обновления автоматически при запуске" Margin="0,0,0,8"
-                                      Checked="AppAutoUpdate_Changed" Unchecked="AppAutoUpdate_Changed"/>
+                                      Checked="AppAutoUpdate_Changed" Unchecked="AppAutoUpdate_Changed"
+                                      ToolTip="Без вопросов ставить новую версию, если она нашлась при запуске"/>
                             <TextBlock x:Name="AppUpdateStatusText" Text="" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"/>
-                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Click="InstallLatestUpdate_Click"/>
+                                <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"
+                                        ToolTip="Посмотреть, какие версии доступны в источнике выше"/>
+                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Click="InstallLatestUpdate_Click"
+                                        ToolTip="Приложение закроется и перезапустится само. Доступно после проверки обновлений"/>
                             </StackPanel>
                             <!-- Постоянный журнал «что нового по версиям» — то же, что разовое окно после
                                  обновления, но к нему можно вернуться в любой момент (см. AppChangelogWindow). -->
                             <Button Content="История изменений программы" Style="{StaticResource SecondaryButton}"
-                                    HorizontalAlignment="Left" Margin="0,0,0,8" Click="ShowAppChangelog_Click"/>
+                                    HorizontalAlignment="Left" Margin="0,0,0,8" Click="ShowAppChangelog_Click"
+                                    ToolTip="Журнал «что нового» по всем установленным версиям"/>
                             <TextBlock Text="Откат на другую версию:" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -260,7 +264,8 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <ComboBox Grid.Column="0" x:Name="AppVersionsCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                                <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"/>
+                                <Button Grid.Column="1" Content="Установить выбранную" Click="InstallSelectedVersion_Click"
+                                        ToolTip="Откатиться на выбранную версию или переустановить её — приложение перезапустится"/>
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -347,8 +352,10 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Сбросить выбранное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetLayoutFallbackSelected_Click"/>
-                                <Button Content="Сбросить всё обучение" Style="{StaticResource SecondaryButton}" Click="ResetLayoutFallbackAll_Click"/>
+                                <Button Content="Сбросить выбранное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetLayoutFallbackSelected_Click"
+                                        ToolTip="Забыть ответы по выбранному запросу — вопрос про раскладку будет задан заново"/>
+                                <Button Content="Сбросить всё обучение" Style="{StaticResource SecondaryButton}" Click="ResetLayoutFallbackAll_Click"
+                                        ToolTip="Очистить таблицу целиком — программа снова спросит про раскладку по любому запросу"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -410,8 +417,10 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"/>
-                                <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"/>
+                                <Button Content="Сбросить статистику у всех" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetFwUsage_Click"
+                                        ToolTip="Обнулить счётчики выборов и ручные веса — на всех машинах, а не только на этой"/>
+                                <Button Content="Снова спрашивать" Style="{StaticResource SecondaryButton}" Click="ResetUsageConfirmLearning_Click"
+                                        ToolTip="Забыть накопленные ответы на «та ли это прошивка» — вопрос начнёт задаваться заново"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -437,9 +446,12 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                        <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"/>
-                        <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"/>
-                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"/>
+                        <Button Content="Добавить тип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddGroup_Click"
+                                ToolTip="Новый тип шкафа — заводится сразу с первым подтипом"/>
+                        <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"
+                                ToolTip="Новый подтип внутри выбранного в таблице типа шкафа"/>
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"
+                                ToolTip="Удалить выбранный подтип. Вместе с последним подтипом удаляется и сам тип шкафа"/>
                     </StackPanel>
 
                     <TextBlock Text="КОНТРОЛЛЕРЫ И МОДИФИКАЦИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -579,8 +591,10 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Orientation="Horizontal">
-                        <Button Content="Добавить теги" Margin="0,0,8,0" Click="ModerateFirmware_Click"/>
-                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshModeration_Click"/>
+                        <Button Content="Добавить теги" Margin="0,0,8,0" Click="ModerateFirmware_Click"
+                                ToolTip="Открыть карточку выбранной версии — теги, описание, вложения. То же, что двойной клик по строке"/>
+                        <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshModeration_Click"
+                                ToolTip="Перечитать список — новые загрузки коллег приезжают синхронизацией"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -795,12 +809,15 @@
                     <ColumnDefinition Width="200"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <ComboBox Grid.Column="0" x:Name="UserRoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                <Button Grid.Column="1" Content="Сменить роль" Click="SetUserRole_Click"/>
+                <ComboBox Grid.Column="0" x:Name="UserRoleCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"
+                          ToolTip="Роль, которую получит выбранный в таблице пользователь"/>
+                <Button Grid.Column="1" Content="Сменить роль" Click="SetUserRole_Click"
+                        ToolTip="Назначить выбранному в таблице пользователю роль из списка слева"/>
             </Grid>
             <StackPanel Grid.Row="4" Orientation="Horizontal">
                 <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshUsers_Click"/>
-                <Button Content="Удалить пользователя" Style="{StaticResource SecondaryButton}" Click="DeleteUser_Click"/>
+                <Button Content="Удалить пользователя" Style="{StaticResource SecondaryButton}" Click="DeleteUser_Click"
+                        ToolTip="Убрать из ростера. При следующем входе по AD он заведётся заново с ролью «Наладчик»"/>
             </StackPanel>
         </Grid>
         </Grid>

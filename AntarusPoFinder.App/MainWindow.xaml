@@ -333,12 +333,14 @@
                                 <TextBlock Grid.Column="0" Text="{Binding ThemeLabel}" VerticalAlignment="Center"
                                            Style="{StaticResource MutedText}"/>
                                 <ToggleButton x:Name="ThemeToggleControl" Grid.Column="1" Style="{StaticResource ThemeToggleSwitch}"
-                                              IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"/>
+                                              IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"
+                                              ToolTip="Переключить светлую и тёмную тему"/>
                             </Grid>
 
                             <TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
-                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"/>
+                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"
+                                    ToolTip="Пройти вводный тур по программе заново"/>
                             <TextBlock HorizontalAlignment="Center" Margin="0,4,0,2">
                                 <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
                             </TextBlock>
@@ -354,7 +356,8 @@
                     </StackPanel>
 
                     <Button x:Name="NotificationsNavButton" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryButton}"
-                            Margin="12,4,12,0" Command="{Binding ShowNotificationHistoryCommand}">
+                            Margin="12,4,12,0" Command="{Binding ShowNotificationHistoryCommand}"
+                            ToolTip="История сообщений из нижней строки и настройка их категорий">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                             <TextBlock Text="Уведомления"/>
                             <Border Background="{DynamicResource AccentBrush}" CornerRadius="8"

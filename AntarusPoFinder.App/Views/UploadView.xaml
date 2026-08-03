@@ -48,8 +48,10 @@
                             <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="BrowseFile_Click"/>
-                        <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"/>
+                        <Button Grid.Column="0" Content="Файл..." Style="{StaticResource SecondaryButton}" Click="BrowseFile_Click"
+                                ToolTip="Выбрать файл прошивки. Можно отметить сразу несколько — они уедут одной версией"/>
+                        <Button Grid.Column="2" Content="Папка..." Style="{StaticResource SecondaryButton}" Click="BrowseFolder_Click"
+                                ToolTip="Выбрать папку проекта целиком — скопируется всё её содержимое"/>
                     </Grid>
 
                     <CheckBox x:Name="HmiCheck" Content="Добавить HMI-проект (отдельно от ПЛК, напр. .fsprj)" Margin="0,12,0,0"
@@ -451,7 +453,8 @@
 
                     <TextBlock x:Name="StatusLabel" Text="" Style="{StaticResource SubtitleText}" Margin="0,8,0,8" TextWrapping="Wrap"/>
 
-                    <Button x:Name="UploadBtn" Content="Загрузить прошивку" Height="40" Click="Upload_Click"/>
+                    <Button x:Name="UploadBtn" Content="Загрузить прошивку" Height="40" Click="Upload_Click"
+                            ToolTip="Скопировать файлы на общий диск и завести версию — путь и имя показаны в предпросмотре выше"/>
                     <!-- IsEnabled/ToolTip задаются кодом (UpdateKeepSwVersionAvailability): кнопка доступна
                          только когда для выбранного подтип/контроллер/HW есть последняя активная версия —
                          откатывать иначе нечего. По умолчанию серая, до первого пересчёта доступности. -->
