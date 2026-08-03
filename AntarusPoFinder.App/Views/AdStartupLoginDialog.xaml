@@ -37,6 +37,19 @@
         <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
         <Button Content="Войти" HorizontalAlignment="Right" Click="AdAuth_Click" IsDefault="True" Margin="0,0,0,4"/>
 
+        <!-- Появляется ТОЛЬКО когда до домена/сервера не достучались вовсе (а не когда пароль неверный):
+             под IPsec туннель поднимается позже старта приложения, поэтому первая попытка входа штатно
+             может прийтись на момент, когда сети ещё нет. Повтор — та же кнопка «Войти» (пароль в поле
+             уже введён), рядом — диагностика, чтобы было видно, что именно недоступно. -->
+        <StackPanel x:Name="RetryPanel" Visibility="Collapsed" Margin="0,8,0,0">
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Text="Похоже, сеть ещё не поднялась (VPN/IPsec подключается позже запуска программы). Подождите минуту и попробуйте снова — пароль вводить заново не нужно."/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowConnectionStatus_Click"/>
+                <Button Content="Проверить снова" Click="AdAuth_Click"/>
+            </StackPanel>
+        </StackPanel>
+
         <Separator Margin="0,8,0,12"/>
         <TextBlock Text="АВАРИЙНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
         <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
