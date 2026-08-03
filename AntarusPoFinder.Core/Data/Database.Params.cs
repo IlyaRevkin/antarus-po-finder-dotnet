@@ -32,11 +32,18 @@ public partial class Database
 
     // ── Param Files ───────────────────────────────────────────────────────────
 
+    /// <summary>Заводит новую запись файла параметров. sync_id проставляется ПРЯМО ЗДЕСЬ, а не
+    /// откладывается до следующего BackfillSyncIds на старте приложения: строка может уехать в общий
+    /// конфиг в ту же минуту (экспорт делается вручную сразу после загрузки), а строка без sync_id у
+    /// получателя не соотносится ни с чем и не умеет ни архивироваться тумбстоуном, ни обновляться.
+    /// Готовый SyncId в объекте уважается — им пользуется импорт конфига, когда переносит чужую
+    /// строку вместе с её идентификатором.</summary>
     public int AddParamFile(ParamFile pf)
     {
+        var syncId = string.IsNullOrEmpty(pf.SyncId) ? System.Guid.NewGuid().ToString() : pf.SyncId;
         ExecuteNonQuery("""
-            INSERT INTO param_files (subtype_id, manufacturer, filename, disk_path, description, upload_date)
-            VALUES (@s, @m, @f, @d, @desc, @u)
+            INSERT INTO param_files (subtype_id, manufacturer, filename, disk_path, description, upload_date, tags, archived, sync_id)
+            VALUES (@s, @m, @f, @d, @desc, @u, @tags, @arch, @sync)
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", (object?)pf.SubtypeId ?? System.DBNull.Value);
@@ -45,8 +52,12 @@ public partial class Database
             cmd.Parameters.AddWithValue("@d", pf.DiskPath);
             cmd.Parameters.AddWithValue("@desc", pf.Description);
             cmd.Parameters.AddWithValue("@u", pf.UploadDate);
+            cmd.Parameters.AddWithValue("@tags", pf.Tags);
+            cmd.Parameters.AddWithValue("@arch", pf.Archived ? 1 : 0);
+            cmd.Parameters.AddWithValue("@sync", syncId);
         });
         var id = ExecuteScalar("SELECT last_insert_rowid()");
+        pf.SyncId = syncId;
         return id is long l ? (int)l : -1;
     }
 
@@ -86,6 +97,7 @@ public partial class Database
         UploadDate = GetString(reader, "upload_date"),
         Archived = GetBool(reader, "archived"),
         Tags = GetString(reader, "tags"),
+        SyncId = GetString(reader, "sync_id"),
         SubtypeName = GetString(reader, "subtype_name"),
         FolderName = GetString(reader, "folder_name"),
         GroupName = GetString(reader, "group_name"),
@@ -117,6 +129,73 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Живая (не архивная) запись по натуральному ключу «подтип + производитель + имя
+    /// файла» — тот же ключ, по которому импорт конфига соотносит строки при первом контакте, и по
+    /// которому перезаливка находит запись, чтобы ОБНОВИТЬ её вместо заведения дубля.</summary>
+    public ParamFile? FindLiveParamFile(int subtypeId, string manufacturer, string filename)
+    {
+        using var reader = ExecuteReader("""
+            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
+            FROM param_files pf
+            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
+            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+            WHERE pf.archived = 0 AND pf.subtype_id = @s AND pf.manufacturer = @m AND pf.filename = @f
+            ORDER BY pf.id
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@m", manufacturer);
+            cmd.Parameters.AddWithValue("@f", filename);
+        });
+        return reader.Read() ? ReadParamFile(reader) : null;
+    }
+
+    /// <summary>Запись по её межмашинному идентификатору — основной путь импорта конфига (см.
+    /// Database.ConfigExchange.cs). Архивные ВОЗВРАЩАЮТСЯ намеренно: локальная архивация постоянна,
+    /// и импорт обязан её увидеть, чтобы не воскресить снятую запись входящей «живой» копией с
+    /// машины, которая об удалении ещё не знает.</summary>
+    public ParamFile? FindParamFileBySyncId(string syncId)
+    {
+        if (string.IsNullOrEmpty(syncId)) return null;
+        using var reader = ExecuteReader("""
+            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
+            FROM param_files pf
+            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
+            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+            WHERE pf.sync_id = @sy
+            ORDER BY pf.id
+            """, cmd => cmd.Parameters.AddWithValue("@sy", syncId));
+        return reader.Read() ? ReadParamFile(reader) : null;
+    }
+
+    /// <summary>«Усыновление» чужого sync_id при первом контакте двух независимо заведённых баз:
+    /// строка совпала по натуральному ключу, но идентификаторы у сторон разные (каждая сгенерировала
+    /// свой). Тот же приём, что у типов/подтипов/контроллеров (см. adoptSyncId в
+    /// ImportHierarchyDataCore) — со следующей синхронизации строки соотносятся уже по sync_id, и
+    /// переименование файла/смена производителя перестают выглядеть как «удалили и завели новую».</summary>
+    public void SetParamFileSyncId(int fileId, string syncId) =>
+        ExecuteNonQuery("UPDATE param_files SET sync_id=@sy WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@sy", syncId);
+            cmd.Parameters.AddWithValue("@id", fileId);
+        });
+
+    /// <summary>Перезаливка файла под тем же именем: запись ОБНОВЛЯЕТСЯ (свежая дата, дописанный
+    /// журнал изменений в описании), а не плодится новой строкой — см. ParamFileUploadService.
+    /// Путь на диске тоже обновляется: тот же файл могли перезалить с машины с другой буквой диска.</summary>
+    public void UpdateParamFileUpload(int fileId, string diskPath, string description, string uploadDate) =>
+        ExecuteNonQuery("UPDATE param_files SET disk_path=@d, description=@desc, upload_date=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", diskPath);
+            cmd.Parameters.AddWithValue("@desc", description);
+            cmd.Parameters.AddWithValue("@u", uploadDate);
+            cmd.Parameters.AddWithValue("@id", fileId);
+        });
+
+    /// <summary>Архивация записи (мягкое удаление). Именно архивация, а не DELETE: строка остаётся в
+    /// таблице и уезжает в общий конфиг ТУМБСТОУНОМ — иначе удаление жило бы только на той машине,
+    /// где его сделали, а у коллег снятая запись оставалась бы навсегда (жалоба «у меня 2 записи, у
+    /// коллеги 4»). Файл на диске не трогается никогда.</summary>
     public void DeleteParamFile(int fileId) =>
         ExecuteNonQuery("UPDATE param_files SET archived=1 WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fileId));
 
