@@ -209,22 +209,40 @@
                         <StackPanel>
                             <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub. Папка надёжнее: доступ к GitHub с рабочих машин регулярно режется, и тогда обновления перестают доезжать." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <!-- Поле сохраняется само (при уходе фокуса и после выбора через «…») —
+                                 отдельной кнопки «Сохранить» больше нет, о факте сохранения сообщает
+                                 нижняя строка состояния. -->
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" x:Name="AppUpdatePathInput" Height="34" Margin="0,0,8,0" ToolTip="Сетевая папка с файлами AntarusPoFinder-{версия}.exe. Если пусто — используется GitHub."/>
-                                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Margin="0,0,8,0" Click="BrowseAppUpdatePath_Click"/>
-                                <Button Grid.Column="2" Content="Сохранить" Click="SaveAppUpdatePath_Click"/>
+                                <TextBox Grid.Column="0" x:Name="AppUpdatePathInput" Height="34" Margin="0,0,8,0"
+                                         LostFocus="AppUpdatePathInput_LostFocus"
+                                         ToolTip="Папка этой машины с файлами AntarusPoFinder-{версия}.exe. Если пусто — используется общая папка (ниже), а если и её нет — GitHub."/>
+                                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseAppUpdatePath_Click"/>
                             </Grid>
-                            <CheckBox x:Name="AppAutoUpdateCheck" Content="Устанавливать найденные обновления автоматически при запуске" Margin="0,0,0,8"/>
+                            <!-- Общая папка — единственная настройка обновлений, которая уезжает на все
+                                 машины (см. UpdateFolderResolver и ConfigService.app_update_path_shared).
+                                 Только администратору: она пишется в общий конфиг. -->
+                            <StackPanel x:Name="SharedUpdatePathSection" Margin="0,0,0,8">
+                                <TextBlock Text="Общая папка обновлений (для всех машин):" Margin="0,0,0,4"/>
+                                <TextBox x:Name="AppUpdatePathSharedInput" Height="34" Margin="0,0,0,4"
+                                         LostFocus="AppUpdatePathSharedInput_LostFocus"
+                                         ToolTip="Уезжает на все машины вместе с общим конфигом. Лучше указывать путь ОТНОСИТЕЛЬНО корня рабочего диска (например «Обновления») — тогда он работает независимо от того, какой буквой диск подключён на каждой машине."/>
+                                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                                           Text="Задаётся один раз администратором и синхронизируется на все машины. Пишите путь относительно корня рабочего диска («Обновления») или в виде \\сервер\шара\… — абсолютный путь с буквой диска на других машинах может не совпасть. Поле выше (папка этой машины) при заполнении перебивает общее."/>
+                            </StackPanel>
+                            <CheckBox x:Name="AppAutoUpdateCheck" Content="Устанавливать найденные обновления автоматически при запуске" Margin="0,0,0,8"
+                                      Checked="AppAutoUpdate_Changed" Unchecked="AppAutoUpdate_Changed"/>
                             <TextBlock x:Name="AppUpdateStatusText" Text="" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Content="Проверить обновления" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"/>
-                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Click="InstallLatestUpdate_Click"/>
+                                <Button Content="Проверить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAppUpdates_Click"
+                                        ToolTip="Опрашивает оба источника сразу: что лежит в папке обновлений, что есть на GitHub, что установлено и что из этого будет использовано."/>
+                                <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Margin="0,0,8,0" Click="InstallLatestUpdate_Click"/>
+                                <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Click="ShowConnectionStatus_Click"
+                                        ToolTip="Диск, домен/сервер входа и источник обновлений — что доступно прямо сейчас и почему нет."/>
                             </StackPanel>
                             <!-- Постоянный журнал «что нового по версиям» — то же, что разовое окно после
                                  обновления, но к нему можно вернуться в любой момент (см. AppChangelogWindow). -->
