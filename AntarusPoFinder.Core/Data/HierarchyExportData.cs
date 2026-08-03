@@ -112,8 +112,18 @@ public class ExportedParamFile
     [JsonPropertyName("disk_path")] public string DiskPath { get; set; } = "";
     [JsonPropertyName("description")] public string Description { get; set; } = "";
     [JsonPropertyName("upload_date")] public string UploadDate { get; set; } = "";
+    /// <summary>1 — запись снята (архивирована) на выгружавшей машине. Именно ТУМБСТОУН, а не
+    /// «строки просто нет в снимке»: param_files аддитивна по своей природе (у каждой машины бывают
+    /// свои загрузки), поэтому отсутствие строки никогда не означает удаление — его нужно передавать
+    /// положительным сигналом, ровно как fw_versions.deleted_at.</summary>
     [JsonPropertyName("archived")] public int Archived { get; set; }
     [JsonPropertyName("manufacturer")] public string Manufacturer { get; set; } = "";
+    /// <summary>Стабильный идентификатор строки. Пусто у экспорта со старой версии приложения —
+    /// импорт тогда соотносит по натуральному ключу, как раньше.</summary>
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    /// <summary>Теги файла параметров. Раньше в общий конфиг вообще не выгружались — тег, навешенный
+    /// на одной машине, до коллег не доезжал, и поиск по нему у них ничего не находил.</summary>
+    [JsonPropertyName("tags")] public string Tags { get; set; } = "";
     [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
     [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
@@ -189,6 +199,16 @@ public class HierarchyExportData
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
     [JsonPropertyName("fw_versions")] public List<ExportedFwVersion> FwVersions { get; set; } = new();
     [JsonPropertyName("param_files")] public List<ExportedParamFile> ParamFiles { get; set; } = new();
+
+    /// <summary>true — снимок писало приложение, которое уже умеет sync_id/тумбстоуны у файлов
+    /// параметров, т.е. список param_files выше ПОЛНЫЙ (включая архивные) и каждая строка адресуема.
+    /// Отдельный явный флаг, а не «посмотрим, есть ли хоть у одной строки sync_id»: эталонная
+    /// синхронизация архивирует у получателей всё, чего в снимке нет, и снимок со старой версии
+    /// приложения (где param_files выгружались без sync_id и без архивных) не должен даже случайно
+    /// быть принят за полный — иначе одна синхронизация со старого клиента вычистила бы у всех
+    /// остальных всю таблицу параметров. Старый экспорт ключа не содержит → false → прежнее
+    /// поведение (только добавлять) сохраняется байт в байт.</summary>
+    [JsonPropertyName("param_files_have_sync")] public bool ParamFilesHaveSync { get; set; }
     // Always present with a default empty list (unlike Tags/AllowedExtensions/ParamManufacturers
     // above) — an export from an older app version without this feature simply carries zero users,
     // which correctly means "nothing to add/update", never "delete everyone" (app_users is
@@ -285,6 +305,14 @@ public class ImportCounts
     /// mean "deleted" (fw_versions is additive-only otherwise).</summary>
     public int FwVersionsRemoved { get; set; }
     public int ParamFiles { get; set; }
+    /// <summary>Записи файлов параметров, снятые (архивированные) здесь по входящему тумбстоуну либо
+    /// вычищенные эталонной синхронизацией как отсутствующие в полном снимке отправителя. Полный
+    /// аналог FwVersionsRemoved — до появления sync_id у param_files удаление между машинами не
+    /// разъезжалось вовсе.</summary>
+    public int ParamFilesRemoved { get; set; }
+    /// <summary>Файлы параметров, у которых входящий снимок обновил дату загрузки/описание/теги —
+    /// раньше уже совпавшая строка не обновлялась никогда (импорт был строго «только добавлять»).</summary>
+    public int ParamFilesUpdated { get; set; }
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
 
@@ -300,6 +328,7 @@ public class ImportCounts
         ModificationsAdded + ModificationsUpdated + ModificationsRemoved + ManufacturersAdded + ManufacturersRemoved + TagsAdded + TagsRemoved +
         ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
         ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
-        ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + ParamFiles +
+        ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved +
+        ParamFiles + ParamFilesRemoved + ParamFilesUpdated +
         AppUsersAdded + AppUsersUpdated;
 }

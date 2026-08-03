@@ -616,12 +616,19 @@ public class ConfigSyncTests
         }
     }
 
-    /// <summary>Критическое ограничение задачи: эталон касается ТОЛЬКО справочника. Прошивки/файлы
-    /// параметров получателя, отсутствующие у «эталона» (потому что тот их никогда не загружал),
-    /// обязаны остаться нетронутыми и полностью незамеченными — не только не удалиться, но даже не
-    /// попасть ни в один из счётчиков FwVersions*/ParamFiles.</summary>
+    /// <summary>ПРОШИВКИ эталонная синхронизация не трогает: локальная прошивка, отсутствующая у
+    /// «эталона» (потому что тот её никогда не загружал), обязана остаться нетронутой и полностью
+    /// незамеченной — не только не удалиться, но даже не попасть ни в один из счётчиков FwVersions*.
+    ///
+    /// А вот про ФАЙЛЫ ПАРАМЕТРОВ ожидание изменено сознательно, по прямой просьбе владельца:
+    /// «нужно, чтобы синхра здесь корректно отработала, а старые файлы затирались или не мешались».
+    /// Расхождение таблиц («у меня 2 записи, а у коллеги 4, и все не те») иначе не лечится вовсе:
+    /// чужая мусорная строка, которой у эталона никогда не было, не может приехать тумбстоуном —
+    /// надгробить нечего. Поэтому эталонный снимок теперь архивирует записи параметров, которых в
+    /// нём нет (ровно как он давно делает с подтипами/типами/контроллерами/модификациями). Именно
+    /// АРХИВИРУЕТ: файл на диске остаётся на месте, снимается только запись.</summary>
     [Fact]
-    public void ImportHierarchyData_Authoritative_DoesNotTouchLocalFwVersionsOrParamFiles()
+    public void ImportHierarchyData_Authoritative_KeepsLocalFwVersions_ButSweepsParamFiles()
     {
         var pathA = NewTempDb();
         var pathB = NewTempDb();
@@ -672,11 +679,13 @@ public class ConfigSyncTests
             Assert.Equal(0, counts.FwVersions);
             Assert.Equal(0, counts.FwVersionsRemoved);
             Assert.Equal(0, counts.ParamFiles);
+            Assert.Equal(paramCountBefore, counts.ParamFilesRemoved);
 
+            // Прошивка — на месте и незамечена.
             Assert.Equal(fwCountBefore, dbB.GetAllFwVersionsWithNames(includeArchived: true).Count);
-            Assert.Equal(paramCountBefore, dbB.GetParamFiles().Count);
             Assert.Contains(dbB.GetAllFwVersionsWithNames(includeArchived: true), f => f.VersionRaw == "9.9.9.1.20260722_0000");
-            Assert.Contains(dbB.GetParamFiles(), f => f.Filename == "authoritative_test.dcfx");
+            // Файл параметров — снят из таблицы (запись архивирована), сам файл на диске не трогался.
+            Assert.DoesNotContain(dbB.GetParamFiles(), f => f.Filename == "authoritative_test.dcfx");
         }
         finally
         {

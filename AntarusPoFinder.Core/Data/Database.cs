@@ -120,7 +120,9 @@ public partial class Database : IDisposable
                  description  TEXT    NOT NULL DEFAULT '',
                  upload_date  TEXT    NOT NULL DEFAULT '',
                  archived     INTEGER NOT NULL DEFAULT 0,
-                 tags         TEXT    NOT NULL DEFAULT ''
+                 tags         TEXT    NOT NULL DEFAULT '',
+                 -- Стабильный GUID строки для синхронизации между машинами (см. EnsureColumnsExist).
+                 sync_id      TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS users (
@@ -472,12 +474,23 @@ public partial class Database : IDisposable
         if (!hadReleasedColumn)
             Exec("UPDATE fw_versions SET released = CASE WHEN TRIM(tags) <> '' THEN 1 ELSE 0 END");
 
+        // sync_id у файлов параметров — ровно тот же приём, что у справочников выше, и по той же
+        // причине, только позже: до этого param_files соотносились между машинами ИСКЛЮЧИТЕЛЬНО по
+        // тройке (подтип + производитель + имя файла), а импорт был строго «только добавлять». Из-за
+        // этого (а) удаление/архивация записи никуда не уезжали — у коллеги оставались давно снятые
+        // строки, (б) перезаливка заводила новую строку вместо обновления старой, и таблицы на двух
+        // машинах расходились («у меня 2 записи, у коллеги 4, и все не те»). Со стабильным GUID
+        // строка узнаётся у соседа независимо от того, как её потом переименовали/перезалили, а
+        // архивация уезжает как тумбстоун (см. Database.ConfigExchange.cs).
+        // Пустое значение = поведение ровно как раньше: импорт откатывается на матч по натуральному
+        // ключу и «усыновляет» чужой sync_id при первом контакте.
         AddColumnsIfMissing("param_files",
             ("manufacturer", "TEXT NOT NULL DEFAULT ''"),
             ("description", "TEXT NOT NULL DEFAULT ''"),
             ("upload_date", "TEXT NOT NULL DEFAULT ''"),
             ("archived", "INTEGER NOT NULL DEFAULT 0"),
-            ("tags", "TEXT NOT NULL DEFAULT ''"));
+            ("tags", "TEXT NOT NULL DEFAULT ''"),
+            ("sync_id", "TEXT NOT NULL DEFAULT ''"));
 
         AddColumnsIfMissing("fw_version_reservations",
             ("expires_at", "TEXT NOT NULL DEFAULT ''"));
@@ -505,7 +518,10 @@ public partial class Database : IDisposable
     /// instead of looking like a delete+insert.</summary>
     private void BackfillSyncIds()
     {
-        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications" })
+        // param_files — в этом же списке: строки, залитые до появления столбца, обязаны получить
+        // GUID, иначе они не соотносятся с чужими и не могут ни уехать как тумбстоун, ни принять
+        // «усыновление» чужого sync_id при первом контакте (см. ImportHierarchyDataCore).
+        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "param_files" })
         {
             var ids = QueryInts($"SELECT id FROM {table} WHERE sync_id IS NULL OR sync_id = ''");
             foreach (var id in ids)
@@ -570,18 +586,24 @@ public partial class Database : IDisposable
     /// repeated syncs). The match key is fixed (see ImportHierarchyDataCore), this collapses the
     /// duplicates that already accumulated: keeps the oldest row per (subtype, manufacturer,
     /// filename), unions everyone's tags onto it, deletes the rest. Idempotent — a clean DB has
-    /// nothing to group, runs in O(rows) every startup after that.</summary>
+    /// nothing to group, runs in O(rows) every startup after that.
+    ///
+    /// Схлопывание идёт К САМОЙ СТАРОЙ строке (её id/sync_id уже могли разойтись по машинам), но
+    /// НЕ к её содержимому: дата загрузки и описание берутся у самой свежей строки группы. Раньше
+    /// брались у самой старой — и перезаливка, которая до этого фикса заводила новую строку вместо
+    /// обновления старой (см. ParamFileUploadService), молча теряла и свежую дату, и всё, что
+    /// человек написал в описании при перезаливке.</summary>
     private void DedupeParamFiles()
     {
-        var groups = new Dictionary<(int SubtypeId, string Manufacturer, string Filename), List<(int Id, string Tags)>>();
-        using (var r = ExecuteReader("SELECT id, subtype_id, manufacturer, filename, tags FROM param_files WHERE archived = 0 ORDER BY id"))
+        var groups = new Dictionary<(int SubtypeId, string Manufacturer, string Filename), List<(int Id, string Tags, string UploadDate, string Description)>>();
+        using (var r = ExecuteReader("SELECT id, subtype_id, manufacturer, filename, tags, upload_date, description FROM param_files WHERE archived = 0 ORDER BY id"))
         {
             while (r.Read())
             {
                 if (r.IsDBNull(1)) continue;
                 var key = (r.GetInt32(1), r.GetString(2), r.GetString(3));
                 if (!groups.TryGetValue(key, out var list)) groups[key] = list = new();
-                list.Add((r.GetInt32(0), GetString(r, "tags")));
+                list.Add((r.GetInt32(0), GetString(r, "tags"), GetString(r, "upload_date"), GetString(r, "description")));
             }
         }
 
@@ -591,9 +613,15 @@ public partial class Database : IDisposable
 
             var keepId = list[0].Id;
             var mergedTags = Services.TagString.Join(list.SelectMany(x => Services.TagString.Parse(x.Tags)));
-            ExecuteNonQuery("UPDATE param_files SET tags=@t WHERE id=@id", cmd =>
+            // Самая свежая по дате загрузки; при равных (или пустых) датах — последняя вставленная,
+            // т.е. та, что физически лежит на диске сейчас.
+            var freshest = list.OrderBy(x => x.UploadDate, StringComparer.Ordinal).ThenBy(x => x.Id).Last();
+            var description = string.IsNullOrWhiteSpace(freshest.Description) ? list[0].Description : freshest.Description;
+            ExecuteNonQuery("UPDATE param_files SET tags=@t, upload_date=@u, description=@d WHERE id=@id", cmd =>
             {
                 cmd.Parameters.AddWithValue("@t", mergedTags);
+                cmd.Parameters.AddWithValue("@u", freshest.UploadDate);
+                cmd.Parameters.AddWithValue("@d", description);
                 cmd.Parameters.AddWithValue("@id", keepId);
             });
 
