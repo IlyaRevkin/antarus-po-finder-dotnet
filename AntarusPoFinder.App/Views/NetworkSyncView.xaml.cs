@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
@@ -96,16 +97,34 @@ public partial class NetworkSyncView : UserControl
         RefreshIfActive();
     }
 
+    // ── Автосохранение путей ──────────────────────────────────────────────────
+    // Кнопок «Сохранить» у трёх путей больше нет: выбрал папку через «…» — сохранилось сразу,
+    // набрал руками — сохранилось по уходу фокуса или по Enter. Ничего не сохраняем и молчим, если
+    // значение не изменилось (SettingsAutoSave.PathChanged), иначе каждый переход по вкладке сыпал
+    // бы «Путь сохранён» в нижнюю строку.
+
     private void BrowseRoot_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Путь к диску" };
-        if (dlg.ShowDialog() == true) RootPathInput.Text = dlg.FolderName;
+        if (dlg.ShowDialog() != true) return;
+        RootPathInput.Text = dlg.FolderName;
+        SaveRootPath();
     }
 
-    private void SaveRoot_Click(object sender, RoutedEventArgs e)
+    private void RootPath_LostFocus(object sender, RoutedEventArgs e) => SaveRootPath();
+
+    private void RootPath_KeyDown(object sender, KeyEventArgs e)
     {
-        _services.Cfg.SetRootPath(RootPathInput.Text.Trim());
-        _host.ShowStatus("Путь сохранён", category: NotificationCategory.Sync);
+        if (e.Key == Key.Enter) SaveRootPath();
+    }
+
+    private void SaveRootPath()
+    {
+        var path = RootPathInput.Text.Trim();
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.RootPath())) return;
+
+        _services.Cfg.SetRootPath(path);
+        _host.ShowStatus("Путь к диску сохранён", category: NotificationCategory.Sync);
         // Create the folder tree on the new path and refresh the footer "Диск: …" indicator right
         // away — otherwise the footer stays stale (contradicting the toast above) until the next
         // periodic sync tick, and on sync_interval_min=0 it never updates until the app restarts.
@@ -115,24 +134,48 @@ public partial class NetworkSyncView : UserControl
     private void BrowseSecondDisk_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Второй диск" };
-        if (dlg.ShowDialog() == true) SecondDiskInput.Text = dlg.FolderName;
+        if (dlg.ShowDialog() != true) return;
+        SecondDiskInput.Text = dlg.FolderName;
+        SaveSecondDiskPath();
     }
 
-    private void SaveSecondDisk_Click(object sender, RoutedEventArgs e)
+    private void SecondDisk_LostFocus(object sender, RoutedEventArgs e) => SaveSecondDiskPath();
+
+    private void SecondDisk_KeyDown(object sender, KeyEventArgs e)
     {
-        _services.Cfg.SetSecondDiskPath(SecondDiskInput.Text.Trim());
+        if (e.Key == Key.Enter) SaveSecondDiskPath();
+    }
+
+    private void SaveSecondDiskPath()
+    {
+        var path = SecondDiskInput.Text.Trim();
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.SecondDiskPath())) return;
+
+        _services.Cfg.SetSecondDiskPath(path);
         _host.ShowStatus("Путь второго диска сохранён", category: NotificationCategory.Sync);
     }
 
     private void BrowseInspectionFolder_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка осмотра" };
-        if (dlg.ShowDialog() == true) InspectionFolderInput.Text = dlg.FolderName;
+        if (dlg.ShowDialog() != true) return;
+        InspectionFolderInput.Text = dlg.FolderName;
+        SaveInspectionFolderPath();
     }
 
-    private void SaveInspectionFolder_Click(object sender, RoutedEventArgs e)
+    private void InspectionFolder_LostFocus(object sender, RoutedEventArgs e) => SaveInspectionFolderPath();
+
+    private void InspectionFolder_KeyDown(object sender, KeyEventArgs e)
     {
-        _services.Cfg.SetInspectionFolder(InspectionFolderInput.Text.Trim());
+        if (e.Key == Key.Enter) SaveInspectionFolderPath();
+    }
+
+    private void SaveInspectionFolderPath()
+    {
+        var path = InspectionFolderInput.Text.Trim();
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.Get("inspection_folder"))) return;
+
+        _services.Cfg.SetInspectionFolder(path);
         _host.ShowStatus("Папка осмотра сохранена", category: NotificationCategory.Sync);
     }
 
@@ -210,21 +253,37 @@ public partial class NetworkSyncView : UserControl
         }
     }
 
+    private void PushInterval_LostFocus(object sender, RoutedEventArgs e) => SavePushInterval();
+
+    private void PushInterval_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SavePushInterval();
+    }
+
     /// <summary>Same "0 = off, any other number = on with that interval" pattern as Осмотра's
     /// auto-cleanup — a separate "отправлять автоматически" checkbox used to sit next to this field,
     /// redundant with it (the interval already had its own "0 disables" meaning, see the footnote
     /// text below the field), so it was removed rather than kept as a second way to express the same
-    /// on/off state.</summary>
-    private void SavePushInterval_Click(object sender, RoutedEventArgs e)
+    /// on/off state.
+    ///
+    /// Сохраняется само (кнопки «Сохранить» больше нет). Мусорный ввод не показывает модальное окно —
+    /// по уходу фокуса это было бы навязчиво: поле возвращается к сохранённому значению, а причина
+    /// уходит в нижнюю строку состояния.</summary>
+    private void SavePushInterval()
     {
-        if (!int.TryParse(PushIntervalInput.Text.Trim(), out var v) || v < 0)
+        var edit = SettingsAutoSave.ParseNumber(PushIntervalInput.Text, _services.Cfg.ConfigPushIntervalMin(), min: 0,
+            "Интервал отправки: нужно целое число минут (0 — отключить автоотправку)");
+        if (edit.Invalid)
         {
-            AppMessageBox.Show("Введите целое число минут (0 — отключить автоотправку).", "Интервал", MessageBoxButton.OK, MessageBoxImage.Warning);
+            PushIntervalInput.Text = edit.Value.ToString();
+            _host.ShowStatus(edit.Message, category: NotificationCategory.Sync);
             return;
         }
-        _services.Cfg.SetConfigPushIntervalMin(v);
+        if (!edit.Save) return;
+
+        _services.Cfg.SetConfigPushIntervalMin(edit.Value);
         _host.RefreshConfigSync();
-        _host.ShowStatus(v == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {v} мин", category: NotificationCategory.Sync);
+        _host.ShowStatus(edit.Value == 0 ? "Автоотправка на диск отключена" : $"Интервал отправки: {edit.Value} мин", category: NotificationCategory.Sync);
     }
 
     private async void PushNow_Click(object sender, RoutedEventArgs e)
