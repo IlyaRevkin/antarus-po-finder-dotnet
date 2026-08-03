@@ -223,6 +223,9 @@ public partial class SettingsView : UserControl
         var isAdmin = role == "administrator";
 
         AdminRoleAndPasswordsSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // Общая папка обновлений пишется в общий конфиг и уезжает на все машины — задавать её может
+        // только администратор. Локальное поле выше остаётся доступно всем: это настройка своей машины.
+        SharedUpdatePathSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // Единая зона ПЛК+HMI — бета-функция, программист/администратор осознанно включают её себе;
         // наладчику не показываем, чтобы не столкнулся с экспериментальным поведением, не понимая, что это опция.
         UnifiedZoneSection.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
@@ -480,6 +483,7 @@ public partial class SettingsView : UserControl
         StartMinimizedCheck.IsChecked = _services.Cfg.AppStartMinimized();
 
         AppUpdatePathInput.Text = _services.Cfg.AppUpdatePath();
+        AppUpdatePathSharedInput.Text = _services.Cfg.AppUpdatePathShared();
         AppAutoUpdateCheck.IsChecked = _services.Cfg.AppAutoUpdate();
         AppVersionText.Text = $"Текущая версия: {AppUpdateService.CurrentVersionText}";
 
@@ -780,28 +784,84 @@ public partial class SettingsView : UserControl
     private void StartMinimized_Changed(object sender, RoutedEventArgs e) =>
         _services.Cfg.SetAppStartMinimized(StartMinimizedCheck.IsChecked == true);
 
+    /// <summary>Автосохранение вместо кнопки «Сохранить»: путь закрепляется сразу после выбора папки
+    /// и при уходе фокуса из поля, о факте сохранения сообщает нижняя строка состояния.</summary>
     private void BrowseAppUpdatePath_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка обновлений" };
-        if (dlg.ShowDialog() == true) AppUpdatePathInput.Text = dlg.FolderName;
+        if (dlg.ShowDialog() != true) return;
+        AppUpdatePathInput.Text = dlg.FolderName;
+        SaveAppUpdatePath();
     }
 
-    private void SaveAppUpdatePath_Click(object sender, RoutedEventArgs e)
+    private void AppUpdatePathInput_LostFocus(object sender, RoutedEventArgs e) => SaveAppUpdatePath();
+
+    private void SaveAppUpdatePath()
     {
-        _services.Cfg.SetAppUpdatePath(AppUpdatePathInput.Text.Trim());
-        _services.Cfg.SetAppAutoUpdate(AppAutoUpdateCheck.IsChecked == true);
-        _host.ShowStatus("Настройки обновлений сохранены", category: NotificationCategory.AppUpdates);
+        var path = AppUpdatePathInput.Text.Trim();
+        if (string.Equals(path, _services.Cfg.AppUpdatePath(), StringComparison.OrdinalIgnoreCase)) return;
+
+        _services.Cfg.SetAppUpdatePath(path);
+        _host.ShowStatus(path.Length == 0
+                ? "Папка обновлений этой машины очищена — будет использована общая папка или GitHub"
+                : $"Папка обновлений сохранена: {path}",
+            category: NotificationCategory.AppUpdates);
     }
 
+    private void AppUpdatePathSharedInput_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var path = AppUpdatePathSharedInput.Text.Trim();
+        if (string.Equals(path, _services.Cfg.AppUpdatePathShared(), StringComparison.OrdinalIgnoreCase)) return;
+
+        _services.Cfg.SetAppUpdatePathShared(path);
+        _host.ShowStatus(path.Length == 0
+                ? "Общая папка обновлений очищена"
+                : $"Общая папка обновлений сохранена: {path} (уедет на другие машины со следующей отправкой конфига)",
+            category: NotificationCategory.AppUpdates);
+    }
+
+    private void AppAutoUpdate_Changed(object sender, RoutedEventArgs e)
+    {
+        var value = AppAutoUpdateCheck.IsChecked == true;
+        if (value == _services.Cfg.AppAutoUpdate()) return;
+
+        _services.Cfg.SetAppAutoUpdate(value);
+        _host.ShowStatus(value ? "Автообновление включено" : "Автообновление выключено",
+            category: NotificationCategory.AppUpdates);
+    }
+
+    private void ShowConnectionStatus_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new ConnectionStatusDialog(_services.Cfg) { Owner = Window.GetWindow(this) };
+        dlg.ShowDialog();
+    }
+
+    /// <summary>Опрашивает ОБА источника (папка и GitHub) и показывает всё сразу: что нашлось в
+    /// папке, что на GitHub, что установлено и какой источник будет использован. Раньше здесь
+    /// спрашивался только тот источник, который сработал первым, и «папка отвалилась, работаем с
+    /// GitHub» выглядело точно так же, как «папка не настроена» — то есть недоступность источника
+    /// была не видна. Список версий для отката по-прежнему берётся из ТОГО источника, который будет
+    /// использован (устанавливать можно только оттуда, откуда действительно можно скачать).</summary>
     private async void CheckAppUpdates_Click(object sender, RoutedEventArgs e)
     {
         AppUpdateStatusText.Text = "Проверка обновлений…";
         InstallLatestBtn.IsEnabled = false;
 
+        var report = await AppUpdateService.ProbeSourcesAsync(_services.Cfg.EffectiveAppUpdatePath(),
+            Services.ConnectionStatusService.DefaultTimeout);
+        AppUpdateStatusText.Text = AppUpdateService.DescribeSources(report);
+
+        if (report.EffectiveSource is null)
+        {
+            _latestAppRelease = null;
+            AppVersionsCombo.ItemsSource = null;
+            return;
+        }
+
         UpdateCheckResult result;
         try
         {
-            result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.AppUpdatePath());
+            result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.EffectiveAppUpdatePath());
         }
         catch (Exception ex)
         {
@@ -816,21 +876,15 @@ public partial class SettingsView : UserControl
 
         if (result.Releases.Count == 0)
         {
-            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Релизов не найдено.";
             _latestAppRelease = null;
             return;
         }
 
         _latestAppRelease = result.Releases[0];
-        var current = AppUpdateService.CurrentVersion;
-        if (_latestAppRelease.Version > current)
+        if (_latestAppRelease.Version > AppUpdateService.CurrentVersion)
         {
-            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Доступна новая версия: {_latestAppRelease.Version} (текущая {current}).";
+            AppUpdateStatusText.Text += $"\nДоступна новая версия: {_latestAppRelease.Version}.";
             InstallLatestBtn.IsEnabled = true;
-        }
-        else
-        {
-            AppUpdateStatusText.Text = $"Источник: {result.SourceLabel}. Установлена актуальная версия ({current}). Найдено версий: {result.Releases.Count}.";
         }
     }
 
