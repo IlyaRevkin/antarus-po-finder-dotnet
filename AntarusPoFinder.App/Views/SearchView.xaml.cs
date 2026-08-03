@@ -66,7 +66,97 @@ public partial class SearchView : UserControl
 
     private void SearchInput_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter) PerformSearch();
+        if (e.Key != Key.Enter) return;
+        // Enter — «искать прямо сейчас»: отменяем отложенный запуск, чтобы он не повторил тот же
+        // поиск ещё раз через долю секунды.
+        _liveSearchTimer?.Stop();
+        PerformSearch();
+    }
+
+    // ── Поиск по мере ввода ───────────────────────────────────────────────
+    // Кнопка «Найти» осталась (немедленный запуск), но ждать её больше не нужно: выдача
+    // перезапускается сама через паузу после последнего нажатия клавиши. Устаревшие результаты
+    // отбрасываются уже существующим механизмом поколений (_searchGeneration) — поздний ответ
+    // прошлого запроса не перетирает свежий.
+
+    private DispatcherTimer? _liveSearchTimer;
+
+    /// <summary>Запрос, по которому последний раз реально запускался поиск — чтобы правка, не
+    /// меняющая сути (например, добавленный в конце пробел), не гоняла поиск и обход диска заново.</summary>
+    private string _lastLiveQuery = "";
+
+    /// <summary>true, пока идёт поиск, запущенный НЕ кнопкой/Enter'ом, а паузой в наборе. Гасит
+    /// подсказку про раскладку клавиатуры (см. LayoutFallbackAllowed): модальный вопрос «вы имели в
+    /// виду вот это?» посреди набора текста — ровно то, чего в живом поиске быть не должно. По Enter
+    /// и по кнопке «Найти» вопрос задаётся как раньше.</summary>
+    private bool _liveSearchPass;
+
+    private void SearchInput_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!SearchLiveQuery.AutoSearchApplies(CurrentMode == SearchMode.Schemas)) return;
+        if (!SearchLiveQuery.QueryChanged(SearchInput.Text, _lastLiveQuery)) return;
+
+        _liveSearchTimer ??= CreateLiveSearchTimer();
+        // Перезапуск таймера с нуля на каждое нажатие — это и есть debounce: поиск уйдёт один раз,
+        // когда оператор перестанет печатать, а не на каждую букву.
+        _liveSearchTimer.Stop();
+        _liveSearchTimer.Start();
+    }
+
+    private DispatcherTimer CreateLiveSearchTimer()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SearchLiveQuery.DebounceMs) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            RunLiveSearch();
+        };
+        return timer;
+    }
+
+    private void RunLiveSearch()
+    {
+        if (!SearchLiveQuery.AutoSearchApplies(CurrentMode == SearchMode.Schemas)) return;
+        if (!SearchLiveQuery.QueryChanged(SearchInput.Text, _lastLiveQuery)) return;
+
+        // Стёрли запрос и фильтров нет — на экране не должна оставаться выдача по тексту, которого
+        // в поле уже нет. Тот же вид, что после «Сбросить поиск».
+        if (!SearchLiveQuery.HasSomethingToSearch(SearchInput.Text, !ActiveFilters().IsEmpty))
+        {
+            _lastLiveQuery = "";
+            ClearResultsView();
+            return;
+        }
+
+        _liveSearchPass = true;
+        try { PerformSearch(); }
+        finally { _liveSearchPass = false; }
+    }
+
+    /// <summary>Пустой экран выдачи — общий для «Сбросить поиск» и для стёртого до конца запроса.</summary>
+    private void ClearResultsView()
+    {
+        _searchGeneration++;
+        ResultsPanel.Children.Clear();
+        ClearSchemaResults();
+        StatusLabel.Text = "";
+        EmptyLabel.Text = "Введите запрос — выдача обновится сама";
+        EmptyLabel.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Клик по строке поиска выделяет весь запрос целиком — чтобы новый запрос вставлялся
+    /// одним Ctrl+V поверх старого, без предварительной чистки поля. Оба обработчика нужны вместе:
+    /// GotKeyboardFocus выделяет при переходе фокуса (Tab, программный Focus), а PreviewMouseLeft-
+    /// ButtonDown перехватывает первый клик мышью — иначе WPF сразу после выделения поставил бы
+    /// каретку в точку клика и снял его. Повторный клик по уже активному полю работает как обычно
+    /// (можно поставить каретку и править запрос руками).</summary>
+    private void SearchInput_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => SearchInput.SelectAll();
+
+    private void SearchInput_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (SearchInput.IsKeyboardFocusWithin) return;
+        e.Handled = true;
+        SearchInput.Focus();
     }
 
     // ── Фильтры ───────────────────────────────────────────────────────────
@@ -372,16 +462,16 @@ public partial class SearchView : UserControl
 
     private void ResetSearch_Click(object sender, RoutedEventArgs e)
     {
+        // Отложенный запуск по мере ввода отменяем до очистки поля — иначе он сработал бы уже после
+        // сброса и нарисовал выдачу по только что стёртому запросу.
+        _liveSearchTimer?.Stop();
+        _lastLiveQuery = "";
         SearchInput.Text = "";
         // Фильтры сбрасываются вместе с запросом: иначе «сбросил поиск, а всё равно ничего не
         // находит» — забытый фильтр в свёрнутой панели не виден.
         ResetFilterCombos();
         UpdateFiltersButton();
-        ResultsPanel.Children.Clear();
-        ClearSchemaResults();
-        StatusLabel.Text = "";
-        EmptyLabel.Text = "Введите запрос и нажмите «Найти»";
-        EmptyLabel.Visibility = Visibility.Visible;
+        ClearResultsView();
         SearchInput.Focus();
     }
 
@@ -391,6 +481,10 @@ public partial class SearchView : UserControl
     private void SearchMode_Changed(object sender, RoutedEventArgs e)
     {
         AnimateModeThumb();
+        // Ушли в «Схемы» — отложенный запуск по мере ввода там не работает (обход второго диска, см.
+        // SearchLiveQuery.AutoSearchApplies); заодно гасим уже заведённый таймер, чтобы он не запустил
+        // обход диска через долю секунды после переключения.
+        _liveSearchTimer?.Stop();
         // Набор фильтров у каждого режима свой — переставляем его до поиска, чтобы тот уже читал
         // фильтры нового режима.
         ApplyModeToFilters();
@@ -418,6 +512,9 @@ public partial class SearchView : UserControl
     private void PerformSearch()
     {
         var query = SearchInput.Text.Trim();
+        // Что реально ушло в поиск — по этому значению поиск по мере ввода понимает, изменился ли
+        // запрос с прошлого раза (см. SearchInput_TextChanged).
+        _lastLiveQuery = query;
         UpdateFiltersButton();
         // Пустой запрос сам по себе ничего не ищет, но с заданными фильтрами — это осмысленное
         // «покажи всё такое» (все прошивки НГР на SMH5, все с типом пуска ПЧ и т.п.). Только для
@@ -1397,6 +1494,7 @@ public partial class SearchView : UserControl
     private static string LayoutFallbackKey(string query) => query.Trim().ToUpperInvariant();
 
     private bool LayoutFallbackAllowed(string query) =>
+        !_liveSearchPass &&
         _services.Cfg.LayoutFallbackEnabled() &&
         _services.Db.GetLayoutFallbackDecision(LayoutFallbackKey(query)) != LayoutFallbackDecision.Never;
 
