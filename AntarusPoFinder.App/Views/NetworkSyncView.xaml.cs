@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -303,7 +304,10 @@ public partial class NetworkSyncView : UserControl
                 result = await ConfigSyncService.ExportAsync(_services, root, exportedBy);
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
             AppMessageBox.Show(
-                $"Отправлено:\nПрошивок: {result.Hierarchy.FwVersions.Count}\nФайлов параметров: {result.Hierarchy.ParamFiles.Count}\n" +
+                // Файлы параметров считаем ЖИВЫЕ: в снимок теперь входят и архивные — это тумбстоуны
+                // удаления (см. Database.ConfigExchange.cs), показывать их оператору как «отправлено
+                // столько-то файлов» было бы враньём.
+                $"Отправлено:\nПрошивок: {result.Hierarchy.FwVersions.Count}\nФайлов параметров: {result.Hierarchy.ParamFiles.Count(p => p.Archived == 0)}\n" +
                 $"Групп: {result.Hierarchy.EquipmentGroups.Count}, Модификаций: {result.Hierarchy.ControllerModifications.Count}\n" +
                 $"Тегов: {result.Hierarchy.Tags?.Count ?? 0}, Резервов номеров: {result.Hierarchy.Reservations.Count}",
                 "Конфиг отправлен на диск", MessageBoxButton.OK, MessageBoxImage.Information);

@@ -49,7 +49,61 @@ public partial class ParamsView : UserControl
         _services = services;
         _host = host;
         Loaded += (_, _) => PopulateCombos();
+        Loaded += (_, _) => _ = CleanDiskDuplicatesOnceAsync();
     }
+
+    /// <summary>Разовая чистка файлов-двойников «имя (что-то).ext», уже наплодившихся в папках
+    /// параметров (см. ParamFileDuplicateCleanup — там же разбор, почему текущий код приложения их
+    /// создать не может и откуда они, скорее всего, взялись). Делается один раз на машину, при
+    /// первом открытии страницы «Параметры», и только если сетевой диск сейчас доступен — иначе
+    /// флаг не ставится и попытка повторится в следующий раз.
+    ///
+    /// Обход диска уходит в фон, а вся работа с БД остаётся на UI-потоке: Database — одно соединение
+    /// SQLite, и лезть в него из двух потоков одновременно нельзя.</summary>
+    private async Task CleanDiskDuplicatesOnceAsync()
+    {
+        if (_duplicateCleanupStarted) return;
+        _duplicateCleanupStarted = true;
+        if (_services.Db.GetSetting(ParamFileDuplicateCleanup.DoneFlagKey) == "true") return;
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
+
+        var targets = ParamFileDuplicateCleanup.Targets(_services.Db);
+        if (targets.Count == 0)
+        {
+            _services.Db.SetSetting(ParamFileDuplicateCleanup.DoneFlagKey, "true");
+            return;
+        }
+
+        var paramsRoot = Path.Combine(root, "Параметры");
+        ParamFileDuplicateCleanup.Result result;
+        try
+        {
+            result = await Task.Run(() => ParamFileDuplicateCleanup.CleanFolders(targets, paramsRoot));
+        }
+        catch
+        {
+            // Диск отвалился посреди обхода — флаг не ставим, попробуем в следующий раз.
+            return;
+        }
+
+        ParamFileDuplicateCleanup.ArchiveRemovedRows(_services.Db, result.Removed);
+        _services.Db.SetSetting(ParamFileDuplicateCleanup.DoneFlagKey, "true");
+
+        if (result.Removed.Count > 0)
+        {
+            _host.ShowStatus($"Убраны дубликаты файлов параметров: {result.Removed.Count}",
+                category: NotificationCategory.FirmwareAndParams);
+            ReloadTable();
+        }
+        // Всё сомнительное — не удалено, а показано человеку: решать ему.
+        if (result.Skipped.Count > 0)
+            _host.ShowStatus($"Похожие на дубликаты файлы параметров оставлены как есть ({result.Skipped.Count}): "
+                + string.Join("; ", result.Skipped.Take(3)), category: NotificationCategory.FirmwareAndParams);
+    }
+
+    private bool _duplicateCleanupStarted;
 
     /// <summary>Страница живёт в кэше между переходами (MainWindowViewModel._pageCache), поэтому
     /// справочники в комбобоксах — те, что были на момент её первой отрисовки. Всё, что поменялось
@@ -204,6 +258,12 @@ public partial class ParamsView : UserControl
 
         var dstFolder = _services.Hierarchy.ParamsPath(root, primaryTarget.GroupName, subtype.Name, manuf);
         var srcPath = _srcPath;
+        var now = DateTime.Now;
+        // Перезаливка под тем же именем больше НЕ затирает прежний файл: он переименовывается в
+        // «имя (до ГГГГ-ММ-ДД).ext» и остаётся в папке для просмотра, а новый ложится под исходным
+        // именем — «Открыть» всегда ведёт на свежий, за старым идут через «Открыть папку»
+        // (см. ParamFileUploadService).
+        string? archivedPrevious = null;
         try
         {
             UploadBtn.IsEnabled = false;
@@ -211,6 +271,7 @@ public partial class ParamsView : UserControl
                 await Task.Run(() =>
                 {
                     Directory.CreateDirectory(dstFolder);
+                    archivedPrevious = ParamFileUploadService.ArchivePreviousOnDisk(dstFolder, Path.GetFileName(srcPath), now);
                     File.Copy(srcPath, Path.Combine(dstFolder, Path.GetFileName(srcPath)), overwrite: true);
                 });
         }
@@ -228,28 +289,31 @@ public partial class ParamsView : UserControl
         {
             SubtypeId = subtype.Id,
             Manufacturer = manuf,
-            Filename = Path.GetFileName(_srcPath),
+            Filename = Path.GetFileName(srcPath),
             DiskPath = dstFolder,
             Description = DescInput.Text.Trim(),
-            UploadDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
         };
-        _services.Db.AddParamFile(record);
+        // Заводит новую запись либо ОБНОВЛЯЕТ существующую (свежая дата + дописанная строка-лог в
+        // описании) — раньше перезаливка всегда делала новый INSERT, и таблица обрастала дублями.
+        var outcome = ParamFileUploadService.SaveRecord(_services.Db, record, archivedPrevious, now);
 
         var extraIds = SubtypesSelect.ExtraSubtypes.Select(s => s.Id ?? 0).ToHashSet();
         var link = ParamFileLinkService.LinkToExtraSubtypes(_services.Db, _services.Hierarchy, root,
             subtype.Id!.Value, record, _subtypeTargets.Where(t => extraIds.Contains(t.Id)),
             new Services.ShortcutCreator());
 
-        _host.ShowStatus($"Параметры загружены: {Path.GetFileName(_srcPath)}", category: NotificationCategory.FirmwareAndParams);
-        if (link.CreatedIds.Count > 0 || link.Warnings.Count > 0)
-        {
-            var msg = link.CreatedIds.Count > 0
-                ? $"Тот же файл добавлен ещё для {link.CreatedIds.Count} подтип(ов) — ярлыком, без копирования."
-                : "";
-            if (link.Warnings.Count > 0)
-                msg += (msg.Length > 0 ? "\n\nПредупреждения:\n" : "Предупреждения:\n") + string.Join("\n", link.Warnings);
-            AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
+        _host.ShowStatus($"Параметры загружены: {Path.GetFileName(srcPath)}", category: NotificationCategory.FirmwareAndParams);
+        var notes = new List<string>();
+        if (outcome.Updated)
+            notes.Add(archivedPrevious is null
+                ? "Запись обновлена — дата загрузки освежена, изменение записано в описание."
+                : $"Файл перезалит. Прежняя редакция сохранена в той же папке как «{archivedPrevious}».");
+        if (link.CreatedIds.Count > 0)
+            notes.Add($"Тот же файл добавлен ещё для {link.CreatedIds.Count} подтип(ов) — ярлыком, без копирования.");
+        if (link.Warnings.Count > 0)
+            notes.Add("Предупреждения:\n" + string.Join("\n", link.Warnings));
+        if (notes.Count > 0)
+            AppMessageBox.Show(string.Join("\n\n", notes), "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
 
         DescInput.Text = "";
         _srcPath = null;
