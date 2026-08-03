@@ -69,14 +69,24 @@ public static class LoaderFiles
     }
 
     /// <summary>Находит оба допустимых источника интерактивной загрузки. Каждый тип выбирается по
-    /// одинаковому порядку папок: точная локальная копия раньше сетевой папки той же версии.</summary>
-    public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs)
+    /// одинаковому порядку папок: точная локальная копия раньше сетевой папки той же версии.
+    ///
+    /// executableHint — указанный оператором в модерации файл прошивки: в одной папке версии может
+    /// лежать пачка .lfs (например, по одному на пожарный шкаф), и заливать надо именно выбранный,
+    /// а не первый попавшийся. Подсказка применяется только к своему расширению — указанный .psl не
+    /// подменяет собой поиск .lfs и наоборот (см. <see cref="ResolvePreferHint"/>).</summary>
+    public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs, string? executableHint = null)
     {
-        var candidates = dirs.ToArray();
+        var candidates = dirs as IReadOnlyList<string> ?? dirs.ToList();
         return new LoaderProjectFiles(
-            FindIn(candidates, LfsExtension),
-            FindIn(candidates, PslExtension));
+            ResolvePreferHint(candidates, executableHint, LfsExtension),
+            ResolvePreferHint(candidates, executableHint, PslExtension));
     }
+
+    /// <summary>Имя собранного файла для этого исходника: <c>проект.psl</c> → <c>проект.lfs</c>.
+    /// Одно место на всех — и на запрос к Automation (outputPath), и на публикацию результата.</summary>
+    public static string LfsNameFor(string pslPath) =>
+        Path.GetFileNameWithoutExtension(pslPath) + LfsExtension;
 
     private static bool HasExt(string path, string extension) =>
         string.Equals(Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase);
