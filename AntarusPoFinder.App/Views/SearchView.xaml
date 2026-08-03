@@ -22,11 +22,17 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
+            <!-- Выдача обновляется сама по мере ввода (пауза ~300 мс, см. SearchLiveQuery), кнопка
+                 «Найти» и Enter — немедленный запуск того же поиска. Клик по полю выделяет весь текст
+                 целиком: набранный запрос заменяется новым одним Ctrl+V, без предварительной чистки. -->
             <TextBox Grid.Column="0" x:Name="SearchInput" Height="38" Margin="0,0,8,0"
                      VerticalContentAlignment="Center"
-                     ToolTip="Введите название шкафа — напр. «НГР КПЧ SMH5» или «ПЖ KINCO»"
-                     KeyDown="SearchInput_KeyDown"/>
-            <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"/>
+                     ToolTip="Название шкафа — напр. «НГР КПЧ SMH5» или «ПЖ KINCO». Выдача обновляется по мере ввода"
+                     KeyDown="SearchInput_KeyDown" TextChanged="SearchInput_TextChanged"
+                     GotKeyboardFocus="SearchInput_GotKeyboardFocus"
+                     PreviewMouseLeftButtonDown="SearchInput_PreviewMouseLeftButtonDown"/>
+            <Button Grid.Column="1" Content="Найти" Height="38" Width="100" Click="Search_Click"
+                    ToolTip="Искать прямо сейчас, не дожидаясь паузы в наборе"/>
             <!-- Видна только пока идёт обход второго диска (поиск по схемам) — единственная операция
                  поиска, которая длится минуты и которую есть смысл прерывать. Свёрнутая кнопка не
                  занимает места: колонка Auto. -->
@@ -36,7 +42,8 @@
             <Button Grid.Column="3" x:Name="FiltersToggle" Content="Фильтры ▾" Style="{StaticResource SecondaryButton}"
                     Height="38" Margin="8,0,0,0" Click="ToggleFilters_Click"
                     ToolTip="Сузить выдачу по типу шкафа, подтипу, контроллеру или типу пуска"/>
-            <Button Grid.Column="4" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"/>
+            <Button Grid.Column="4" Content="Сбросить поиск" Style="{StaticResource SecondaryButton}" Height="38" Margin="8,0,0,0" Click="ResetSearch_Click"
+                    ToolTip="Очистить запрос и снять все фильтры"/>
         </Grid>
 
         <!-- Панель фильтров: свёрнута по умолчанию — кнопок в поиске и так хватает, а фильтры
@@ -126,10 +133,12 @@
                  запросе, тем выше версия в выдаче). Галочка — это «кавычки»: искать введённое ЦЕЛИКОМ,
                  тем же порядком и написанием (НГР-2.0, а не НГР 2 0), как непрерывную фразу. Живьём
                  читается из ExactWordCheck.IsChecked (см. SearchView.xaml.cs), поэтому смена дефолта —
-                 это только атрибут здесь. Логика — Database.SearchFwVersions (SearchOrdered / SearchByKeywords). -->
+                 это только атрибут здесь. Логика — Database.SearchFwVersions (SearchOrdered / SearchByKeywords).
+                 Подсказка нарочно короткая: развёрнутое объяснение «как кавычки в Гугле» оператору
+                 ничего не давало. -->
             <CheckBox x:Name="ExactWordCheck" Content="Точный поиск" VerticalAlignment="Center"
                       IsChecked="False"
-                      ToolTip="Как кавычки в Гугле: ищет введённое целиком, тем же порядком и написанием. Снимите галочку для обычного поиска по словам с ранжированием по точности"
+                      ToolTip="Искать введённое целиком, тем же порядком и написанием"
                       Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
         </StackPanel>
 
@@ -137,7 +146,7 @@
 
         <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto">
             <Grid>
-                <TextBlock x:Name="EmptyLabel" Text="Введите запрос и нажмите «Найти»" Style="{StaticResource MutedText}"
+                <TextBlock x:Name="EmptyLabel" Text="Введите запрос — выдача обновится сама" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,40,0,0"/>
                 <StackPanel x:Name="ResultsPanel"/>
             </Grid>
