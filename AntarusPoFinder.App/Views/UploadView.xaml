@@ -302,49 +302,57 @@
                         <StackPanel>
                             <!-- Опции версии — дата/штамп времени и признак нестандартного (ОПЦ) шкафа.
                                  WrapPanel, не горизонтальный StackPanel — при минимальной ширине окна
-                                 три чекбокса шире доступной колонки, а WrapPanel просто переносит третий
-                                 на свою строку вместо обрезания (тот самый баг с нечитаемым "ОПЦ SN",
-                                 который уже чинили здесь раньше). -->
+                                 чекбоксы шире доступной колонки, а WrapPanel просто переносит лишний
+                                 на свою строку вместо обрезания.
+                                 Галочка «ОПЦ» одна (раньше их было две — «ОПЦ заявка» и «ОПЦ SN»):
+                                 включили — открылись оба поля сразу, заполнить надо хотя бы одно
+                                 (см. OpcFields и UploadView.Opc_Toggled). -->
                             <TextBlock Text="ОПЦИИ ВЕРСИИ" Style="{StaticResource MutedText}" FontSize="11" Margin="0,0,0,4"/>
                             <WrapPanel x:Name="VersionOptionsPanel" Orientation="Horizontal" Margin="0,0,0,6">
                                 <CheckBox x:Name="IncludeDateCheck" Content="Дата/время в номере версии" IsChecked="True" Margin="0,0,20,4"
                                           Checked="IncludeDate_Toggled" Unchecked="IncludeDate_Toggled"
-                                          ToolTip="Если выключено, номер версии не содержит дату и время сборки (eq.sub.hw.sw без штампа)."/>
-                                <CheckBox x:Name="OpcReqNumCheck" Content="ОПЦ заявка" Margin="0,0,16,4"
-                                          Checked="OpcReqNum_Toggled" Unchecked="OpcReqNum_Toggled"
-                                          ToolTip="Нестандартный шкаф с номером заявки — активирует поле № заявки, имя файла получает суффикс (номер)."/>
-                                <CheckBox x:Name="OpcSnCheck" Content="ОПЦ SN" Margin="0,0,16,4"
-                                          Checked="OpcSn_Toggled" Unchecked="OpcSn_Toggled"
-                                          ToolTip="Нестандартный шкаф с серийным номером — активирует поле SN шкафа, имя файла получает суффикс SNxxxxx."/>
+                                          ToolTip="Выключено — номер версии без штампа даты и времени сборки."/>
+                                <CheckBox x:Name="OpcCheck" Content="ОПЦ" Margin="0,0,20,4"
+                                          Checked="Opc_Toggled" Unchecked="Opc_Toggled"
+                                          ToolTip="Разовая прошивка под конкретный нестандартный шкаф. Откроются поля серийного номера и номера заявки — заполните хотя бы одно."/>
                                 <!-- Доступность (IsEnabled) переключается кодом — см.
                                      UploadView.UpdateKeepSwVersionAvailability: чекбокс имеет смысл,
                                      только если для выбранного подтип/контроллер/HW уже ЕСТЬ хотя бы
                                      одна активная версия ("не увеличивать" относительно чего — увеличивать
                                      не от чего у самой первой загрузки в новую комбинацию). ToolTip тоже
-                                     подменяется кодом — что именно написано, зависит от доступности. -->
+                                     подменяется кодом — что именно написано, зависит от доступности.
+                                     При включённой ОПЦ прячется целиком: sw у разовой версии не задаётся. -->
                                 <CheckBox x:Name="KeepSwVersionCheck" Content="Не увеличивать версию ПО (sw)" Margin="0,0,0,4"
                                           Checked="KeepSwVersion_Toggled" Unchecked="KeepSwVersion_Toggled"/>
                             </WrapPanel>
 
-                            <Grid Margin="0,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="№ заявки:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
-                                <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
-                                         Visibility="Collapsed" ToolTip="напр. 1312 — в имени файла будет дополнен нулями до 5 цифр" TextChanged="ReqNum_Changed"/>
-                            </Grid>
+                            <!-- Оба поля ОПЦ живут в одной панели и показываются/прячутся вместе с
+                                 галочкой. Подсказка под ними краснеет, пока оба пусты, — чтобы отказ
+                                 при загрузке не был неожиданностью. -->
+                            <StackPanel x:Name="OpcFieldsPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="Серийный номер шкафа:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
+                                             ToolTip="Заводской номер шкафа, напр. 42 — в имени файла станет SN00042" TextChanged="CabinetSn_Changed"/>
+                                </Grid>
 
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" x:Name="CabinetSnLabel" Text="SN шкафа:" VerticalAlignment="Center" Margin="0,0,4,0" Visibility="Collapsed"/>
-                                <TextBox Grid.Column="1" x:Name="CabinetSnInput" Height="34"
-                                         Visibility="Collapsed" ToolTip="Заводской серийный номер шкафа (независимо от № заявки) — в имени файла будет суффикс SNxxxxx" TextChanged="CabinetSn_Changed"/>
-                            </Grid>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" x:Name="ReqNumLabel" Text="Номер заявки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Column="1" x:Name="ReqNumInput" Height="34"
+                                             ToolTip="Номер заявки, напр. 1312 — в имени файла станет (01312)" TextChanged="ReqNum_Changed"/>
+                                </Grid>
+
+                                <TextBlock x:Name="OpcHintLabel" TextWrapping="Wrap" Style="{StaticResource MutedText}"
+                                           Text="Заполните хотя бы одно поле — можно оба."/>
+                            </StackPanel>
 
                             <!-- Доп. файлы — три плитки-слота вместо трёх полноширинных рядов
                                  label+TextBox+3 кнопки (см. FileSlotController и стиль FileSlot в

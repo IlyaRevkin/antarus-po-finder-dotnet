@@ -165,9 +165,8 @@ public class FirmwareUploadServiceTests : IDisposable
         try
         {
             var request = BaseRequest(src, group, subtype, mod);
-            request.OpcRequestEnabled = true;
+            request.OpcEnabled = true;
             request.RequestNumRaw = "1312";
-            request.OpcSnEnabled = true;
             request.CabinetSnRaw = "42";
 
             var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
@@ -181,6 +180,100 @@ public class FirmwareUploadServiceTests : IDisposable
             Assert.Equal("00042", result.Record.CabinetSn);
         }
         finally { File.Delete(src); }
+    }
+
+    /// <summary>Галочка «ОПЦ» одна, а полей два — и хотя бы одно обязано быть заполнено. Пустые оба —
+    /// загрузка отказывает тем же понятным текстом, что показывает форма (см. OpcFields).</summary>
+    [Fact]
+    public void Upload_OpcEnabledWithBothFieldsEmpty_ValidationFails()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.OpcEnabled = true;
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
+            Assert.Equal(OpcFields.BothEmptyError, result.Errors.Single());
+        }
+        finally { File.Delete(src); }
+    }
+
+    [Fact]
+    public void Upload_OpcEnabledWithOnlyCabinetSn_Success()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.OpcEnabled = true;
+            request.CabinetSnRaw = "42";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Contains("_SN00042", result.DestinationFilename);
+            Assert.DoesNotContain("_(", result.DestinationFilename);
+            Assert.True(result.Record!.IsOpc);
+        }
+        finally { File.Delete(src); }
+    }
+
+    /// <summary>Поля ОПЦ учитываются только при включённой галочке — набранный и передумавший
+    /// оператор не должен получить SN в имени файла обычной версии.</summary>
+    [Fact]
+    public void Upload_OpcDisabled_IgnoresFilledFields()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.OpcEnabled = false;
+            request.CabinetSnRaw = "42";
+            request.RequestNumRaw = "1312";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.False(result.Record!.IsOpc);
+            Assert.Equal("", result.Record.CabinetSn);
+            Assert.Equal("", result.Record.RequestNum);
+            Assert.DoesNotContain("SN", result.DestinationFilename!);
+        }
+        finally { File.Delete(src); }
+    }
+
+    /// <summary>«При включённой ОПЦ поле sw не указывается»: форма галочку «не увеличивать версию ПО»
+    /// прячет, а служба её игнорирует — ОПЦ-версия получает следующий номер обычным порядком, даже
+    /// если флажок остался включённым с прошлой загрузки.</summary>
+    [Fact]
+    public void Upload_OpcEnabled_IgnoresKeepSwVersion()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var first = WriteTempFile(".psl");
+        var second = WriteTempFile(".psl");
+        try
+        {
+            var firstResult = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(first, group, subtype, mod));
+            Assert.Equal(FirmwareUploadOutcome.Success, firstResult.Outcome);
+            var firstSw = firstResult.Record!.SwVersion;
+
+            var request = BaseRequest(second, group, subtype, mod);
+            request.KeepSwVersion = true;
+            request.OpcEnabled = true;
+            request.CabinetSnRaw = "42";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Equal(firstSw + 1, result.Record!.SwVersion);
+        }
+        finally { File.Delete(first); File.Delete(second); }
     }
 
     [Fact]
