@@ -239,6 +239,51 @@ public partial class Database : IDisposable
                  author             TEXT    NOT NULL DEFAULT ''
              );
 
+             -- Журнал решений модерации, принятых на ЭТОЙ машине (вывод из модерации, архивирование,
+             -- откат, удаление). Существует ради одной вещи: полный снимок на общий диск выгружает
+             -- только машина администратора, поэтому решение, принятое наладчиком, физически не могло
+             -- уехать к остальным. Журнал едет отдельной секцией общего конфига (moderation_decisions,
+             -- см. ExportedModerationDecision) и дописывается туда узким каналом
+             -- ConfigSyncService.PushModerationOnly с ЛЮБОЙ машины, не трогая остальной конфиг.
+             -- Прошивка адресуется переносимо (sync_id подтипа и модели контроллера + version_raw) —
+             -- локальные id на машинах разные. Признаки монотонные («только вперёд»), поэтому
+             -- проигрывание идемпотентно, а порядок применения решений не важен.
+             CREATE TABLE IF NOT EXISTS moderation_log (
+                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                 subtype_sync_id    TEXT    NOT NULL DEFAULT '',
+                 subtype_name       TEXT    NOT NULL DEFAULT '',
+                 group_name         TEXT    NOT NULL DEFAULT '',
+                 controller_sync_id TEXT    NOT NULL DEFAULT '',
+                 controller_name    TEXT    NOT NULL DEFAULT '',
+                 version_raw        TEXT    NOT NULL DEFAULT '',
+                 released           INTEGER NOT NULL DEFAULT 0,
+                 archived           INTEGER NOT NULL DEFAULT 0,
+                 status             TEXT    NOT NULL DEFAULT '',
+                 deleted_at         TEXT    NOT NULL DEFAULT '',
+                 ts                 TEXT    NOT NULL DEFAULT '',
+                 author             TEXT    NOT NULL DEFAULT ''
+             );
+
+             -- Журнал переносов версии прошивки на другую модель контроллера (Настройки истории →
+             -- «Сменить контроллер»). Тот же смысл, что у hw_rewrite_log выше: контроллер входит в
+             -- натуральный ключ синхронизации (подтип+контроллер+version_raw) И в путь папки на диске,
+             -- поэтому правка только в БД у коллег выглядела бы как «удалили + завели заново» — старая
+             -- строка осталась бы фантомом, новая приехала бы дублем. Событие проигрывается каждой
+             -- машиной как перенос (см. ConfigSyncService.ReplayCtrlReassigns).
+             CREATE TABLE IF NOT EXISTS ctrl_reassign_log (
+                 id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                 subtype_sync_id        TEXT NOT NULL DEFAULT '',
+                 subtype_name           TEXT NOT NULL DEFAULT '',
+                 group_name             TEXT NOT NULL DEFAULT '',
+                 old_controller_sync_id TEXT NOT NULL DEFAULT '',
+                 old_controller_name    TEXT NOT NULL DEFAULT '',
+                 new_controller_sync_id TEXT NOT NULL DEFAULT '',
+                 new_controller_name    TEXT NOT NULL DEFAULT '',
+                 version_raw            TEXT NOT NULL DEFAULT '',
+                 ts                     TEXT NOT NULL DEFAULT '',
+                 author                 TEXT NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS layout_fallback_feedback (
                  query_key  TEXT    PRIMARY KEY,
                  yes_count  INTEGER NOT NULL DEFAULT 0,

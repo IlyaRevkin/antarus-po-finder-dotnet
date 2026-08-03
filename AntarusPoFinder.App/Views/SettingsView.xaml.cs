@@ -2065,9 +2065,19 @@ public partial class SettingsView : UserControl
             "Вывести версию из модерации и сделать релизной?",
             "Модерация", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
         // Вместе с записями-копиями под другими подтипами — см. Database.MarkFwVersionReleasedWithLinked.
-        if (release) _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+        var delivered = false;
+        if (release)
+        {
+            _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+            // Узкий канал доставки решения модерации — работает с любой машины, не только с
+            // администраторской (см. ConfigSyncService.PushModerationOnly).
+            delivered = ConfigSyncService.RecordAndPushModeration(_services,
+                _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
+        }
 
-        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        _host.ShowStatus(release
+            ? $"Версия выведена из модерации: {v.VersionRaw}" + (delivered ? " (отправлено коллегам)" : "")
+            : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadModerationTab();
     }
 
@@ -2338,6 +2348,10 @@ public partial class SettingsView : UserControl
         catch (Exception ex) { warnings.Add($"HMI-проект: {ex.Message}"); }
 
         _services.Db.TombstoneFwVersion(v.Id!.Value);
+        // Удаление — такое же решение модерации, как «выпустить», и точно так же обязано доехать до
+        // коллег с любой машины: узкий канал (ConfigSyncService.PushModerationOnly) дописывает
+        // tombstone в общий конфиг, не дожидаясь полного экспорта администратора.
+        ConfigSyncService.RecordAndPushModeration(_services, v.Id!.Value, _services.CurrentUserName);
         _host.ShowStatus($"Удалено: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         if (warnings.Count > 0)
             AppMessageBox.Show("Запись удалена из базы, но не все файлы удалось убрать с диска:\n" + string.Join("\n", warnings),

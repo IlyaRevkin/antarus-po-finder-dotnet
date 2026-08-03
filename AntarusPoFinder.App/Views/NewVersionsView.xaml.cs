@@ -1,6 +1,7 @@
 ﻿using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -66,9 +67,20 @@ public partial class NewVersionsView : UserControl
             "Модерация прошивок", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
         // Вместе со всеми записями-копиями этой же прошивки под другими подтипами — иначе подтип,
         // отмеченный только что в этом же диалоге, вернул бы версию в модерацию.
-        if (release) _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+        var delivered = false;
+        if (release)
+        {
+            _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+            // Узкий канал доставки решения (см. ConfigSyncService.PushModerationOnly): страница
+            // модерации доступна и наладчику, а полный экспорт — только администратору, поэтому без
+            // этого решение, принятое здесь, у коллег никогда бы не появилось.
+            delivered = ConfigSyncService.RecordAndPushModeration(_services,
+                _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
+        }
 
-        _host.ShowStatus(release ? $"Версия выведена из модерации: {v.VersionRaw}" : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        _host.ShowStatus(release
+            ? $"Версия выведена из модерации: {v.VersionRaw}" + (delivered ? " (отправлено коллегам)" : "")
+            : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         LoadData();
     }
 }

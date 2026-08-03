@@ -468,6 +468,26 @@ public partial class Database
             """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
     }
 
+    /// <summary>id самой записи и всех её копий-ссылок на те же файлы (та же прошивка, заведённая под
+    /// другими подтипами шкафа — см. MarkFwVersionReleasedWithLinked выше и FirmwareSubtypeLinkService).
+    /// Нужен там, где решение модерации касается ВСЕХ этих записей сразу и его надо записать в журнал
+    /// доставки по каждой (см. ConfigSyncService.RecordAndPushModeration): выпустили одну — выпущены
+    /// все, значит и у коллег должны стать выпущенными все, а не одна.</summary>
+    public List<int> GetFwVersionIdsSharingFiles(int versionId)
+    {
+        var ids = new List<int> { versionId };
+        using var reader = ExecuteReader($"""
+            SELECT id FROM fw_versions
+            WHERE {NotDeleted()} AND disk_path <> '' AND id <> @id
+              AND disk_path   = (SELECT disk_path   FROM fw_versions WHERE id = @id)
+              AND version_raw = (SELECT version_raw FROM fw_versions WHERE id = @id)
+            ORDER BY id
+            """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
+        while (reader.Read())
+            ids.Add(reader.GetInt32(0));
+        return ids;
+    }
+
     public List<FwVersionRecord> GetFwVersions(int? subtypeId = null, int? controllerId = null,
         bool includeArchived = false, bool includeRolledBack = false)
     {
@@ -747,13 +767,20 @@ public partial class Database
     }
 
     /// <summary>Переназначить версию другому контроллеру (модели) — правка атрибуции в истории версий,
-    /// когда прошивку по ошибке завели под не тем контроллером. Меняется только запись в каталоге:
-    /// версия переезжает в другую hw-группу (подтип+контроллер+hw), поэтому manual_current сбрасываем —
-    /// прежняя отметка «текущая» относилась к старой группе. Файлы на диске и ярлыки не двигаем (как и
-    /// откат: это «поправить запись», а не «перелить файлы») — disk_path остаётся прежним и по-прежнему
-    /// открывается; про расхождение «папка под старым контроллером — запись под новым» вызывающий явно
-    /// предупреждает. Возвращает false, если версии нет, контроллер не задан или уже такой.</summary>
-    public bool ReassignFwVersionController(int fwVersionId, int newControllerId)
+    /// когда прошивку по ошибке завели под не тем контроллером. Версия переезжает в другую hw-группу
+    /// (подтип+контроллер+hw), поэтому manual_current сбрасываем — прежняя отметка «текущая»
+    /// относилась к старой группе.
+    ///
+    /// Это ТОЛЬКО БД-часть. Папку версии на диске переносит HierarchyService.
+    /// ReassignFwVersionToController — он же и является нормальной точкой входа для операции:
+    /// имя контроллера входит в путь папки (ПО\&lt;тип&gt;\&lt;подтип&gt;\&lt;контроллер&gt;\&lt;версия&gt;), поэтому
+    /// правка одной лишь записи осиротила бы папку, и ближайший досмотр диска завёл бы её ОТДЕЛЬНОЙ
+    /// записью-фантомом под старым контроллером (ровно то, что и происходило). <paramref
+    /// name="newDiskPath"/> — новое расположение папки; null означает «путь не меняется» (запись без
+    /// файлов, ОПЦ-версия, чей путь от контроллера не зависит, либо прямой вызов из тестов).
+    ///
+    /// Возвращает false, если версии нет, контроллер не задан или уже такой.</summary>
+    public bool ReassignFwVersionController(int fwVersionId, int newControllerId, string? newDiskPath = null)
     {
         var v = GetFwVersionById(fwVersionId);
         if (v is null || newControllerId <= 0 || v.ControllerId == newControllerId) return false;
@@ -763,6 +790,12 @@ public partial class Database
             cmd.Parameters.AddWithValue("@c", newControllerId);
             cmd.Parameters.AddWithValue("@id", fwVersionId);
         });
+        if (newDiskPath is not null && newDiskPath != v.DiskPath)
+            ExecuteNonQuery("UPDATE fw_versions SET disk_path=@d WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@d", newDiskPath);
+                cmd.Parameters.AddWithValue("@id", fwVersionId);
+            });
         return true;
     }
 

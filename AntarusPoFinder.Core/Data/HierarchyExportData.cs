@@ -169,6 +169,66 @@ public class ExportedHwRewrite
     [JsonPropertyName("author")] public string Author { get; set; } = "";
 }
 
+/// <summary>Одно решение модерации (вывод из модерации, архивирование, откат, удаление), принятое на
+/// какой-то машине — см. Database.ModerationLog.cs и ConfigSyncService.PushModerationOnly. Отдельная
+/// секция общего конфига именно потому, что полный снимок выгружает только администратор: решение
+/// наладчика/программиста иначе физически не могло уехать к остальным, ведь fw_versions в снимке —
+/// это состояние БД машины-экспортёра, а не чужой.
+///
+/// Прошивка адресуется переносимо (sync_id подтипа и модели контроллера + version_raw), как и
+/// ExportedFwUsage: локальные id прошивок на разных машинах разные. Имена (group/subtype/controller)
+/// едут рядом запасным ключом ровно как у ExportedFwVersion — на самом первом контакте двух
+/// независимо собранных баз sync_id ещё не совпадают.
+///
+/// Все четыре признака монотонные («только вперёд»): released 0→1, archived 0→1, status active→иной,
+/// deleted_at ''→отметка. Поэтому применение идемпотентно, порядок решений не важен, а две машины,
+/// принявшие РАЗНЫЕ решения по одной версии, сходятся на объединении (см.
+/// Database.ApplyModerationDecisions).</summary>
+public class ExportedModerationDecision
+{
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+    [JsonPropertyName("controller_sync_id")] public string ControllerSyncId { get; set; } = "";
+    [JsonPropertyName("controller_name")] public string ControllerName { get; set; } = "";
+    [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
+    [JsonPropertyName("released")] public int Released { get; set; }
+    [JsonPropertyName("archived")] public int Archived { get; set; }
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    [JsonPropertyName("ts")] public string Ts { get; set; } = "";
+    [JsonPropertyName("author")] public string Author { get; set; } = "";
+
+    /// <summary>Ключ дедупликации при склейке журналов разных машин (см.
+    /// ConfigSyncService.PushModerationOnly и Database.AbsorbModerationDecisions): одно и то же
+    /// решение приезжает обратно на машину-автора при каждом полном экспорте, и без ключа журнал
+    /// разрастался бы копиями. Отметка времени входит в ключ намеренно — два РАЗНЫХ решения по одной
+    /// версии (сначала выпустили, потом откатили) обязаны остаться двумя записями.</summary>
+    public string DedupKey() =>
+        string.Join("|", SubtypeSyncId, SubtypeName, ControllerSyncId, ControllerName, VersionRaw,
+            Released, Archived, Status, DeletedAt, Ts);
+}
+
+/// <summary>Один перенос версии прошивки на другую модель контроллера, сделанный оператором на своей
+/// машине (см. Database.CtrlReassignLog.cs и ConfigSyncService.ReplayCtrlReassigns). Ровно та же
+/// логика, что у ExportedHwRewrite: контроллер входит и в натуральный ключ синхронизации, и в путь
+/// папки на диске, поэтому без явного события перенос выглядел бы у коллег как «удалили + завели
+/// заново». Nullable-список без дефолта в HierarchyExportData — экспорт со старой версии приложения
+/// ключа не содержит вовсе.</summary>
+public class ExportedCtrlReassign
+{
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+    [JsonPropertyName("old_controller_sync_id")] public string OldControllerSyncId { get; set; } = "";
+    [JsonPropertyName("old_controller_name")] public string OldControllerName { get; set; } = "";
+    [JsonPropertyName("new_controller_sync_id")] public string NewControllerSyncId { get; set; } = "";
+    [JsonPropertyName("new_controller_name")] public string NewControllerName { get; set; } = "";
+    [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
+    [JsonPropertyName("ts")] public string Ts { get; set; } = "";
+    [JsonPropertyName("author")] public string Author { get; set; } = "";
+}
+
 /// <summary>Вклад одной машины в общую статистику выборов прошивки — см. Database.FwUsage.cs.
 /// Прошивка адресуется переносимо (sync_id подтипа и модели контроллера + version_raw): локальные id
 /// на разных машинах разные.</summary>
@@ -237,6 +297,20 @@ public class HierarchyExportData
     /// экспорт со старой версии приложения ключа не содержит, и приём тогда просто ничего не
     /// проигрывает (fw_versions едут как раньше).</summary>
     [JsonPropertyName("hw_rewrites")] public List<ExportedHwRewrite>? HwRewrites { get; set; }
+
+    /// <summary>Решения модерации, принятые на ЛЮБОЙ машине (см. ExportedModerationDecision). Едут
+    /// отдельной секцией, потому что fw_versions в снимке — это состояние базы машины-экспортёра, а
+    /// полный снимок выгружает только администратор: без этой секции решение наладчика или
+    /// программиста не имело физической возможности доехать до остальных. Nullable без дефолта по той
+    /// же причине, что Tags/HwRewrites: экспорт со старой версии приложения ключа не содержит вовсе, и
+    /// импорт тогда просто ничего не применяет — прежнее поведение один в один.</summary>
+    [JsonPropertyName("moderation_decisions")] public List<ExportedModerationDecision>? ModerationDecisions { get; set; }
+
+    /// <summary>Переносы версий прошивок на другую модель контроллера (см. ExportedCtrlReassign) —
+    /// журнал последних операций, чтобы приёмник проиграл ещё не применённое как ПЕРЕНОС (запись +
+    /// папка на диске), а не получил фантом под старым контроллером и дубль под новым. Nullable без
+    /// дефолта — как и hw_rewrites рядом.</summary>
+    [JsonPropertyName("ctrl_reassignments")] public List<ExportedCtrlReassign>? CtrlReassignments { get; set; }
 
     /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
     /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой
@@ -333,6 +407,14 @@ public class ImportCounts
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
 
+    /// <summary>Строк fw_versions, которые продвинуло вперёд приехавшее РЕШЕНИЕ МОДЕРАЦИИ с другой
+    /// машины (см. ExportedModerationDecision / Database.ApplyModerationDecisions). Считается отдельно
+    /// от FwVersions/FwVersionsRemoved: те отражают дифф самих строк снимка, а это — узкий канал
+    /// доставки решений, который работает даже когда снимок целиком собран не той машиной, что
+    /// приняла решение. Входит в TotalChanges — иначе плашка «Поступили изменения» промолчала бы, и
+    /// решение так и не применилось бы (Analyze выходит раньше, когда применять «нечего»).</summary>
+    public int ModerationApplied { get; set; }
+
     /// <summary>Hierarchy rows where BOTH the local copy and the incoming one were edited since they
     /// last agreed — held back, NOT applied, NOT counted in TotalChanges (nothing was actually
     /// changed). See Database.ConflictResolution.cs — the caller checks
@@ -347,5 +429,5 @@ public class ImportCounts
         ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + FwVersionsRenamed +
         ParamFiles + ParamFilesRemoved + ParamFilesUpdated +
-        AppUsersAdded + AppUsersUpdated;
+        AppUsersAdded + AppUsersUpdated + ModerationApplied;
 }
