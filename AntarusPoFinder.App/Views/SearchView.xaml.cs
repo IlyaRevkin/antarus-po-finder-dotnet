@@ -147,16 +147,26 @@ public partial class SearchView : UserControl
     /// <summary>Клик по строке поиска выделяет весь запрос целиком — чтобы новый запрос вставлялся
     /// одним Ctrl+V поверх старого, без предварительной чистки поля. Оба обработчика нужны вместе:
     /// GotKeyboardFocus выделяет при переходе фокуса (Tab, программный Focus), а PreviewMouseLeft-
-    /// ButtonDown перехватывает первый клик мышью — иначе WPF сразу после выделения поставил бы
-    /// каретку в точку клика и снял его. Повторный клик по уже активному полю работает как обычно
-    /// (можно поставить каретку и править запрос руками).</summary>
+    /// ButtonDown перехватывает клик мышью — иначе WPF сразу после выделения поставил бы каретку в
+    /// точку клика и снял его.
+    ///
+    /// Важно, что выделяет и клик по УЖЕ активному полю: после набора запроса фокус остаётся в
+    /// строке, и «выделять только при получении фокуса» означало бы, что в самом частом случае
+    /// (посмотрел выдачу — вставляю следующий запрос) клик даёт каретку, а не выделение. Повторный
+    /// клик, когда всё уже выделено, пропускается — так остаётся возможность поставить каретку и
+    /// поправить запрос руками.</summary>
     private void SearchInput_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => SearchInput.SelectAll();
 
     private void SearchInput_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (SearchInput.IsKeyboardFocusWithin) return;
+        if (SearchInput.IsKeyboardFocusWithin
+            && SearchInput.Text.Length > 0
+            && SearchInput.SelectionLength == SearchInput.Text.Length)
+            return;
+
         e.Handled = true;
         SearchInput.Focus();
+        SearchInput.SelectAll();
     }
 
     // ── Фильтры ───────────────────────────────────────────────────────────

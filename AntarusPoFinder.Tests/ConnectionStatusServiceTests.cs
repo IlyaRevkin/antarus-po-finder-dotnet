@@ -21,6 +21,48 @@ namespace AntarusPoFinder.Tests;
 /// тестов — про соблюдение таймаута, а не про «зелёное/красное».</summary>
 public class ConnectionStatusServiceTests
 {
+    /// <summary>Регрессия, пойманная живым GUI-прогоном: проверка недостижимого домена оставляла
+    /// «ненаблюдённое» исключение брошенной по таймауту задачи подключения. Оно прилетало с потока
+    /// финализатора в TaskScheduler.UnobservedTaskException, а тот в приложении показывает модальное
+    /// «Произошла ошибка» и заводит тикет о сбое — то есть экран диагностики ронял приложение ровно
+    /// на той машине, где домен недоступен (вне домена, поднимающийся IPsec-туннель). Здесь именно
+    /// это и проверяется: после сборки мусора ни одного ненаблюдённого исключения быть не должно.</summary>
+    [Fact]
+    public void TryTcpConnect_UnreachableHost_LeavesNoUnobservedTaskException()
+    {
+        var unobserved = 0;
+        void Handler(object? _, UnobservedTaskExceptionEventArgs args)
+        {
+            Interlocked.Increment(ref unobserved);
+            args.SetObserved(); // иначе упадём сами и утащим соседние тесты
+        }
+
+        TaskScheduler.UnobservedTaskException += Handler;
+        try
+        {
+            // Имя заведомо не разрешается в DNS, таймаут заведомо меньше времени отказа резолвера —
+            // ровно тот путь, где задача бросается и падает уже после нашего ухода.
+            Assert.False(ConnectionStatusService.TryTcpConnect(
+                "не-существует-antarus-проверка.invalid", 389, TimeSpan.FromMilliseconds(50)));
+
+            // Дать брошенной задаче упасть, затем прогнать финализаторы дважды: исключение
+            // публикуется именно финализатором Task, и одного прохода не всегда достаточно.
+            Thread.Sleep(3000);
+            for (var i = 0; i < 2; i++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            GC.Collect();
+
+            Assert.Equal(0, Volatile.Read(ref unobserved));
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Handler;
+        }
+    }
+
     private sealed class ThrowingHttpMessageHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

@@ -229,11 +229,40 @@ public static class ConnectionStatusService
         catch (Exception ex) { return onTimeout() with { Details = ex.Message }; }
     }
 
-    private static bool TryTcpConnect(string host, int port, TimeSpan timeout)
+    /// <summary>Проверка «отвечает ли хост» с жёстким таймаутом.
+    ///
+    /// ⚠️ Брошенную по таймауту задачу ОБЯЗАТЕЛЬНО надо «наблюсти». Недостижимый или
+    /// нерезолвящийся хост (домена нет в DNS — обычное дело на машине вне домена и штатная
+    /// ситуация, пока поднимается IPsec-туннель) роняет ConnectAsync уже ПОСЛЕ того, как истёк
+    /// таймаут и мы ушли дальше. Если это исключение никто не прочитал, оно прилетает с потока
+    /// финализатора в TaskScheduler.UnobservedTaskException, а тот в этом приложении показывает
+    /// модальное «Произошла ошибка» и заводит тикет о сбое. То есть экран диагностики падал ровно
+    /// в том случае, ради которого он и сделан. Отсюда же и Dispose только после завершения
+    /// задачи: закрытый на ходу сокет даёт второе такое же исключение.</summary>
+    internal static bool TryTcpConnect(string host, int port, TimeSpan timeout)
     {
-        using var client = new TcpClient();
+        var client = new TcpClient();
         var connect = client.ConnectAsync(host, port);
-        return connect.Wait(timeout) && client.Connected;
+
+        bool finished;
+        try { finished = connect.Wait(timeout); }
+        catch (Exception) { finished = true; } // упала в срок — Wait уже прочитал исключение
+
+        if (!finished)
+        {
+            _ = connect.ContinueWith(
+                t =>
+                {
+                    _ = t.Exception; // прочитать = «наблюсти»
+                    try { client.Dispose(); } catch { /* закрываем как получится */ }
+                },
+                TaskContinuationOptions.ExecuteSynchronously);
+            return false;
+        }
+
+        var connected = connect.IsCompletedSuccessfully && client.Connected;
+        client.Dispose();
+        return connected;
     }
 
     /// <summary>null — сервер ответил (любым кодом, включая 401: для нас это «жив и требует

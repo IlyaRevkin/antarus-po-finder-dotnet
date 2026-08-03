@@ -656,6 +656,14 @@ public partial class UploadView : UserControl
 
     private void UpdatePreview()
     {
+        // Во время InitializeComponent элементы создаются по порядку разметки, а обработчики уже
+        // работают: XAML выставляет IsChecked галочкам («включать дату», «не увеличивать sw»), те
+        // поднимают Toggled, и мы попадаем сюда, когда элементы НИЖЕ по разметке ещё null. Так и
+        // упала страница загрузки целиком (NullReferenceException на InheritedTagsHint) — форму
+        // просто не открыть. Первый же полный предпросмотр всё равно будет вызван из конструктора
+        // после InitializeComponent, поэтому ранний выход ничего не теряет.
+        if (PreviewLabel is null || InheritedTagsHint is null) return;
+
         if (GroupCombo.SelectedItem is not EquipmentGroup group ||
             SubtypesSelect.MainSubtype is not EquipmentSubType subtype ||
             CtrlCombo.SelectedItem is not ControllerModification mod)
