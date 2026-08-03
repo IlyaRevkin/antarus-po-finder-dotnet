@@ -759,10 +759,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         catch (Exception ex)
         {
-            // В лог — ВСЕГДА, а не только на переходе в «не работает» ниже: жалоба «обновления не
+            // В журнал — ВСЕГДА, а не только на переходе в «не работает» ниже: жалоба «обновления не
             // приходят» разбирается по журналу, и там должна быть видна каждая неудачная попытка,
             // включая случай «недоступны оба источника сразу» (UpdateSourcesUnavailableException).
-            System.Diagnostics.Debug.WriteLine($"[AppUpdate] Проверка обновлений не удалась: {AppUpdateService.DescribeError(ex)}");
+            AppUpdateService.LogSourceFailure($"Проверка обновлений не удалась: {AppUpdateService.DescribeError(ex)}");
 
             // Здесь стоял голый `catch { return; }` с обоснованием «пользователь всегда может
             // проверить вручную в Настройках» — на практике это означало, что сломавшаяся проверка
@@ -787,6 +787,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // если/когда GitHub закроют по IP, обновления после этого исчезнут молча. Говорим сразу.
         if (result.FolderProblem is not null)
         {
+            AppUpdateService.LogSourceFailure($"Папка обновлений недоступна ({result.FolderProblem}) — использован запасной источник: {result.SourceLabel}.");
             if (!_appUpdateFolderLastFailed)
             {
                 _appUpdateFolderLastFailed = true;
