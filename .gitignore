@@ -52,3 +52,6 @@ installer/*.sha256
 docs/screenshots/
 docs/*.pdf
 *.psl
+
+## Рабочие копии фоновых агентов — временные, не часть репозитория.
+.claude/

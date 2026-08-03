@@ -105,21 +105,30 @@ public partial class EditFirmwareDialog : Window
         }
         RefreshExecutableTexts();
 
-        _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "", folderDialogTitle: "Выбрать папку");
-        _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "", folderDialogTitle: "Выбрать папку");
-        _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "", folderDialogTitle: "Выбрать папку");
+        // Все диалоги модерации открываются в папке версии НА СЕРВЕРЕ (см. ServerStartDirectory):
+        // модератор выбирает инструкцию, карты и файл панели из того, что лежит рядом с прошивкой, а
+        // системный диалог по умолчанию возвращал последнюю локальную папку этой машины.
+        _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "", folderDialogTitle: "Выбрать папку",
+            initialDirectory: ServerStartDirectory);
+        _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "", folderDialogTitle: "Выбрать папку",
+            initialDirectory: ServerStartDirectory);
+        _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "", folderDialogTitle: "Выбрать папку",
+            initialDirectory: ServerStartDirectory);
         _hmiPicker = new FilePickerRow(p => HmiInput.Text = p, () => HmiInput.Text = "",
             fileDialogTitle: "Выбрать файл HMI-проекта",
             fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
-            folderDialogTitle: "Выбрать папку HMI-проекта");
+            folderDialogTitle: "Выбрать папку HMI-проекта",
+            initialDirectory: ServerStartDirectory);
         // Только файл (папку класть в саму папку версии нельзя — она общая для файлов прошивки);
         // фильтр по .lfs/.psl, но с «Все файлы» на случай другого расширения прошивки.
         _plcFilePicker = new FilePickerRow(p => PlcFileInput.Text = p, () => PlcFileInput.Text = "",
             fileDialogTitle: "Выбрать файл прошивки ПЛК",
-            fileDialogFilter: "Прошивка ПЛК (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*");
+            fileDialogFilter: "Прошивка ПЛК (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*",
+            initialDirectory: ServerStartDirectory);
         _pslFilePicker = new FilePickerRow(p => PslFileInput.Text = p, () => PslFileInput.Text = "",
             fileDialogTitle: "Выбрать исходник прошивки (.psl)",
-            fileDialogFilter: "Исходник Segnetics (*.psl)|*.psl|Все файлы (*.*)|*.*");
+            fileDialogFilter: "Исходник Segnetics (*.psl)|*.psl|Все файлы (*.*)|*.*",
+            initialDirectory: ServerStartDirectory);
 
         // Блок доп. файлов имеет смысл только когда известно, куда их класть: нужны имена группы/
         // подтипа/контроллера (в записи из поиска их нет — доносим из БД) и доступный сетевой диск.
@@ -140,6 +149,19 @@ public partial class EditFirmwareDialog : Window
         }
 
         ConfigureFirmwareFileFields();
+    }
+
+    /// <summary>С какой папки открывать диалоги выбора файлов в модерации — папка версии НА СЕРВЕРЕ.
+    /// Модератор выбирает инструкцию, карты и файл панели из того, что лежит рядом с прошивкой, а
+    /// системный диалог по умолчанию открывался в последней локальной папке этой машины. Берём
+    /// реальную папку сборки, а не записанный disk_path вслепую: её могли переименовать или перезалить
+    /// под другой датой (см. FirmwareDiskPresence.ResolveVersionDir). Не нашли — папка контроллера,
+    /// а нет и её — пустая строка, тогда диалог откроется как раньше.</summary>
+    private string? ServerStartDirectory()
+    {
+        if (string.IsNullOrEmpty(_record.DiskPath)) return null;
+        return FirmwareDiskPresence.ResolveVersionDir(_record.DiskPath, _record.VersionRaw)
+            ?? Path.GetDirectoryName(_record.DiskPath);
     }
 
     /// <summary>Разводит поля файла прошивки по типу проекта. У Segnetics — «Прошивка ПЛК (.lfs)»

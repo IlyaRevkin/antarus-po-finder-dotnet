@@ -362,4 +362,51 @@ public class LoaderBackendTests
             LoaderFiles.ResolvePreferHint(new[] { root.Path }, "",
                 LoaderFiles.LfsExtension, LoaderFiles.PslExtension));
     }
+
+    [Fact]
+    public void FindDeploymentFiles_UsesOperatorChosenLfs_NotFirstFound()
+    {
+        // Пачка прошивок пожарных шкафов в одной папке версии: заливается ровно тот .lfs, который
+        // оператор указал в модерации. Порядок папок тут ни при чём — выбор оператора главнее.
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_1.lfs"), "a");
+        File.WriteAllText(Path.Combine(root.Path, "шкаф_2.lfs"), "b");
+
+        var files = LoaderFiles.FindDeploymentFiles(new[] { root.Path }, "шкаф_2.lfs");
+
+        Assert.Equal(Path.Combine(root.Path, "шкаф_2.lfs"), files.LfsPath);
+    }
+
+    [Fact]
+    public void FindDeploymentFiles_HintOnPsl_DoesNotReplaceLfs()
+    {
+        // Подсказка применяется по каждому расширению отдельно: указанный .psl остаётся исходником,
+        // а заливаемым .lfs становится первый найденный, а не «подсказка любой ценой».
+        using var root = new TempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "прог.lfs"), "lfs");
+        File.WriteAllText(Path.Combine(root.Path, "проект_1.psl"), "a");
+        File.WriteAllText(Path.Combine(root.Path, "проект_2.psl"), "b");
+
+        var files = LoaderFiles.FindDeploymentFiles(new[] { root.Path }, "проект_2.psl");
+
+        Assert.Equal(Path.Combine(root.Path, "прог.lfs"), files.LfsPath);
+        Assert.Equal(Path.Combine(root.Path, "проект_2.psl"), files.PslPath);
+    }
+
+    [Fact]
+    public void FindDeploymentFiles_NoHint_KeepsFolderPriority()
+    {
+        // Без подсказки поведение прежнее — локальная копия раньше сетевой папки.
+        using var root = new TempRoot();
+        var local = Path.Combine(root.Path, "local");
+        var disk = Path.Combine(root.Path, "disk");
+        Directory.CreateDirectory(local);
+        Directory.CreateDirectory(disk);
+        File.WriteAllText(Path.Combine(local, "project.lfs"), "local lfs");
+        File.WriteAllText(Path.Combine(disk, "project.lfs"), "disk lfs");
+
+        var files = LoaderFiles.FindDeploymentFiles(new[] { local, disk }, "");
+
+        Assert.Equal(Path.Combine(local, "project.lfs"), files.LfsPath);
+    }
 }

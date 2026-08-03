@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -22,14 +23,19 @@ internal sealed class FilePickerRow
     private readonly string _fileDialogFilter;
     private readonly string _folderDialogTitle;
     private readonly Func<string[], string>? _combineMultiple;
+    private readonly Func<string?>? _initialDirectory;
 
     /// <param name="combineMultiple">Что делать, если выбрали/перетащили несколько файлов сразу.
     /// Не задан ⇒ прежнее поведение (берётся первый) — так и оставлено для полей доп. файлов, где
     /// набор файлов не имеет смысла. HMI и основная зона прошивки передают сюда сборку во временную
     /// папку (DropStagingService), чтобы дальше это был обычный сценарий «выбрали папку».</param>
+    /// <param name="initialDirectory">С какой папки открывать диалог. Нужно модерации: файл инструкции
+    /// или HMI выбирают из папки прошивки НА СЕРВЕРЕ, а системный диалог по умолчанию помнит последнюю
+    /// локальную папку этой машины — и оператор каждый раз шёл к сетевому диску руками. Вычисляется
+    /// делегатом на момент открытия: путь версии становится известен позже конструктора.</param>
     public FilePickerRow(Action<string> apply, Action clear,
         string fileDialogTitle = "", string fileDialogFilter = "", string folderDialogTitle = "",
-        Func<string[], string>? combineMultiple = null)
+        Func<string[], string>? combineMultiple = null, Func<string?>? initialDirectory = null)
     {
         _apply = apply;
         _clear = clear;
@@ -37,6 +43,7 @@ internal sealed class FilePickerRow
         _fileDialogFilter = fileDialogFilter;
         _folderDialogTitle = folderDialogTitle;
         _combineMultiple = combineMultiple;
+        _initialDirectory = initialDirectory;
     }
 
     public void BrowseFile()
@@ -46,14 +53,44 @@ internal sealed class FilePickerRow
             Title = _fileDialogTitle,
             Filter = _fileDialogFilter,
             Multiselect = _combineMultiple is not null,
+            InitialDirectory = StartDirectory(),
         };
-        if (dlg.ShowDialog() == true) ApplyPaths(dlg.FileNames.Length > 0 ? dlg.FileNames : new[] { dlg.FileName });
+        if (ShowSafely(() => dlg.ShowDialog(), () => dlg.InitialDirectory = "") == true)
+            ApplyPaths(dlg.FileNames.Length > 0 ? dlg.FileNames : new[] { dlg.FileName });
     }
 
     public void BrowseFolder()
     {
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = _folderDialogTitle };
-        if (dlg.ShowDialog() == true) _apply(dlg.FolderName);
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = _folderDialogTitle,
+            InitialDirectory = StartDirectory(),
+        };
+        if (ShowSafely(() => dlg.ShowDialog(), () => dlg.InitialDirectory = "") == true) _apply(dlg.FolderName);
+    }
+
+    /// <summary>Существующая стартовая папка или "" (= поведение системы по умолчанию). Недоступная
+    /// сетевая шара не должна мешать выбрать файл вручную, поэтому проверку существования не пропускаем.</summary>
+    private string StartDirectory()
+    {
+        string? dir;
+        try { dir = _initialDirectory?.Invoke(); }
+        catch (Exception) { return ""; }
+        return !string.IsNullOrEmpty(dir) && Directory.Exists(dir) ? dir : "";
+    }
+
+    /// <summary>Нативный диалог умеет бросить ArgumentException, разрешая InitialDirectory в shell-элемент,
+    /// даже когда Directory.Exists на этом пути истинно (ловили живьём на кириллических путях, см.
+    /// SettingsView). Тогда — повтор без стартовой папки: лучше открыть «где попало», чем кнопка,
+    /// которая молча ничего не делает.</summary>
+    private static bool? ShowSafely(Func<bool?> show, Action dropInitialDirectory)
+    {
+        try { return show(); }
+        catch (ArgumentException)
+        {
+            dropInitialDirectory();
+            return show();
+        }
     }
 
     public void Clear() => _clear();
