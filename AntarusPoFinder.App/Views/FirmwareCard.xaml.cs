@@ -170,6 +170,10 @@ public partial class FirmwareCard : UserControl
             ".PSL — исходный проект, .LFS — скомпилированный файл";
 
         var metaParts = new List<string>();
+        // Первой строкой — какая именно комплектация шкафа совпала. Наладчик ввёл название своего
+        // шкафа и получил ОДНУ карточку: без этой пометки он видит обычную прошивку с «не своими»
+        // тегами и не понимает, почему нашлась именно она. У обычной прошивки поле пустое.
+        if (!string.IsNullOrEmpty(result.ConfigName)) metaParts.Add($"Конфигурация: {result.ConfigName}");
         if (!string.IsNullOrEmpty(result.Controller)) metaParts.Add($"Контроллер: {result.Controller}");
         if (!string.IsNullOrEmpty(result.EquipmentType)) metaParts.Add(result.EquipmentType);
         if (!string.IsNullOrEmpty(result.WorkType)) metaParts.Add(result.WorkType);
@@ -181,6 +185,9 @@ public partial class FirmwareCard : UserControl
                 ? "по этому запросу выбирали 1 раз"
                 : $"по этому запросу выбирали {result.UsageCount} раз");
         MetaLabel.Text = string.Join("  ·  ", metaParts);
+        MetaLabel.ToolTip = string.IsNullOrEmpty(result.ConfigName)
+            ? null
+            : $"Вариант прошивки {result.VersionRaw} под эту комплектацию шкафа: файлы и номер версии те же, отличается набор тегов";
 
         // Read-only display here — editing tags (and description/launch types together) happens
         // through the single "Теги" button below, not inline, to avoid two competing tag editors
