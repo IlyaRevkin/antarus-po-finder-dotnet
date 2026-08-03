@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
@@ -1054,8 +1055,58 @@ public partial class UploadView : UserControl
                     msg += "\n\nПредупреждения:\n" + string.Join("\n", result.Warnings);
                 AppMessageBox.Show(msg, "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
 
+                OfferLfsBuild(result);
                 ResetForm();
                 return;
+        }
+    }
+
+    /// <summary>Выложили исходник .psl без собранного .lfs — предлагаем собрать его прямо сейчас.
+    ///
+    /// Жалоба Ильи: «если загружают psl, чтобы у наладчика при поиске уже был lfs». Сборка при
+    /// заливке в контроллер этого не даёт: она случается позже, на чужой машине, и результат оседает
+    /// в её локальной рабочей области. Здесь .lfs собирается изолированным SMLogix (к ПЛК не
+    /// подключаемся, см. LfsConversionService) и кладётся в папку версии НА ДИСКЕ — то есть его
+    /// сразу видят все.
+    ///
+    /// Спрашиваем, а не делаем молча: сборка занимает минуты и требует установленного SMLogix,
+    /// которого на машине программиста может не быть — в этом случае просто говорим, что LFS можно
+    /// собрать позже в модерации, и не мешаем закончить загрузку.</summary>
+    private void OfferLfsBuild(FirmwareUploadResult result)
+    {
+        if (result.Record is not { } record) return;
+
+        var decision = LfsConversionService.Decide(result.DestinationFolder, null, record.ExecutableHint);
+        if (decision.Need != LfsConversionNeed.Build || decision.Plan is null) return;
+
+        var backend = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath());
+        if (!backend.IsAvailable)
+        {
+            _host.ShowStatus(
+                "У версии есть только исходник .psl. Собрать .lfs на этой машине нечем — " +
+                "Segnetics Loader Automation не найден; сделайте это в «Модерация прошивок».",
+                category: NotificationCategory.FirmwareAndParams);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            "В этой версии выложен исходник .psl, а собранного .lfs нет — наладчик при поиске увидит только исходник.\n\n" +
+            "Собрать .lfs сейчас и положить его рядом с .psl в папке версии на диске?\n" +
+            "Сборка идёт на этой машине и занимает несколько минут; ПЛК для неё не нужен.",
+            "Собрать LFS", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var built = LoaderDialog.ShowBuild(Window.GetWindow(this), _services.Cfg, new LoaderJob
+        {
+            VersionName = record.VersionRaw,
+            SourcePath = decision.Plan.PslPath,
+            NetworkFolder = decision.Plan.Publish.NetworkFolder ?? "",
+        });
+        if (built)
+        {
+            _host.ShowStatus($"LFS собран и выложен рядом с исходником: {record.VersionRaw}",
+                category: NotificationCategory.FirmwareAndParams);
+            _host.InvalidateSearchResults();
         }
     }
 

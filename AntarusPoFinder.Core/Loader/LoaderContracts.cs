@@ -10,6 +10,11 @@ public enum LoaderOperation
 {
     /// <summary>Определить тип выбранного файла и загрузить проект в ПЛК.</summary>
     Deploy,
+
+    /// <summary>Только собрать .lfs из .psl изолированным SMLogix, к ПЛК не подключаться
+    /// (см. docs/loader/LOADER_AUTOMATION_API.md, действие <c>build</c>). Нужна, чтобы наладчик
+    /// видел готовый .lfs в поиске, а не собирал его каждый раз заливкой в контроллер.</summary>
+    Build,
 }
 
 public enum LoaderLogLevel { Info, Warning, Error, Success }
@@ -37,6 +42,28 @@ public sealed record LoaderRequest
     public string VersionName { get; init; } = "";
 
     public LoaderOptions Options { get; init; } = new();
+}
+
+/// <summary>Что именно окно загрузки должно сделать: какой файл взять и куда положить собранный
+/// .lfs. Собирается вызывающей стороной (карточка поиска, модерация, загрузка новой версии) —
+/// само окно никуда не ходит за этими путями и ничего не «доищет» само.</summary>
+public sealed record LoaderJob
+{
+    public LoaderOperation Operation { get; init; } = LoaderOperation.Deploy;
+
+    /// <summary>Имя версии для заголовка и имени рабочей области.</summary>
+    public string VersionName { get; init; } = "";
+
+    /// <summary>Файл, с которым работаем: .lfs (сразу заливаем) или .psl (Loader соберёт).</summary>
+    public string SourcePath { get; init; } = "";
+
+    /// <summary>Папка версии на сетевом диске — главная цель публикации собранного .lfs: только
+    /// оттуда его увидят остальные машины.</summary>
+    public string NetworkFolder { get; init; } = "";
+
+    /// <summary>Папка версии в локальном кэше — зеркало, чтобы своя же карточка показала LFS сразу,
+    /// не дожидаясь следующей синхронизации.</summary>
+    public string LocalFolder { get; init; } = "";
 }
 
 /// <summary>Одна строка прогресса. <paramref name="Percent"/> = -1 означает неопределённый
