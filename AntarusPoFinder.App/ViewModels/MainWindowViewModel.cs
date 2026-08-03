@@ -47,6 +47,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private bool _configPushLastFailed;
     private bool _fwAutoUpdateLastFailed;
     private bool _appUpdateCheckLastFailed;
+    /// <summary>Папка обновлений задана, но недоступна — работаем с GitHub. Отдельный флаг от
+    /// _appUpdateCheckLastFailed: проверка при этом формально удалась, но настроенный источник
+    /// молча подменился запасным, и об этом надо сказать один раз на переходе (а не каждые 30 минут).</summary>
+    private bool _appUpdateFolderLastFailed;
     private Version? _lastNotifiedUpdateVersion;
 
     /// <summary>Тикеты приходят с других машин в любой момент, а PullNewEvents раньше срабатывал
@@ -749,10 +753,17 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         UpdateCheckResult result;
         try
         {
-            result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.AppUpdatePath());
+            // EffectiveAppUpdatePath, а не AppUpdatePath: путь может быть задан не на этой машине, а
+            // администратором в общей (синхронизируемой) настройке — см. UpdateFolderResolver.
+            result = await AppUpdateService.CheckForUpdatesAsync(_services.Cfg.EffectiveAppUpdatePath());
         }
         catch (Exception ex)
         {
+            // В лог — ВСЕГДА, а не только на переходе в «не работает» ниже: жалоба «обновления не
+            // приходят» разбирается по журналу, и там должна быть видна каждая неудачная попытка,
+            // включая случай «недоступны оба источника сразу» (UpdateSourcesUnavailableException).
+            System.Diagnostics.Debug.WriteLine($"[AppUpdate] Проверка обновлений не удалась: {AppUpdateService.DescribeError(ex)}");
+
             // Здесь стоял голый `catch { return; }` с обоснованием «пользователь всегда может
             // проверить вручную в Настройках» — на практике это означало, что сломавшаяся проверка
             // (GitHub недоступен из заводской сети, прокси режет TLS, сетевая папка обновлений
@@ -770,6 +781,23 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             return;
         }
         _appUpdateCheckLastFailed = false;
+
+        // Настроенная папка обновлений отвалилась, а обновления поехали с GitHub. Само по себе это
+        // ещё работает — но именно так выглядит начало проблемы, ради которой папку и заводили:
+        // если/когда GitHub закроют по IP, обновления после этого исчезнут молча. Говорим сразу.
+        if (result.FolderProblem is not null)
+        {
+            if (!_appUpdateFolderLastFailed)
+            {
+                _appUpdateFolderLastFailed = true;
+                AddNotification($"Папка обновлений недоступна — {result.FolderProblem}. Обновления пока берутся из запасного источника: {result.SourceLabel}.",
+                    NotificationCategory.AppUpdates);
+            }
+        }
+        else
+        {
+            _appUpdateFolderLastFailed = false;
+        }
 
         if (result.Releases.Count == 0) return;
         var latest = result.Releases[0];
