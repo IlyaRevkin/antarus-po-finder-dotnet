@@ -200,7 +200,71 @@ public partial class EditFirmwareDialog : Window
         PlcFileLabel.ToolTip = "Загрузочный файл прошивки Segnetics (.lfs) — ложится в папку версии " +
             "рядом с прошивкой. Исходный проект .psl докладывается отдельным полем ниже.";
         PslFilePanel.Visibility = Visibility.Visible;
+        // Дешёвая отсечка по уже посчитанным флагам: без исходника или с готовым .lfs собирать
+        // нечего, и лишний обход папки версии по сети ради этого не нужен.
+        if (hasPsl && !hasLfs) RefreshBuildLfs();
     }
+
+    // ── Сборка .psl → .lfs ────────────────────────────────────────────────────
+    // Кнопка нужна ровно для жалобы «программист залил psl, а наладчик при поиске должен уже видеть
+    // lfs». Раньше .lfs собирался ТОЛЬКО как побочный эффект заливки в контроллер и оседал в
+    // локальной рабочей области заливавшего: на сетевой диск он не попадал, и следующий наладчик на
+    // другой машине снова видел один исходник.
+
+    /// <summary>Папка версии на диске — та же, куда модерация докладывает файлы прошивки
+    /// (путь мог быть записан коллегой в его форме диска, приводим к нашей).</summary>
+    private string VersionFolderOnDisk()
+    {
+        var folder = FirmwarePathLocalizer.Localize(_record.DiskPath, _services.Cfg.RootPath());
+        if (string.IsNullOrEmpty(folder)) return "";
+        // disk_path мог указывать на одиночный файл — тогда «папка версии» это его родитель.
+        return Directory.Exists(folder) ? folder : Path.GetDirectoryName(folder) ?? "";
+    }
+
+    /// <summary>Показывает кнопку сборки, только когда собирать реально есть что и есть куда
+    /// положить результат: есть .psl в папке версии на диске и нет .lfs.</summary>
+    private void RefreshBuildLfs()
+    {
+        var decision = LfsConversionService.Decide(VersionFolderOnDisk(), null, _record.ExecutableHint);
+        if (decision.Need != LfsConversionNeed.Build)
+        {
+            BuildLfsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        BuildLfsPanel.Visibility = Visibility.Visible;
+        BuildLfsHint.Text = "Собранного .lfs у версии нет — в поиске наладчик видит только исходник.";
+    }
+
+    private void BuildLfs_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = VersionFolderOnDisk();
+        var decision = LfsConversionService.Decide(folder, null, _record.ExecutableHint);
+        if (decision.Need != LfsConversionNeed.Build || decision.Plan is null)
+        {
+            AppMessageBox.Show(decision.Message, "Сборка LFS", MessageBoxButton.OK, MessageBoxImage.Information);
+            RefreshBuildLfs();
+            return;
+        }
+
+        var built = LoaderDialog.ShowBuild(this, _services.Cfg, new LoaderJob
+        {
+            VersionName = _record.VersionRaw,
+            SourcePath = decision.Plan.PslPath,
+            NetworkFolder = folder,
+        });
+        if (!built)
+        {
+            RefreshBuildLfs();
+            return;
+        }
+        _lfsBuilt = true;
+        BuildLfsBtn.Visibility = Visibility.Collapsed;
+        BuildLfsHint.Text = "LFS собран и сохранён в папке версии на диске — его увидят все.";
+    }
+
+    /// <summary>В папке версии появился собранный .lfs — показанная выдача поиска с её строкой
+    /// «Файлы: LFS —» больше не актуальна (см. ReportChanges).</summary>
+    private bool _lfsBuilt;
 
     // ── Вес в поиске (по запросам) ────────────────────────────────────────────
 
@@ -481,6 +545,7 @@ public partial class EditFirmwareDialog : Window
         ReportSubtypes(dlg.SubtypeLinkResult, host);
         ReportConfigs(dlg, host);
         ReportMetadataEdits(dlg, host);
+        if (dlg._lfsBuilt) host.InvalidateSearchResults();
     }
 
     /// <summary>Итог правки набора конфигураций шкафа. Кладётся и в накопитель синхронизации — иначе

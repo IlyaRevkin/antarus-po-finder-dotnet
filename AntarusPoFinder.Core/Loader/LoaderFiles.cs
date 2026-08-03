@@ -83,14 +83,19 @@ public static class LoaderFiles
     /// если указан конкретный .lfs (или .psl), заливается именно он. Без этого в папке с пачкой
     /// прошивок пожарных шкафов в контроллер уезжала первая попавшаяся — ровно та жалоба, что чинили
     /// в 1.54.1. Подсказка применяется по каждому расширению отдельно, поэтому указанный .psl не
-    /// подменяет собой .lfs и наоборот.</summary>
+    /// подменяет собой .lfs и наоборот (см. <see cref="ResolvePreferHint"/>).</summary>
     public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs, string? executableHint = null)
     {
-        var candidates = dirs.ToArray();
+        var candidates = dirs as IReadOnlyList<string> ?? dirs.ToList();
         return new LoaderProjectFiles(
             ResolvePreferHint(candidates, executableHint, LfsExtension),
             ResolvePreferHint(candidates, executableHint, PslExtension));
     }
+
+    /// <summary>Имя собранного файла для этого исходника: <c>проект.psl</c> → <c>проект.lfs</c>.
+    /// Одно место на всех — и на запрос к Automation (outputPath), и на публикацию результата.</summary>
+    public static string LfsNameFor(string pslPath) =>
+        Path.GetFileNameWithoutExtension(pslPath) + LfsExtension;
 
     private static bool HasExt(string path, string extension) =>
         string.Equals(Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase);
