@@ -26,8 +26,8 @@
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="INSTALLFOLDER" Name="Programs">
         <Directory Id="APPDIR" Name="AntarusPoFinder">
-          <!-- Встроенный Segnetics Loader кладётся сюда; приложение находит его по этому пути
-               (SegneticsLoaderResolver.DefaultBundledPath = <папка приложения>\Loader\SegneticsLoader.exe),
+          <!-- Встроенный Segnetics Loader кладётся сюда; приложение находит Automation API по пути
+               (SegneticsLoaderResolver.DefaultBundledPath = <папка приложения>\Loader\SegneticsLoader.Automation.exe),
                поэтому оператору не нужно ничего настраивать. -->
           <Directory Id="LoaderDir" Name="Loader" />
         </Directory>
@@ -76,10 +76,13 @@
       </Feature>
       <!-- Встроенный Segnetics Loader ставится вместе с приложением и обновляется тем же MSI —
            так «Загрузить в ПЛК» работает из коробки, а каждое обновление Finder подтягивает
-           актуальный лоадер. Files рекурсивно забирает installer/loader/** (exe, dll, docs, tools). -->
+           актуальный Loader. Локальную копию SMLogix Loader синхронизирует самостоятельно. -->
       <Feature Id="SegneticsLoaderFeature" Title="Segnetics Loader (загрузчик в контроллер)"
                Level="1" AllowAbsent="no" AllowAdvertise="no">
-        <Files Directory="LoaderDir" Include="loader\**" />
+        <Files Directory="LoaderDir"
+               Include="loader\**">
+          <Exclude Files="loader\SMLogix isolated payload\**" />
+        </Files>
       </Feature>
     </Feature>
 

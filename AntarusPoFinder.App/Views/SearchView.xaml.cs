@@ -535,9 +535,8 @@ public partial class SearchView : UserControl
         _subtypesById = _services.Db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
         var canEditTags = _services.Cfg.CurrentRole() is "administrator";
         var autoSync = _services.Cfg.SearchAutoSync();
-        // Подключён ли настоящий лоадер — сейчас всегда false (в приложении только заготовка,
-        // StubFirmwareLoaderBackend.IsAvailable = false), поэтому «Загрузить в ПЛК» станет основной
-        // кнопкой карточки лишь когда лоадер реально допилят. Считаем один раз на всю выдачу.
+        // Доступность Automation-компонента считаем один раз на выдачу. Саму кнопку не скрываем при
+        // его отсутствии: по нажатию оператор получит точную причину, а не молчаливое исчезновение.
         var loaderConnected = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath()).IsAvailable;
         // Прошивки, чьи правки (теги/описание) ещё лежат в накопителе и не уехали на диск — карточка
         // покажет «правки этой прошивки ещё не на диске» (см. FirmwareCardFlags.TagsPending). Читаем
@@ -1705,57 +1704,36 @@ public partial class SearchView : UserControl
         TryOpen(path);
     }
 
-    /// <summary>Загрузка в контроллер через лоадер. Если рядом с приложением (или в настройках) есть
-    /// Segnetics Loader — открывает его сразу с найденным файлом (.lfs, а нет — .psl на сборку), и
-    /// оператор доводит загрузку в его окне. Если лоадера нет — показывает прежний диалог, который
-    /// объясняет, как его подключить, и ничего не заливает.</summary>
-    private async void OpenLoader(HierarchyResult result)
+    /// <summary>Открывает интерактивную загрузку через Automation API. Готовый LFS имеет приоритет;
+    /// при его отсутствии PSL собирается и загружается production-пайплайном Loader.</summary>
+    private void OpenLoader(HierarchyResult result)
     {
         var versionName = $"{result.Name} {result.VersionRaw}".Trim();
-        var loaderExe = SegneticsLoaderResolver.Resolve(_services.Cfg.LoaderExePath());
-        if (loaderExe is null)
+        var backend = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath());
+        if (!backend.IsAvailable)
         {
-            var src = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint, LoaderFiles.LfsExtension) ?? "";
-            LoaderDialog.ShowFlash(Window.GetWindow(this), _services.Cfg, versionName, src);
+            AppMessageBox.Show(
+                backend.UnavailableReason ?? "Segnetics Loader Automation недоступен.",
+                "Segnetics Loader",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             return;
         }
 
-        // Заливается .lfs; если его нет — отдаём .psl (Segnetics Loader соберёт сам). Когда в папке
-        // версии несколько прошивок, берётся именно та, что указал оператор в модерации, а не первая
-        // попавшаяся (ResolvePreferHint) — иначе в контроллер уезжала не та. Файл сначала копируется
-        // на эту машину: лоадер не должен читать прошивку по сетевой шаре — обрыв SMB посреди загрузки
-        // превращается в наполовину записанный контроллер.
-        var file = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint,
-            LoaderFiles.LfsExtension, LoaderFiles.PslExtension);
-
-        string? localFile = null;
-        try
-        {
-            if (file is not null)
-            {
-                using (_host.BeginBusy($"Подготовка файла для загрузчика: {versionName}"))
-                    localFile = await Task.Run(() =>
-                        LoaderWorkspace.Create(ConfigService.LocalLoader, versionName).Import(file));
-            }
-
-            SegneticsLoaderBackend.Launch(loaderExe, localFile);
-            _host.ShowStatus(localFile is null
-                ? "Segnetics Loader запущен"
-                : $"Segnetics Loader запущен: {Path.GetFileName(localFile)}");
-        }
-        catch (System.ComponentModel.Win32Exception)
+        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result));
+        if (!files.HasAny)
         {
             AppMessageBox.Show(
-                "Не удалось запустить Segnetics Loader. Похоже, на этом компьютере не установлен " +
-                ".NET 8 Desktop Runtime (x64).\n\nСкачайте и установите его:\n" +
-                "https://dotnet.microsoft.com/download/dotnet/8.0/runtime",
-                "Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Для этой версии не найден файл LFS или PSL.",
+                "Загрузка в ПЛК",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
         }
-        catch (Exception ex)
-        {
-            AppMessageBox.Show($"Не удалось открыть Segnetics Loader:\n{ex.Message}",
-                "Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+
+        var sourcePath = files.LfsPath ?? files.PslPath!;
+
+        LoaderDialog.ShowDeploy(Window.GetWindow(this), _services.Cfg, versionName, sourcePath);
     }
 
     /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с

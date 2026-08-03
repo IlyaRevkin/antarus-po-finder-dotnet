@@ -1,106 +1,433 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace AntarusPoFinder.Core.Loader;
 
-/// <summary>
-/// Находит исполняемый файл Segnetics Loader. Приоритет: явно указанный оператором путь
-/// (Настройки → Общие → «Лоадер»), затем встроенная копия, которую кладёт рядом с приложением
-/// инсталлятор (<c>&lt;папка приложения&gt;\Loader\SegneticsLoader.exe</c>). Благодаря встроенной
-/// копии лоадер работает «из коробки» — путь в настройках можно не задавать.
-/// </summary>
+/// <summary>Находит Automation API Segnetics Loader. Пустая настройка означает встроенную копию
+/// в <c>&lt;папка Searcher&gt;\Loader</c>. Настройка может указывать каталог Loader, GUI exe или
+/// непосредственно Automation exe.</summary>
 public static class SegneticsLoaderResolver
 {
-    public const string LoaderExeName = "SegneticsLoader.exe";
+    public const string AutomationExeName = "SegneticsLoader.Automation.exe";
+    public const string GuiExeName = "SegneticsLoader.exe";
     public const string BundledSubfolder = "Loader";
 
-    /// <summary>Куда инсталлятор кладёт встроенный лоадер — рядом с exe приложения.</summary>
     public static string DefaultBundledPath =>
-        Path.Combine(AppContext.BaseDirectory, BundledSubfolder, LoaderExeName);
+        Path.Combine(AppContext.BaseDirectory, BundledSubfolder, AutomationExeName);
 
-    /// <summary>Путь к рабочему exe лоадера или <c>null</c>, если не нашли ни по настройке, ни
-    /// среди встроенных. Проверяет существование файла, а не только непустоту строки — оператор
-    /// мог указать путь, а лоадер потом переехать/удалиться.</summary>
     public static string? Resolve(string? configuredPath)
     {
-        var configured = configuredPath?.Trim();
-        if (!string.IsNullOrEmpty(configured) && File.Exists(configured)) return configured;
+        var candidate = CandidatePath(configuredPath);
+        return candidate is not null && File.Exists(candidate) ? candidate : null;
+    }
 
-        var bundled = DefaultBundledPath;
-        return File.Exists(bundled) ? bundled : null;
+    public static string? CandidatePath(string? configuredPath)
+    {
+        var configured = configuredPath?.Trim().Trim('"');
+        if (string.IsNullOrEmpty(configured)) return DefaultBundledPath;
+
+        if (Directory.Exists(configured) || string.IsNullOrEmpty(Path.GetExtension(configured)))
+            return Path.Combine(configured, AutomationExeName);
+
+        var fileName = Path.GetFileName(configured);
+        if (string.Equals(fileName, AutomationExeName, StringComparison.OrdinalIgnoreCase))
+            return configured;
+
+        if (string.Equals(fileName, GuiExeName, StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(Path.GetDirectoryName(configured) ?? "", AutomationExeName);
+
+        return null;
     }
 }
 
-/// <summary>
-/// Реальный backend: отдаёт загрузку встроенному <b>Segnetics Loader</b> (кастомная сборка v2.6.0,
-/// поставляется вместе с приложением). Segnetics Loader — это полноценное GUI-приложение (сборка
-/// PSL → LFS через SMLogix, заливка LFS/ELF/ZOP в контроллер по SSH/SFTP, обновление ядра,
-/// форматирование), у которого нет headless-режима, поэтому интеграция строится не на разборе его
-/// вывода, а на запуске его окна с уже подставленным файлом: Loader умеет открываться по .lfs/.psl/
-/// .zop, переданному аргументом (та же логика, что у файловых ассоциаций). Оператор доводит загрузку
-/// в его окне — там для этого есть всё, чего в этой программе быть не должно.
-/// </summary>
+/// <summary>Клиент UTF-8 JSONL-протокола <c>SegneticsLoader.Automation.exe --stdio</c>.</summary>
 public sealed class SegneticsLoaderBackend : IFirmwareLoaderBackend
 {
+    private const int ProtocolVersion = 1;
     private readonly string _exePath;
+    private readonly IReadOnlyList<string> _prefixArguments;
 
-    public SegneticsLoaderBackend(string exePath) => _exePath = exePath;
-
-    public string Name => "Segnetics Loader";
-    public bool IsAvailable => File.Exists(_exePath);
-    public string? UnavailableReason => IsAvailable ? null : $"Segnetics Loader не найден: {_exePath}";
-
-    /// <summary>Запускает Segnetics Loader, при непустом пути — сразу с открытым файлом. Не ждёт
-    /// завершения: это GUI, оператор работает в его окне. Бросает <see cref="Win32Exception"/>,
-    /// если exe не удалось стартовать (нет .NET 8 Desktop Runtime и т.п.) — вызывающий сам решает,
-    /// как об этом сообщить.</summary>
-    public static Process Launch(string exePath, string? filePath)
+    public SegneticsLoaderBackend(string exePath)
+        : this(exePath, Array.Empty<string>())
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = exePath,
-            UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(exePath) ?? Environment.CurrentDirectory,
-        };
-        if (!string.IsNullOrWhiteSpace(filePath)) psi.ArgumentList.Add(filePath!);
-        return Process.Start(psi) ?? throw new InvalidOperationException("Не удалось запустить Segnetics Loader.");
     }
 
-    public Task<LoaderResult> RunAsync(LoaderRequest request, IProgress<LoaderProgress> progress, CancellationToken ct)
+    internal SegneticsLoaderBackend(string exePath, IReadOnlyList<string> prefixArguments)
     {
-        ct.ThrowIfCancellationRequested();
-        if (!IsAvailable)
-            return Task.FromResult(LoaderResult.Fail(UnavailableReason ?? "Segnetics Loader недоступен."));
+        _exePath = exePath;
+        _prefixArguments = prefixArguments;
+        DisplayVersion = ReadDisplayVersion(exePath);
+    }
 
-        var file = request.SourcePath;
-        progress.Report(new LoaderProgress(30, "Запуск", $"Открываю Segnetics Loader: {_exePath}"));
+    public string Name => "Segnetics Loader Automation";
 
+    public string? DisplayVersion { get; }
+
+    public bool IsAvailable => File.Exists(_exePath);
+
+    public string? UnavailableReason => IsAvailable
+        ? null
+        : $"Segnetics Loader Automation не найден: {_exePath}";
+
+    private static string? ReadDisplayVersion(string exePath)
+    {
         try
         {
-            Launch(_exePath, file);
+            var info = FileVersionInfo.GetVersionInfo(exePath);
+            return NormalizeDisplayVersion(info.ProductVersion, info.FileVersion);
         }
-        catch (System.ComponentModel.Win32Exception ex)
+        catch (Exception)
         {
-            return Task.FromResult(LoaderResult.Fail(
-                "Не удалось запустить Segnetics Loader. Похоже, не установлен .NET 8 Desktop Runtime (x64). " +
-                "Скачать: https://dotnet.microsoft.com/download/dotnet/8.0/runtime\n" +
-                $"Подробности: {ex.Message}"));
+            return null;
+        }
+    }
+
+    internal static string? NormalizeDisplayVersion(string? productVersion, string? fileVersion)
+    {
+        foreach (var rawVersion in new[] { productVersion, fileVersion })
+        {
+            var value = rawVersion?.Trim();
+            if (string.IsNullOrEmpty(value)) continue;
+
+            var metadataIndex = value.IndexOf('+');
+            if (metadataIndex >= 0) value = value[..metadataIndex];
+            if (value.StartsWith('v')) value = value[1..];
+
+            if (!Version.TryParse(value, out var version)) continue;
+            return version.Build >= 0
+                ? $"{version.Major}.{version.Minor}.{version.Build}"
+                : $"{version.Major}.{version.Minor}";
+        }
+
+        return null;
+    }
+
+    public async Task<LoaderResult> RunAsync(
+        LoaderRequest request,
+        IProgress<LoaderProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(progress);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!IsAvailable)
+            return LoaderResult.Fail(UnavailableReason ?? "Segnetics Loader Automation недоступен.");
+
+        if (request.Operation != LoaderOperation.Deploy)
+            return LoaderResult.Fail("Searcher поддерживает только интерактивную загрузку проекта в ПЛК.");
+
+        if (!File.Exists(request.SourcePath))
+            return LoaderResult.Fail($"Файл проекта не найден: {request.SourcePath}");
+
+        var operationId = $"finder-{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}";
+        if (!string.IsNullOrWhiteSpace(request.OutputPath) &&
+            !string.Equals(Path.GetExtension(request.SourcePath), ".psl", StringComparison.OrdinalIgnoreCase))
+        {
+            return LoaderResult.Fail("Сохранение выходного LFS поддерживается только при загрузке PSL-проекта.");
+        }
+
+        var startRequest = new Dictionary<string, object?>
+        {
+            ["protocolVersion"] = ProtocolVersion,
+            ["operationId"] = operationId,
+            ["action"] = "deploy",
+            ["artifactPath"] = request.SourcePath,
+            ["preparation"] = request.Options.FormatAndUpdateFirmware
+                ? "formatAndUpdateFirmware"
+                : "none",
+        };
+        if (!string.IsNullOrWhiteSpace(request.OutputPath))
+        {
+            startRequest["outputPath"] = Path.GetFullPath(request.OutputPath);
+            startRequest["overwriteOutput"] = true;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _exePath,
+            WorkingDirectory = Path.GetDirectoryName(_exePath) ?? Environment.CurrentDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(false),
+            StandardOutputEncoding = new UTF8Encoding(false),
+            StandardErrorEncoding = new UTF8Encoding(false),
+        };
+        foreach (var argument in _prefixArguments) startInfo.ArgumentList.Add(argument);
+        startInfo.ArgumentList.Add("--stdio");
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+                return LoaderResult.Fail("Не удалось запустить Segnetics Loader Automation.");
         }
         catch (Exception ex)
         {
-            return Task.FromResult(LoaderResult.Fail($"Не удалось запустить Segnetics Loader: {ex.Message}"));
+            return LoaderResult.Fail($"Не удалось запустить Segnetics Loader Automation: {ex.Message}");
         }
 
-        progress.Report(new LoaderProgress(100, "Загрузчик открыт",
-            string.IsNullOrWhiteSpace(file)
-                ? "Segnetics Loader открыт. Выберите файл и выполните загрузку/сборку в его окне."
-                : $"Segnetics Loader открыт с файлом: {file}. Выполните загрузку в его окне.",
-            LoaderLogLevel.Success));
+        process.StandardInput.AutoFlush = true;
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(startRequest)).ConfigureAwait(false);
 
-        return Task.FromResult(LoaderResult.Ok(
-            "Segnetics Loader запущен — загрузка/сборка выполняется в его окне."));
+        using var cancelRegistration = cancellationToken.Register(() =>
+        {
+            _ = Task.Run(() => SendCancelAsync(process, operationId));
+        });
+
+        LoaderResult? terminalResult = null;
+        string? cancelledMessage = null;
+        var terminalSeen = false;
+
+        while (await process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            try
+            {
+                using var document = JsonDocument.Parse(line.TrimStart('\uFEFF'));
+                var root = document.RootElement;
+                if (!root.TryGetProperty("protocolVersion", out var protocolElement) ||
+                    !protocolElement.TryGetInt32(out var eventProtocolVersion) ||
+                    eventProtocolVersion != ProtocolVersion)
+                {
+                    progress.Report(new LoaderProgress(-1, "Протокол",
+                        "Версия события Segnetics Loader Automation не поддерживается.",
+                        LoaderLogLevel.Warning));
+                    continue;
+                }
+
+                if (!TryReadString(root, "operationId", out var eventOperationId) ||
+                    !string.Equals(eventOperationId, operationId, StringComparison.Ordinal))
+                {
+                    progress.Report(new LoaderProgress(-1, "Протокол",
+                        "Получено событие Automation с другим идентификатором операции.",
+                        LoaderLogLevel.Warning));
+                    continue;
+                }
+
+                if (!TryReadString(root, "event", out var eventType))
+                {
+                    progress.Report(new LoaderProgress(-1, "Протокол",
+                        "Получена строка Automation без типа события.", LoaderLogLevel.Warning));
+                    continue;
+                }
+
+                switch (eventType)
+                {
+                    case "started":
+                        progress.Report(new LoaderProgress(0, "Запуск",
+                            "Segnetics Loader принял запрос."));
+                        break;
+
+                    case "plan":
+                        progress.Report(new LoaderProgress(0, "План загрузки", DescribePlan(root)));
+                        break;
+
+                    case "progress":
+                        var percent = root.TryGetProperty("percent", out var percentElement) &&
+                                      percentElement.TryGetDouble(out var numericPercent)
+                            ? Math.Clamp((int)Math.Round(numericPercent), 0, 100)
+                            : -1;
+                        var hasProgressMessage = TryReadString(root, "message", out var message);
+                        progress.Report(new LoaderProgress(
+                            percent,
+                            "Выполнение",
+                            hasProgressMessage ? message : string.Empty,
+                            UpdatesStage: hasProgressMessage));
+                        break;
+
+                    case "log":
+                        var logMessage = TryReadString(root, "message", out var logged)
+                            ? logged
+                            : "Segnetics Loader передал пустую строку журнала.";
+                        var level = TryReadString(root, "level", out var levelName)
+                            ? ParseLogLevel(levelName)
+                            : LoaderLogLevel.Info;
+                        progress.Report(new LoaderProgress(
+                            -1, "Журнал Loader", logMessage, level, UpdatesStage: false));
+                        break;
+
+                    case "completed":
+                        if (terminalSeen) break;
+                        terminalSeen = true;
+                        var completedMessage = TryReadString(root, "message", out var completed)
+                            ? completed
+                            : "Проект загружен в ПЛК.";
+                        ReportWarnings(root, progress);
+                        var artifacts = TryReadString(root, "outputPath", out var outputPath)
+                            ? new[] { outputPath }
+                            : Array.Empty<string>();
+                        terminalResult = LoaderResult.Ok(completedMessage, artifacts);
+                        CloseRequestStream(process);
+                        break;
+
+                    case "failed":
+                        if (terminalSeen) break;
+                        terminalSeen = true;
+                        terminalResult = ParseFailure(root, progress);
+                        CloseRequestStream(process);
+                        break;
+
+                    case "cancelled":
+                        if (terminalSeen) break;
+                        terminalSeen = true;
+                        cancelledMessage = TryReadString(root, "message", out var cancelled)
+                            ? cancelled
+                            : "Операция отменена.";
+                        CloseRequestStream(process);
+                        break;
+
+                    default:
+                        progress.Report(new LoaderProgress(-1, "Протокол",
+                            $"Получено неизвестное событие Automation: {eventType}",
+                            LoaderLogLevel.Warning));
+                        break;
+                }
+            }
+            catch (JsonException ex)
+            {
+                progress.Report(new LoaderProgress(-1, "Протокол",
+                    $"Не удалось разобрать строку Automation: {ex.Message}", LoaderLogLevel.Warning));
+            }
+        }
+
+        await process.WaitForExitAsync().ConfigureAwait(false);
+        var stderr = (await stderrTask.ConfigureAwait(false)).Trim();
+
+        if (cancelledMessage is not null)
+            throw new OperationCanceledException(cancelledMessage);
+
+        if (terminalResult is null)
+        {
+            if (stderr.Contains("You must install or update .NET", StringComparison.OrdinalIgnoreCase) ||
+                stderr.Contains("Microsoft.NETCore.App", StringComparison.OrdinalIgnoreCase))
+            {
+                return LoaderResult.Fail(
+                    "Не удалось запустить Segnetics Loader Automation: установите Microsoft .NET 8 Runtime x64.");
+            }
+
+            var details = string.IsNullOrEmpty(stderr) ? "" : $"\n{stderr}";
+            return LoaderResult.Fail(
+                $"Segnetics Loader Automation завершился без итогового события. Код завершения: {process.ExitCode}.{details}");
+        }
+
+        if (terminalResult.Success && process.ExitCode != 0)
+            return LoaderResult.Fail(
+                $"Segnetics Loader сообщил об успешной загрузке, но завершился с кодом {process.ExitCode}.");
+
+        return terminalResult;
+    }
+
+    private static void CloseRequestStream(Process process)
+    {
+        try
+        {
+            process.StandardInput.Close();
+        }
+        catch (Exception)
+        {
+            // Процесс мог закрыть stdin одновременно с отправкой терминального события.
+        }
+    }
+
+    private static async Task SendCancelAsync(Process process, string operationId)
+    {
+        try
+        {
+            if (process.HasExited) return;
+            var request = JsonSerializer.Serialize(new
+            {
+                protocolVersion = ProtocolVersion,
+                operationId,
+                action = "cancel",
+            });
+            await process.StandardInput.WriteLineAsync(request).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Завершившийся процесс закрывает stdin раньше, чем callback отмены успевает записать строку.
+        }
+    }
+
+    private static LoaderResult ParseFailure(JsonElement root, IProgress<LoaderProgress> progress)
+    {
+        if (!root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+            return LoaderResult.Fail("Segnetics Loader завершил операцию с ошибкой без описания.");
+
+        var message = TryReadString(error, "message", out var userMessage)
+            ? userMessage
+            : "Segnetics Loader завершил операцию с ошибкой.";
+        if (TryReadString(error, "logDirectory", out var logDirectory))
+            progress.Report(new LoaderProgress(-1, "Диагностика",
+                $"Диагностические файлы Loader: {logDirectory}", LoaderLogLevel.Info));
+        return LoaderResult.Fail(message);
+    }
+
+    private static void ReportWarnings(JsonElement root, IProgress<LoaderProgress> progress)
+    {
+        if (!root.TryGetProperty("warnings", out var warnings) || warnings.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var warning in warnings.EnumerateArray())
+            if (warning.ValueKind == JsonValueKind.String && warning.GetString() is { Length: > 0 } text)
+                progress.Report(new LoaderProgress(-1, "Предупреждение", text, LoaderLogLevel.Warning));
+    }
+
+    private static string DescribePlan(JsonElement root)
+    {
+        var artifact = TryReadString(root, "artifactType", out var artifactType)
+            ? artifactType.ToUpperInvariant()
+            : "неизвестный формат";
+        var steps = root.TryGetProperty("steps", out var stepsElement) && stepsElement.ValueKind == JsonValueKind.Array
+            ? stepsElement.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => DescribeStep(item.GetString() ?? ""))
+                .ToArray()
+            : Array.Empty<string>();
+        return steps.Length == 0
+            ? $"Тип файла: {artifact}."
+            : $"Тип файла: {artifact}. Этапы: {string.Join(", ", steps)}.";
+    }
+
+    private static string DescribeStep(string step) => step switch
+    {
+        "formatAndUpdateFirmware" => "форматирование проекта и обновление ядра",
+        "buildPslToLfs" => "сборка PSL в LFS",
+        "extractZop" => "распаковка ZOP",
+        "deployLfs" => "загрузка LFS",
+        "waitForProjectReady" => "ожидание запуска проекта",
+        "deployElf" => "загрузка ELF",
+        _ => step,
+    };
+
+    private static LoaderLogLevel ParseLogLevel(string level) => level switch
+    {
+        "warning" => LoaderLogLevel.Warning,
+        "error" => LoaderLogLevel.Error,
+        _ => LoaderLogLevel.Info,
+    };
+
+    private static bool TryReadString(JsonElement element, string propertyName, out string value)
+    {
+        if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
+        {
+            value = property.GetString() ?? "";
+            return true;
+        }
+
+        value = "";
+        return false;
     }
 }

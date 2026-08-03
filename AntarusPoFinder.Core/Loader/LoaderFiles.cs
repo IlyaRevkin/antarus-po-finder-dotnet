@@ -6,6 +6,13 @@ using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Loader;
 
+public sealed record LoaderProjectFiles(string? LfsPath, string? PslPath)
+{
+    public bool HasLfs => LfsPath is not null;
+    public bool HasPsl => PslPath is not null;
+    public bool HasAny => HasLfs || HasPsl;
+}
+
 /// <summary>Поиск файлов Segnetics внутри папки версии: .psl — исходный проект SMLogix, .lfs —
 /// скомпилированный файл, который и заливается в контроллер. Используется и кнопками «Открыть файл
 /// PSL/LFS» в карточке поиска, и самим лоадером (что собирать / что заливать).</summary>
@@ -44,17 +51,10 @@ public static class LoaderFiles
         return null;
     }
 
-    /// <summary>Файл прошивки с учётом выбора оператора в модерации (FwVersionRecord.ExecutableHint).
-    ///
-    /// Когда в ОДНОЙ папке версии лежит несколько прошивок (например, пачка .lfs пожарных шкафов),
-    /// «первый найденный» — не обязательно тот, что нужен. Оператор указывает нужный файл в модерации,
-    /// и «Открыть прошивку ПЛК» его уже уважает (см. PlcOpenResolver) — а заливка в контроллер и
-    /// кнопки «Открыть LFS/PSL» брали первый попавшийся, отсюда жалоба «залил не ту прошивку».
-    ///
-    /// Подсказка используется, только если указывает на файл с одним из <paramref name="extensions"/>
-    /// (для заливки — .lfs, затем .psl; для «Открыть LFS» — только .lfs): подсказка на .psl не должна
-    /// подставляться там, где ждут именно .lfs. Если подсказки нет или она указывает на файл другого
-    /// расширения — прежний поиск «первый по списку расширений».</summary>
+    /// <summary>Находит файл для команды открытия с учётом выбора оператора в модерации.
+    /// Подсказка используется только для подходящего расширения; при отсутствии подходящей подсказки
+    /// возвращается первый файл по обычному порядку поиска. Выбор источника для загрузки в ПЛК этим
+    /// методом не определяется.</summary>
     public static string? ResolvePreferHint(IEnumerable<string> dirs, string? executableHint, params string[] extensions)
     {
         var dirList = dirs as IReadOnlyList<string> ?? dirs.ToList();
@@ -66,6 +66,16 @@ public static class LoaderFiles
         foreach (var ext in extensions)
             if (FindIn(dirList, ext) is { } hit) return hit;
         return null;
+    }
+
+    /// <summary>Находит оба допустимых источника интерактивной загрузки. Каждый тип выбирается по
+    /// одинаковому порядку папок: точная локальная копия раньше сетевой папки той же версии.</summary>
+    public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs)
+    {
+        var candidates = dirs.ToArray();
+        return new LoaderProjectFiles(
+            FindIn(candidates, LfsExtension),
+            FindIn(candidates, PslExtension));
     }
 
     private static bool HasExt(string path, string extension) =>

@@ -22,7 +22,8 @@
 - ZOP - контейнер Loader, содержащий LFS и один ELF payload.
 - standalone ELF - ELF, загруженный старой vendor/template механикой как
   самостоятельный активный проект.
-- managed-блок - участок `/projects/start.after` между маркерами Loader.
+- profile manager - общий router активного профиля в
+  `/projects/sys/segnetics-runtime/profile-manager.sh`.
 
 В комбинированном режиме запрещено:
 
@@ -43,6 +44,12 @@ Loader хранит companion-состояние в своей служебно�
   start-companion.sh
   bin/
     <processName>
+
+/projects/sys/segnetics-runtime/
+  active-profile.env
+  pending-profile.env
+  rollback/
+  profile-manager.sh
 ```
 
 `companion.env`:
@@ -61,20 +68,22 @@ COMPATIBILITY_CONTRACT=/projects/sys/segnetics-loader/compatibility.contract
 ```text
 /tmp/<processName>.log
 /tmp/segnetics-loader-companion.log
-/tmp/segnetics-loader-companion-start.after.log
+/tmp/segnetics-profile-manager.log
+/tmp/segnetics-active-profile.log
 ```
 
-Managed-блок в `/projects/start.after`:
+Profile manager устанавливает общий router в `/projects/start.after`:
 
 ```sh
-# BEGIN SEGNETICS_LOADER_COMPANION
-/projects/sys/segnetics-loader/start-companion.sh --autostart >>/tmp/segnetics-loader-companion-start.after.log 2>&1 || true
-# END SEGNETICS_LOADER_COMPANION
+# BEGIN SEGNETICS_ACTIVE_PROFILE
+/projects/sys/segnetics-runtime/profile-manager.sh autostart >>/tmp/segnetics-active-profile.log 2>&1 || true
+# END SEGNETICS_ACTIVE_PROFILE
 ```
 
-Loader добавляет или обновляет только managed-блок. Остальное содержимое
-`/projects/start.after` не затирается. В managed-блоке не должно быть имени
-конкретного ELF.
+В `/projects/start.before` аналогично устанавливается guard vendor takeover.
+Менеджер заменяет только собственные и прежние известные managed-блоки,
+сохраняя остальное содержимое hook-файлов. Имя конкретного ELF хранится в
+`companion.env`, а не в router-е.
 
 ## Контракт Совместимости
 
@@ -127,31 +136,29 @@ sha256(compatibility.contract)
 
 ## Загрузка ELF/ZOP
 
-Загрузка PSL/LFS через Loader не изменяет companion-настройки. Если companion
-уже был установлен, его восстановление после загрузки PSL/LFS выполняется
-только через существующий `/projects/start.after`.
+При загрузке нового PSL/LFS Loader останавливает companion до замены проекта.
+После установки profile manager повторно проверяет контракт. Совместимый
+companion запускается снова, несовместимый переводится в `ENABLED=0`, а
+LFS-загрузка завершается успешно с предупреждением.
 
 ELF и ELF payload из ZOP загружаются через companion deploy path.
 
 Алгоритм загрузки ELF:
 
-1. Проверить SSH-подключение к ПЛК.
-2. Создать `/projects/sys/segnetics-loader/bin`.
-3. Остановить старые companion-процессы, у которых `/proc/<pid>/exe` указывает
-   внутрь `/projects/sys/segnetics-loader/bin/`.
-4. Очистить `/projects/sys/segnetics-loader/bin/*`.
-5. Загрузить новый ELF во временный файл `<processName>.tmp`.
-6. Атомарно переименовать его в
+1. Проверить SSH-подключение и прочитать текущий `/projects/load_files.srv`.
+2. Построить локально `compatibility.contract`, `companion.env` и launcher.
+3. Загрузить ELF и служебные файлы с суффиксом `.tmp`.
+4. Выполнить `profile-manager prepare vendor-psl segnetics-loader`: сохранить
+   rollback-состояние и остановить несовместимые процессы по точным путям.
+5. Атомарно переименовать ELF в
    `/projects/sys/segnetics-loader/bin/<processName>` и сделать исполняемым.
-7. Построить `compatibility.contract` по текущему `/projects/load_files.srv`.
-   Если переменных нет, создаётся пустой `compatibility.contract`. Пустой
-   контракт валиден и означает отсутствие требований к PSL-переменным.
-8. Записать `companion.env`.
-9. Записать или обновить `start-companion.sh`.
-10. Добавить или обновить managed-блок в `/projects/start.after`.
-11. Запустить `/projects/sys/segnetics-loader/start-companion.sh --direct`.
-12. Если companion не стартовал, вывести хвост `/tmp/<processName>.log` и
-    завершить операцию ошибкой.
+6. Атомарно установить `compatibility.contract`, `companion.env` и
+   `start-companion.sh`.
+7. Выполнить `profile-manager commit vendor-psl segnetics-loader`.
+8. Profile manager обновляет hook-блоки, запускает companion и подтверждает
+   процесс по точному пути.
+9. Если установка или запуск не подтверждены, восстановить предыдущий профиль
+   owner-bound rollback-ом и вывести хвост `/tmp/<processName>.log`.
 
 Алгоритм загрузки ZOP:
 
@@ -180,6 +187,7 @@ append-режиме.
 
 - `--autostart` - запуск из `/projects/start.after`;
 - `--direct` - прямой запуск из Loader во время загрузки ELF/ZOP.
+- `--stop` - точная остановка своего ELF или `gdbserver`, который его запустил.
 
 В `--autostart` любые ошибки проверки или запуска пишутся в
 `/tmp/segnetics-loader-companion.log`, после чего launcher завершает работу с
@@ -216,51 +224,30 @@ nohup "$BINARY" >"$LOG" 2>&1 </dev/null &
 
 ## Vendor/Template И Отключение
 
-Если до включения комбинированного режима был загружен standalone ELF через
-vendor/template механику, он мог оставить:
+Companion требует существующий `/projects/load_files.srv`. Если до него был
+активен vendor standalone, profile manager транзакционно останавливает
+`/projects/<oldElfName>` по точному пути и сохраняет его для rollback. Если
+PSL/LFS-проект отсутствует, commit companion не принимается и прежний
+standalone восстанавливается.
 
-```text
-/projects/.template_active_project = <oldElfName>
-```
+Обратный переход также управляется единым профилем. Загрузка standalone
+останавливает companion, очищает пользовательский PSL/LFS-state и принимает
+`PROFILE=vendor-standalone`. Прямой vendor/template запуск имеет приоритет:
+guard обнаруживает новый `.template_active_project`, отключает
+несовместимый managed runtime и не возвращает ошибку в vendor pipeline.
 
-Если указанный standalone ELF реально запущен как процесс из `/projects/<oldElfName>`,
-а `/projects/load_files.srv` отсутствует, PSL/LFS не считается подготовленным
-основным проектом ПЛК. При попытке загрузить companion ELF/ZOP нужно блокировать
-операцию сообщением:
-
-```text
-Комбинированный режим невозможен: активным проектом ПЛК сейчас является standalone ELF.
-Сначала загрузите PSL/LFS-проект, затем повторите загрузку ELF/ZOP в комбинированном режиме.
-```
-
-Если на ПЛК уже есть `/projects/load_files.srv`, но при этом продолжает работать
-процесс `/projects/<oldElfName>`, указанный в `.template_active_project`, это
-считается конфликтом старого vendor/template standalone ELF с установленным
-PSL/LFS-проектом. Перед переходом в companion-модель Loader останавливает этот
-standalone-процесс, удаляет `.template_active_project` и продолжает загрузку
-companion ELF/ZOP.
-
-Если после комбинированного режима пользователь загружает ELF как standalone
-через vendor/template механику, vendor-модель имеет приоритет. Она может
-вызвать `./start`, изменить `.template_active_project` и сделать standalone ELF
-активным проектом ПЛК. Managed-блок в `start.after` не должен ломать этот
-режим: `start-companion.sh --autostart` при несовместимости или отключенном
-режиме ничего не запускает и завершается с кодом `0`.
-
-Отключение комбинированного режима:
+Отключение companion выполняется так:
 
 1. Записать в `companion.env`:
 
 ```sh
 ENABLED=0
+AUTOSTART=0
 ```
 
-2. Остановить процессы из `/projects/sys/segnetics-loader/bin/`.
+2. Вызвать `start-companion.sh --stop` и проверить отсутствие точного
+   ELF/gdbserver-процесса.
 
-`ENABLED=0` является единственным признаком отключения режима. При отключении
-не нужно удалять `companion.env`, `compatibility.contract`,
-`start-companion.sh`, `bin/*` и логи. Эти файлы можно оставить как
-диагностическое и восстановительное состояние.
-
-Очистка `/projects/sys/segnetics-loader/bin/*` выполняется при установке нового
-companion ELF/ZOP. При отключении режима эта очистка не требуется.
+Служебные файлы могут оставаться для диагностики и возможного rollback.
+Активное состояние определяется одновременно manifest-ом профиля,
+`ENABLED` и фактическим процессом.
