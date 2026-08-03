@@ -10,7 +10,11 @@
         <TextBlock x:Name="TitleLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,12" TextWrapping="Wrap"/>
 
         <TextBlock Text="Теги:" Margin="0,0,0,4"/>
-        <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,16"/>
+        <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,4"/>
+        <!-- Та же подсказка, что и в модерации прошивок (см. Core/Services/TagPattern.cs): пул тегов
+             у прошивок и файлов параметров общий, значит и подстановка работает одинаково. -->
+        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"
+                   Text="Звёздочка в теге — подстановка любой части названия: тег «…ПЖ-ПП-2-(*-*А)-АВР-FD-Ст» находится и по «(9-14А)», и по «(20-25А)»."/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
