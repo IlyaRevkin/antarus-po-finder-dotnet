@@ -145,6 +145,12 @@ public class FirmwareUploadResult
     /// обновляли только программу ПЛК; вызывающий просто сообщает об этом оператору.</summary>
     public string InheritedHmiFromVersion { get; init; } = "";
 
+    /// <summary>Теги, перенесённые с предыдущей версии этого шкафа, и её номер (см.
+    /// FirmwareUploadPlan.InheritedTags). Пустые — наследовать было нечего либо оператор ввёл всё сам.
+    /// Не предупреждение: вызывающий просто показывает оператору, что именно перенеслось.</summary>
+    public List<string> InheritedTags { get; init; } = new();
+    public string InheritedTagsFromVersion { get; init; } = "";
+
     public bool IsSuccess => Outcome == FirmwareUploadOutcome.Success;
 
     private static FirmwareUploadResult Fail(string message) =>
@@ -205,6 +211,16 @@ public class FirmwareUploadPlan
 
     /// <summary>Номер версии, от которой унаследована панель — только для сообщения оператору.</summary>
     public string InheritedHmiFromVersion { get; init; } = "";
+
+    /// <summary>Теги, подтянутые с предыдущей версии этого же шкафа (см.
+    /// Database.GetLatestTagsForFirmware) — те, которых оператор в этой загрузке не набрал сам. Уже
+    /// входят в <see cref="Tags"/> выше (значит и в CHANGELOG.md, и в запись БД); отдельным списком
+    /// хранятся только чтобы сказать оператору, что именно перенеслось — наследование должно быть
+    /// видимым, а не молчаливым.</summary>
+    public List<string> InheritedTags { get; init; } = new();
+
+    /// <summary>Номер версии, с которой перенесены теги — только для сообщения оператору.</summary>
+    public string InheritedTagsFromVersion { get; init; } = "";
 }
 
 /// <summary>Что получилось у дисковой фазы: имя файла, куда легли вложения и какие мелочи не
@@ -370,6 +386,23 @@ public static class FirmwareUploadService
             if (!string.IsNullOrWhiteSpace(autoTag) && !tags.Contains(autoTag, StringComparer.OrdinalIgnoreCase))
                 tags.Add(autoTag);
 
+        // Теги предыдущей версии ЭТОГО ЖЕ шкафа — по той же логике, что и наследование HMI-проекта
+        // чуть выше: теги описывают шкаф («Шкаф управления пожарными насосами АМПЕРУС ПЖ-ПП-2-…»), а
+        // не конкретную сборку программы, и новая версия ПЛК ставится в те же самые шкафы. Раньше
+        // каждая загрузка начинала с пустого списка: программист либо заново набивал десяток названий
+        // шкафов, либо (что и происходило) не набивал — и свежая версия переставала находиться по тем
+        // запросам, по которым находилась предыдущая. Дописываются только те, которых оператор не
+        // ввёл сам, и только в конец: набранное вручную остаётся первым и ничем не перетирается,
+        // убрать лишнее можно потом в модерации.
+        var inheritedTags = new List<string>();
+        var previousTags = PreviousVersionTags(db, subOption.Id!.Value, mod.ControllerId);
+        foreach (var tag in TagString.Parse(previousTags?.Tags ?? ""))
+            if (!tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            {
+                tags.Add(tag);
+                inheritedTags.Add(tag);
+            }
+
         var plan = new FirmwareUploadPlan
         {
             Request = request,
@@ -393,9 +426,20 @@ public static class FirmwareUploadService
             InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
             InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
             InheritedHmiFromVersion = inheritedHmi?.VersionRaw ?? "",
+            InheritedTags = inheritedTags,
+            InheritedTagsFromVersion = inheritedTags.Count > 0 ? previousTags!.Value.VersionRaw : "",
         };
         return (plan, null);
     }
+
+    /// <summary>Теги предыдущей версии этого шкафа — ровно то, что предложит унаследовать загрузка.
+    /// Публичный и отдельный от Prepare, потому что тем же ответом пользуется предпросмотр в UploadView
+    /// (подсказка «перенесутся теги предыдущей версии: …» ДО нажатия «Загрузить»): наследование должно
+    /// быть видно заранее, а не всплывать сюрпризом в сообщении об успехе.
+    ///
+    /// null — наследовать нечего (первая версия шкафа либо у предыдущих не было тегов).</summary>
+    public static (string Tags, string VersionRaw)? PreviousVersionTags(Database db, int subtypeId, int controllerId) =>
+        db.GetLatestTagsForFirmware(subtypeId, controllerId);
 
     /// <summary>Фаза 2 (только диск): копирует прошивку и вложения на сетевой диск, пишет
     /// CHANGELOG.md. В БД не ходит ни разу — вызывающий может выполнить её в фоновом потоке, чтобы
@@ -550,6 +594,8 @@ public static class FirmwareUploadService
             DestinationFolder = plan.DestinationFolder,
             DestinationFilename = copy.DestinationFilename,
             InheritedHmiFromVersion = inheritedHmiFrom,
+            InheritedTags = plan.InheritedTags,
+            InheritedTagsFromVersion = plan.InheritedTagsFromVersion,
         };
     }
 

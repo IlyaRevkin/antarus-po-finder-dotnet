@@ -116,7 +116,7 @@ public partial class Database
                    fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
-                   fv.modbus_map_path, fv.deleted_at,
+                   fv.modbus_map_path, fv.deleted_at, fv.sync_id,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -138,7 +138,7 @@ public partial class Database
                     Tags = r.GetString(18), Status = GetString(r, "status"), Released = GetInt(r, "released"),
                     HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
                     HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
-                    DeletedAt = GetString(r, "deleted_at"),
+                    DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
                     GroupName = GetString(r, "group_name"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1024,13 +1024,19 @@ public partial class Database
 
         // ── fw_versions / param_files: additive-only, as before — each machine may have uploads
         //    the exporting one never saw, so absence locally never means "delete it". The one
-        //    exception is status/released on an ALREADY-matched row: moderation only ever advances
-        //    (active→rolled_back, unreleased→released — see the reservations block above for the
-        //    same reasoning), so if the incoming copy is further along than the local row we adopt
-        //    it; we never move a local row backwards to active/unreleased. Without this, a version
-        //    moderated (tags added + released) on one machine before its FIRST export would insert
-        //    fine there, but land back in every OTHER machine's moderation queue forever, since the
-        //    natural-key match would just skip it as "already exists" without ever updating it.
+        //    exception is МОДЕРАЦИЯ on an ALREADY-matched row — status, released и archived: она
+        //    только продвигается вперёд (active→rolled_back, unreleased→released, 0→archived — см.
+        //    тот же довод в блоке резервов выше), поэтому копию, ушедшую дальше нашей, принимаем, а
+        //    назад локальную строку не тянем никогда. Без этого версия, отмодерированная на одной
+        //    машине, оставалась бы в очереди модерации у всех остальных навсегда: совпадение по ключу
+        //    просто пропускало бы её как «уже есть», ничего не обновляя.
+        //
+        //    Опознаётся строка по sync_id (см. FindFwVersionRow) с откатом на прежний натуральный ключ
+        //    подтип+контроллер+version_raw. Одного натурального ключа не хватало: он ломается от
+        //    правок, которые сама же программа и разрешает (переназначение контроллера, переписывание
+        //    hw меняет version_raw) — после них состояние модерации и надгробие не находили, к какой
+        //    строке примениться, и запись коллеги оставалась висеть в модерации, а рядом заводился
+        //    дубликат.
         //
         //    Deletion (Задача 3) is the one thing that ISN'T additive-only: TombstoneFwVersion marks
         //    a row with deleted_at instead of removing it, specifically so it keeps flowing through
@@ -1049,36 +1055,75 @@ public partial class Database
             var ctrlId = ResolveId("controller_models", fv.ControllerSyncId, controllerSyncToId, "name", fv.CtrlName);
             if (subId is null || ctrlId is null) continue;
 
-            var existing = ExecuteReader(
-                """
-                SELECT id, status, released, io_map_path, instructions_path, hmi_path,
-                       executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
-                       description, launch_types, tags
-                FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
-                """, cmd =>
-                {
-                    cmd.Parameters.AddWithValue("@s", subId.Value);
-                    cmd.Parameters.AddWithValue("@c", ctrlId.Value);
-                    cmd.Parameters.AddWithValue("@v", fv.VersionRaw);
-                });
-            (int Id, string Status, int Released, string IoMapPath, string InstructionsPath, string HmiPath,
-                string ExecutableHint, string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
-                string Description, string LaunchTypes, string Tags)? existingRow = null;
-            using (existing)
-                if (existing.Read())
-                    existingRow = (existing.GetInt32(0), GetString(existing, "status"), GetInt(existing, "released"),
-                        GetString(existing, "io_map_path"), GetString(existing, "instructions_path"), GetString(existing, "hmi_path"),
-                        GetString(existing, "executable_hint"), GetString(existing, "hmi_executable_hint"), GetString(existing, "modbus_map_path"),
-                        GetString(existing, "deleted_at"), GetString(existing, "disk_path"),
-                        GetString(existing, "description"), GetString(existing, "launch_types", "[]"), GetString(existing, "tags"));
+            var existingRow = FindFwVersionRow(fv.SyncId, subId.Value, ctrlId.Value, fv.VersionRaw);
 
             if (existingRow is not null)
             {
-                var (id, localStatus, localReleased, localIoMap, localInstr, localHmi, localExecHint, localHmiExecHint, localModbus, localDeletedAt, localDiskPath, localDesc, localLaunchTypes, localTags) = existingRow.Value;
+                var id = existingRow.Id;
+                var (localStatus, localReleased, localArchived) = (existingRow.Status, existingRow.Released, existingRow.Archived);
+                var (localIoMap, localInstr, localHmi) = (existingRow.IoMapPath, existingRow.InstructionsPath, existingRow.HmiPath);
+                var (localExecHint, localHmiExecHint, localModbus) = (existingRow.ExecutableHint, existingRow.HmiExecutableHint, existingRow.ModbusMapPath);
+                var (localDeletedAt, localDiskPath) = (existingRow.DeletedAt, existingRow.DiskPath);
+                var (localDesc, localLaunchTypes, localTags) = (existingRow.Description, existingRow.LaunchTypes, existingRow.Tags);
+
+                // Первый контакт двух независимо заведённых баз: строка нашлась по натуральному ключу,
+                // а sync_id у сторон разные (каждая сгенерировала свой при миграции). Перенимаем чужой
+                // прямо сейчас — ровно как это делают справочники выше (adoptSyncId), чтобы дальше обе
+                // машины связывала уже отметка, переживающая правку контроллера/номера версии.
+                if (apply && !string.IsNullOrEmpty(fv.SyncId) && fv.SyncId != existingRow.SyncId)
+                    ExecuteNonQuery("UPDATE fw_versions SET sync_id=@sy WHERE id=@id", cmd =>
+                    {
+                        cmd.Parameters.AddWithValue("@sy", fv.SyncId);
+                        cmd.Parameters.AddWithValue("@id", id);
+                    });
 
                 // Rule 1 — already deleted here: permanent, never revived by an incoming row that
                 // just hasn't caught up yet (see class doc above).
                 if (!string.IsNullOrEmpty(localDeletedAt)) continue;
+
+                // Строка опознана по sync_id, но её натуральный ключ разошёлся — значит на машине-
+                // источнике версию ПЕРЕИМЕНОВАЛИ (переписали hw: version_raw и имя папки на диске) или
+                // ПЕРЕНАЗНАЧИЛИ другому контроллеру. Это ровно тот же случай «строку правили, а не
+                // завели заново», ради которого sync_id и появился у справочников: применяем правку НА
+                // МЕСТЕ. Раньше (без sync_id) такой снимок вставлял рядом вторую строку, а исходная
+                // оставалась фантомом — с несуществующей папкой и навсегда в очереди модерации.
+                //
+                // Предохранитель: если целевой натуральный ключ у нас уже занят другой строкой (дубль
+                // от старой версии приложения, гонка с проигрыванием hw-переписывания), переименование
+                // пропускаем — два ряда с одним ключом хуже, чем один устаревший.
+                var renamed = existingRow.VersionRaw != fv.VersionRaw ||
+                              existingRow.SubtypeId != subId.Value || existingRow.ControllerId != ctrlId.Value;
+                if (renamed && FindFwVersionIdByNaturalKey(subId.Value, ctrlId.Value, fv.VersionRaw, id) is not null)
+                    renamed = false;
+                if (renamed)
+                {
+                    counts.FwVersionsRenamed++;
+                    if (apply)
+                        ExecuteNonQuery("""
+                            UPDATE fw_versions SET subtype_id=@s, controller_id=@c, version_raw=@v,
+                                hw_version=@hw, sw_version=@sw, dt_str=@dt, eq_prefix=@eq, sub_prefix=@sub,
+                                disk_path=@disk
+                            WHERE id=@id
+                            """, cmd =>
+                        {
+                            cmd.Parameters.AddWithValue("@s", subId.Value);
+                            cmd.Parameters.AddWithValue("@c", ctrlId.Value);
+                            cmd.Parameters.AddWithValue("@v", fv.VersionRaw);
+                            cmd.Parameters.AddWithValue("@hw", fv.HwVersion);
+                            cmd.Parameters.AddWithValue("@sw", fv.SwVersion);
+                            cmd.Parameters.AddWithValue("@dt", fv.DtStr);
+                            cmd.Parameters.AddWithValue("@eq", fv.EqPrefix);
+                            cmd.Parameters.AddWithValue("@sub", fv.SubPrefix);
+                            // Имя папки версии на диске = version_raw, поэтому вместе с номером
+                            // переезжает и путь. Он абсолютный и записан в нотации отправителя —
+                            // приводит его к нашему корню RemapFwPaths сразу после импорта (см.
+                            // ConfigSyncService.ApplyToDatabase), тем же проходом, что и для строк,
+                            // приехавших сюда впервые.
+                            cmd.Parameters.AddWithValue("@disk", fv.DiskPath);
+                            cmd.Parameters.AddWithValue("@id", id);
+                        });
+                    if (apply) localDiskPath = fv.DiskPath;
+                }
 
                 // Rule 2 — incoming tombstone not yet applied locally: mirror it.
                 if (!string.IsNullOrEmpty(fv.DeletedAt))
@@ -1160,14 +1205,22 @@ public partial class Database
                                     newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
                                     newDesc != localDesc || newLaunchTypes != localLaunchTypes || newTags != localTags;
 
+                // Архивирование — третья составляющая состояния модерации, наравне со status и
+                // released (очередь модерации отбирает строки по всем трём сразу, см.
+                // GetUnreleasedFwVersionsWithNames). Раньше archived писался ТОЛЬКО при первичной
+                // вставке: версия, убранная в архив на одной машине, у всех остальных так и оставалась
+                // активной и продолжала висеть у них в модерации — ровно тот же класс расхождения, что
+                // и с released до его появления здесь. Правило то же, монотонное: 0 → 1 применяем,
+                // назад (разархивирование) не тянем — снимок мог быть собран до архивирования.
                 var advances = (localStatus == "active" && incomingStatus != "active") ||
-                               (localReleased == 0 && fv.Released != 0) || fieldsChanged;
+                               (localReleased == 0 && fv.Released != 0) ||
+                               (localArchived == 0 && fv.Archived != 0) || fieldsChanged;
                 if (!advances) continue;
 
                 counts.FwVersions++;
                 if (!apply) continue;
                 ExecuteNonQuery("""
-                    UPDATE fw_versions SET status=@st, released=@rel, io_map_path=@io, instructions_path=@instr,
+                    UPDATE fw_versions SET status=@st, released=@rel, archived=@arch, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
                         description=@desc, launch_types=@lt, tags=@tags
                     WHERE id=@id
@@ -1178,6 +1231,7 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@tags", newTags);
                     cmd.Parameters.AddWithValue("@st", localStatus == "active" ? incomingStatus : localStatus);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
+                    cmd.Parameters.AddWithValue("@arch", localArchived != 0 ? 1 : fv.Archived);
                     cmd.Parameters.AddWithValue("@io", newIoMap);
                     cmd.Parameters.AddWithValue("@instr", newInstr);
                     cmd.Parameters.AddWithValue("@hmi", newHmi);
@@ -1204,14 +1258,19 @@ public partial class Database
                     dt_str, version_raw, filename, disk_path, local_path, description, changelog,
                     launch_types, io_map_path, instructions_path, hmi_path, executable_hint, hmi_executable_hint,
                     modbus_map_path, is_opc, request_num,
-                    upload_date, archived, tags, status, released)
+                    upload_date, archived, tags, status, released, sync_id)
                 VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                     @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                     @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                     @modbus_map_path,@is_opc,@request_num,
-                    @upload_date,@archived,@tags,@status,@released)
+                    @upload_date,@archived,@tags,@status,@released,@sync_id)
                 """, cmd =>
             {
+                // Прошивка заводится с ТЕМ ЖЕ sync_id, что у отправителя, — иначе строка «та же
+                // самая», но связать её с оригиналом было бы уже нечем. Пустой (старый экспорт) —
+                // заводим свой: он ничего не ломает, а следующая синхронизация с обновлённой машины
+                // перенимет её значение по натуральному ключу.
+                cmd.Parameters.AddWithValue("@sync_id", string.IsNullOrEmpty(fv.SyncId) ? Guid.NewGuid().ToString() : fv.SyncId);
                 cmd.Parameters.AddWithValue("@subtype_id", subId.Value);
                 cmd.Parameters.AddWithValue("@controller_id", ctrlId.Value);
                 cmd.Parameters.AddWithValue("@eq_prefix", fv.EqPrefix);
@@ -1284,6 +1343,59 @@ public partial class Database
     }
 
     // ── Sync-id-aware lookup helpers ─────────────────────────────────────────
+
+    /// <summary>Локальная строка fw_versions в том объёме, который нужен импорту (см.
+    /// ImportHierarchyDataCore) — всё, что он сравнивает и переносит.</summary>
+    private sealed record LocalFwRow(int Id, string SyncId, string Status, int Released, int Archived,
+        string IoMapPath, string InstructionsPath, string HmiPath, string ExecutableHint,
+        string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
+        string Description, string LaunchTypes, string Tags,
+        int SubtypeId, int ControllerId, string VersionRaw);
+
+    /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
+    /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
+    ///
+    /// Порядок именно такой, и в этом весь смысл столбца. Натуральный ключ не переживает правок,
+    /// которые программа сама же и разрешает: «переназначить версию другому контроллеру» меняет
+    /// controller_id, переписывание hw модификации — version_raw (а с ним и имя папки). После любой из
+    /// них снимок с машины-автора переставал находить соответствующую строку у получателя: приехавшее
+    /// надгробие/вывод из модерации применять было не к чему, рядом вставлялся дубликат, а исходная
+    /// запись получателя оставалась висеть в очереди модерации навсегда. sync_id переживает обе
+    /// правки, поэтому состояние доезжает до той же строки. Откат на натуральный ключ обязателен для
+    /// первого контакта (у сторон разные sync_id) и для снимков со старой версии приложения.</summary>
+    private LocalFwRow? FindFwVersionRow(string syncId, int subtypeId, int controllerId, string versionRaw)
+    {
+        const string cols = """
+            id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
+            executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
+            description, launch_types, tags, subtype_id, controller_id, version_raw
+            """;
+
+        if (!string.IsNullOrEmpty(syncId))
+        {
+            using var bySync = ExecuteReader($"SELECT {cols} FROM fw_versions WHERE sync_id=@sy",
+                cmd => cmd.Parameters.AddWithValue("@sy", syncId));
+            if (bySync.Read()) return ReadLocalFwRow(bySync);
+        }
+
+        using var byKey = ExecuteReader(
+            $"SELECT {cols} FROM fw_versions WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@s", subtypeId);
+                cmd.Parameters.AddWithValue("@c", controllerId);
+                cmd.Parameters.AddWithValue("@v", versionRaw);
+            });
+        return byKey.Read() ? ReadLocalFwRow(byKey) : null;
+    }
+
+    private static LocalFwRow ReadLocalFwRow(Microsoft.Data.Sqlite.SqliteDataReader r) => new(
+        GetInt(r, "id"), GetString(r, "sync_id"), GetString(r, "status"), GetInt(r, "released"), GetInt(r, "archived"),
+        GetString(r, "io_map_path"), GetString(r, "instructions_path"), GetString(r, "hmi_path"),
+        GetString(r, "executable_hint"), GetString(r, "hmi_executable_hint"), GetString(r, "modbus_map_path"),
+        GetString(r, "deleted_at"), GetString(r, "disk_path"),
+        GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
+        GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"));
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {
