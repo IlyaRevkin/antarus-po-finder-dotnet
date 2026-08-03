@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App;
 
@@ -495,6 +496,36 @@ public static class AppUpdateService
     {
         using var stream = File.OpenRead(filePath);
         return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    /// <summary>Журнал проверок обновлений — рядом с базой приложения (ConfigService.AppData), а не в
+    /// %TEMP%: его читают, когда разбирают жалобу «новые версии не приходят», и он должен пережить
+    /// чистку временных файлов. Пишется только неудача (успешная проверка молчит), поэтому файл
+    /// растёт медленно; при превышении лимита старая половина отбрасывается.
+    ///
+    /// Существует именно потому, что Debug.WriteLine в релизной сборке не выполняется вовсе, а
+    /// уведомление в истории сообщается один раз «на переходе» — по нему не видно, повторяется ли
+    /// отказ каждые полчаса или был разовым.</summary>
+    public static string UpdateCheckLogPath => Path.Combine(ConfigService.AppData, "update-check.log");
+
+    private const long UpdateCheckLogMaxBytes = 256 * 1024;
+
+    /// <summary>Никогда не бросает: журнал — вспомогательная вещь, и невозможность в него записать не
+    /// должна ломать саму проверку обновлений.</summary>
+    public static void LogSourceFailure(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(ConfigService.AppData);
+            var path = UpdateCheckLogPath;
+            if (File.Exists(path) && new FileInfo(path).Length > UpdateCheckLogMaxBytes)
+            {
+                var lines = File.ReadAllLines(path);
+                File.WriteAllLines(path, lines.Skip(lines.Length / 2));
+            }
+            File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+        }
+        catch { /* см. doc — журнал не имеет права мешать работе */ }
     }
 
     /// <summary>Turns a raw exception from CheckForUpdatesAsync/InstallAndRestartAsync into a

@@ -208,6 +208,21 @@ public class UpdateSourceSelectionTests
         finally { AppUpdateService.ResetHttpClientForTests(); }
     }
 
+    // ── Журнал неудачных проверок ────────────────────────────────────────────
+
+    [Fact]
+    public void LogSourceFailure_WritesLineToPersistentLogNextToAppData()
+    {
+        // Именно файл, а не Debug.WriteLine: в релизной сборке (а на рабочих машинах она и стоит)
+        // Debug-вывод не выполняется вовсе, и «недоступность источника попадает в лог» осталось бы
+        // словами. Путь ведёт в ConfigService.AppData, который в тестах подменён (TestAppDataInit).
+        var marker = $"тестовая запись {Guid.NewGuid():N}";
+        AppUpdateService.LogSourceFailure(marker);
+
+        Assert.True(File.Exists(AppUpdateService.UpdateCheckLogPath));
+        Assert.Contains(marker, File.ReadAllText(AppUpdateService.UpdateCheckLogPath));
+    }
+
     // ── Какая папка «моя»: локальная / общая / относительная от корня диска ───
 
     [Fact]
