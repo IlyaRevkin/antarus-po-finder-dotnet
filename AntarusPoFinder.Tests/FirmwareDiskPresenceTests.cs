@@ -119,4 +119,58 @@ public class FirmwareDiskPresenceTests
         Assert.False(FirmwareDiskPresence.VersionPresentOnDisk("", "1.1.4.38.20260716_1814"));
         Assert.False(FirmwareDiskPresence.VersionPresentOnDisk(null, "1.1.4.38.20260716_1814"));
     }
+
+    // ── ResolveVersionDir: РЕАЛЬНАЯ папка для открытия/копирования ─────────────
+    // Отдельно от «есть/нет»: открытие/синхра/обход должны идти на ту же переименованную папку, что
+    // видит показ карточки. Раньше они шли по точному disk_path вслепую — отсюда залипшая «локальная
+    // копия устарела, обновляем», «папка …\version не найдена» и не открывающийся ПЛК на живой прошивке.
+
+    [Fact]
+    public void Resolve_ExactFolderExists_ReturnsIt()
+    {
+        using var root = new TempRoot();
+        var raw = "1.1.4.36.20260716_0848";
+        var dir = SeedVersionFolder(root, raw);
+
+        Assert.Equal(dir, FirmwareDiskPresence.ResolveVersionDir(dir, raw));
+    }
+
+    [Fact]
+    public void Resolve_ExactMissing_ReturnsRenamedSiblingSameNumber()
+    {
+        using var root = new TempRoot();
+        var raw = "1.1.4.38.20260716_1814";
+        var real = SeedVersionFolder(root, raw + "_ОТКАТАНО");
+        var stalePath = Path.Combine(CtrlDir(root), raw);
+
+        Assert.Equal(real, FirmwareDiskPresence.ResolveVersionDir(stalePath, raw));
+    }
+
+    [Fact]
+    public void Resolve_ExactMissing_ReturnsSiblingSameBuildStamp()
+    {
+        using var root = new TempRoot();
+        // hw переписали на диске, метку сборки не трогали — та же сборка под другим именем.
+        var real = SeedVersionFolder(root, "1.1.5.38.20260716_1814");
+        var stalePath = Path.Combine(CtrlDir(root), "1.1.4.38.20260716_1814");
+
+        Assert.Equal(real, FirmwareDiskPresence.ResolveVersionDir(stalePath, "1.1.4.38.20260716_1814"));
+    }
+
+    [Fact]
+    public void Resolve_GenuinelyDeleted_ReturnsNull()
+    {
+        using var root = new TempRoot();
+        SeedVersionFolder(root, "1.1.4.40.20260801_0900");
+        var deleted = Path.Combine(CtrlDir(root), "1.1.4.99.20260101_0000");
+
+        Assert.Null(FirmwareDiskPresence.ResolveVersionDir(deleted, "1.1.4.99.20260101_0000"));
+    }
+
+    [Fact]
+    public void Resolve_EmptyOrNull_ReturnsNull()
+    {
+        Assert.Null(FirmwareDiskPresence.ResolveVersionDir("", "1.1.4.38.20260716_1814"));
+        Assert.Null(FirmwareDiskPresence.ResolveVersionDir(null, "1.1.4.38.20260716_1814"));
+    }
 }

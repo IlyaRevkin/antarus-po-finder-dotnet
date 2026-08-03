@@ -20,10 +20,18 @@ public static class FirmwareSync
         var localDir = LocalFirmwareCache.SanitizeName(result.Name);
         var dst = Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw);
 
-        FileSystemHelpers.CopyTree(result.FirmwareDir, dst, overwrite: true);
+        // Копируем из РЕАЛЬНОЙ папки сборки, а не из записанного disk_path вслепую: точную папку могли
+        // переименовать/перезалить под другой датой, а disk_path устареть после синхры — файлы тогда
+        // лежат в соседней папке той же сборки (см. FirmwareDiskPresence.ResolveVersionDir). Без этого
+        // копирование падало «папки нет», хотя прошивка на диске есть — ровно жалоба про залипшую
+        // «локальная копия устарела, обновляем» и «папка …\version не найдена». Соседняя папка и папка
+        // контроллера (для карт/инструкций) берутся от того же реального источника.
+        var srcDir = FirmwareDiskPresence.ResolveVersionDir(result.FirmwareDir, result.VersionRaw) ?? result.FirmwareDir;
+
+        FileSystemHelpers.CopyTree(srcDir, dst, overwrite: true);
         if (cleanup) CleanupOldLocalVersions(localDir, result.VersionRaw);
 
-        var ctrlDir = Directory.GetParent(result.FirmwareDir)?.FullName;
+        var ctrlDir = Directory.GetParent(srcDir)?.FullName;
         if (ctrlDir is not null)
         {
             var ioMapSrc = Path.Combine(ctrlDir, "Карта ВВ");

@@ -51,10 +51,18 @@ public static class LoaderFiles
         return null;
     }
 
-    /// <summary>Находит файл для команды открытия с учётом выбора оператора в модерации.
-    /// Подсказка используется только для подходящего расширения; при отсутствии подходящей подсказки
-    /// возвращается первый файл по обычному порядку поиска. Выбор источника для загрузки в ПЛК этим
-    /// методом не определяется.</summary>
+    /// <summary>Файл с учётом выбора оператора в модерации (FwVersionRecord.ExecutableHint).
+    ///
+    /// Когда в ОДНОЙ папке версии лежит несколько прошивок (например, пачка .lfs пожарных шкафов),
+    /// «первый найденный» — не обязательно тот, что нужен. Оператор указывает нужный файл в модерации,
+    /// и этот выбор обязаны уважать все команды над файлом версии: и «Открыть прошивку ПЛК», и
+    /// «Открыть LFS/PSL», и заливка в контроллер (см. FindDeploymentFiles) — иначе в контроллер уезжает
+    /// чужая прошивка, а это уже не «неудобно», а испорченный шкаф.
+    ///
+    /// Подсказка используется, только если указывает на файл с одним из <paramref name="extensions"/>
+    /// (для «Открыть LFS» — только .lfs): подсказка на .psl не должна подставляться там, где ждут
+    /// именно .lfs. Если подсказки нет или она другого расширения — прежний поиск «первый по списку
+    /// расширений».</summary>
     public static string? ResolvePreferHint(IEnumerable<string> dirs, string? executableHint, params string[] extensions)
     {
         var dirList = dirs as IReadOnlyList<string> ?? dirs.ToList();
@@ -68,14 +76,20 @@ public static class LoaderFiles
         return null;
     }
 
-    /// <summary>Находит оба допустимых источника интерактивной загрузки. Каждый тип выбирается по
-    /// одинаковому порядку папок: точная локальная копия раньше сетевой папки той же версии.</summary>
-    public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs)
+    /// <summary>Оба допустимых источника интерактивной загрузки. Каждый тип выбирается по одинаковому
+    /// порядку папок: точная локальная копия раньше сетевой папки той же версии.
+    ///
+    /// <paramref name="executableHint"/> — выбор оператора в модерации, и он ГЛАВНЕЕ порядка папок:
+    /// если указан конкретный .lfs (или .psl), заливается именно он. Без этого в папке с пачкой
+    /// прошивок пожарных шкафов в контроллер уезжала первая попавшаяся — ровно та жалоба, что чинили
+    /// в 1.54.1. Подсказка применяется по каждому расширению отдельно, поэтому указанный .psl не
+    /// подменяет собой .lfs и наоборот.</summary>
+    public static LoaderProjectFiles FindDeploymentFiles(IEnumerable<string> dirs, string? executableHint = null)
     {
         var candidates = dirs.ToArray();
         return new LoaderProjectFiles(
-            FindIn(candidates, LfsExtension),
-            FindIn(candidates, PslExtension));
+            ResolvePreferHint(candidates, executableHint, LfsExtension),
+            ResolvePreferHint(candidates, executableHint, PslExtension));
     }
 
     private static bool HasExt(string path, string extension) =>

@@ -719,14 +719,18 @@ public partial class SearchView : UserControl
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
     /// разницу между наборами.</summary>
-    private static PlcOpenSources PlcSources(HierarchyResult result) => new()
+    private static PlcOpenSources PlcSources(HierarchyResult result)
     {
-        CandidateFolders = CandidateFolders(result).ToList(),
-        VersionFolders = VersionFolders(result).ToList(),
-        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), result.FirmwareDir ?? "" },
-        ExecutableHint = result.ExecutableHint,
-        NetworkFolder = result.FirmwareDir,
-    };
+        var net = ResolvedNetworkDir(result);
+        return new()
+        {
+            CandidateFolders = CandidateFolders(result).ToList(),
+            VersionFolders = VersionFolders(result).ToList(),
+            FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), net },
+            ExecutableHint = result.ExecutableHint,
+            NetworkFolder = net,
+        };
+    }
 
     /// <summary>Источники файла панели для HmiOpenResolver — зеркально PlcSources.
     /// Ходит на диск (FindSiblingFolder) — вызывать из фонового обхода или по клику, не в отрисовке.</summary>
@@ -736,7 +740,7 @@ public partial class SearchView : UserControl
         SiblingHmiFolder = FindSiblingFolder(result, "HMI"),
         ExecutableHint = result.HmiExecutableHint,
         CandidateFolders = CandidateFolders(result).ToList(),
-        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), result.FirmwareDir ?? "" },
+        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), ResolvedNetworkDir(result) },
     };
 
     /// <summary>Самый свежий актуальный файл документа (карта ВВ / инструкция / карта Modbus) —
@@ -804,7 +808,12 @@ public partial class SearchView : UserControl
                 && PathCheckableHere(result, root);
             if (diskMissing)
             {
-                card.Configure(result, baseFlags with { DiskScanPending = false, DiskMissing = true });
+                var missingFlags = baseFlags with { DiskScanPending = false, DiskMissing = true };
+                card.Configure(result, missingFlags);
+                // Пере-показать статус явно: первая отрисовка показала «синхронизируем…», а Configure
+                // второй раз статус не трогает (_syncStatusShown) — без этого «обновляем…» висело бы,
+                // хотя на диске версии нет и синхронизировать нечего.
+                card.RefreshSyncStatus(missingFlags);
                 continue;
             }
 
@@ -898,8 +907,12 @@ public partial class SearchView : UserControl
             {
                 // Проверка существования — тоже поход на сетевой диск, поэтому вместе с копированием
                 // уходит в фоновый поток: на отвалившейся шаре она сама по себе висит секундами.
+                // Ищем РЕАЛЬНУЮ папку сборки (точную или переименованного/перезалитого соседа), а не
+                // слепо точный disk_path — иначе синхра падала «папки нет» на живой прошивке, и
+                // «локальная копия устарела, обновляем» висела вечно (см. FirmwareDiskPresence).
                 var dst = await Task.Run(() =>
-                    Directory.Exists(result.FirmwareDir) ? FirmwareSync.CopyToLocal(result) : null);
+                    FirmwareDiskPresence.ResolveVersionDir(result.FirmwareDir, result.VersionRaw) is not null
+                        ? FirmwareSync.CopyToLocal(result) : null);
                 if (generation != _searchGeneration) return;
                 card.SetSyncStatus(dst is null
                     ? $"Папка версии не найдена на диске: {result.FirmwareDir}"
@@ -1570,8 +1583,13 @@ public partial class SearchView : UserControl
 
     private static string? FindSiblingFolder(HierarchyResult result, string folderName)
     {
-        if (!Directory.Exists(result.FirmwareDir)) return null;
-        var ctrlDir = Directory.GetParent(result.FirmwareDir)?.FullName;
+        // От РЕАЛЬНОЙ папки версии, а не от записанного disk_path: если её переименовали/перезалили,
+        // точного пути нет, и папка контроллера (родитель) — с ней рядом лежат «Карта ВВ»/«Инструкция»/
+        // «Карта Modbus» — иначе не находилась. Ровно жалоба «инструкция на диске есть, а в карточке её
+        // взаимодействия нет».
+        var versionDir = ResolvedNetworkDir(result);
+        if (!Directory.Exists(versionDir)) return null;
+        var ctrlDir = Directory.GetParent(versionDir)?.FullName;
         if (ctrlDir is null) return null;
         var candidate = Path.Combine(ctrlDir, folderName);
         return Directory.Exists(candidate) ? candidate : null;
@@ -1591,8 +1609,20 @@ public partial class SearchView : UserControl
             foreach (var sub in Directory.EnumerateDirectories(baseDir).OrderByDescending(d => d))
                 yield return sub;
 
-        if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
+        var net = ResolvedNetworkDir(result);
+        if (!string.IsNullOrEmpty(net)) yield return net;
     }
+
+    /// <summary>Реальная папка версии на сетевом диске: точный disk_path, если он на месте, иначе
+    /// соседняя папка ТОЙ ЖЕ сборки — точную могли переименовать/перезалить под другой датой, а
+    /// disk_path устареть после синхры (файлы лежат рядом под другим именем, см.
+    /// FirmwareDiskPresence.ResolveVersionDir). Раньше открытие/синхра/обход шли по точному disk_path
+    /// вслепую и упирались в «папки нет», хотя прошивка на диске есть — та же жалоба, что чинил показ
+    /// карточки, но там робастной сделали только проверку «прятать ли», а открытие/синхру — нет.
+    /// Возвращаем исходный путь, если реальную папку не нашли: пусть вызывающий покажет его в «не
+    /// найдено». Ходит на диск — звать из фонового обхода или по клику, не из отрисовки.</summary>
+    private static string ResolvedNetworkDir(HierarchyResult result) =>
+        FirmwareDiskPresence.ResolveVersionDir(result.FirmwareDir, result.VersionRaw) ?? result.FirmwareDir;
 
     /// <summary>Папки ИМЕННО этой версии — без соседних версий из локального кэша, в отличие от
     /// CandidateFolders.
@@ -1605,7 +1635,8 @@ public partial class SearchView : UserControl
     private static IEnumerable<string> VersionFolders(HierarchyResult result)
     {
         yield return Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw);
-        if (!string.IsNullOrEmpty(result.FirmwareDir)) yield return result.FirmwareDir;
+        var net = ResolvedNetworkDir(result);
+        if (!string.IsNullOrEmpty(net)) yield return net;
     }
 
     private static string? ResolveOpenTarget(HierarchyResult result)
@@ -1613,9 +1644,10 @@ public partial class SearchView : UserControl
         foreach (var dir in CandidateFolders(result))
             if (FindUsableFile(dir, result.ExecutableHint) is { } target) return target;
 
-        // Ничего похожего на открываемый файл — но если папка версии на диске есть, показать хотя бы
-        // её содержимое полезнее, чем сказать «не найдено».
-        return Directory.Exists(result.FirmwareDir) ? result.FirmwareDir : null;
+        // Ничего похожего на открываемый файл — но если папка версии на диске есть (точная или
+        // соседняя той же сборки), показать хотя бы её содержимое полезнее, чем сказать «не найдено».
+        var net = ResolvedNetworkDir(result);
+        return Directory.Exists(net) ? net : null;
     }
 
     /// <summary>Проекты, где ПЛК и панель лежат в ОДНОЙ папке — это не только KINCO: то же бывает у
@@ -1679,7 +1711,9 @@ public partial class SearchView : UserControl
     /// файлы (несколько .lfs в одной папке) прямо там, где их видят коллеги.</summary>
     private void OpenServerFolder(HierarchyResult result)
     {
-        var dir = result.FirmwareDir ?? "";
+        // Реальная папка сборки, а не записанный disk_path вслепую: папку могли переименовать или
+        // перезалить под другой датой — тогда точного пути нет, а файлы лежат рядом (ResolvedNetworkDir).
+        var dir = string.IsNullOrEmpty(result.FirmwareDir) ? "" : ResolvedNetworkDir(result);
         if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
         {
             AppMessageBox.Show(
@@ -1720,7 +1754,10 @@ public partial class SearchView : UserControl
             return;
         }
 
-        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result));
+        // ExecutableHint — выбранный оператором в модерации файл. Он обязателен здесь: в папке версии
+        // может лежать пачка прошивок (пожарные шкафы), и «первый найденный .lfs» уезжал в контроллер
+        // вместо нужного.
+        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result), result.ExecutableHint);
         if (!files.HasAny)
         {
             AppMessageBox.Show(

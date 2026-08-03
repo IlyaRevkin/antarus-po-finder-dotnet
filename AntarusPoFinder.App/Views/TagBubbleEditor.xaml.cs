@@ -18,6 +18,7 @@ public partial class TagBubbleEditor : UserControl
     private Func<List<string>>? _allTagsProvider;
     private bool _readOnly;
     private bool _editing;
+    private int? _collapseAfter;
     private TextBox? _editInput;
     private StackPanel? _suggestionsPanel;
 
@@ -25,17 +26,26 @@ public partial class TagBubbleEditor : UserControl
     /// button (e.g. FirmwareCard's inline bubbles on a search result) persist the change immediately.</summary>
     public event EventHandler? TagsChanged;
 
+    /// <summary>Нажали «показать все теги (N)» в свёрнутом режиме — хост открывает окно с полным
+    /// списком (см. FirmwareCard). Только для readOnly + collapseAfter.</summary>
+    public event EventHandler? ShowAllRequested;
+
     public TagBubbleEditor()
     {
         InitializeComponent();
     }
 
-    public void Configure(IEnumerable<string> initialTags, Func<List<string>>? allTagsProvider = null, bool readOnly = false)
+    /// <param name="collapseAfter">В режиме только для чтения не показывать больше этого числа тегов
+    /// сразу: выводятся самые короткие из них, а вместо остальных — бабл «показать все теги (N)»,
+    /// открывающий окно со списком (ShowAllRequested). Нужно на карточке поиска: у прошивки, подходящей
+    /// десятку шкафов, все теги-названия занимали полкарточки. null — показывать все теги, как раньше.</param>
+    public void Configure(IEnumerable<string> initialTags, Func<List<string>>? allTagsProvider = null, bool readOnly = false, int? collapseAfter = null)
     {
         _tags.Clear();
         _tags.AddRange(initialTags.Where(t => !string.IsNullOrWhiteSpace(t)));
         _allTagsProvider = allTagsProvider;
         _readOnly = readOnly;
+        _collapseAfter = collapseAfter;
         _editing = false;
         Render();
     }
@@ -50,10 +60,39 @@ public partial class TagBubbleEditor : UserControl
     private void Render()
     {
         BubblesPanel.Children.Clear();
+
+        // Свёрнутый режим (только карточка поиска): показываем самые КОРОТКИЕ теги — они занимают
+        // меньше места и их влезает больше, — а всё остальное прячем за «показать все теги (N)».
+        // Порядок хранения _tags не трогаем: сортируем только копию для показа.
+        if (_readOnly && _collapseAfter is int cap && _tags.Count > cap)
+        {
+            foreach (var tag in _tags.OrderBy(t => t.Length).ThenBy(t => t, StringComparer.CurrentCulture).Take(cap))
+                BubblesPanel.Children.Add(MakeBubble(tag));
+            BubblesPanel.Children.Add(MakeShowAllBubble(_tags.Count));
+            return;
+        }
+
         foreach (var tag in _tags)
             BubblesPanel.Children.Add(MakeBubble(tag));
         if (!_readOnly)
             BubblesPanel.Children.Add(_editing ? MakeEditBubble() : MakeAddBubble());
+    }
+
+    /// <summary>Бабл «показать все теги (N)» в конце свёрнутого ряда — TextBlock, а не Button, по той же
+    /// причине, что и чипы-подсказки: не перехватывать фокус. Открытие окна со списком делает хост.</summary>
+    private Border MakeShowAllBubble(int total)
+    {
+        var border = new Border
+        {
+            Style = (Style)FindResource("TagBubbleBorder"),
+            Child = new TextBlock { Text = $"показать все теги ({total})", VerticalAlignment = VerticalAlignment.Center },
+            Margin = new Thickness(0, 0, 6, 6),
+            Cursor = Cursors.Hand,
+            Opacity = 0.8,
+            ToolTip = "Полный список тегов этой прошивки",
+        };
+        border.PreviewMouseLeftButtonDown += (_, e) => { e.Handled = true; ShowAllRequested?.Invoke(this, EventArgs.Empty); };
+        return border;
     }
 
     private Border MakeBubble(string tag)

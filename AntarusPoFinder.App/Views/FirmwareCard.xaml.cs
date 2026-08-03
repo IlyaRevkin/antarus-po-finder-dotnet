@@ -132,11 +132,31 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
 
+    /// <summary>Сколько самых коротких тегов показывать на карточке до сворачивания в «показать все».
+    /// Небольшое число: смысл — уместить теги в одну-две строки, а не занимать полкарточки списком
+    /// названий шкафов, которым подходит одна прошивка.</summary>
+    private const int TagsCollapseAfter = 3;
+
+    /// <summary>Полный набор тегов текущей записи — для окна «показать все теги» (TagsView показывает
+    /// свёрнутый ряд).</summary>
+    private IReadOnlyList<string> _allTags = Array.Empty<string>();
+
     public FirmwareCard()
     {
         InitializeComponent();
         MorePopup.Opened += MorePopup_Opened;
         MorePopup.Closed += MorePopup_Closed;
+        // Подписка один раз в конструкторе, а не в Configure: Configure зовётся несколько раз на одну
+        // карточку (первая отрисовка + досмотр диска), и подписка там копила бы обработчики.
+        TagsView.ShowAllRequested += (_, _) => ShowAllTags();
+    }
+
+    private void ShowAllTags()
+    {
+        if (_allTags.Count == 0) return;
+        var list = string.Join("\n", _allTags.Select(t => "•  " + t));
+        AppMessageBox.Show(list, $"Теги — {Result.Name} {Result.VersionRaw}".Trim(),
+            MessageBoxButton.OK, MessageBoxImage.None);
     }
 
     public void Configure(HierarchyResult result, FirmwareCardFlags flags)
@@ -166,7 +186,10 @@ public partial class FirmwareCard : UserControl
         // through the single "Теги" button below, not inline, to avoid two competing tag editors
         // on the same card.
         var tags = TagString.Parse(result.Tags);
-        TagsView.Configure(tags, null, readOnly: true);
+        _allTags = tags;
+        // Свёрнуто: у прошивки, подходящей десятку шкафов, все теги-названия занимали полкарточки.
+        // Показываем несколько самых коротких, остальное — за «показать все теги (N)» (см. ShowAllTags).
+        TagsView.Configure(tags, null, readOnly: true, collapseAfter: TagsCollapseAfter);
         TagsView.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // «Синхронизирован ли этот тег» — правки этой прошивки ещё в накопителе, на диск не ушли
@@ -302,6 +325,13 @@ public partial class FirmwareCard : UserControl
     }
 
     private bool _syncStatusShown;
+
+    /// <summary>Пере-показать строку статуса локальной копии по обновлённым флагам. Нужно, когда обход
+    /// диска уже ПОСЛЕ первой отрисовки выяснил, что версии на диске нет (DiskMissing): первая отрисовка
+    /// показала «синхронизируем…», а обычный пересчёт в Configure заблокирован (_syncStatusShown), иначе
+    /// он затирал бы ход идущей автосинхры у других карточек. Такую карточку в автосинхру не берут (тянуть
+    /// нечего), поэтому пере-показ безопасен — идущего статуса тут нет.</summary>
+    public void RefreshSyncStatus(FirmwareCardFlags flags) => ShowInitialSyncStatus(flags);
 
     /// <summary>Хвост подписи кнопки панели: расширение того, что откроется, и от какой версии взят
     /// проект, если он унаследован. Оба факта важны, поэтому в одних скобках через запятую —
