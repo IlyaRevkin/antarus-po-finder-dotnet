@@ -343,6 +343,167 @@ public class HierarchyService
         return new HwRewriteResult(errors.Count == 0, updated, renamed, errors);
     }
 
+    // ── Перенос версии на другую модель контроллера ──────────────────────────
+
+    /// <summary>Результат переноса версии на другой контроллер. <see cref="Moved"/> — папку на диске
+    /// действительно перенесли (false, когда переносить было нечего: запись без файлов, ОПЦ-версия
+    /// либо проигрывание чужого события, где папку уже перенёс автор правки). При Ok=false в
+    /// <see cref="Errors"/> лежит причина отказа, и операция тогда НЕ трогала ни диск, ни БД. При
+    /// Ok=true список тоже может быть непуст — туда попадает только незначащий сбой переноса папки
+    /// панели (сама версия при этом перенесена, панель осталась на прежнем месте и открывается).</summary>
+    public record ReassignResult(bool Ok, bool Moved, string NewDiskPath, List<string> Errors);
+
+    /// <summary>Переносит версию прошивки на другую модель контроллера — и запись в каталоге, И её
+    /// папку на диске. Имя контроллера входит в путь (ПО\&lt;тип&gt;\&lt;подтип&gt;\&lt;контроллер&gt;\&lt;версия&gt;),
+    /// поэтому правка одной лишь записи (как было раньше — Database.ReassignFwVersionController в
+    /// одиночку) осиротила бы папку: ближайший досмотр диска (PlanFwSync/ScanFwDisk) увидел бы её под
+    /// СТАРЫМ контроллером, не нашёл бы в известных версиях этой пары и завёл бы ОТДЕЛЬНУЮ запись —
+    /// фантом, который тут же попадал в очередь модерации. Ровно та же причина, по которой
+    /// переписывание hw двигает папку версии (см. RewriteHw выше), и сделано в той же манере.
+    ///
+    /// Что двигается: сама папка версии и «своя» папка панели (HMI лежит не внутри папки версии, а в
+    /// общей папке HMI контроллера под именем «{версия}_hmi», см. RewriteHw). Что НЕ двигается: Карта
+    /// ВВ / Инструкция / Карта modbus — это общие документы контроллера, на них могут ссылаться другие
+    /// версии, и унести их за одной означало бы сломать остальные; они открываются по сохранённому
+    /// абсолютному пути и продолжают работать.
+    ///
+    /// Устойчивость: шара недоступна или папки версии на месте нет — операция отменяется ЦЕЛИКОМ
+    /// (БД не трогаем, внятная строка в Errors), иначе запись разъехалась бы с диском, когда шара
+    /// вернётся. Целевая папка уже существует — для оператора это конфликт (отмена), при
+    /// проигрывании чужого события — ожидаемое состояние (её перенёс автор), просто перецеливаем
+    /// запись. Повторный запуск — пустая операция: контроллер уже новый, вернётся Ok=false без
+    /// ошибок.
+    ///
+    /// <paramref name="replay"/> — проигрывание переноса, приехавшего от коллеги (см.
+    /// ConfigSyncService.ReplayCtrlReassigns): толерантно к тому, что папку на общей шаре уже
+    /// перенесли, и к недоступному диску (тогда правится только запись, чтобы натуральный ключ
+    /// совпал со снимком и импорт fw_versions не завёл дубль).</summary>
+    public ReassignResult ReassignFwVersionToController(string root, int fwVersionId, int newControllerId, bool replay = false)
+    {
+        var errors = new List<string>();
+        var v = _db.GetFwVersionById(fwVersionId);
+        if (v is null || newControllerId <= 0 || v.ControllerId == newControllerId)
+            return new ReassignResult(false, false, "", errors);
+
+        var newCtrl = _db.GetAllControllerModels().FirstOrDefault(c => c.Id == newControllerId);
+        if (newCtrl is null)
+        {
+            errors.Add("Целевой контроллер не найден в справочнике — перенос отменён.");
+            return new ReassignResult(false, false, "", errors);
+        }
+        var names = _db.GetFwVersionNames(fwVersionId);
+        if (names is null)
+        {
+            errors.Add("Не удалось определить тип/подтип шкафа версии — перенос отменён.");
+            return new ReassignResult(false, false, "", errors);
+        }
+
+        var localDisk = FirmwarePathLocalizer.Localize(v.DiskPath, root);
+        var newDiskPath = localDisk;
+        var moved = false;
+
+        // ОПЦ-версия лежит в общей папке «ОПЦ» подтипа, а не в папке контроллера (см. PoCtrlFolder) —
+        // её путь от контроллера не зависит, двигать нечего. Запись без файлов — тем более.
+        var pathDependsOnController = !v.IsOpc && !string.IsNullOrWhiteSpace(v.DiskPath);
+        if (pathDependsOnController)
+        {
+            var target = FwPath(root, names.Value.GroupName, names.Value.SubtypeName, newCtrl.Name, v.VersionRaw);
+
+            if (!replay && (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)))
+            {
+                errors.Add("Сетевой диск недоступен — перенос отменён, запись не изменена.");
+                return new ReassignResult(false, false, "", errors);
+            }
+
+            if (string.Equals(target, localDisk, StringComparison.OrdinalIgnoreCase))
+            {
+                newDiskPath = target; // уже там (напр. повторное проигрывание) — двигать нечего
+            }
+            else if (Directory.Exists(target))
+            {
+                if (!replay)
+                {
+                    errors.Add($"«{target}» уже существует на диске — перенос отменён, запись не изменена.");
+                    return new ReassignResult(false, false, "", errors);
+                }
+                newDiskPath = target; // проигрывание: папку уже перенёс автор правки
+            }
+            else if (Directory.Exists(localDisk))
+            {
+                try
+                {
+                    var parent = Path.GetDirectoryName(target);
+                    if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+                    Directory.Move(localDisk, target);
+                    newDiskPath = target;
+                    moved = true;
+                }
+                catch (Exception e)
+                {
+                    errors.Add($"{v.VersionRaw}: {e.Message}");
+                    return new ReassignResult(false, false, "", errors);
+                }
+            }
+            else if (!replay)
+            {
+                // Оператор: папки нет там, где её ждёт запись. Правка только БД разъехалась бы с
+                // диском — отменяем целиком и говорим об этом.
+                errors.Add($"Папка версии на диске недоступна ({localDisk}) — перенос отменён, запись не изменена.");
+                return new ReassignResult(false, false, "", errors);
+            }
+            else
+            {
+                // Проигрывание при offline-шаре: ни старой, ни новой папки здесь сейчас не видно.
+                // Запись всё равно приводим к каноническому виду — папка на общей шаре у автора уже
+                // под новым контроллером, иначе импорт снимка заведёт дубль.
+                newDiskPath = target;
+            }
+        }
+
+        // «Своя» панель переезжает в папку HMI НОВОГО контроллера; унаследованную от другой версии
+        // (имя папки не про эту версию) не трогаем — там пометка «от версии X» остаётся верной.
+        var localHmi = FirmwarePathLocalizer.Localize(v.HmiPath, root);
+        var newHmiDir = HmiPath(root, names.Value.GroupName, names.Value.SubtypeName, newCtrl.Name);
+        var newHmi = MoveOwnHmiFolder(localHmi, v.VersionRaw, newHmiDir, errors);
+        if (!string.Equals(newHmi, localHmi, StringComparison.Ordinal))
+            _db.RepointHmiPath(v.HmiPath, newHmi);
+
+        _db.ReassignFwVersionController(fwVersionId, newControllerId, newDiskPath);
+        return new ReassignResult(true, moved, newDiskPath, errors);
+    }
+
+    /// <summary>Переносит «свою» папку/файл панели в папку HMI ДРУГОГО контроллера и возвращает новый
+    /// hmi_path. Отличается от RenameOwnHmiFolder только тем, что меняется родительская папка, а не
+    /// имя: при переносе версии имя панели («{версия}_hmi») остаётся прежним. Правила те же —
+    /// унаследованную панель не трогаем, на диске двигаем только если исходное есть, а целевого ещё
+    /// нет, иначе hmi_path в базе оставляем прежним, чтобы он не разошёлся с реальностью.</summary>
+    private static string MoveOwnHmiFolder(string hmiPath, string versionRaw, string newHmiDir, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(hmiPath) || string.IsNullOrWhiteSpace(newHmiDir)) return hmiPath;
+
+        var trimmed = hmiPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        if (!name.StartsWith($"{versionRaw}_hmi", StringComparison.OrdinalIgnoreCase)) return hmiPath;
+
+        var newPath = Path.Combine(newHmiDir, name);
+        if (string.Equals(newPath, trimmed, StringComparison.OrdinalIgnoreCase)) return hmiPath;
+
+        try
+        {
+            if (Directory.Exists(newPath) || File.Exists(newPath)) return newPath; // уже перенесена
+            if (!Directory.Exists(trimmed) && !File.Exists(trimmed)) return hmiPath; // ни там, ни там — путь не выдумываем
+            Directory.CreateDirectory(newHmiDir);
+            if (Directory.Exists(trimmed)) Directory.Move(trimmed, newPath);
+            else File.Move(trimmed, newPath);
+        }
+        catch (Exception e)
+        {
+            errors.Add($"HMI {versionRaw}: {e.Message}");
+            return hmiPath;
+        }
+        return newPath;
+    }
+
     /// <summary>Переименовывает папку/файл HMI со старой строки версии на новую при правке hw и
     /// возвращает новый hmi_path. Трогает только «свою» панель — ту, чьё имя начинается с
     /// «{oldRaw}_hmi» (её сделали вместе с этой версией); унаследованную от другой версии возвращает
