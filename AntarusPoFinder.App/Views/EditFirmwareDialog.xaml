@@ -151,6 +151,19 @@
                     <Path Data="{StaticResource Icon.Close}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
             </Grid>
+
+            <!-- Сборка .psl → .lfs прямо в модерации. Показывается только когда в папке версии есть
+                 исходник и НЕТ собранного файла: цель — чтобы наладчик в поиске сразу видел .lfs, а
+                 не собирал его сам заливкой в контроллер (собранный там файл оседал в локальной
+                 рабочей области заливавшего и на диск не попадал). Сборка идёт локально, на диск
+                 уезжает только готовый файл (LfsConversionService/LfsPublisher). -->
+            <StackPanel x:Name="BuildLfsPanel" Visibility="Collapsed" Orientation="Horizontal" Margin="100,8,0,0">
+                <Button x:Name="BuildLfsBtn" Content="Собрать LFS из PSL" Style="{StaticResource SecondaryButton}"
+                        Click="BuildLfs_Click"
+                        ToolTip="Собрать .lfs изолированным SMLogix и положить его рядом с .psl в папке версии на диске — чтобы его увидели все, а не только эта машина."/>
+                <TextBlock x:Name="BuildLfsHint" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                           Margin="10,0,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
         </StackPanel>
 
         <!-- Модерация исполняемых файлов: и для ПЛК, и для HMI (раньше можно было переназначить
