@@ -295,6 +295,38 @@
         </Setter>
     </Style>
 
+    <!-- Тот же заголовок-раскрывашка, но с ПОДПИСЬЮ ИЗ Content, а не вшитой в шаблон. Появился
+         вместе с секцией «ДЛЯ НАЛАДЧИКА» (MainWindow.xaml SetupSectionToggle): SidebarExpanderHeader
+         выше рисует ровно слово «ДОПОЛНИТЕЛЬНО» внутри своего шаблона, и второй секции он бы просто
+         не подошёл. Сам SidebarExpanderHeader при этом оставлен как есть и не переписан на этот
+         стиль: на него завязан живой GUI-стенд, а переезд ничего бы не дал, кроме риска. -->
+    <Style x:Key="SidebarSectionHeader" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="0,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="Chevron" Text="&#8250;" FontSize="12" Width="14"
+                                       VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
+                            <TextBlock Text="{TemplateBinding Content}" Style="{StaticResource MutedText}"
+                                       FontSize="10" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chevron" Property="Text" Value="&#8964;"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chevron" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Свёрнутый по умолчанию блок необязательных полей на форме (напр. "ОПЦИИ ВЕРСИИ" в
          UploadView) — тот же чеврон-паттерн, что у SidebarExpanderHeader выше и по той же причине
          (обычный WPF Expander со стандартным хромом смотрелся бы светлым инородным пятном на тёмной

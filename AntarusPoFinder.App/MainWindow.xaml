@@ -323,20 +323,10 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <!-- Наклейки — окно, а не страница: это папка с готовыми шаблонами на
-                                 печать («Проверено ОТК», «Проверьте перед подключением»), и ради
-                                 такой мелочи отдельный раздел в основном меню занимал бы место
-                                 наравне с Поиском. Здесь её несложно найти, а сама папка настраивается
-                                 в Настройки → Печать. Видна всем ролям — печатает наладчик. -->
-                            <Button x:Name="StickersNavButton" Content="Наклейки" Style="{StaticResource CompactNavButton}"
-                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="Stickers_Click"
-                                    ToolTip="Шаблоны наклеек из общей папки — открыть или напечатать"/>
-                            <!-- «Паспорт по шаблону» — соседняя мелочь того же рода: типовой бланк
-                                 (НКУ, Щит СПЛ, ШР) печатается с подставленным названием шкафа. Тоже
-                                 окно и тоже здесь, а не разделом меню: действие на полминуты. -->
-                            <Button x:Name="PassportPrintNavButton" Content="Паспорт по шаблону" Style="{StaticResource CompactNavButton}"
-                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="PassportPrint_Click"
-                                    ToolTip="Типовой бланк паспорта: вписать название шкафа и напечатать"/>
+                            <!-- «Наклейки» и «Паспорт по шаблону» отсюда УБРАНЫ — переехали в секцию
+                                 «ДЛЯ НАЛАДЧИКА» (см. SetupSectionToggle в списке меню выше). Слова
+                                 Ильи: «наклейки и паспорта в том блоке не в тему» — здесь всё
+                                 остальное про настройку программы, а это рабочая печать. -->
 
                             <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Grid Margin="0,2,0,0">
@@ -454,6 +444,136 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+
+                            <!-- ══ Секция «ДЛЯ НАЛАДЧИКА» ══
+                                 Просьба Ильи: «давай сделаем доп меню какое-нибудь которое типа для
+                                 наладчика но не часто используется, там будет параметры ПЧ/УПП,
+                                 наклейки, паспорта как раз и модерацию мб туда вынести». До этого
+                                 «Параметры ПЧ/УПП» и «Модерация прошивок» стояли в основном списке
+                                 наравне с Поиском, а «Наклейки» и «Паспорта» лежали в
+                                 «ДОПОЛНИТЕЛЬНО» вперемешку с Настройками и Тикетами.
+
+                                 Стоит здесь, сразу под основным списком, а не рядом с
+                                 «ДОПОЛНИТЕЛЬНО» внизу: это всё ещё РАБОЧИЕ разделы, просто редкие, и
+                                 читаться они должны как продолжение меню, а не как служебный подвал.
+
+                                 В отличие от «ДОПОЛНИТЕЛЬНО» состояние секции ЗАПОМИНАЕТСЯ между
+                                 запусками (SetupSectionExpanded ↔ ConfigService.SidebarSetupExpanded):
+                                 туда ходят работать, и сворачивать её заново каждый запуск значило
+                                 бы мешать тому, кто ей пользуется. Секция целиком исчезает, если у
+                                 роли не осталось ни одного её пункта — см. SetupSectionVisible. -->
+                            <StackPanel Visibility="{Binding SetupSectionVisible, Converter={StaticResource BoolToVis}}">
+                                <!-- Отбивка и отступы — те же, что у блока «БЫСТРЫЙ ДОСТУП» ниже
+                                     (разделитель во всю ширину, заголовок с 12, кнопки с 8): это
+                                     соседние блоки одного списка, и разъехавшиеся на 4 пикселя
+                                     отступы видны сразу. -->
+                                <Separator Margin="0,8,0,0"/>
+                                <Grid Margin="12,0,12,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ToggleButton x:Name="SetupSectionToggle" Grid.Column="0" HorizontalAlignment="Left"
+                                                  Content="ДЛЯ НАЛАДЧИКА" Style="{StaticResource SidebarSectionHeader}"
+                                                  IsChecked="{Binding SetupSectionExpanded, Mode=TwoWay}"/>
+                                    <!-- Очередь модерации прошивок, пока секция свёрнута: сам пункт с
+                                         бейджем в этот момент не виден, и без этого числа админ
+                                         перестал бы замечать, что версии ждут разметки. -->
+                                    <Border Grid.Column="1" CornerRadius="8" Padding="6,0" MinWidth="16" Margin="6,0,0,0"
+                                            VerticalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                                <Setter Property="Visibility"
+                                                        Value="{Binding SetupSectionBadgeCount, Converter={StaticResource CountToVis}}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsChecked, ElementName=SetupSectionToggle}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding SetupSectionBadgeCount}" FontSize="10" FontWeight="Bold"
+                                                   HorizontalAlignment="Center" Foreground="{DynamicResource TextOnAccentBrush}"/>
+                                    </Border>
+                                </Grid>
+                                <StackPanel x:Name="SetupSectionContent" Margin="8,4,8,0"
+                                            Visibility="{Binding IsChecked, ElementName=SetupSectionToggle, Converter={StaticResource BoolToVis}}">
+                                    <!-- Страницы секции (Параметры ПЧ/УПП, Паспорта шкафов, Модерация
+                                         прошивок) — тот же список NavItems, что и у основного меню,
+                                         разобранный по ShowInSetupList (см. NavItem.Section). -->
+                                    <ItemsControl x:Name="SetupNavItemsControl" ItemsSource="{Binding NavItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Style="{StaticResource CompactNavButton}"
+                                                        Margin="0,0,0,2" HorizontalAlignment="Stretch"
+                                                        Visibility="{Binding ShowInSetupList, Converter={StaticResource BoolToVis}}"
+                                                        Tag="{Binding IsActive, Converter={StaticResource ActiveTagConverter}}"
+                                                        Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding PageId}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <!-- Явный стиль на TextBlock, а не только Foreground кнопки —
+                                                             см. тот же приём в основном списке выше. -->
+                                                        <TextBlock Text="{Binding Label}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <Border CornerRadius="8" Padding="6,0" MinWidth="16" Margin="6,0,0,0"
+                                                                Visibility="{Binding BadgeCount, Converter={StaticResource CountToVis}}">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                            <Setter Property="Background" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <TextBlock Text="{Binding BadgeCount}" FontSize="10" FontWeight="Bold"
+                                                                       HorizontalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <!-- «Наклейки» и «Сформировать паспорт» — окна, а не страницы:
+                                         действие на полминуты, ради которого отдельный раздел меню
+                                         занимал бы место наравне с Поиском. Роль их не ограничивает —
+                                         печатает наладчик (см. SetupToolsVisible). -->
+                                    <StackPanel Visibility="{Binding SetupToolsVisible, Converter={StaticResource BoolToVis}}">
+                                        <Button x:Name="StickersNavButton" Content="Наклейки" Style="{StaticResource CompactNavButton}"
+                                                Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="Stickers_Click"
+                                                ToolTip="Шаблоны наклеек из общей папки — открыть или напечатать"/>
+                                        <!-- ЕДИНСТВЕННАЯ точка входа в формирование паспорта по бланку.
+                                             Раньше это же окно открывалось из четырёх мест под именем
+                                             «Паспорт по шаблону», отсюда и жалоба «по паспортам почему-то
+                                             2 кнопки, а не так как я просил». -->
+                                        <Button x:Name="PassportPrintNavButton" Content="Сформировать паспорт" Style="{StaticResource CompactNavButton}"
+                                                Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="PassportPrint_Click"
+                                                ToolTip="Вписать название шкафа в бланк паспорта, посмотреть готовый лист и напечатать"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
 
                             <!-- "sidebar" display mode (default) — see Настройки → Быстрый доступ for
                                  the "top" alternative (horizontal bubble dock above the page content,
