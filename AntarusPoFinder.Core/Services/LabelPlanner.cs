@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -116,8 +116,12 @@ public static class LabelPlanner
     public const double MinTitlePt = 5;
     public const double MinCaptionPt = 5;
 
-    /// <summary>Доля высоты, больше которой ссылке не отдаём: она вспомогательная, а место нужно коду.</summary>
-    public const double CaptionShareMax = 0.4;
+    /// <summary>Доля высоты, больше которой ссылке не отдаём: она вспомогательная, а место нужно коду.
+    ///
+    /// 0.3, а не 0.4: на мелкой наклейке 40×30 ссылка съедала столько, что код ужимался почти до
+    /// нижнего предела (~13 мм) и читался плохо. На крупных размерах (97.5×72) разницы нет — там
+    /// ссылка и так укладывается в свои две-три строки задолго до предела доли.</summary>
+    public const double CaptionShareMax = 0.3;
 
     /// <summary>Ширина «среднего» символа в долях кегля. Segoe UI кириллицей даёт около половины
     /// кегля, жирное начертание — чуть больше. Оценка нужна только чтобы заранее отвести место;

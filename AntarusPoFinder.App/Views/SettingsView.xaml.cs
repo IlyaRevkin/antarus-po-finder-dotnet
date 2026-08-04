@@ -1335,6 +1335,7 @@ public partial class SettingsView : UserControl
 
             PassportTemplatesFolderInput.Text = _services.Cfg.PassportTemplatesFolder();
             PassportPlaceholderInput.Text = _services.Cfg.PassportNamePlaceholder();
+            PassportDuplexCheck.IsChecked = _services.Cfg.PassportDuplexShortEdge();
             ShowPassportTemplatesStatus();
         }
         finally
@@ -1557,6 +1558,18 @@ public partial class SettingsView : UserControl
         _services.Cfg.SetPassportNamePlaceholder(value);
         PassportPlaceholderInput.Text = _services.Cfg.PassportNamePlaceholder();
         _host.ShowStatus($"Метка названия в бланке: {_services.Cfg.PassportNamePlaceholder()}");
+    }
+
+    /// <summary>Двусторонняя печать паспорта. Переворот всегда по короткой стороне — по длинной
+    /// оборот разворота встаёт вверх ногами, и другого осмысленного варианта для бланка нет,
+    /// поэтому переключатель один, а не выбор из двух видов дуплекса.</summary>
+    private void PassportDuplex_Click(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        _services.Cfg.SetPassportDuplexShortEdge(PassportDuplexCheck.IsChecked == true);
+        _host.ShowStatus(PassportDuplexCheck.IsChecked == true
+            ? "Паспорт печатается с двух сторон, переворот по короткой стороне"
+            : "Паспорт печатается односторонним");
     }
 
     private void OpenPassportPrint_Click(object sender, RoutedEventArgs e) =>
