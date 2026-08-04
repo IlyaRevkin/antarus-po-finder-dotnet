@@ -69,6 +69,12 @@ public class FirmwareUploadRequest
     /// <summary>Класть ли на первом диске ярлык на уехавшую инструкцию (ConfigService.ThirdDiskShortcuts()).</summary>
     public bool ThirdDiskShortcuts { get; set; } = true;
 
+    /// <summary>Диск перестроен под новую раскладку (ConfigService.DiskLayoutV2()) — новая версия
+    /// заводится с пятью своими папками, файл прошивки ложится в «Прошивка», а карты/инструкция/HMI —
+    /// в свои папки ВНУТРИ версии (docs/hierarchy-rework-plan.md, этап 4). false — всё ровно как
+    /// раньше: файл в корне папки версии, документы в общих папках контроллера.</summary>
+    public bool NewDiskLayout { get; set; }
+
     public string IoMapSourcePath { get; set; } = "";
     public string InstructionsSourcePath { get; set; } = "";
     public string ModbusMapSourcePath { get; set; } = "";
@@ -212,6 +218,12 @@ public class FirmwareUploadPlan
     public bool SourceIsDirectory { get; init; }
 
     public string DestinationFolder { get; init; } = "";
+
+    /// <summary>Версия заводится по новой раскладке: пять своих папок, прошивка внутри «Прошивка»
+    /// (см. FirmwareUploadRequest.NewDiskLayout). Папки документов ниже к этому моменту уже посчитаны
+    /// с учётом флага — здесь он нужен ровно для файла прошивки и для создания самих папок.</summary>
+    public bool NewLayout { get; init; }
+
     public string IoMapFolder { get; init; } = "";
     public string InstructionsFolder { get; init; } = "";
     public string ModbusMapFolder { get; init; } = "";
@@ -381,7 +393,21 @@ public static class FirmwareUploadService
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, includeDate: request.IncludeDateInVersion);
         }
 
-        var dstFolder = hierarchy.FwPath(root, group.Name, subOption.Name, mod.ControllerName, fwv.Raw, isOpc);
+        // Заявка и заводской SN попадают в ИМЯ папки ОПЦ-версии (этап 5): ОПЦ заводят под конкретный
+        // шкаф, и на диске его ищут по этим номерам, а не по строке версии. У обычной версии они
+        // пустые и на имя папки не влияют вовсе.
+        var dstFolder = hierarchy.FwPath(root, group.Name, subOption.Name, mod.ControllerName, fwv.Raw,
+            isOpc, reqNum, cabinetSn);
+
+        // Куда лягут документы: свои папки внутри версии на перестроенном диске, общие папки
+        // контроллера — на прежнем. Папки версии на этот момент ещё нет, поэтому решает флаг, а не
+        // VersionLayout.SlotWriteFolder (тот смотрит на диск и у несуществующей папки честно ответил
+        // бы «старое место»).
+        var ctrlFolder = Path.Combine(HierarchyService.GroupSubFolder(root, group.Name, subOption.Name),
+            mod.ControllerName);
+        string SlotFolder(string slot) => request.NewDiskLayout
+            ? VersionLayout.SlotFolder(dstFolder, slot)
+            : Path.Combine(ctrlFolder, slot);
 
         if (Directory.Exists(dstFolder) && !request.ConfirmOverwriteExisting)
         {
@@ -439,10 +465,11 @@ public static class FirmwareUploadService
             Tags = tags,
             SourceIsDirectory = isDir,
             DestinationFolder = dstFolder,
-            IoMapFolder = hierarchy.IoMapPath(root, group.Name, subOption.Name, mod.ControllerName),
-            InstructionsFolder = hierarchy.InstrPath(root, group.Name, subOption.Name, mod.ControllerName),
-            ModbusMapFolder = hierarchy.ModbusMapPath(root, group.Name, subOption.Name, mod.ControllerName),
-            HmiFolder = hierarchy.HmiPath(root, group.Name, subOption.Name, mod.ControllerName),
+            NewLayout = request.NewDiskLayout,
+            IoMapFolder = SlotFolder(HierarchyFolders.IoMap),
+            InstructionsFolder = SlotFolder(HierarchyFolders.Instructions),
+            ModbusMapFolder = SlotFolder(HierarchyFolders.Modbus),
+            HmiFolder = SlotFolder(HierarchyFolders.Hmi),
             AuthorId = user.Id,
             InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
             InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
@@ -476,16 +503,26 @@ public static class FirmwareUploadService
         try
         {
             Directory.CreateDirectory(plan.DestinationFolder);
+            // Пять папок версии — сразу, до файлов: дальше и прошивка, и документы кладутся уже
+            // внутрь них, а человек, открывший папку в проводнике, видит одинаковую раскладку у
+            // всякой новой версии, а не «у этой пусто, у той папки».
+            var fwFolder = plan.DestinationFolder;
+            if (plan.NewLayout)
+            {
+                VersionLayout.EnsureFolders(plan.DestinationFolder);
+                fwFolder = VersionLayout.FirmwareFolder(plan.DestinationFolder);
+            }
+
             if (plan.SourceIsDirectory)
             {
-                CopyDirectoryContents(request.SourcePath, plan.DestinationFolder);
+                CopyDirectoryContents(request.SourcePath, fwFolder);
                 dstName = Path.GetFileName(request.SourcePath.TrimEnd(Path.DirectorySeparatorChar));
             }
             else
             {
                 var ext = Path.GetExtension(request.SourcePath);
                 dstName = FirmwareNaming.BuildFirmwareFilename(plan.Version, ext, plan.RequestNum, plan.CabinetSn);
-                File.Copy(request.SourcePath, Path.Combine(plan.DestinationFolder, dstName), overwrite: true);
+                File.Copy(request.SourcePath, Path.Combine(fwFolder, dstName), overwrite: true);
             }
         }
         catch (Exception ex)

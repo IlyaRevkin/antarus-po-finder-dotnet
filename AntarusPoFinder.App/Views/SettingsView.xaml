@@ -516,9 +516,18 @@
                             <TextBlock Text="Приводит давно лежащее на диске к нынешним правилам. Сначала показывает план."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
                                        ToolTip="Имя файла прошивки = имя папки версии; инструкции переезжают на третий диск, если он настроен."/>
-                            <Button Content="Перестроить структуру диска…" Style="{StaticResource SecondaryButton}"
-                                    HorizontalAlignment="Left" Click="DiskMigration_Click"
-                                    ToolTip="Запускать на одной машине и когда коллеги не заливают прошивки. Журнал операций сохраняется в «Конфиг» на диске."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Перестроить структуру диска…" Style="{StaticResource SecondaryButton}"
+                                        Margin="0,0,8,0" Click="DiskMigration_Click"
+                                        ToolTip="Запускать на одной машине и когда коллеги не заливают прошивки. Журнал операций сохраняется в «Конфиг» на диске."/>
+                                <!-- Перенос ОПЦ внутрь контроллера — единственная операция, меняющая
+                                     путь версии в базе, а путь у совпавшей записи импортом общего
+                                     конфига не обновляется никогда. Поэтому на КАЖДОЙ машине, которая
+                                     перестройку не запускала, путь чинится вот этой кнопкой. -->
+                                <Button Content="Найти переехавшие ОПЦ" Style="{StaticResource SecondaryButton}"
+                                        Click="RepairOpcPaths_Click"
+                                        ToolTip="Нажимают на своей машине после того, как кто-то перенёс ОПЦ внутрь контроллера: программа находит новые папки по номеру версии и правит пути. Ничего не двигает и не удаляет."/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>

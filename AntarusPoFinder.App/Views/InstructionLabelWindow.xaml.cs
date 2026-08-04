@@ -1,6 +1,7 @@
 using System;
-using System.IO;
+using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -8,14 +9,18 @@ using AntarusPoFinder.Core.Services;
 namespace AntarusPoFinder.App.Views;
 
 /// <summary>«QR и этикетка» — печать наклейки со ссылкой на инструкцию, чтобы наладчик у шкафа
-/// открыл документ телефоном, а не искал его по диску.
+/// открыл документ телефоном, а не искал его по диску. Открывается кнопкой прямо с карточки версии.
 ///
 /// Что попадает в QR — решает <see cref="LabelLinkBuilder"/>: веб-ссылка, если администратор задал
 /// адрес диска инструкций (Настройки → Печать), иначе сетевой путь к самому файлу. Второй вариант с
 /// телефона не открыть, поэтому окно честно говорит, что именно зашито в код.
 ///
-/// Размер этикетки и принтер — тоже из Настройки → Печать: у наклеек предприятия свой формат, а
-/// принтер этикеток обычно не тот, что стоит принтером по умолчанию.</summary>
+/// <b>Макет правится здесь же, с живым предпросмотром.</b> Раньше настраивались только ширина и
+/// высота, и в настройках — отсюда «что 97, что 90, что 100 ставлю, верх обрезается»: подобрать
+/// поля под непечатаемую кромку принтера вслепую нельзя, а других ручек не было. Теперь справа
+/// стоят все параметры <see cref="LabelLayout"/>, и каждое изменение сразу перерисовывает ту самую
+/// этикетку, которая уйдёт на принтер. Сохранение — отдельной кнопкой: подгонка под одну наклейку
+/// не должна менять настройку у всех.</summary>
 public partial class InstructionLabelWindow : Window
 {
     private readonly AppServices _services;
@@ -23,6 +28,11 @@ public partial class InstructionLabelWindow : Window
     private readonly string _qrContent;
     private readonly string _title;
     private readonly string _subtitle;
+    private LabelLayout _layout;
+
+    /// <summary>Пока поля заполняются из настроек, их TextChanged не должен пересобирать этикетку и
+    /// уж тем более читать полузаполненную форму.</summary>
+    private bool _filling;
 
     public InstructionLabelWindow(AppServices services, IAppHost host, string title, string subtitle, string? instructionFile)
     {
@@ -31,26 +41,104 @@ public partial class InstructionLabelWindow : Window
         _host = host;
         _title = title;
         _subtitle = subtitle;
+        _layout = LabelLayout.FromConfig(services.Cfg);
 
         var (content, explanation) = ResolveQrContent(services, instructionFile);
         _qrContent = content;
 
         HeaderText.Text = $"{title}\n{subtitle}".Trim();
         LinkText.Text = explanation;
-        var printer = services.Cfg.LabelPrinter();
-        PrinterText.Text = string.IsNullOrWhiteSpace(printer)
-            ? $"Принтер: по умолчанию · этикетка {Size()} мм · сменить — Настройки → Печать"
-            : $"Принтер: {printer} · этикетка {Size()} мм · сменить — Настройки → Печать";
 
-        LabelHost.Content = BuildLabel();
+        FillLayoutInputs(_layout);
+        Redraw();
     }
 
-    private string Size() =>
-        $"{_services.Cfg.LabelWidthMm():0.##} × {_services.Cfg.LabelHeightMm():0.##}";
+    // ── Макет ────────────────────────────────────────────────────────────────
 
+    private void FillLayoutInputs(LabelLayout v)
+    {
+        _filling = true;
+        try
+        {
+            WidthInput.Text = Num(v.WidthMm);
+            HeightInput.Text = Num(v.HeightMm);
+            MarginInput.Text = Num(v.MarginMm);
+            OffsetXInput.Text = Num(v.OffsetXMm);
+            OffsetYInput.Text = Num(v.OffsetYMm);
+            QrInput.Text = Num(v.QrMm);
+            TitlePtInput.Text = Num(v.TitlePt);
+            CaptionPtInput.Text = Num(v.CaptionPt);
+            ShowLinkCheck.IsChecked = v.ShowLink;
+            ShowFrameCheck.IsChecked = v.ShowFrame;
+            FancyQrCheck.IsChecked = v.FancyQr;
+        }
+        finally
+        {
+            _filling = false;
+        }
+    }
+
+    private static string Num(double value) => value.ToString("0.##", CultureInfo.CurrentCulture);
+
+    /// <summary>Недописанное число («3,» посреди набора) не должно ни ронять предпросмотр, ни
+    /// прыгать на подставленный ноль — оставляем прежнее значение до тех пор, пока в поле не
+    /// появится что-то разбираемое.</summary>
+    private static double Read(TextBox box, double fallback)
+    {
+        var raw = (box.Text ?? "").Trim().Replace(',', '.');
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
+    }
+
+    private LabelLayout ReadLayout() => new LabelLayout
+    {
+        WidthMm = Read(WidthInput, _layout.WidthMm),
+        HeightMm = Read(HeightInput, _layout.HeightMm),
+        MarginMm = Read(MarginInput, _layout.MarginMm),
+        OffsetXMm = Read(OffsetXInput, _layout.OffsetXMm),
+        OffsetYMm = Read(OffsetYInput, _layout.OffsetYMm),
+        QrMm = Read(QrInput, _layout.QrMm),
+        TitlePt = Read(TitlePtInput, _layout.TitlePt),
+        CaptionPt = Read(CaptionPtInput, _layout.CaptionPt),
+        ShowLink = ShowLinkCheck.IsChecked == true,
+        ShowFrame = ShowFrameCheck.IsChecked == true,
+        FancyQr = FancyQrCheck.IsChecked == true,
+    }.Clamped();
+
+    private void Layout_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_filling) return;
+        _layout = ReadLayout();
+        Redraw();
+    }
+
+    private void SaveLayout_Click(object sender, RoutedEventArgs e)
+    {
+        _layout.SaveTo(_services.Cfg);
+        _host.ShowStatus($"Макет этикетки сохранён: {_layout.SizeCaption()} мм, поля {Num(_layout.MarginMm)} мм");
+    }
+
+    private void ResetLayout_Click(object sender, RoutedEventArgs e)
+    {
+        _layout = new LabelLayout();
+        FillLayoutInputs(_layout);
+        Redraw();
+    }
+
+    private void Redraw()
+    {
+        LabelHost.Content = BuildLabel();
+        var printer = _services.Cfg.LabelPrinter();
+        PrinterText.Text = (string.IsNullOrWhiteSpace(printer) ? "Принтер: по умолчанию" : $"Принтер: {printer}")
+                           + $" · этикетка {_layout.SizeCaption()} мм · поля {Num(_layout.MarginMm)} мм"
+                           + " · сменить принтер — Настройки → Печать";
+    }
+
+    /// <summary>«ИНСТ» в окошке кода — не украшение: наклейки на шкафу оказываются рядом (паспорт,
+    /// ОТК, инструкция), и по одному взгляду должно быть понятно, куда ведёт именно эта.</summary>
     private FrameworkElement BuildLabel() =>
-        LabelPrinter.BuildLabel(_services.Cfg.LabelWidthMm(), _services.Cfg.LabelHeightMm(),
-            LabelPrinter.MakeQr(_qrContent), _title, _subtitle, _qrContent);
+        LabelPrinter.BuildLabel(_layout, _qrContent, _title, _subtitle, _qrContent, "ИНСТ");
+
+    // ── Содержимое кода ──────────────────────────────────────────────────────
 
     /// <summary>Что зашить в QR и как это объяснить человеку. Ссылка считается от того диска, на
     /// котором файл реально лежит: инструкции могут быть уведены на третий диск, и относительный путь

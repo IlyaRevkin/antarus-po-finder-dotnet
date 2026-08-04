@@ -1448,10 +1448,11 @@ public partial class SettingsView : UserControl
     /// BuildLabel) — иначе проверка полей ничего не проверяет.</summary>
     private void TestPrintLabel_Click(object sender, RoutedEventArgs e)
     {
-        var label = LabelPrinter.BuildLabel(_services.Cfg.LabelWidthMm(), _services.Cfg.LabelHeightMm(),
-            LabelPrinter.MakeQr("https://example.org/проверка"), "Пробная этикетка",
-            $"{_services.Cfg.LabelWidthMm():0.##} × {_services.Cfg.LabelHeightMm():0.##} мм",
-            "Если рамка обрезана — поправьте размер в настройках или поля в драйвере принтера.");
+        var layout = LabelLayout.FromConfig(_services.Cfg);
+        var label = LabelPrinter.BuildLabel(layout, "https://example.org/проверка", "Пробная этикетка",
+            $"{layout.SizeCaption()} мм, поля {layout.MarginMm:0.##} мм",
+            "Если что-то срезано по краю — увеличьте поля или подвиньте макет: кнопка «QR инструкции» на карточке версии.",
+            "ТЕСТ");
         var outcome = LabelPrinter.Print(label, _services.Cfg.LabelPrinter(), "Пробная этикетка");
         _host.ShowStatus(outcome.Message);
         if (!outcome.Ok)
@@ -1474,7 +1475,11 @@ public partial class SettingsView : UserControl
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с шаблонами наклеек" };
         if (dlg.ShowDialog() != true) return;
 
-        StickersFolderInput.Text = dlg.FolderName;
+        // Обзор всегда отдаёт абсолютный путь с буквой ЭТОЙ машины, а настройка синхронизируется:
+        // папка наклеек общая, «только буква разная» — записав «Z:\…», мы прятали бы её от всех, у
+        // кого тот же диск подключён под другой буквой. Внутри общего диска — сохраняем хвост.
+        StickersFolderInput.Text = SharedFolderPath.ToPortable(
+            _services.Cfg.RootPath(), dlg.FolderName, StickerTemplates.DefaultSubfolder);
         StickersFolder_LostFocus(sender, e);
     }
 
@@ -1535,7 +1540,9 @@ public partial class SettingsView : UserControl
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с бланками паспортов" };
         if (dlg.ShowDialog() != true) return;
 
-        PassportTemplatesFolderInput.Text = dlg.FolderName;
+        // Хвост от корня диска, а не буква этой машины — см. BrowseStickersFolder_Click рядом.
+        PassportTemplatesFolderInput.Text = SharedFolderPath.ToPortable(
+            _services.Cfg.RootPath(), dlg.FolderName, PassportService.DefaultTemplatesSubfolder);
         PassportTemplatesFolder_LostFocus(sender, e);
     }
 
@@ -2557,7 +2564,7 @@ public partial class SettingsView : UserControl
         }
         // План по БД здесь, создание сотен папок на сетевом диске — в фоне (см. HierarchyService,
         // блок про двухфазные операции): окно во время этого больше не «висит».
-        var plan = _services.Hierarchy.PlanStructure(root);
+        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
         using (_host.BeginBusy("Проверка структуры диска…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
@@ -2577,6 +2584,34 @@ public partial class SettingsView : UserControl
     {
         var dlg = new DiskMigrationDialog(_services, _host) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
+        LoadFirmwareTab();
+    }
+
+    /// <summary>Локальная починка путей ОПЦ после переноса их внутрь контроллера
+    /// (docs/hierarchy-rework-plan.md, этап 5 — единственный переезд, меняющий disk_path). Нужна на
+    /// каждой машине отдельно, потому что путь у совпавшей записи импортом общего конфига не
+    /// обновляется никогда: у всех, кроме запускавшего перестройку, ОПЦ-прошивки иначе молча стали бы
+    /// «⚠ на диске не найдена». Обход диска — в фоне: у ОПЦ-записей путей сотни.</summary>
+    private async void RepairOpcPaths_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск недоступен.", "ОПЦ", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        HierarchyService.OpcRepairResult result;
+        using (_host.BeginBusy("Ищем переехавшие ОПЦ…"))
+            result = await Task.Run(() => _services.Hierarchy.RepairOpcDiskPaths(root));
+
+        var text = result.Repaired == 0 && result.Unresolved == 0
+            ? "Все ОПЦ-прошивки на месте — чинить нечего."
+            : $"Путь исправлен у {result.Repaired} ОПЦ-прошивок." +
+              (result.Unresolved > 0 ? $"\nНе нашлось новое место у {result.Unresolved} — они показаны ниже." : "") +
+              (result.Details.Count > 0 ? "\n\n" + string.Join("\n", result.Details.Take(20)) : "");
+        AppMessageBox.Show(text, "ОПЦ", MessageBoxButton.OK, MessageBoxImage.Information);
+        _host.ShowStatus($"ОПЦ: путь исправлен у {result.Repaired}", category: NotificationCategory.Sync);
         LoadFirmwareTab();
     }
 

@@ -49,6 +49,21 @@ public class DiskScanColleagueUploadsTests : IDisposable
     {
         var (group, subtype, mod) = Cabinet();
         var dir = _hierarchy.FwPath(Root, group.Name, subtype.Name, mod.ControllerName, versionRaw, isOpc);
+        return SeedFolder(dir, versionRaw, filename, tags);
+    }
+
+    /// <summary>То же, но в ПРЕЖНЮЮ папку «ОПЦ» на уровне подтипа (docs/hierarchy-rework-plan.md,
+    /// этап 5). Она остаётся полностью читаемой, пока в конторе есть машины со старым клиентом, и
+    /// именно у неё контроллер по-прежнему выводится из hw-числа: в пути его нет.</summary>
+    private string SeedLegacyOpc(string versionRaw, string filename, params string[] tags)
+    {
+        var (group, subtype, _) = Cabinet();
+        var dir = Path.Combine(HierarchyService.LegacyOpcFolder(Root, group.Name, subtype.Name), versionRaw);
+        return SeedFolder(dir, versionRaw, filename, tags);
+    }
+
+    private string SeedFolder(string dir, string versionRaw, string filename, string[] tags)
+    {
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, filename), "dummy");
         ChangelogFile.Write(dir, FwVersionNumber.Parse(versionRaw)!, new[] { "УПП" }, "правки коллеги", tags);
@@ -91,17 +106,56 @@ public class DiskScanColleagueUploadsTests : IDisposable
         Assert.Equal("00042", stored.CabinetSn);
     }
 
-    /// <summary>Контроллер у общей папки выводится из hw-номера версии. Незнакомый hw — версия
-    /// пропускается: завести её не тому контроллеру хуже, чем не завести вовсе.</summary>
+    /// <summary>Контроллер у ПРЕЖНЕЙ общей папки выводится из hw-номера версии, потому что в пути его
+    /// нет. Незнакомый hw — версия пропускается: завести её не тому контроллеру хуже, чем не завести
+    /// вовсе.</summary>
     [Fact]
-    public void OpcVersion_WithUnknownHwNumber_IsSkippedRatherThanGuessed()
+    public void LegacyOpcVersion_WithUnknownHwNumber_IsSkippedRatherThanGuessed()
     {
-        SeedOnDisk("3.0.999.0001", isOpc: true, "3.0.999.0001.PSL");
+        SeedLegacyOpc("3.0.999.0001", "3.0.999.0001.PSL");
 
         var result = Scan();
 
         Assert.Equal(0, result.Added);
         Assert.Empty(_db.GetFwVersions(includeArchived: true, includeRolledBack: true));
+    }
+
+    /// <summary>А в новой раскладке (ОПЦ внутри контроллера, этап 5) тот же незнакомый hw ничему не
+    /// мешает: контроллер читается из пути. Это и есть починка жалобы «ОПЦ-версия коллеги у меня не
+    /// появилась» — раньше такая папка молча пропускалась.</summary>
+    [Fact]
+    public void OpcInsideController_WithUnknownHwNumber_IsImportedAnyway()
+    {
+        var (_, _, mod) = Cabinet();
+        SeedOnDisk("3.0.999.0001", isOpc: true, "3.0.999.0001.PSL");
+
+        var result = Scan();
+
+        Assert.Equal(1, result.Added);
+        var stored = Stored("3.0.999.0001");
+        Assert.Equal(mod.ControllerId, stored.ControllerId);
+        Assert.True(stored.IsOpc);
+    }
+
+    /// <summary>Имя папки ОПЦ в новой раскладке — номер заявки и заводской SN, а не строка версии.
+    /// Номер версии восстанавливается из CHANGELOG.md, заявка с SN — из имени папки: у версии
+    /// коллеги имя файла может быть каким угодно, а имя папки строит сама программа.</summary>
+    [Fact]
+    public void OpcFolderNamedByRequestAndSerial_RestoresVersionFromChangelog()
+    {
+        var (group, subtype, mod) = Cabinet();
+        var dir = _hierarchy.FwPath(Root, group.Name, subtype.Name, mod.ControllerName,
+            "3.0.005.0781", isOpc: true, requestNum: "01312", cabinetSn: "00042");
+        Assert.EndsWith(Path.Combine("ОПЦ", "01312_SN00042"), dir);
+        SeedFolder(dir, "3.0.005.0781", "как_назвал_коллега.psl", Array.Empty<string>());
+
+        var result = Scan();
+
+        Assert.Equal(1, result.Added);
+        var stored = Stored("3.0.005.0781");
+        Assert.Equal("01312", stored.RequestNum);
+        Assert.Equal("00042", stored.CabinetSn);
+        Assert.Equal(mod.ControllerId, stored.ControllerId);
     }
 
     /// <summary>Обычная версия под папкой контроллера нестандартной не становится — иначе признак ОПЦ

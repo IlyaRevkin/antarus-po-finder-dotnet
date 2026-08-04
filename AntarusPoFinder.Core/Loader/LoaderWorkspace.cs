@@ -49,14 +49,19 @@ public sealed class LoaderWorkspace : IDisposable
 
     /// <summary>Копирует файл или папку в <see cref="SourceDir"/> и возвращает локальный путь к
     /// копии. Дальше лоадер работает ТОЛЬКО с этим путём — сетевой источник больше не нужен, и
-    /// обрыв сети посреди сборки не превращается в наполовину прочитанный проект.</summary>
+    /// обрыв сети посреди сборки не превращается в наполовину прочитанный проект.
+    ///
+    /// Копия файла ПРОВЕРЯЕТСЯ побайтово (см. <see cref="CopyVerified"/>): жалоба «Segnetics с
+    /// сетевого диска иногда грузится битым» — ровно про это. Шара по WebDAV умеет отдать файл
+    /// короче или с мусором в середине, и такой .lfs уезжает в контроллер молча: лоадеру он выглядит
+    /// как обычный файл. Лучше сорваться здесь с внятной ошибкой, чем испортить шкаф.</summary>
     public string Import(string sourcePath)
     {
         if (string.IsNullOrWhiteSpace(sourcePath))
             throw new ArgumentException("Не указан файл для загрузки.", nameof(sourcePath));
 
         if (File.Exists(sourcePath))
-            return FileSystemHelpers.CopyFile(sourcePath, SourceDir);
+            return CopyVerified(sourcePath);
 
         if (Directory.Exists(sourcePath))
         {
@@ -66,6 +71,45 @@ public sealed class LoaderWorkspace : IDisposable
         }
 
         throw new FileNotFoundException($"Файл или папка не найдены: {sourcePath}", sourcePath);
+    }
+
+    /// <summary>Сколько раз пробуем скопировать файл, пока копия не совпадёт с оригиналом. Два: одна
+    /// повторная попытка снимает случайный сбой чтения шары, а если и она не сошлась — источник
+    /// действительно битый или его прямо сейчас переписывают, и молчать об этом нельзя.</summary>
+    private const int VerifyAttempts = 2;
+
+    private string CopyVerified(string sourcePath)
+    {
+        string? lastProblem = null;
+        for (var attempt = 1; attempt <= VerifyAttempts; attempt++)
+        {
+            var dst = FileSystemHelpers.CopyFile(sourcePath, SourceDir);
+
+            var sourceLength = new FileInfo(sourcePath).Length;
+            var copyLength = new FileInfo(dst).Length;
+            if (sourceLength != copyLength)
+            {
+                lastProblem = $"размер копии {copyLength} байт против {sourceLength} у оригинала";
+                continue;
+            }
+            if (!Sha256(sourcePath).AsSpan().SequenceEqual(Sha256(dst)))
+            {
+                lastProblem = "содержимое копии не совпало с оригиналом";
+                continue;
+            }
+            return dst;
+        }
+
+        throw new IOException(
+            $"Файл скопирован с сетевого диска повреждённым ({lastProblem}). " +
+            "Повторите попытку; если повторяется — проверьте файл на диске.");
+    }
+
+    private static byte[] Sha256(string path)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var stream = File.OpenRead(path);
+        return sha.ComputeHash(stream);
     }
 
     /// <summary>Всё, что лоадер положил в <see cref="OutputDir"/>, включая вложенные папки.</summary>

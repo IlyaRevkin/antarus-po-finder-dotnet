@@ -98,6 +98,116 @@ public class LabelAndStickersTests
         Assert.Empty(StickerTemplates.List(null));
     }
 
+    /// <summary>Жалоба «папка наклеек должна синхрониться тоже, она общая, только буква разная».
+    /// Обзор папки всегда отдаёт абсолютный путь с буквой ЭТОЙ машины, а настройка уезжает
+    /// синхронизацией дословно — записав «Z:\Конфиг\Наклейки», мы прятали бы папку от всех, у кого та
+    /// же шара подключена под другой буквой. Хранится хвост от корня диска.</summary>
+    [Fact]
+    public void ToPortable_KeepsOnlyTheTailInsideTheSharedDisk()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Z_disk");
+
+        // Внутри диска — остаётся хвост, и он сходится на машине с другой буквой.
+        Assert.Equal(Path.Combine("Общее", "Наклейки"),
+            SharedFolderPath.ToPortable(root, Path.Combine(root, "Общее", "Наклейки"), StickerTemplates.DefaultSubfolder));
+
+        // Ровно подпапка по умолчанию — сворачивается в «настройку не трогали».
+        Assert.Equal("", SharedFolderPath.ToPortable(root,
+            Path.Combine(root, StickerTemplates.DefaultSubfolder), StickerTemplates.DefaultSubfolder));
+
+        // Снаружи диска (сетевая шара, локальная папка) — остаётся как есть: хвоста от корня нет.
+        Assert.Equal(@"\\сервер\шара\Наклейки",
+            SharedFolderPath.ToPortable(root, @"\\сервер\шара\Наклейки", StickerTemplates.DefaultSubfolder));
+        // Диск не настроен — трогать нечего.
+        Assert.Equal(@"D:\Наклейки", SharedFolderPath.ToPortable("", @"D:\Наклейки", StickerTemplates.DefaultSubfolder));
+    }
+
+    /// <summary>Сохранённый хвост должен разворачиваться обратно в ту же папку на любой машине — это
+    /// и есть весь смысл ToPortable, поэтому проверяется парой с Resolve/FolderFor.</summary>
+    [Fact]
+    public void ToPortable_RoundTripsThroughStickerFolderResolution()
+    {
+        var mine = Path.Combine(Path.GetTempPath(), "Z_disk");
+        var colleague = Path.Combine(Path.GetTempPath(), "Y_disk");
+
+        var stored = SharedFolderPath.ToPortable(mine, Path.Combine(mine, "Общее", "Наклейки"),
+            StickerTemplates.DefaultSubfolder);
+
+        Assert.Equal(Path.Combine(colleague, "Общее", "Наклейки"), StickerTemplates.FolderFor(colleague, stored));
+    }
+
+    /// <summary>ToPortable чинит настройку только в момент выбора папки — а значение, УЖЕ уехавшее
+    /// синхронизацией абсолютным («Z:\Конфиг\Наклейки»), у коллеги с буквой «Y:» так и осталось бы
+    /// битым до тех пор, пока администратор не переназначит папку заново. Поэтому чужая буква
+    /// спасается на чтении: записанной папки нет — ищем такую же под СВОИМ корнем диска.</summary>
+    [Fact]
+    public void Resolve_RescuesAbsolutePathWrittenByAnotherMachine()
+    {
+        using var root = new TempRoot();
+        var mine = Path.Combine(root.Path, "Y_disk");
+        var real = Path.Combine(mine, "Конфиг", "Наклейки");
+        Directory.CreateDirectory(real);
+
+        // Путь коллеги: та же шара, другая буква и другой промежуточный сегмент — ведущие сегменты
+        // отбрасываются по одному, пока не найдётся существующая папка.
+        Assert.Equal(real, StickerTemplates.FolderFor(mine, @"Z:\Antarus\Конфиг\Наклейки"));
+
+        // Своя же папка существует — спасать нечего, путь остаётся дословным.
+        Assert.Equal(real, StickerTemplates.FolderFor(mine, real));
+
+        // Ничего похожего под своим корнем нет — подставлять чужую папку нельзя, остаётся как
+        // записано: «папка недоступна» честнее молчаливой подмены.
+        Assert.Equal(@"Z:\Совсем\Другое", StickerTemplates.FolderFor(mine, @"Z:\Совсем\Другое"));
+    }
+
+    // ── Макет этикетки ───────────────────────────────────────────────────────
+
+    /// <summary>«Что 97, что 90, что 100 ставлю — верх обрезается»: причина была в нулевых полях, а
+    /// не в размере. Поле по умолчанию — 3 мм, с запасом больше непечатаемой зоны.</summary>
+    [Fact]
+    public void LabelLayout_DefaultsHaveMarginsAndReadableCaption()
+    {
+        var layout = new LabelLayout();
+
+        Assert.Equal(3, layout.MarginMm);
+        Assert.True(layout.CaptionPt >= 9, "кегль ссылки ниже 9 pt на 203 dpi кириллицей разваливается");
+        Assert.True(layout.ShowLink);
+    }
+
+    /// <summary>Значения приводятся к рабочему диапазону при КАЖДОМ чтении — в настройки может
+    /// приехать что угодно, в том числе синхронизацией с чужой машины.</summary>
+    [Fact]
+    public void LabelLayout_Clamped_KeepsLabelPhysicallyPossible()
+    {
+        var v = new LabelLayout
+        {
+            WidthMm = 5000, HeightMm = -10, MarginMm = 999,
+            OffsetXMm = 100, OffsetYMm = -100, TitlePt = 500, CaptionPt = 0,
+        }.Clamped();
+
+        Assert.InRange(v.WidthMm, 20, 300);
+        Assert.InRange(v.HeightMm, 15, 300);
+        // Поля не съедают больше четверти меньшей стороны — иначе содержимому не осталось бы места.
+        Assert.InRange(v.MarginMm, 0, Math.Min(v.WidthMm, v.HeightMm) / 4);
+        Assert.InRange(v.OffsetXMm, -20, 20);
+        Assert.InRange(v.OffsetYMm, -20, 20);
+        Assert.InRange(v.TitlePt, 6, 48);
+        Assert.InRange(v.CaptionPt, 5, 24);
+    }
+
+    /// <summary>Сторона QR всегда помещается внутрь полей — и когда её считают сами, и когда её задал
+    /// человек. Иначе код уезжал бы за край ровно так же, как раньше уезжал верх.</summary>
+    [Fact]
+    public void LabelLayout_EffectiveQr_FitsInsideMargins()
+    {
+        var auto = new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }.Clamped();
+        Assert.InRange(auto.EffectiveQrMm(), 8, auto.WidthMm - 2 * auto.MarginMm);
+        Assert.True(auto.EffectiveQrMm() <= auto.HeightMm - 2 * auto.MarginMm);
+
+        var huge = new LabelLayout { WidthMm = 60, HeightMm = 40, MarginMm = 4, QrMm = 200 }.Clamped();
+        Assert.True(huge.EffectiveQrMm() <= huge.WidthMm - 2 * huge.MarginMm);
+    }
+
     // ── Каноническое имя файла прошивки ──────────────────────────────────────
 
     [Fact]

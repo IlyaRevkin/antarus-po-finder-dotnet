@@ -40,10 +40,21 @@ public record StructurePlan(string Root, List<string> Folders, HierarchyNames Na
 public record FwSyncTarget(int SubtypeId, int ControllerId, string GroupName, string SubtypeName,
     string ControllerName, string ControllerPath, HashSet<string> KnownVersions);
 
-/// <summary>Общая папка «ОПЦ» одного подтипа: у неё нет своего контроллера (она одна на все), поэтому
-/// вместо него — карта «hw-номер версии → контроллер», по которой найденная версия и раскладывается.</summary>
+/// <summary>Папка «ОПЦ», которую надо просмотреть. Их теперь два вида, и различаются они ровно одним:
+/// знаем ли мы контроллер ИЗ ПУТИ.
+/// <list type="bullet">
+/// <item><description><b>Новая раскладка</b> (этап 5) — «ОПЦ» внутри папки контроллера. Контроллер
+/// известен, <see cref="ControllerId"/> заполнен, <see cref="ControllerByHw"/> не нужен.</description></item>
+/// <item><description><b>Прежняя</b> — одна «ОПЦ» на подтип. Контроллера в пути нет, поэтому он, как и
+/// раньше, выводится из hw-числа версии по карте <see cref="ControllerByHw"/>; неоднозначный hw
+/// по-прежнему означает «пропустить» (завести версию не тому контроллеру хуже, чем не завести).</description></item>
+/// </list></summary>
 public record FwOpcSyncTarget(int SubtypeId, string GroupName, string SubtypeName, string OpcPath,
-    Dictionary<int, (int ControllerId, string ControllerName)> ControllerByHw, HashSet<string> KnownVersions);
+    Dictionary<int, (int ControllerId, string ControllerName)> ControllerByHw, HashSet<string> KnownVersions)
+{
+    public int? ControllerId { get; init; }
+    public string ControllerName { get; init; } = "";
+}
 
 public record FwSyncPlan(List<FwSyncTarget> Targets, List<FwOpcSyncTarget>? OpcTargets = null);
 
@@ -52,6 +63,11 @@ public record FwSyncPlan(List<FwSyncTarget> Targets, List<FwOpcSyncTarget>? OpcT
 public record FwDiskCandidate(FwSyncTarget Target, FwVersionNumber Version, string VersionDir,
     string Filename, ChangelogContent? Changelog, bool IsOpc = false)
 {
+    /// <summary>Номер заявки и заводской SN, вычитанные ИЗ ИМЕНИ ПАПКИ (новая раскладка ОПЦ, этап 5).
+    /// null — имя папки их не содержит, и они, как раньше, разбираются из имени файла прошивки
+    /// (см. ImportFwCandidates): раньше это было единственное место на диске, где они записаны.</summary>
+    public (string RequestNum, string CabinetSn)? OpcMarkers { get; init; }
+
     public string Label => SubtypeName == "—"
         ? $"{Target.GroupName}/{Target.ControllerName}/{Version.Raw}"
         : $"{Target.GroupName}/{SubtypeName}/{Target.ControllerName}/{Version.Raw}";
@@ -75,23 +91,40 @@ public class HierarchyService
 
     // ── Path builders ─────────────────────────────────────────────────────────
 
-    private static string CtrlOrOpcFolder(string controller, bool isOpc) => isOpc ? HierarchyFolders.Opc : controller;
-
-    /// <summary>Папка типа/подтипа в дереве ПО — общий «родитель» всех папок контроллеров, «ОПЦ» и
+    /// <summary>Папка типа/подтипа в дереве ПО — общий «родитель» всех папок контроллеров и
     /// «Паспорт». У подтипа-заглушки «—» своего сегмента нет (см. Database.EnsureEveryGroupHasSubtype),
     /// за него стоит папка самого типа.</summary>
-    private static string GroupSubFolder(string root, string groupName, string subName)
+    public static string GroupSubFolder(string root, string groupName, string subName)
     {
         var parts = new List<string> { root, FolderPo, groupName };
         if (subName != "—") parts.Add(subName);
         return Path.Combine(parts.ToArray());
     }
 
-    private string PoCtrlFolder(string root, string groupName, string subName, string controller, bool isOpc) =>
-        Path.Combine(GroupSubFolder(root, groupName, subName), CtrlOrOpcFolder(controller, isOpc));
+    /// <summary>Папка, внутри которой лежат папки версий. Для ОПЦ это больше НЕ подмена контроллера
+    /// («ОПЦ» вместо его имени), а подпапка ВНУТРИ него — docs/hierarchy-rework-plan.md, этап 5:
+    /// раньше по пути ОПЦ-версии нельзя было понять контроллер, и досмотр диска гадал его по hw-числу,
+    /// молча пропуская неоднозначные (жалоба «ОПЦ-версия коллеги не появилась»). Старое место
+    /// (<see cref="LegacyOpcFolder"/>) остаётся полностью читаемым — см. PlanFwSync/ScanFwDisk.</summary>
+    private string PoCtrlFolder(string root, string groupName, string subName, string controller, bool isOpc)
+    {
+        var ctrl = Path.Combine(GroupSubFolder(root, groupName, subName), controller);
+        return isOpc ? OpcLayout.ControllerOpcFolder(ctrl) : ctrl;
+    }
 
-    public string FwPath(string root, string groupName, string subName, string controller, string versionStr, bool isOpc = false) =>
-        Path.Combine(PoCtrlFolder(root, groupName, subName, controller, isOpc), versionStr);
+    /// <summary>Прежнее место ОПЦ — одна папка на подтип, рядом с папками контроллеров. Сюда НИЧЕГО
+    /// больше не пишется, но всё, что накопилось, читается как раньше, пока не выполнена перестройка
+    /// диска (DiskLayoutMigrator) и пока в конторе остаются машины со старым клиентом.</summary>
+    public static string LegacyOpcFolder(string root, string groupName, string subName) =>
+        OpcLayout.SubtypeOpcFolder(GroupSubFolder(root, groupName, subName));
+
+    /// <summary>Папка версии. У ОПЦ имя папки — это номер заявки/заводской SN шкафа, а не строка
+    /// версии (этап 5): ОПЦ заводится под конкретный шкаф, и человек ищет его именно по этим номерам.
+    /// Номер версии такой папки хранится в CHANGELOG.md — см. OpcLayout.ResolveVersion.</summary>
+    public string FwPath(string root, string groupName, string subName, string controller, string versionStr,
+        bool isOpc = false, string requestNum = "", string cabinetSn = "") =>
+        Path.Combine(PoCtrlFolder(root, groupName, subName, controller, isOpc),
+            isOpc ? OpcLayout.FolderName(requestNum, cabinetSn, versionStr) : versionStr);
 
     /// <summary>Public wrapper over PoCtrlFolder — the controller (or ОПЦ, when isOpc) folder itself,
     /// with no version segment appended. Used by the "reassign" action in UnknownFilesDialog to drop
@@ -413,12 +446,16 @@ public class HierarchyService
         var newDiskPath = localDisk;
         var moved = false;
 
-        // ОПЦ-версия лежит в общей папке «ОПЦ» подтипа, а не в папке контроллера (см. PoCtrlFolder) —
-        // её путь от контроллера не зависит, двигать нечего. Запись без файлов — тем более.
-        var pathDependsOnController = !v.IsOpc && !string.IsNullOrWhiteSpace(v.DiskPath);
+        // ОПЦ-версия ПРЕЖНЕЙ раскладки лежит в общей папке «ОПЦ» подтипа — её путь от контроллера не
+        // зависит, двигать нечего. ОПЦ, уже переехавшая внутрь контроллера (этап 5), наоборот, зависит
+        // от него ровно так же, как обычная версия, и обязана переехать вместе с записью. Запись без
+        // файлов не двигается в любом случае.
+        var pathDependsOnController = !string.IsNullOrWhiteSpace(v.DiskPath)
+            && (!v.IsOpc || IsInsideControllerOpc(localDisk));
         if (pathDependsOnController)
         {
-            var target = FwPath(root, names.Value.GroupName, names.Value.SubtypeName, newCtrl.Name, v.VersionRaw);
+            var target = FwPath(root, names.Value.GroupName, names.Value.SubtypeName, newCtrl.Name, v.VersionRaw,
+                v.IsOpc, v.RequestNum, v.CabinetSn);
 
             if (!replay && (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)))
             {
@@ -481,6 +518,59 @@ public class HierarchyService
 
         _db.ReassignFwVersionController(fwVersionId, newControllerId, newDiskPath);
         return new ReassignResult(true, moved, newDiskPath, errors);
+    }
+
+    /// <summary>Лежит ли эта папка версии в «ОПЦ» ВНУТРИ контроллера (новая раскладка, этап 5), а не в
+    /// общей «ОПЦ» подтипа. Отличается одним уровнем: у новой над «ОПЦ» стоит папка контроллера, у неё
+    /// самой рядом лежат папки документов; у прежней над «ОПЦ» сразу тип/подтип. Ровно та же проверка,
+    /// что и в VersionLayout.ControllerFolderOf, — там она и живёт, чтобы правило было одно.</summary>
+    private static bool IsInsideControllerOpc(string versionDir) =>
+        VersionLayout.ControllerFolderOf(versionDir) is not null
+        && string.Equals(Path.GetFileName(Path.GetDirectoryName(
+            versionDir.TrimEnd(Path.DirectorySeparatorChar)) ?? ""), HierarchyFolders.Opc, StringComparison.OrdinalIgnoreCase);
+
+    // ── Починка путей ОПЦ после этапа 5 ──────────────────────────────────────
+
+    public record OpcRepairResult(int Repaired, int Unresolved, List<string> Details);
+
+    /// <summary>Локальный, идемпотентный проход «найти, куда переехали мои ОПЦ-версии»
+    /// (docs/hierarchy-rework-plan.md, этап 5). Нужен потому, что перенос ОПЦ внутрь контроллера —
+    /// единственная операция всей перестройки, которая МЕНЯЕТ <c>disk_path</c>, а он у совпавшей записи
+    /// при импорте общего конфига не обновляется никогда (Database.ConfigExchange.cs): у всех, кто
+    /// перестройку не запускал, ОПЦ-прошивки иначе молча стали бы «⚠ на диске не найдена».
+    ///
+    /// Что делает: для каждой своей ОПЦ-записи, чей путь на диске больше не существует, ищет папку в
+    /// «ОПЦ» её контроллера с тем же номером версии (OpcLayout.FindMigratedFolder) и переписывает
+    /// <c>disk_path</c> на неё. Ничего не двигает и не удаляет. Не нашли — путь не трогаем: выдуманный
+    /// путь хуже устаревшего. Диск недоступен — выходим сразу, иначе «шара отвалилась» выглядела бы как
+    /// «всё переехало».</summary>
+    public OpcRepairResult RepairOpcDiskPaths(string root)
+    {
+        var details = new List<string>();
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            return new OpcRepairResult(0, 0, details);
+
+        int repaired = 0, unresolved = 0;
+        foreach (var v in _db.GetAllFwVersionsWithNames(includeArchived: true))
+        {
+            if (!v.IsOpc || string.IsNullOrWhiteSpace(v.DiskPath)) continue;
+            var local = FirmwarePathLocalizer.Localize(v.DiskPath, root);
+            if (Directory.Exists(local)) continue;
+
+            var ctrlFolder = Path.Combine(GroupSubFolder(root, v.GroupName, v.SubtypeName), v.CtrlName);
+            var found = OpcLayout.FindMigratedFolder(ctrlFolder, v.VersionRaw);
+            if (found is null)
+            {
+                unresolved++;
+                details.Add($"{v.GroupName}/{v.SubtypeName}/{v.CtrlName}/{v.VersionRaw}: новое место не найдено");
+                continue;
+            }
+
+            _db.RepointFwVersionDiskPath(v.Id!.Value, found);
+            repaired++;
+            details.Add($"{v.VersionRaw}: {local} → {found}");
+        }
+        return new OpcRepairResult(repaired, unresolved, details);
     }
 
     /// <summary>Переносит «свою» папку/файл панели в папку HMI ДРУГОГО контроллера и возвращает новый
@@ -580,8 +670,14 @@ public class HierarchyService
     public EnsureStructureResult EnsureStructure(string root) => ApplyStructurePlan(PlanStructure(root));
 
     /// <summary>БД-фаза: какие папки должны быть на диске. Ни одного обращения к файловой системе —
-    /// её можно вызывать на потоке UI, даже когда сам диск не отвечает.</summary>
-    public StructurePlan PlanStructure(string root)
+    /// её можно вызывать на потоке UI, даже когда сам диск не отвечает.
+    ///
+    /// <paramref name="thirdRoot"/> — корень диска инструкций (если настроен). Раскладка на нём
+    /// ЗЕРКАЛЬНАЯ (InstructionDiskResolver), но сама собой она не появлялась: папки там создавались
+    /// только в момент, когда туда впервые клали файл, — отсюда «на третьем структура не создалась».
+    /// Зеркалим только папки «Инструкция»: третий диск больше ни подо что не заведён, и тащить туда
+    /// пустое дерево контроллеров целиком незачем.</summary>
+    public StructurePlan PlanStructure(string root, string? thirdRoot = null)
     {
         var folders = new List<string>();
         var controllers = _db.GetAllControllerModels();
@@ -608,8 +704,11 @@ public class HierarchyService
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Modbus));
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
+                    // «ОПЦ» теперь внутри контроллера (этап 5). Прежнюю папку на уровне подтипа в план
+                    // БОЛЬШЕ НЕ добавляем: она остаётся на диске со всем содержимым и читается, но
+                    // заводить её заново под каждый подтип — плодить пустые папки старой раскладки.
+                    folders.Add(OpcLayout.ControllerOpcFolder(ctrlPath));
                 }
-                folders.Add(Path.Combine(groupSubPath, HierarchyFolders.Opc));
                 // Паспорта — рядом с «ОПЦ», у подтипа: см. HierarchyFolders.Passports. Создаётся
                 // всегда, как и остальные служебные папки, чтобы оператору было куда положить файл
                 // руками и чтобы обход диска не считал её «неизвестной».
@@ -626,6 +725,17 @@ public class HierarchyService
         folders.Add(Path.Combine(root, FolderPo, HierarchyFolders.UnknownFw));
         folders.Add(Path.Combine(root, FolderParams, HierarchyFolders.UnknownParams));
         folders.Add(Path.Combine(root, FolderConfig));
+
+        // Зеркало папок «Инструкция» на третьем диске — см. док метода. Считается заменой префикса
+        // тем же InstructionDiskResolver, которым потом идёт и чтение, поэтому «уехать не туда»
+        // из-за неверно настроенного корня физически не может: неподходящий путь даёт null.
+        if (!string.IsNullOrWhiteSpace(thirdRoot))
+            foreach (var mirror in folders
+                         .Where(f => string.Equals(Path.GetFileName(f), HierarchyFolders.Instructions, StringComparison.Ordinal))
+                         .Select(f => InstructionDiskResolver.Mirror(root, thirdRoot, f))
+                         .Where(m => m is not null)
+                         .ToList())
+                folders.Add(mirror!);
 
         return new StructurePlan(root, folders, SnapshotNames());
     }
@@ -914,8 +1024,20 @@ public class HierarchyService
                     // (помеченные надгробием) версии — см. док GetKnownVersionRaws о том, как иначе
                     // досмотр диска воскрешал удалённую прошивку новой строкой прямо в модерацию.
                     var known = _db.GetKnownVersionRaws(sub.Id!.Value, ctrl.Id!.Value);
+                    var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
                     targets.Add(new FwSyncTarget(sub.Id!.Value, ctrl.Id!.Value, g.Name, sub.Name, ctrl.Name,
-                        Path.Combine(groupSubPath, ctrl.Name), known));
+                        ctrlPath, known));
+
+                    // Новая раскладка ОПЦ (этап 5): «ОПЦ» внутри контроллера — контроллер известен из
+                    // пути, гадать по hw не нужно. Тот же набор известных версий, что и у обычных
+                    // папок: ОПЦ-версия — такая же строка fw_versions этой пары подтип/контроллер.
+                    opcTargets.Add(new FwOpcSyncTarget(sub.Id!.Value, g.Name, sub.Name,
+                        OpcLayout.ControllerOpcFolder(ctrlPath),
+                        new Dictionary<int, (int, string)>(), known)
+                    {
+                        ControllerId = ctrl.Id!.Value,
+                        ControllerName = ctrl.Name,
+                    });
                 }
 
                 // Нестандартные (ОПЦ) версии лежат не в папке контроллера, а в общей папке «ОПЦ»
@@ -941,7 +1063,7 @@ public class HierarchyService
                 // Та же поправка на надгробия, что и у обычных папок контроллеров выше.
                 var knownInSubtype = _db.GetKnownVersionRaws(sub.Id!.Value, null);
                 opcTargets.Add(new FwOpcSyncTarget(sub.Id!.Value, g.Name, sub.Name,
-                    Path.Combine(groupSubPath, HierarchyFolders.Opc), byHw, knownInSubtype));
+                    OpcLayout.SubtypeOpcFolder(groupSubPath), byHw, knownInSubtype));
             }
         }
 
@@ -971,24 +1093,12 @@ public class HierarchyService
                 if (parsed is null) continue;
                 if (target.KnownVersions.Contains(parsed.Raw)) { skipped++; continue; }
 
-                string filename = "";
+                var filename = ReadFirmwareFilename(versionDir, errors);
                 ChangelogContent? changelog = null;
-                try
-                {
-                    // Имя файла — первый файл в папке, но НЕ служебный CHANGELOG.md: при
-                    // перечислении он часто оказывается первым по алфавиту, и строка
-                    // получала filename="CHANGELOG.md" вместо самой прошивки.
-                    var found = Directory.EnumerateFiles(versionDir)
-                        .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
-                    filename = found is null ? "" : Path.GetFileName(found);
-                    // Описание и типы пуска берём из CHANGELOG.md, который положила туда
-                    // загрузившая машина — заглушка остаётся только там, где файла нет.
-                    changelog = ChangelogFile.TryRead(versionDir);
-                }
-                catch (Exception e)
-                {
-                    errors.Add($"{versionDir}: {e.Message}");
-                }
+                // Описание и типы пуска берём из CHANGELOG.md, который положила туда
+                // загрузившая машина — заглушка остаётся только там, где файла нет.
+                try { changelog = ChangelogFile.TryRead(versionDir); }
+                catch (Exception e) { errors.Add($"{versionDir}: {e.Message}"); }
 
                 candidates.Add(new FwDiskCandidate(target, parsed, versionDir, filename, changelog));
             }
@@ -1004,16 +1114,38 @@ public class HierarchyService
 
             foreach (var versionDir in versionDirs)
             {
-                var parsed = FwVersionNumber.Parse(Path.GetFileName(versionDir));
-                if (parsed is null) continue;
+                // Имя папки ОПЦ больше не обязано быть номером версии (этап 5): номер ищется по
+                // цепочке имя папки → CHANGELOG.md → имя файла прошивки. Ничего не дало — пропускаем:
+                // запись с выдуманным номером хуже, чем ненайденная папка.
+                var parsed = OpcLayout.ResolveVersion(versionDir);
+                if (parsed is null) { skipped++; continue; }
                 if (opc.KnownVersions.Contains(parsed.Raw)) { skipped++; continue; }
-                // Контроллер выводится из hw-номера (см. PlanFwSync); не вывелся — пропускаем.
-                if (!opc.ControllerByHw.TryGetValue(parsed.HwVersion, out var ctrl)) { skipped++; continue; }
 
-                var target = new FwSyncTarget(opc.SubtypeId, ctrl.ControllerId, opc.GroupName, opc.SubtypeName,
-                    ctrl.ControllerName, opc.OpcPath, opc.KnownVersions);
+                // Контроллер: из пути (новая раскладка) либо, как раньше, из hw-номера версии.
+                int controllerId;
+                string controllerName;
+                if (opc.ControllerId is { } knownCtrlId)
+                {
+                    controllerId = knownCtrlId;
+                    controllerName = opc.ControllerName;
+                }
+                else if (opc.ControllerByHw.TryGetValue(parsed.HwVersion, out var ctrl))
+                {
+                    controllerId = ctrl.ControllerId;
+                    controllerName = ctrl.ControllerName;
+                }
+                else { skipped++; continue; }
+
+                var target = new FwSyncTarget(opc.SubtypeId, controllerId, opc.GroupName, opc.SubtypeName,
+                    controllerName, opc.OpcPath, opc.KnownVersions);
+                var markers = OpcLayout.ParseFolderName(Path.GetFileName(versionDir.TrimEnd(Path.DirectorySeparatorChar)));
                 candidates.Add(new FwDiskCandidate(target, parsed, versionDir,
-                    ReadFirmwareFilename(versionDir, errors), ChangelogFile.TryRead(versionDir), IsOpc: true));
+                    ReadFirmwareFilename(versionDir, errors), ChangelogFile.TryRead(versionDir), IsOpc: true)
+                {
+                    // Пустая пара «заявка+SN» = имя папки их не несёт (прежняя раскладка) — тогда
+                    // разбор идёт по имени файла, как и раньше (см. ImportFwCandidates).
+                    OpcMarkers = markers is { RequestNum: "", CabinetSn: "" } ? null : markers,
+                });
                 // Две ОПЦ-папки одного подтипа с одним номером версии — теоретически возможны только
                 // при ручной правке диска; помечаем номер как известный, чтобы во второй раз он не
                 // завёлся ещё одной записью в этом же проходе.
@@ -1024,20 +1156,26 @@ public class HierarchyService
         return new FwDiskScan(candidates, skipped, errors);
     }
 
-    /// <summary>Имя файла прошивки в папке версии — первый файл, кроме служебного CHANGELOG.md.</summary>
+    /// <summary>Имя файла прошивки в папке версии — первый файл, кроме служебных (CHANGELOG.md,
+    /// ярлыки). Ищется в «Прошивка\», если версия уже перестроена под новую раскладку, и в самой папке
+    /// версии, если ещё нет (VersionLayout — режим совместимости): иначе у переехавшей версии имя файла
+    /// оказалось бы пустым, и карточка перестала бы показывать, чем открывать.</summary>
     private static string ReadFirmwareFilename(string versionDir, List<string> errors)
     {
-        try
+        foreach (var folder in VersionLayout.FirmwareFolders(versionDir))
         {
-            var found = Directory.EnumerateFiles(versionDir)
-                .FirstOrDefault(f => !string.Equals(Path.GetFileName(f), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase));
-            return found is null ? "" : Path.GetFileName(found);
+            try
+            {
+                var found = Directory.EnumerateFiles(folder)
+                    .FirstOrDefault(f => !VersionLayout.IsServiceFile(f));
+                if (found is not null) return Path.GetFileName(found);
+            }
+            catch (Exception e)
+            {
+                errors.Add($"{folder}: {e.Message}");
+            }
         }
-        catch (Exception e)
-        {
-            errors.Add($"{versionDir}: {e.Message}");
-            return "";
-        }
+        return "";
     }
 
     /// <summary>БД-фаза: заводит записи по тому, что нашёл обход диска.</summary>
@@ -1054,8 +1192,10 @@ public class HierarchyService
                 // Номер заявки и заводской SN нигде, кроме имени файла, на диске не записаны
                 // (CHANGELOG.md их не хранит) — вытаскиваем оттуда, иначе нестандартная версия
                 // коллеги приехала бы сюда как обычная, без заявки и SN.
+                // Новая раскладка ОПЦ пишет их прямо в ИМЯ ПАПКИ — оттуда и берём, когда есть: имя
+                // файла у версии коллеги может быть каким угодно, а имя папки строит сама программа.
                 var (requestNum, cabinetSn) = c.IsOpc
-                    ? FirmwareNaming.ParseOpcMarkers(c.Filename)
+                    ? c.OpcMarkers ?? FirmwareNaming.ParseOpcMarkers(c.Filename)
                     : ("", "");
 
                 _db.AddFwVersion(new Domain.FwVersionRecord

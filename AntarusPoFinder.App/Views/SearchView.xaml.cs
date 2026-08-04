@@ -1902,15 +1902,19 @@ public partial class SearchView : UserControl
     private static string? FindSiblingFolder(HierarchyResult result, string folderName)
     {
         // От РЕАЛЬНОЙ папки версии, а не от записанного disk_path: если её переименовали/перезалили,
-        // точного пути нет, и папка контроллера (родитель) — с ней рядом лежат «Карта ВВ»/«Инструкция»/
+        // точного пути нет, и папка контроллера — с ней рядом лежат «Карта ВВ»/«Инструкция»/
         // «Карта Modbus» — иначе не находилась. Ровно жалоба «инструкция на диске есть, а в карточке её
         // взаимодействия нет».
+        //
+        // Сама развилка «своя папка внутри версии или общая папка контроллера» живёт в VersionLayout
+        // (docs/hierarchy-rework-plan.md, этап 4) — это ЕДИНСТВЕННОЕ место в приложении, откуда
+        // читаются документы версии, поэтому одной этой строчкой обе раскладки становятся видны
+        // одинаково. Заодно чинится ОПЦ новой раскладки: её родитель — папка «ОПЦ», а не контроллер,
+        // и прежний Directory.GetParent искал документы внутри «ОПЦ» (ControllerFolderOf знает про
+        // лишний уровень).
         var versionDir = ResolvedNetworkDir(result);
         if (!Directory.Exists(versionDir)) return null;
-        var ctrlDir = Directory.GetParent(versionDir)?.FullName;
-        if (ctrlDir is null) return null;
-        var candidate = Path.Combine(ctrlDir, folderName);
-        return Directory.Exists(candidate) ? candidate : null;
+        return VersionLayout.SlotBestReadFolder(versionDir, VersionLayout.ControllerFolderOf(versionDir), folderName);
     }
 
     // ── Card actions ──────────────────────────────────────────────────────

@@ -100,15 +100,23 @@ public static class FirmwareAttachmentsService
 
         string root = request.RootPath, g = request.GroupName, s = request.SubtypeName, c = request.ControllerName;
 
+        // Куда класть документ, решает VersionLayout: своя папка внутри версии у той, что уже
+        // перестроена (docs/hierarchy-rework-plan.md, этап 4), общая папка контроллера у прежней.
+        // Спрашиваем по КАЖДОМУ документу отдельно и в момент копирования — раскладка версии может
+        // измениться между двумя правками одной и той же карточки.
+        var versionDir = FirmwarePathLocalizer.Localize(record.DiskPath, root);
+        var ctrlFolder = Path.Combine(HierarchyService.GroupSubFolder(root, g, s), c);
+        string SlotFolder(string slot) => VersionLayout.SlotWriteFolder(versionDir, ctrlFolder, slot);
+
         string? ioMap = Resolve("Карта in/out", request.IoMapSourcePath, record.IoMapPath,
-            () => hierarchy.IoMapPath(root, g, s, c), applied, warnings);
+            () => SlotFolder(HierarchyFolders.IoMap), applied, warnings);
         string? modbus = Resolve("Карта modbus", request.ModbusMapSourcePath, record.ModbusMapPath,
-            () => hierarchy.ModbusMapPath(root, g, s, c), applied, warnings);
+            () => SlotFolder(HierarchyFolders.Modbus), applied, warnings);
         // Инструкция копируется не тем же Resolve, что «карты»: у неё есть свой диск (третий) и
         // ярлык-заглушка на первом — вся эта развилка живёт в InstructionStorage, здесь только
         // подставляется способ копирования.
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
-            () => hierarchy.InstrPath(root, g, s, c), applied, warnings,
+            () => SlotFolder(HierarchyFolders.Instructions), applied, warnings,
             copy: (src, folder) => InstructionStorage.Copy(src, folder, root, request.ThirdDiskPath,
                 request.ThirdDiskShortcuts, shortcuts, warnings).StoredPath);
 
@@ -128,7 +136,7 @@ public static class FirmwareAttachmentsService
             {
                 try
                 {
-                    hmi = CopyHmiProject(hierarchy.HmiPath(root, g, s, c), record.VersionRaw, request.HmiSourcePath, replaceExisting: true);
+                    hmi = CopyHmiProject(SlotFolder(HierarchyFolders.Hmi), record.VersionRaw, request.HmiSourcePath, replaceExisting: true);
                     applied.Add("HMI-проект");
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

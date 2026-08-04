@@ -290,6 +290,18 @@ public partial class FirmwareCard : UserControl
         if (flags.HasParams)
             ActionsPanel.Children.Add(MakeActionButton("Параметры", (_, _) => ParamsRequested?.Invoke(this, EventArgs.Empty)));
 
+        // Наклейка с QR — отдельной кнопкой в основном ряду, а не пунктом в «Ещё». Печатают её у
+        // шкафа, по одной на каждый собранный шкаф, и «открыть меню → найти пункт» на каждый шкаф —
+        // ровно то «проваливание», от которого просил избавиться Илья. В меню пункт больше не
+        // дублируется: две точки входа в одно окно только путают.
+        if (flags.HasInstructions)
+        {
+            var qrBtn = MakeActionButton("QR инструкции",
+                (_, _) => InstructionLabelRequested?.Invoke(this, EventArgs.Empty));
+            qrBtn.ToolTip = "Наклейка со ссылкой на инструкцию: предпросмотр, настройка макета и печать";
+            ActionsPanel.Children.Add(qrBtn);
+        }
+
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
@@ -502,10 +514,7 @@ public partial class FirmwareCard : UserControl
         if (!flags.HasInstructionDocx && !flags.HasInstructionPrintable)
             AddMenuItem("Открыть инструкцию", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
                 "Открывается самый свежий файл инструкции");
-        // Этикетка с QR — здесь же, у остальных действий с инструкцией: QR ведёт ровно на тот
-        // документ, который открывают пункты выше.
-        AddMenuItem("QR и этикетка", () => InstructionLabelRequested?.Invoke(this, EventArgs.Empty),
-            "Наклейка со ссылкой на инструкцию — наладчик открывает её телефоном у шкафа");
+        // «QR и этикетка» здесь больше нет: это кнопка основного ряда (см. Configure).
     }
 
     // ── Статус локальной копии ────────────────────────────────────────────

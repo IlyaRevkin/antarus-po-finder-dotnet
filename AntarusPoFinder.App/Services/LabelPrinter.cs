@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using AntarusPoFinder.Core.Services;
 using QRCoder;
 
 namespace AntarusPoFinder.App.Services;
@@ -38,86 +39,119 @@ public static class LabelPrinter
         return bmp;
     }
 
-    /// <summary>Сама этикетка: QR слева, подписи справа, ссылка мелким шрифтом внизу. Верстается на
-    /// белом фоне и чёрным текстом ЯВНО, без ресурсов темы: печатается она на бумагу, и в тёмной теме
-    /// приложения этикетка иначе ушла бы на принтер белым по чёрному.</summary>
-    public static FrameworkElement BuildLabel(double widthMm, double heightMm, BitmapSource qr,
-        string title, string subtitle, string caption)
-    {
-        var w = MmToDiu(widthMm);
-        var h = MmToDiu(heightMm);
-        var qrSide = Math.Max(24, Math.Min(h - MmToDiu(10), MmToDiu(45)));
+    /// <summary>Пункты типографские в единицы WPF (1 pt = 1/72 дюйма, DIU = 1/96).</summary>
+    public static double PtToDiu(double pt) => pt * 96.0 / 72.0;
 
-        var grid = new Grid { Width = w, Height = h, Background = Brushes.White };
+    /// <summary>Сама этикетка: QR слева, подписи справа, ссылка под ними. Верстается на белом фоне и
+    /// чёрным текстом ЯВНО, без ресурсов темы: печатается она на бумагу, и в тёмной теме приложения
+    /// этикетка иначе ушла бы на принтер белым по чёрному.
+    ///
+    /// Всё, что задаёт вид, приходит одним <see cref="LabelLayout"/> — там же разобрано, почему поля
+    /// и сдвиг это разные настройки и почему без полей у любого размера «обрезался верх».
+    ///
+    /// <paramref name="holeText"/> — короткая подпись в окошке по центру кода (обычно «ИНСТ»); пусто
+    /// — окна нет.</summary>
+    public static FrameworkElement BuildLabel(LabelLayout layout, string qrContent,
+        string title, string subtitle, string caption, string holeText = "")
+    {
+        var v = layout.Clamped();
+        var w = MmToDiu(v.WidthMm);
+        var h = MmToDiu(v.HeightMm);
+        var pad = MmToDiu(v.MarginMm);
+        var qrSide = MmToDiu(v.EffectiveQrMm());
+
+        var grid = new Grid { Background = Brushes.White };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var image = new Image
-        {
-            Source = qr,
-            Width = qrSide,
-            Height = qrSide,
-            Margin = new Thickness(MmToDiu(3)),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        // Пиксельный QR не должен размываться интерполяцией при печати — иначе телефон его хуже ловит.
-        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
-        Grid.SetRow(image, 0);
-        Grid.SetColumn(image, 0);
-        grid.Children.Add(image);
+        var code = BuildQrVisual(v, qrContent, qrSide, holeText);
+        code.VerticalAlignment = VerticalAlignment.Center;
+        code.HorizontalAlignment = HorizontalAlignment.Left;
+        Grid.SetRow(code, 0);
+        Grid.SetColumn(code, 0);
+        grid.Children.Add(code);
 
         var texts = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, MmToDiu(3), MmToDiu(3), MmToDiu(3)),
+            Margin = new Thickness(MmToDiu(2.5), 0, 0, 0),
         };
         texts.Children.Add(new TextBlock
         {
             Text = title,
-            FontSize = 15,
+            FontSize = PtToDiu(v.TitlePt),
             FontWeight = FontWeights.Bold,
             Foreground = Brushes.Black,
             TextWrapping = TextWrapping.Wrap,
+            LineHeight = PtToDiu(v.TitlePt) * 1.15,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
         });
         if (!string.IsNullOrWhiteSpace(subtitle))
             texts.Children.Add(new TextBlock
             {
                 Text = subtitle,
-                FontSize = 12,
+                FontSize = PtToDiu(v.TitlePt * 0.72),
                 Foreground = Brushes.Black,
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 4, 0, 0),
+                Margin = new Thickness(0, MmToDiu(1.2), 0, 0),
             });
         Grid.SetRow(texts, 0);
         Grid.SetColumn(texts, 1);
         grid.Children.Add(texts);
 
-        var link = new TextBlock
+        if (v.ShowLink && !string.IsNullOrWhiteSpace(caption))
         {
-            Text = caption,
-            FontSize = 8,
-            Foreground = Brushes.Black,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(MmToDiu(3), 0, MmToDiu(3), MmToDiu(2)),
-        };
-        Grid.SetRow(link, 1);
-        Grid.SetColumn(link, 0);
-        Grid.SetColumnSpan(link, 2);
-        grid.Children.Add(link);
+            var link = new TextBlock
+            {
+                Text = caption,
+                FontSize = PtToDiu(v.CaptionPt),
+                Foreground = Brushes.Black,
+                TextWrapping = TextWrapping.Wrap,
+                // Три строки — потолок: длинный адрес с кириллицей иначе съедает всю этикетку, а
+                // четвёртую строку всё равно уже не читают, для этого и есть сам код.
+                MaxHeight = PtToDiu(v.CaptionPt) * 3.6,
+                Margin = new Thickness(0, MmToDiu(1.5), 0, 0),
+            };
+            Grid.SetRow(link, 1);
+            Grid.SetColumn(link, 0);
+            Grid.SetColumnSpan(link, 2);
+            grid.Children.Add(link);
+        }
 
-        var border = new Border
+        var content = new Border
         {
-            Width = w,
-            Height = h,
             Background = Brushes.White,
             BorderBrush = Brushes.Black,
-            BorderThickness = new Thickness(0.6),
+            BorderThickness = new Thickness(v.ShowFrame ? 0.7 : 0),
+            Padding = new Thickness(pad),
             Child = grid,
+            // Поле + калибровочный сдвиг: поле одинаково со всех сторон, сдвиг двигает всю рамку
+            // целиком, не меняя её размера (справа/снизу вычитается ровно столько, сколько
+            // прибавлено слева/сверху).
+            Margin = new Thickness(
+                MmToDiu(v.OffsetXMm), MmToDiu(v.OffsetYMm),
+                -MmToDiu(v.OffsetXMm), -MmToDiu(v.OffsetYMm)),
         };
-        Layout(border, w, h);
-        return border;
+
+        var page = new Grid { Width = w, Height = h, Background = Brushes.White };
+        page.Children.Add(content);
+        Layout(page, w, h);
+        return page;
+    }
+
+    /// <summary>Код внутри этикетки: рисованный (см. <see cref="QrArt"/>) или обычная растровая
+    /// матрица, если фирменный вид выключили. Растровый вариант оставлен именно как запасной: если
+    /// какой-то сканер вдруг заупрямится на скруглённом коде, галочку снимают и печатают привычный.</summary>
+    private static FrameworkElement BuildQrVisual(LabelLayout layout, string content, double side, string holeText)
+    {
+        if (layout.FancyQr) return QrArt.Build(content, side, holeText);
+
+        var image = new Image { Source = MakeQr(content), Width = side, Height = side };
+        // Пиксельный QR не должен размываться интерполяцией при печати — иначе телефон его хуже ловит.
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
+        return image;
     }
 
     /// <summary>Разметка «вручную»: визуал, который никогда не был на экране, сам себя не измеряет, и

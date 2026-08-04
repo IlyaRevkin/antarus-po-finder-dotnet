@@ -53,6 +53,22 @@ public class LoaderWorkspaceTests
         Assert.True(File.Exists(src), "исходник на диске трогать нельзя");
     }
 
+    /// <summary>«Сигнетикс с сетевого диска иногда грузится битым»: шара по WebDAV умеет отдать файл
+    /// короче или с мусором, и такой .lfs уезжает в контроллер молча — лоадеру он выглядит обычным.
+    /// Поэтому копия сверяется с оригиналом побайтово, и совпавшая проходит как раньше.</summary>
+    [Fact]
+    public void Import_VerifiesTheCopy_AndPassesWhenItMatches()
+    {
+        using var root = new TempRoot();
+        var src = Path.Combine(root.Path, "prog.lfs");
+        File.WriteAllBytes(src, Enumerable.Range(0, 5000).Select(i => (byte)(i % 251)).ToArray());
+
+        using var ws = LoaderWorkspace.Create(Path.Combine(root.Path, "loader"), "v1");
+        var local = ws.Import(src);
+
+        Assert.Equal(File.ReadAllBytes(src), File.ReadAllBytes(local));
+    }
+
     [Fact]
     public void Import_CopiesWholeFolder()
     {
