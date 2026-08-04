@@ -148,6 +148,9 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? OpenInstructionPdfRequested;
     /// <summary>Отправить PDF инструкции на принтер по умолчанию.</summary>
     public event EventHandler? PrintInstructionRequested;
+    /// <summary>Показать окно «QR и этикетка» — наклейка со ссылкой на инструкцию этой версии.
+    /// Печатается на принтер этикеток из Настройки → Печать, а не на общий принтер документов.</summary>
+    public event EventHandler? InstructionLabelRequested;
     /// <summary>Паспорт шкафа: напечатать / открыть документ / открыть его папку. Какой именно
     /// паспорт (у шкафа их может быть несколько) — решает SearchView, спросив оператора.</summary>
     public event EventHandler? PrintPassportRequested;
@@ -499,6 +502,10 @@ public partial class FirmwareCard : UserControl
         if (!flags.HasInstructionDocx && !flags.HasInstructionPrintable)
             AddMenuItem("Открыть инструкцию", () => InstructionsRequested?.Invoke(this, EventArgs.Empty),
                 "Открывается самый свежий файл инструкции");
+        // Этикетка с QR — здесь же, у остальных действий с инструкцией: QR ведёт ровно на тот
+        // документ, который открывают пункты выше.
+        AddMenuItem("QR и этикетка", () => InstructionLabelRequested?.Invoke(this, EventArgs.Empty),
+            "Наклейка со ссылкой на инструкцию — наладчик открывает её телефоном у шкафа");
     }
 
     // ── Статус локальной копии ────────────────────────────────────────────

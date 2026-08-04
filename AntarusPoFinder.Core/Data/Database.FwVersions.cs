@@ -90,6 +90,35 @@ public partial class Database
         });
     }
 
+    /// <summary>Файл прошивки переименовали прямо на диске (разовая операция «Перестроить структуру
+    /// диска», см. DiskLayoutMigrator) — поправить все записи, которые на него ссылались. Записей
+    /// может быть несколько: конфигурации одного шкафа делят одну папку версии.
+    ///
+    /// <c>executable_hint</c> правится ТОЛЬКО там, где он указывал ровно на старое имя: подсказка
+    /// может указывать на другой файл в той же папке, и переписывать её вслепую значило бы менять
+    /// выбор оператора «чем открывать».</summary>
+    /// <returns>Сколько строк затронуто — для журнала миграции.</returns>
+    public int RenameFirmwareFileRecords(string diskPath, string oldName, string newName)
+    {
+        var affected = ExecuteNonQuery(
+            "UPDATE fw_versions SET filename=@new WHERE disk_path=@dir AND filename=@old",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@new", newName);
+                cmd.Parameters.AddWithValue("@dir", diskPath);
+                cmd.Parameters.AddWithValue("@old", oldName);
+            });
+        affected += ExecuteNonQuery(
+            "UPDATE fw_versions SET executable_hint=@new WHERE disk_path=@dir AND executable_hint=@old",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@new", newName);
+                cmd.Parameters.AddWithValue("@dir", diskPath);
+                cmd.Parameters.AddWithValue("@old", oldName);
+            });
+        return affected;
+    }
+
     /// <summary>Пути доп. файлов (Карта ВВ / Инструкция / Карта modbus / HMI) — отдельным методом от
     /// UpdateFwVersion, т.к. меняются другим сценарием: «доложить файлы к уже загруженной прошивке»
     /// (см. FirmwareAttachmentsService), а не правкой описания/тегов. null — «не трогать поле»,

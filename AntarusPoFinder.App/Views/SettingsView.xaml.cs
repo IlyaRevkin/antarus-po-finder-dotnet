@@ -191,8 +191,19 @@ public partial class SettingsView : UserControl
     private Button[] AllTabButtons() => new[]
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
-        TabBtnTags, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnUsers,
+        TabBtnTags, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
     };
+
+    /// <summary>Колесо мыши над полосой вкладок крутит саму полосу. В минимальном размере окна
+    /// вкладки в строку не влезают, а горизонтальный скроллбар мышью с колесом не связан вовсе —
+    /// без этого до крайних вкладок было не добраться (жалоба «не все вкладки видны и их не
+    /// проскроллить»). Перехват на Preview: до того, как событие уйдёт наверх в MainScrollViewer и
+    /// прокрутит страницу вместо полосы.</summary>
+    private void TabBar_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        TabBarScroll.ScrollToHorizontalOffset(TabBarScroll.HorizontalOffset - e.Delta);
+        e.Handled = true;
+    }
 
     private void Tab_Click(object sender, RoutedEventArgs e)
     {
@@ -210,9 +221,11 @@ public partial class SettingsView : UserControl
         UsersTab.Visibility = Visibility.Collapsed;
         LoaderTab.Visibility = Visibility.Collapsed;
         ConnectionTab.Visibility = Visibility.Collapsed;
+        PrintingTab.Visibility = Visibility.Collapsed;
 
         if (sender == TabBtnLoader) { LoaderTab.Visibility = Visibility.Visible; LoadLoaderTab(); }
         else if (sender == TabBtnConnection) { ConnectionTab.Visibility = Visibility.Visible; LoadConnectionTab(); }
+        else if (sender == TabBtnPrinting) { PrintingTab.Visibility = Visibility.Visible; LoadPrintingTab(); }
         else if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnHierarchy) HierarchyTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnFirmware) FirmwareTab.Visibility = Visibility.Visible;
@@ -257,6 +270,14 @@ public partial class SettingsView : UserControl
         // машины, а не личная настройка того, кто сейчас за ней сидит.
         TabBtnLoader.Visibility = Visibility.Visible;
         TabBtnConnection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+
+        // «Печать» видят все — этикетку и наклейки печатает наладчик. Но внутри вкладки общие
+        // настройки (адрес диска инструкций, размер этикетки, папка наклеек) уезжают по сети на все
+        // машины, поэтому редактировать их может только администратор; выбор принтера и сами кнопки
+        // печати остаются всем.
+        TabBtnPrinting.Visibility = Visibility.Visible;
+        PrintingSharedSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        StickersFolderSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
 
         var allTabs = AllTabButtons();
         var activeTab = allTabs.FirstOrDefault(b => (string?)b.Tag == "Active");
@@ -505,20 +526,8 @@ public partial class SettingsView : UserControl
         AdminPwdInput.Password = "";
         ProgPwdInput.Password = "";
 
-        AdDomainInput.Text = _services.Cfg.Get("ad_domain");
-        AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
-        AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
-        AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
-        AdHttpUrlInput.Text = _services.Cfg.AdHttpUrl();
-        (_services.Cfg.AdAuthMode() switch
-        {
-            "http" => AdModeHttpRadio,
-            "both" => AdModeBothRadio,
-            _ => AdModeLdapRadio,
-        }).IsChecked = true;
-
-        AdRequireLoginCheck.IsChecked = _services.Cfg.AdRequireLogin();
-        AdRequireLoginDaysInput.Text = _services.Cfg.AdRequireLoginDefaultDays().ToString();
+        // Поля AD (домен, группы, адрес веб-проверки, «требовать вход», срок) заполняются не здесь, а
+        // в LoadConnectionTab — они переехали на вкладку «Подключение».
 
         KeepArchivesCheck.IsChecked = _services.Cfg.KeepArchives();
 
@@ -1113,6 +1122,17 @@ public partial class SettingsView : UserControl
             var mode = _services.Cfg.AdAuthMode();
             AuthKindCombo.SelectedItem = AuthKindCombo.Items.Cast<AuthOption>().First(o => o.Value == mode);
 
+            // Поля AD переехали сюда из «Общих» вместе со всей темой входа — заполняются там же, где
+            // и способ входа, под тем же флагом «идёт заполнение» (иначе LostFocus/Checked при
+            // подстановке значений тут же посчитали бы их правкой оператора).
+            AdDomainInput.Text = _services.Cfg.Get("ad_domain");
+            AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
+            AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
+            AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
+            AdHttpUrlInput.Text = _services.Cfg.AdHttpUrl();
+            AdRequireLoginCheck.IsChecked = _services.Cfg.AdRequireLogin();
+            AdRequireLoginDaysInput.Text = _services.Cfg.AdRequireLoginDefaultDays().ToString();
+
             OidcAuthorityInput.Text = _services.Cfg.OidcAuthority();
             OidcClientIdInput.Text = _services.Cfg.OidcClientId();
             OidcGroupsClaimInput.Text = _services.Cfg.OidcGroupsClaim();
@@ -1144,6 +1164,9 @@ public partial class SettingsView : UserControl
     {
         var oidc = (AuthKindCombo.SelectedItem as AuthOption)?.Value == "oidc";
         OidcSection.Opacity = oidc ? 1.0 : 0.6;
+        // Домен и группы при корпоративном входе не используются (роль считается по claim из токена),
+        // но и там остаются заполнимыми — приглушаем так же, как SSO при доменном входе.
+        AdSection.Opacity = oidc ? 0.6 : 1.0;
         var server = (TransportCombo.SelectedItem as TransportOption)?.Value == "server";
         ServerSection.Opacity = server ? 1.0 : 0.6;
     }
@@ -1267,6 +1290,204 @@ public partial class SettingsView : UserControl
         ServerCheckResultText.Text = "Проверяем сервер…";
         var result = await ServerEndpointCheck.CheckAsync(url);
         ServerCheckResultText.Text = result.Message;
+    }
+
+    // ── Вкладка «Печать» ──────────────────────────────────────────────────────
+    // Этикетка с QR на инструкцию + папка с шаблонами наклеек. Разделение настроек здесь важнее
+    // обычного: адрес диска инструкций, размер этикетки и папка наклеек — ОБЩИЕ (уезжают на все
+    // машины с конфигом, задаёт администратор), а имя принтера — своё у каждой машины
+    // (ConfigSyncService.SkipSettingsKeys). Поэтому поля общих настроек скрыты от наладчика с
+    // программистом, а выбор принтера и сама печать доступны всем — печатает как раз наладчик.
+
+    private bool _printingTabFilling;
+
+    /// <summary>Подпись пустого выбора в списке принтеров. Не имя принтера — печать на «принтер
+    /// Windows по умолчанию», то есть в настройках хранится пустая строка.</summary>
+    private const string DefaultPrinterCaption = "Принтер по умолчанию";
+
+    private void LoadPrintingTab()
+    {
+        _printingTabFilling = true;
+        try
+        {
+            InstructionBaseUrlInput.Text = _services.Cfg.InstructionBaseUrl();
+            LabelWidthInput.Text = _services.Cfg.LabelWidthMm().ToString("0.##", CultureInfo.CurrentCulture);
+            LabelHeightInput.Text = _services.Cfg.LabelHeightMm().ToString("0.##", CultureInfo.CurrentCulture);
+
+            // Список принтеров перечитывается на каждый заход: принтер могли добавить, пока
+            // программа открыта. Сохранённое имя добавляем в список, даже если такого принтера
+            // сейчас нет (сеть/принтер отвалились) — иначе выбор молча сбросился бы на «по умолчанию».
+            var saved = _services.Cfg.LabelPrinter();
+            var names = new List<string> { DefaultPrinterCaption };
+            names.AddRange(LabelPrinter.InstalledPrinters().OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase));
+            if (saved.Length > 0 && !names.Contains(saved, StringComparer.OrdinalIgnoreCase))
+                names.Add(saved);
+            LabelPrinterCombo.ItemsSource = names;
+            LabelPrinterCombo.SelectedItem = saved.Length == 0
+                ? DefaultPrinterCaption
+                : names.FirstOrDefault(n => n.Equals(saved, StringComparison.OrdinalIgnoreCase)) ?? DefaultPrinterCaption;
+
+            StickersFolderInput.Text = _services.Cfg.StickersFolder();
+            ShowStickersFolderStatus();
+        }
+        finally
+        {
+            _printingTabFilling = false;
+        }
+    }
+
+    /// <summary>Куда программа будет смотреть за наклейками с текущими настройками — то же
+    /// вычисление, что и в самом окне наклеек, чтобы «настроил одно, открылось другое» было
+    /// невозможно.</summary>
+    private void ShowStickersFolderStatus()
+    {
+        var folder = StickerTemplates.FolderFor(_services.Cfg.RootPath(), _services.Cfg.StickersFolder());
+        if (folder is null)
+        {
+            StickersFolderStatus.Text = "Сетевой диск не настроен — папку наклеек взять неоткуда.";
+            return;
+        }
+        var count = StickerTemplates.List(folder).Count;
+        StickersFolderStatus.Text = count > 0
+            ? $"{folder} — шаблонов: {count}"
+            : $"{folder} — пусто или недоступно.";
+    }
+
+    private void PrintingField_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (sender == InstructionBaseUrlInput) InstructionBaseUrl_LostFocus(sender, e);
+        else if (sender == LabelWidthInput || sender == LabelHeightInput) LabelSize_LostFocus(sender, e);
+        else if (sender == StickersFolderInput) StickersFolder_LostFocus(sender, e);
+    }
+
+    private void InstructionBaseUrl_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var url = InstructionBaseUrlInput.Text.Trim().TrimEnd('/');
+        if (url == _services.Cfg.InstructionBaseUrl()) return;
+
+        _services.Cfg.SetInstructionBaseUrl(url);
+        _host.ShowStatus(url.Length == 0
+            ? "Веб-адрес диска инструкций очищен — в QR пойдёт сетевой путь"
+            : $"Веб-адрес диска инструкций сохранён: {url}");
+    }
+
+    /// <summary>Проверка ссылки — ровно то, чего не хватает при настройке: собранный адрес открывается
+    /// или нет. Спрашивается САМ базовый адрес (что за ним лежит конкретный файл — уже видно в окне
+    /// этикетки): промахнуться можно в схеме, хосте или корне, а не в хвосте.</summary>
+    private async void CheckInstructionUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = InstructionBaseUrlInput.Text.Trim().TrimEnd('/');
+        if (url.Length == 0)
+        {
+            InstructionUrlCheckText.Text = "Адрес не задан — в QR уйдёт сетевой путь к файлу.";
+            return;
+        }
+
+        InstructionUrlCheckText.Text = "Спрашиваем сервер…";
+        var result = await UrlReachabilityCheck.CheckAsync(url);
+        InstructionUrlCheckText.Text = result.Message;
+    }
+
+    private void LabelSize_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+
+        var width = ParseMm(LabelWidthInput);
+        var height = ParseMm(LabelHeightInput);
+        if (width is null || height is null)
+        {
+            _host.ShowStatus("Размер этикетки: нужны миллиметры больше нуля (например 97,5 × 72)");
+            LoadPrintingTab();
+            return;
+        }
+
+        var changed = false;
+        if (Math.Abs(width.Value - _services.Cfg.LabelWidthMm()) > 0.001)
+        {
+            _services.Cfg.SetLabelWidthMm(width.Value);
+            changed = true;
+        }
+        if (Math.Abs(height.Value - _services.Cfg.LabelHeightMm()) > 0.001)
+        {
+            _services.Cfg.SetLabelHeightMm(height.Value);
+            changed = true;
+        }
+        if (changed)
+            _host.ShowStatus($"Размер этикетки: {width.Value:0.##} × {height.Value:0.##} мм");
+    }
+
+    /// <summary>Размер вводят и «97,5», и «97.5» — принимаем оба независимо от локали машины
+    /// (хранится он всегда через точку, см. ConfigService).</summary>
+    private static double? ParseMm(TextBox box)
+    {
+        var raw = box.Text.Trim().Replace(',', '.');
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null;
+    }
+
+    private void LabelPrinter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var name = LabelPrinterCombo.SelectedItem as string ?? DefaultPrinterCaption;
+        var value = name == DefaultPrinterCaption ? "" : name;
+        if (value == _services.Cfg.LabelPrinter()) return;
+
+        _services.Cfg.SetLabelPrinter(value);
+        _host.ShowStatus(value.Length == 0 ? "Этикетки печатаются на принтер Windows по умолчанию" : $"Принтер этикеток: {value}");
+    }
+
+    /// <summary>Образец этикетки того же размера и тем же кодом, что и настоящая (LabelPrinter.
+    /// BuildLabel) — иначе проверка полей ничего не проверяет.</summary>
+    private void TestPrintLabel_Click(object sender, RoutedEventArgs e)
+    {
+        var label = LabelPrinter.BuildLabel(_services.Cfg.LabelWidthMm(), _services.Cfg.LabelHeightMm(),
+            LabelPrinter.MakeQr("https://example.org/проверка"), "Пробная этикетка",
+            $"{_services.Cfg.LabelWidthMm():0.##} × {_services.Cfg.LabelHeightMm():0.##} мм",
+            "Если рамка обрезана — поправьте размер в настройках или поля в драйвере принтера.");
+        var outcome = LabelPrinter.Print(label, _services.Cfg.LabelPrinter(), "Пробная этикетка");
+        _host.ShowStatus(outcome.Message);
+        if (!outcome.Ok)
+            AppMessageBox.Show(outcome.Message, "Пробная печать", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private void StickersFolder_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var path = StickersFolderInput.Text.Trim();
+        if (string.Equals(path, _services.Cfg.StickersFolder(), StringComparison.OrdinalIgnoreCase)) return;
+
+        _services.Cfg.SetStickersFolder(path);
+        ShowStickersFolderStatus();
+        _host.ShowStatus(path.Length == 0 ? "Наклейки берутся из Конфиг\\Наклейки на общем диске" : $"Папка наклеек: {path}");
+    }
+
+    private void BrowseStickersFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с шаблонами наклеек" };
+        if (dlg.ShowDialog() != true) return;
+
+        StickersFolderInput.Text = dlg.FolderName;
+        StickersFolder_LostFocus(sender, e);
+    }
+
+    private void OpenStickers_Click(object sender, RoutedEventArgs e) =>
+        StickersWindow.ShowFor(Window.GetWindow(this), _services, _host);
+
+    private void OpenStickersFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = StickerTemplates.FolderFor(_services.Cfg.RootPath(), _services.Cfg.StickersFolder());
+        if (folder is null)
+        {
+            AppMessageBox.Show("Сетевой диск не настроен — открывать нечего.", "Наклейки",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        // Папку создаём по требованию: пока в неё ничего не положили, её на диске может и не быть, а
+        // «открыть папку» должно открывать папку, а не ошибку проводника.
+        try { Directory.CreateDirectory(folder); } catch (Exception) { /* сеть недоступна — покажем как есть */ }
+        PrintableDocActions.Open(folder);
+        ShowStickersFolderStatus();
     }
 
     /// <summary>Опрашивает ОБА источника (папка и GitHub) и показывает всё сразу: что нашлось в
@@ -1444,7 +1665,8 @@ public partial class SettingsView : UserControl
     /// наладчика/программиста (см. ApplyRoleVisibility).</summary>
     private void SaveAdSettings()
     {
-        if (_loadingGeneral) return;
+        // Флаг вкладки «Подключение», а не «Общих»: блок AD живёт теперь там и заполняется оттуда.
+        if (_connectionTabFilling) return;
 
         var changed = new List<string>();
         void SaveKey(string key, string value, string label)
@@ -1466,12 +1688,8 @@ public partial class SettingsView : UserControl
             changed.Add("URL веб-сервера");
         }
 
-        var mode = AdModeHttpRadio.IsChecked == true ? "http" : AdModeBothRadio.IsChecked == true ? "both" : "ldap";
-        if (mode != _services.Cfg.AdAuthMode())
-        {
-            _services.Cfg.SetAdAuthMode(mode);
-            changed.Add("способ проверки пароля");
-        }
+        // Способ проверки пароля здесь больше не сохраняется: он задаётся комбобоксом «Чем
+        // подтверждаем личность» на этой же вкладке (AuthKind_Changed) — один ключ, одно место.
 
         var requireLogin = AdRequireLoginCheck.IsChecked == true;
         if (requireLogin != _services.Cfg.AdRequireLogin())
@@ -1497,7 +1715,7 @@ public partial class SettingsView : UserControl
     /// Сохраняется само, по уходу фокуса и по Enter (кнопки «Сохранить» больше нет).</summary>
     private void SaveAdRequireLoginDays()
     {
-        if (_loadingGeneral) return;
+        if (_connectionTabFilling) return;
         var edit = SettingsAutoSave.ParseNumber(AdRequireLoginDaysInput.Text, _services.Cfg.AdRequireLoginDefaultDays(), min: 1,
             "Срок повторного входа по AD: нужно целое число дней больше нуля");
         if (edit.Invalid)
@@ -2271,6 +2489,18 @@ public partial class SettingsView : UserControl
         _host.ShowStatus($"Структура обновлена: {result.CreatedCount} папок", category: NotificationCategory.Sync);
     }
 
+    /// <summary>Разовая перестройка уже накопленного диска (DiskMigrationDialog). Отдельно от
+    /// «Пересоздать структуру диска» выше: та только СОЗДАЁТ недостающие папки и ничего не двигает,
+    /// а эта переименовывает файлы и переносит инструкции — то есть меняет то, что уже лежит.
+    /// Список версий окно берёт из БД само; после закрытия перечитываем вкладку «Прошивки», потому
+    /// что имена файлов у записей могли поменяться.</summary>
+    private void DiskMigration_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new DiskMigrationDialog(_services, _host) { Owner = Window.GetWindow(this) };
+        dlg.ShowDialog();
+        LoadFirmwareTab();
+    }
+
     private async void SyncFwFromDisk_Click(object sender, RoutedEventArgs e)
     {
         var root = _services.Cfg.RootPath();
@@ -2509,9 +2739,50 @@ public partial class SettingsView : UserControl
         return row.Record;
     }
 
+    /// <summary>Двойной клик ОТКРЫВАЕТ файл прошивки — как двойной клик по строке в «Параметрах
+    /// ПЧ/УПП» открывает файл параметров. Раньше он открывал окно модерации, и это расходилось и с
+    /// проводником, и с соседней страницей приложения: «двойной клик = открыть то, на что смотрю».
+    /// Модерация осталась кнопкой «Редактировать» рядом с таблицей.</summary>
     private void FwGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (DataGridClickGuard.IsOverDataRow(e)) EditFirmware_Click(sender, e);
+        if (DataGridClickGuard.IsOverDataRow(e)) OpenSelectedFirmwareFile();
+    }
+
+    private void OpenFirmwareFile_Click(object sender, RoutedEventArgs e) => OpenSelectedFirmwareFile();
+
+    /// <summary>Тот же выбор файла, что и у кнопки «Открыть прошивку ПЛК» на карточке поиска
+    /// (PlcOpenResolver): уважает подсказку «чем открывать», предпочитает .psl у проектов Segnetics и
+    /// не подсовывает файл панели вместо программы ПЛК. Папку версии на диске ищем через
+    /// FirmwareDiskPresence — записанный disk_path мог устареть после переименования папки.
+    /// Открывать нечего — показываем хотя бы папку, это полезнее сообщения «не найдено».</summary>
+    private void OpenSelectedFirmwareFile()
+    {
+        // «Выберите прошивку в таблице» показывает сам GetSelectedFwVersion — второго такого же
+        // сообщения здесь быть не должно.
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+
+        var dir = FirmwareDiskPresence.ResolveVersionDir(v.DiskPath, v.VersionRaw);
+        if (string.IsNullOrEmpty(dir))
+        {
+            AppMessageBox.Show($"Папка версии на диске не найдена:\n{v.DiskPath}", "Прошивки",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var folders = new[] { dir };
+        var target = PlcOpenResolver.Resolve(new PlcOpenSources
+        {
+            CandidateFolders = folders,
+            VersionFolders = folders,
+            FilteredFolders = folders,
+            ExecutableHint = v.ExecutableHint,
+            NetworkFolder = dir,
+        }) ?? dir;
+
+        PrintableDocActions.Open(target);
+        _host.ShowStatus($"Открыто: {Path.GetFileName(target.TrimEnd(Path.DirectorySeparatorChar))}",
+            category: NotificationCategory.FirmwareAndParams);
     }
 
     private void FwGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateFirmwareActionState();

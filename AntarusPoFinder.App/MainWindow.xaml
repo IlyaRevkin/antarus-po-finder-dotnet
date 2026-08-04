@@ -323,6 +323,14 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <!-- Наклейки — окно, а не страница: это папка с готовыми шаблонами на
+                                 печать («Проверено ОТК», «Проверьте перед подключением»), и ради
+                                 такой мелочи отдельный раздел в основном меню занимал бы место
+                                 наравне с Поиском. Здесь её несложно найти, а сама папка настраивается
+                                 в Настройки → Печать. Видна всем ролям — печатает наладчик. -->
+                            <Button x:Name="StickersNavButton" Content="Наклейки" Style="{StaticResource CompactNavButton}"
+                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="Stickers_Click"
+                                    ToolTip="Шаблоны наклеек из общей папки — открыть или напечатать"/>
 
                             <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Grid Margin="0,2,0,0">

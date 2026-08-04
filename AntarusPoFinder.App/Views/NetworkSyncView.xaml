@@ -4,7 +4,9 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="24" MaxWidth="760" HorizontalAlignment="Left">
             <TextBlock Text="Сетевые диски и синхронизация" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
-            <TextBlock Text="Эти настройки — про то, где лежат файлы и как часто общий конфиг (справочник оборудования, теги, резервы номеров) обновляется на этом компьютере. Доступны всем ролям, так как каждый настраивает свой компьютер сам."
+            <!-- Пояснения здесь нарочно короткие: подробности — в ToolTip у самого поля, а не
+                 абзацем над ним. Страница настроек не должна читаться как инструкция. -->
+            <TextBlock Text="Где лежат файлы и как обновляется общий справочник. Настраивается на каждом компьютере отдельно."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,20"/>
 
             <!-- Кнопок «Сохранить» здесь больше нет: путь сохраняется сам — сразу после выбора в
@@ -37,7 +39,7 @@
             </Grid>
 
             <TextBlock Text="ТРЕТИЙ ДИСК (ИНСТРУКЦИИ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-            <TextBlock Text="Необязательный отдельный диск только под инструкции: они самые тяжёлые и нужны в том числе с телефона. Структура папок на нём такая же, как на первом диске, — программа считает путь сама. Пусто или диск недоступен — инструкции лежат на первом, как раньше."
+            <TextBlock Text="Необязательный. Пусто или недоступен — инструкции остаются на первом диске."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
             <Grid Margin="0,0,0,6">
                 <Grid.ColumnDefinitions>
@@ -46,7 +48,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBox Grid.Column="0" x:Name="ThirdDiskInput" Height="34" Margin="0,0,8,0"
                          LostFocus="ThirdDisk_LostFocus" KeyDown="ThirdDisk_KeyDown"
-                         ToolTip="Диск только под инструкции. Папки на нём повторяют первый диск, вручную ничего раскладывать не нужно."/>
+                         ToolTip="Отдельный диск только под инструкции: они самые тяжёлые и нужны в том числе с телефона. Структура папок повторяет первый диск — программа считает путь сама, вручную ничего раскладывать не нужно."/>
                 <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseThirdDisk_Click"
                         ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
@@ -84,14 +86,13 @@
                          делал ровно ту же дешёвую проверку, просто реже и без выигрыша — поле убрано
                          из интерфейса, сама настройка (и таймер, который её ещё уважает) в коде
                          осталась нетронутой на случай отладки. -->
-                    <TextBlock Text="Справочник оборудования, теги и резервы номеров, изменённые кем-то другим на общем диске, подтягиваются на этот компьютер автоматически — как только на диске появляется новая версия, без подтверждения вручную."
+                    <TextBlock Text="Справочник, теги и резервы номеров подтягиваются с диска сами, как только там появляется новая версия."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal">
-                        <Button x:Name="SyncNowButton" Content="Синхронизировать сейчас" Style="{StaticResource SecondaryButton}" Click="SyncNow_Click" Margin="0,0,12,0"/>
+                        <Button x:Name="SyncNowButton" Content="Синхронизировать сейчас" Style="{StaticResource SecondaryButton}" Click="SyncNow_Click" Margin="0,0,12,0"
+                                ToolTip="Подстраховка на случай, если диск на минуту отвалился: автоматика и так проверяет обновления регулярно."/>
                         <TextBlock x:Name="LastSyncText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="Ручная кнопка выше — подстраховка на случай, если диск на минуту отвалился: автоматика и так проверяет обновления регулярно."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,4,0,0"/>
                     <TextBlock x:Name="LastCheckText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,4,0,0"
                                ToolTip="Обновляется на каждой фоновой проверке, даже если изменений на диске не нашлось — если эта отметка не сдвигается, фоновая проверка не запускается вовсе; если сдвигается, а «Последняя синхронизация» выше — нет, изменений на диске просто не найдено."/>
                     <TextBlock x:Name="RevisionText" Text="" Style="{StaticResource MutedText}" FontStyle="Italic" Margin="0,2,0,0"
@@ -107,9 +108,8 @@
                          статус-строку, ЧТО именно синхронизировалось. Индикатор синхры (пилюля в
                          статус-строке) работает всегда, независимо от этого переключателя. -->
                     <CheckBox x:Name="SyncVerboseCheck" Margin="0,14,0,0" Click="SyncVerbose_Click"
-                              Content="Подробный режим синхронизации (писать в статус-строку, что синхронизируется)"/>
-                    <TextBlock Text="Индикатор синхронизации в правом нижнем углу показывает состояние всегда: крутящиеся стрелки — идёт синхра, оранжевый знак — ошибка, стрелки цветом — есть неотправленное (правки, теги, тикеты)."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,4,0,0"/>
+                              Content="Подробный режим синхронизации (писать в статус-строку, что синхронизируется)"
+                              ToolTip="Индикатор синхронизации в правом нижнем углу работает всегда, независимо от этого переключателя: крутящиеся стрелки — идёт синхра, оранжевый знак — ошибка, стрелки цветом — есть неотправленное."/>
                 </StackPanel>
             </Border>
 
@@ -123,17 +123,15 @@
                          диск сразу же, само по себе (см. MainWindowViewModel.PushCatalogChange) — этот
                          интервал только подстраховка на случай, если тот немедленный пуш не удался
                          (диск был недоступен в момент правки): периодически досылает накопленное. -->
-                    <TextBlock Text="Изменения справочника (иерархия, теги, резервы) отправляются на общий диск сразу же, как только их сделали. Интервал ниже — не основной механизм, а подстраховка: если в момент правки диск был недоступен, накопленные изменения досылаются повторно с этим интервалом."
+                    <TextBlock Text="Правки справочника уходят на диск сразу. Интервал ниже — только подстраховка: досылает то, что не ушло, пока диск был недоступен."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Каждые" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="PushIntervalInput" Width="64" Height="34" Margin="0,0,8,0"
                                  LostFocus="PushInterval_LostFocus" KeyDown="PushInterval_KeyDown"
-                                 ToolTip="Целое число минут, 0 — автоотправка выключена. Сохраняется по уходу из поля или по Enter."/>
+                                 ToolTip="Целое число минут, 0 — подстраховочная автоотправка отключена (кнопка «Отправить сейчас» всё равно работает). Сохраняется по уходу из поля или по Enter."/>
                         <TextBlock Text="минут" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="0 — подстраховочная автоотправка отключена (ручная кнопка «Отправить сейчас» ниже всё равно работает)."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" FontStyle="Italic" Margin="0,0,0,10"/>
                     <StackPanel Orientation="Horizontal">
                         <Button Content="Отправить сейчас" Style="{StaticResource SecondaryButton}" Click="PushNow_Click" Margin="0,0,12,0"/>
                         <TextBlock x:Name="LastPushText" Text="" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>

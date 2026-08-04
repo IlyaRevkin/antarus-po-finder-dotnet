@@ -124,16 +124,26 @@ public static class FirmwareNaming
     /// </summary>
     public static string BuildFirmwareFilename(FwVersionNumber version, string ext, string requestNum = "", string cabinetSn = "")
     {
-        var name = version.NumberPart;
+        // Основа имени — ПОЛНАЯ строка версии (version.Raw), то есть ровно имя папки версии, а не
+        // номер без даты. Раньше дата дописывалась отдельно и через подчёркивание («…0003_20260101_1200»),
+        // из-за чего имя файла и имя папки различались одним символом — сравнить их глазами на диске
+        // было невозможно. Теперь «папка = файл», и по имени файла, вырванного из контекста, видно,
+        // какой версии он принадлежит (docs/hierarchy-rework-plan.md, этап 1a).
+        //
+        // ToUpperInvariant тоже убран: он делал имя непохожим на имя папки. Само расширение,
+        // наоборот, приводится к НИЖНЕМУ регистру — «.PSL» у одного файла и «.psl» у соседнего
+        // означают одно и то же, и без этого «каноническое имя» зависело бы от того, как файл
+        // назвали в SMLogix. Уже лежащие на диске файлы приводит к этому же виду разовая операция
+        // «Перестроить структуру диска» (DiskLayoutMigrator) — переименование делается только там,
+        // где в папке версии ровно один файл, иначе можно осиротить executable_hint у коллег.
+        var name = version.Raw;
         if (!string.IsNullOrEmpty(requestNum))
             name += $"_({requestNum})";
         if (!string.IsNullOrEmpty(cabinetSn))
             name += $"_SN{cabinetSn}";
-        if (!string.IsNullOrEmpty(version.DtStr))
-            name += $"_{version.DtStr}";
         if (!string.IsNullOrEmpty(ext) && !ext.StartsWith('.'))
             ext = "." + ext;
-        return (name + ext).ToUpperInvariant();
+        return name + ext.ToLowerInvariant();
     }
 
     /// <summary>Обратная операция к BuildFirmwareFilename для двух ОПЦ-меток: «_(01312)» → номер

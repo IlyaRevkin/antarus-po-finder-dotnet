@@ -1,0 +1,59 @@
+<Window x:Class="AntarusPoFinder.App.Views.DiskMigrationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Перестроить структуру диска"
+        Width="900" Height="620" MinWidth="640" MinHeight="480"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="Приводит уже накопленный диск к текущим правилам: имя файла прошивки = имя папки версии, инструкции — на диск инструкций. Сначала посмотрите план, выполнение — отдельной кнопкой."/>
+
+        <StackPanel Grid.Row="1" Margin="0,0,0,10">
+            <CheckBox x:Name="RenameCheck" IsChecked="True" Margin="0,0,0,4"
+                      Content="Переименовать файлы прошивок в каноническое имя"
+                      ToolTip="Переименовываются только папки версий, где лежит ровно один файл: в многофайловой папке имя файла привязано к подсказке «чем открывать», и у коллег она не обновится."/>
+            <CheckBox x:Name="InstructionsCheck" Margin="0,0,0,4"
+                      Content="Перенести инструкции на диск инструкций (третий диск)"
+                      ToolTip="Файлы из папок «Инструкция» переезжают в зеркальные папки третьего диска. Пути в базе указывают на первый диск и не меняются — программа считает зеркало сама."/>
+            <CheckBox x:Name="FoldersCheck" IsChecked="True"
+                      Content="Создать недостающие папки структуры (Инструкция, Карта ВВ, Карта Modbus, HMI, ОПЦ, Паспорт)"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="PlanButton" Content="Показать план" Width="150" Margin="0,0,8,0" Click="Plan_Click"/>
+            <Button x:Name="RunButton" Content="Выполнить" Width="130" Margin="0,0,8,0" IsEnabled="False" Click="Run_Click"/>
+            <Button Content="Сохранить план в файл" Style="{StaticResource SecondaryButton}" Click="SavePlan_Click"/>
+        </StackPanel>
+
+        <DataGrid Grid.Row="3" x:Name="OpsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                  Style="{StaticResource RoomyDataGrid}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Что" Binding="{Binding KindLabel}" Width="Auto" MinWidth="170"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Подробности" Binding="{Binding Note}" Width="*" MinWidth="220"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Где" Binding="{Binding Source}" Width="2*" MinWidth="220"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Итог" Binding="{Binding StatusLabel}" Width="Auto" MinWidth="90"
+                                    ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Grid.Row="4" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,10,0,10"/>
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="110" IsCancel="True" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
