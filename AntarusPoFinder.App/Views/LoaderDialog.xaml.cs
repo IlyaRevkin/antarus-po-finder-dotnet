@@ -368,6 +368,8 @@ public partial class LoaderDialog : Window
 
         if (running)
         {
+            // Итог прошлой попытки больше не про текущую: и кнопку повтора, и подсказку убираем.
+            HideRetry();
             StartOperationElapsedTimer();
             Progress.IsIndeterminate = false;
             Progress.Value = 0;
@@ -401,13 +403,38 @@ public partial class LoaderDialog : Window
     }
 
     /// <summary>Провал показывается сразу с раскрытым журналом: разбираться без него всё равно
-    /// невозможно, а лишний клик по «Подробности» в этот момент — издевательство.</summary>
+    /// невозможно, а лишний клик по «Подробности» в этот момент — издевательство. Вместе с журналом
+    /// появляются «Повторить попытку» внизу и подсказка, что проверить руками.</summary>
     private void ShowFailedState(string stage)
     {
         Progress.IsIndeterminate = false;
         PercentLabel.Text = "";
         StageLabel.Text = stage;
         DetailsExpander.IsExpanded = true;
+        ShowRetry();
+    }
+
+    /// <summary>Кнопка повтора и подсказка по обвязке. Подсказка — не украшение: отказ Loader чаще
+    /// оказывался не программным, а в том, что к ПЛК разом подключены несколько шнурков (панель,
+    /// модем, USB) и Automation цепляется не за тот интерфейс — после снятия питания и повторного
+    /// запуска с одним USB та же прошивка уходила нормально. Для сборки LFS её не показываем:
+    /// контроллер там не участвует вовсе.</summary>
+    private void ShowRetry()
+    {
+        RetryBtn.Visibility = _backend.IsAvailable ? Visibility.Visible : Visibility.Collapsed;
+        if (_isBuild) return;
+        FailureHintLabel.Text =
+            "Если Loader не увидел ПЛК: оставьте подключённым только шнур загрузки — панель, модем и " +
+            "прочие кабели на время заливки лучше отсоединить, — снимите и подайте питание на " +
+            "контроллер и повторите. Режим подключения (USB/Ethernet, адрес, адаптер) проверяется в " +
+            "«Настройки → Лоадер».";
+        FailureHintBox.Visibility = Visibility.Visible;
+    }
+
+    private void HideRetry()
+    {
+        RetryBtn.Visibility = Visibility.Collapsed;
+        FailureHintBox.Visibility = Visibility.Collapsed;
     }
 
     private void FinishWithError(string message)

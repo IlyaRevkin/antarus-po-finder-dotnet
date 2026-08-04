@@ -121,30 +121,30 @@ public partial class EditFirmwareDialog : Window
         }
         RefreshExecutableTexts();
 
-        // Все диалоги модерации открываются в папке версии НА СЕРВЕРЕ (см. ServerStartDirectory):
-        // модератор выбирает инструкцию, карты и файл панели из того, что лежит рядом с прошивкой, а
-        // системный диалог по умолчанию возвращал последнюю локальную папку этой машины.
+        // Все диалоги модерации открываются на СЕРВЕРЕ, но каждый — в СВОЕЙ папке (см.
+        // SlotStartDirectory): выбирая HMI, модератор попадал в папку прошивки, хотя у версии есть
+        // своя «HMI\», и до неё каждый раз приходилось идти руками.
         _ioMapPicker = new FilePickerRow(p => IoMapInput.Text = p, () => IoMapInput.Text = "", folderDialogTitle: "Выбрать папку",
-            initialDirectory: ServerStartDirectory);
+            initialDirectory: () => SlotStartDirectory(HierarchyFolders.IoMap));
         _instrPicker = new FilePickerRow(p => InstructionsInput.Text = p, () => InstructionsInput.Text = "", folderDialogTitle: "Выбрать папку",
-            initialDirectory: ServerStartDirectory);
+            initialDirectory: () => SlotStartDirectory(HierarchyFolders.Instructions));
         _modbusPicker = new FilePickerRow(p => ModbusMapInput.Text = p, () => ModbusMapInput.Text = "", folderDialogTitle: "Выбрать папку",
-            initialDirectory: ServerStartDirectory);
-        _hmiPicker = new FilePickerRow(p => HmiInput.Text = p, () => HmiInput.Text = "",
+            initialDirectory: () => SlotStartDirectory(HierarchyFolders.Modbus));
+        _hmiPicker = new FilePickerRow(p => { WarnIfHmiSelectionIsDoomed(p); HmiInput.Text = p; }, () => HmiInput.Text = "",
             fileDialogTitle: "Выбрать файл HMI-проекта",
             fileDialogFilter: "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
             folderDialogTitle: "Выбрать папку HMI-проекта",
-            initialDirectory: ServerStartDirectory);
+            initialDirectory: () => SlotStartDirectory(HierarchyFolders.Hmi));
         // Только файл (папку класть в саму папку версии нельзя — она общая для файлов прошивки);
         // фильтр по .lfs/.psl, но с «Все файлы» на случай другого расширения прошивки.
         _plcFilePicker = new FilePickerRow(p => PlcFileInput.Text = p, () => PlcFileInput.Text = "",
             fileDialogTitle: "Выбрать файл прошивки ПЛК",
             fileDialogFilter: "Прошивка ПЛК (*.lfs;*.psl)|*.lfs;*.psl|Все файлы (*.*)|*.*",
-            initialDirectory: ServerStartDirectory);
+            initialDirectory: FirmwareStartDirectory);
         _pslFilePicker = new FilePickerRow(p => PslFileInput.Text = p, () => PslFileInput.Text = "",
             fileDialogTitle: "Выбрать исходник прошивки (.psl)",
             fileDialogFilter: "Исходник Segnetics (*.psl)|*.psl|Все файлы (*.*)|*.*",
-            initialDirectory: ServerStartDirectory);
+            initialDirectory: FirmwareStartDirectory);
 
         // Блок доп. файлов имеет смысл только когда известно, куда их класть: нужны имена группы/
         // подтипа/контроллера (в записи из поиска их нет — доносим из БД) и доступный сетевой диск.
@@ -179,6 +179,38 @@ public partial class EditFirmwareDialog : Window
         if (string.IsNullOrEmpty(_record.DiskPath)) return null;
         return FirmwareDiskPresence.ResolveVersionDir(_record.DiskPath, _record.VersionRaw)
             ?? Path.GetDirectoryName(_record.DiskPath);
+    }
+
+    /// <summary>Выбран проект-папка, который придётся копировать одним файлом — открывать его потом
+    /// будет нечем (см. HmiProjectFormat.SelectionWarning). Не запрет, а предупреждение: модератор
+    /// может знать, что делает, но узнать об этом он должен сейчас, а не от наладчика через неделю.</summary>
+    private static void WarnIfHmiSelectionIsDoomed(string path)
+    {
+        if (HmiProjectFormat.SelectionWarning(path) is { } warning)
+            AppMessageBox.Show(warning, "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    /// <summary>С какой папки открывать диалог КОНКРЕТНОГО вложения. Одной «папки версии» на все поля
+    /// не хватает: у перестроенной версии документы лежат каждый в своей подпапке, и диалог выбора
+    /// HMI открывался в папке прошивки — «указал, что HMI хранится в папке HMI, а открывается папка
+    /// прошивки». Спрашиваем ту же папку, из которой этот документ ЧИТАЕТСЯ (VersionLayout), поэтому у
+    /// не переехавшей версии это по-прежнему общая папка контроллера, а не пустая папка внутри версии.
+    /// Ничего не нашли — прежнее поведение, папка версии.</summary>
+    private string? SlotStartDirectory(string slot)
+    {
+        var versionDir = ServerStartDirectory();
+        if (string.IsNullOrEmpty(versionDir)) return versionDir;
+        return VersionLayout.SlotBestReadFolder(versionDir, VersionLayout.ControllerFolderOf(versionDir), slot)
+               ?? versionDir;
+    }
+
+    /// <summary>То же для файлов самой прошивки: «Прошивка\» у перестроенной версии, папка версии у
+    /// прежней.</summary>
+    private string? FirmwareStartDirectory()
+    {
+        var versionDir = ServerStartDirectory();
+        if (string.IsNullOrEmpty(versionDir)) return versionDir;
+        return VersionLayout.FirmwareFolders(versionDir).FirstOrDefault() ?? versionDir;
     }
 
     /// <summary>Разводит поля файла прошивки по типу проекта. У Segnetics — «Прошивка ПЛК (.lfs)»

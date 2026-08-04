@@ -45,7 +45,11 @@ public static class PlcOpenResolver
     /// <summary>Проекты, где программа ПЛК и панель лежат в ОДНОЙ папке — это не только KINCO: то же
     /// бывает у любого вендора, где панель собирается отдельным файлом рядом с программой.</summary>
     public static readonly string[] PlcExtensions = { ".kpr", ".kpj", ".kpro", ".cpj", ".prj" };
-    public static readonly string[] HmiExtensions = { ".dpj", ".emt", ".emtp", ".emsln" };
+    /// <summary>.fsprj (FStudio) добавлен позже остальных, и его отсутствие здесь стоило дорого: файл
+    /// панели этого формата не опознавался ни автодетектом внутри загруженной папки проекта, ни
+    /// подписью кнопки, хотя выбрать его в модерации фильтр диалога предлагал. Про то, что проект
+    /// этого формата живёт ПАПКОЙ, знает <see cref="HmiProjectFormat"/>.</summary>
+    public static readonly string[] HmiExtensions = { ".dpj", ".emt", ".emtp", ".emsln", ".fsprj" };
 
     /// <summary>Сопроводительные файлы — открывать их вместо проекта бессмысленно.</summary>
     private static readonly string[] DocExtensions = { ".md", ".txt", ".log" };

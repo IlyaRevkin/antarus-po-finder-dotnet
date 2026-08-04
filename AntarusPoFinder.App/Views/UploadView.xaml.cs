@@ -920,6 +920,11 @@ public partial class UploadView : UserControl
 
     private void OnHmiPathPicked(string path)
     {
+        // Ровно тот выбор, из-за которого панель открывалась пустой (см. HmiProjectFormat) — сказать
+        // об этом надо здесь, а не после загрузки: сейчас человек ещё стоит перед папками и может
+        // выбрать правильную.
+        if (HmiProjectFormat.SelectionWarning(path) is { } warning)
+            AppMessageBox.Show(warning, "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
         _hmiPath = path;
         _hmiExecutableHint = Directory.Exists(path) ? PromptExecutableHint(path, HmiExecutableExts, "HMI-проекта") : null;
         HmiPathLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));

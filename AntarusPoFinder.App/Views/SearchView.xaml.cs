@@ -1999,6 +1999,20 @@ public partial class SearchView : UserControl
     {
         if (HmiOpenResolver.Resolve(HmiSources(result)) is { } target)
         {
+            // Проект формата «папка» (.fsprj), загруженный когда-то ОДНИМ файлом: соседние файлы —
+            // модель панели, драйверы — на диск не попали, и FStudio откроет его пустым, ругнувшись
+            // «модель HMI не соответствует текущему программному обеспечению». Само по себе это уже не
+            // случится (см. FirmwareAttachmentsService.CopyHmiProject), но у всех, кто загрузил панель
+            // до этого, такие проекты на диске лежат — и молча открывать их нельзя: человек решит, что
+            // сломан сам проект, а не то, как его положили.
+            if (HmiProjectFormat.LooksStrippedOfCompanions(target)
+                && AppMessageBox.Show(
+                    "Проект панели загружен без сопутствующих файлов: рядом с ним нет ни модели панели, " +
+                    "ни драйверов, поэтому среда откроет его пустым.\n\n" +
+                    "Почините через «Изменить» у этой версии — выберите файл проекта заново, теперь " +
+                    "программа заберёт всю папку целиком.\n\nВсё равно открыть?",
+                    "HMI-проект", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
             TryOpen(target);
             return;
         }

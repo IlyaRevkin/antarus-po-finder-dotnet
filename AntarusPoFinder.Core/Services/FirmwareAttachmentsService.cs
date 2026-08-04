@@ -67,24 +67,68 @@ public static class FirmwareAttachmentsService
     /// для загрузки новой версии (FirmwareUploadService.Upload) и для догрузки к существующей.
     /// Возвращает путь, который надо записать в fw_versions.hmi_path.
     ///
+    /// <b>Выбор одного файла может означать выбор папки.</b> У FStudio (.fsprj) проект — это папка, а
+    /// сам .fsprj лишь точка входа: модель панели и драйверы лежат рядом с ним. Раньше такой выбор
+    /// копировал ОДИН файл, да ещё и переименовывал его в «{версия}_hmi.fsprj» — и проект открывался
+    /// пустым («модель HMI не соответствует текущему программному обеспечению»). Теперь для таких
+    /// форматов копируется вся папка, а имена файлов внутри сохраняются: переименовывать нечего —
+    /// уникальность обеспечивает имя самой папки «{версия}_hmi» (см. <see cref="HmiProjectFormat"/>).
+    ///
     /// replaceExisting=false (загрузка) — файлы докладываются поверх, как было исторически;
     /// replaceExisting=true (замена HMI у существующей версии) — старая папка проекта сносится
     /// целиком, иначе от предыдущего проекта остались бы «висящие» файлы, которых в новом нет.</summary>
     public static string CopyHmiProject(string hmiRootFolder, string versionRaw, string sourcePath, bool replaceExisting = false)
     {
         Directory.CreateDirectory(hmiRootFolder);
-        if (Directory.Exists(sourcePath))
+        var sourceFolder = Directory.Exists(sourcePath) ? sourcePath : HmiProjectFormat.ProjectFolderOf(sourcePath);
+        if (sourceFolder is not null)
         {
             var hmiDstFolder = Path.Combine(hmiRootFolder, $"{versionRaw}_hmi");
+            // Проект УЖЕ лежит там, куда мы собрались его класть — оператор выбрал сохранённый проект
+            // повторно (или через другую букву сетевого диска). Копировать нечего, а копирование
+            // папки в саму себя раньше падало «файл занят другим процессом».
+            if (SamePath(sourceFolder, hmiDstFolder)) return hmiDstFolder;
+            // Вложенность в любую сторону: при replaceExisting снос папки назначения унёс бы источник.
+            if (IsInside(sourceFolder, hmiDstFolder) || IsInside(hmiDstFolder, sourceFolder))
+                throw new IOException("Папка проекта панели вложена в папку назначения — выберите проект из другого места.");
             if (replaceExisting && Directory.Exists(hmiDstFolder)) FileSystemHelpers.RmtreeSafe(hmiDstFolder);
             Directory.CreateDirectory(hmiDstFolder);
-            FileSystemHelpers.CopyTree(sourcePath, hmiDstFolder, overwrite: false);
+            FileSystemHelpers.CopyTree(sourceFolder, hmiDstFolder, overwrite: false);
             return hmiDstFolder;
         }
         var hmiDstName = $"{versionRaw}_hmi{Path.GetExtension(sourcePath)}";
         var dst = Path.Combine(hmiRootFolder, hmiDstName);
-        File.Copy(sourcePath, dst, overwrite: true);
+        if (!SamePath(sourcePath, dst)) File.Copy(sourcePath, dst, overwrite: true);
         return dst;
+    }
+
+    /// <summary>Один и тот же путь с точностью до формы записи (хвостовой слеш, регистр, «..»).
+    /// Недоступный путь не нормализуется — тогда сравниваем как есть.</summary>
+    private static bool SamePath(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return PathsEqual(a, b);
+        }
+    }
+
+    /// <summary><paramref name="inner"/> лежит внутри <paramref name="outer"/> (строго — не он сам).</summary>
+    private static bool IsInside(string inner, string outer)
+    {
+        try
+        {
+            var root = Path.GetFullPath(outer).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return Path.GetFullPath(inner).StartsWith(root, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     /// <param name="shortcuts">Нужен только инструкции, уехавшей на третий диск (см.
@@ -190,7 +234,17 @@ public static class FirmwareAttachmentsService
         }
         try
         {
-            File.Copy(src, Path.Combine(versionFolder, Path.GetFileName(src)), overwrite: true);
+            var dst = Path.Combine(versionFolder, Path.GetFileName(src));
+            // Оператор выбрал файл, который УЖЕ лежит в папке версии — а это ровно то, что предлагает
+            // диалог по умолчанию (он открывается в папке версии на сервере). Копирование файла в
+            // самого себя Windows отвергает как «файл занят другим процессом», и модерация падала с
+            // этой ошибкой на попытке указать разом HMI, .lfs и .psl, взятые оттуда же.
+            if (SamePath(src, dst))
+            {
+                applied.Add($"Файл прошивки ({Path.GetFileName(src)}) — уже на месте");
+                return;
+            }
+            File.Copy(src, dst, overwrite: true);
             var ext = Path.GetExtension(src).ToLowerInvariant();
             applied.Add(string.IsNullOrEmpty(ext) ? "Файл прошивки" : $"Файл прошивки ({ext})");
         }

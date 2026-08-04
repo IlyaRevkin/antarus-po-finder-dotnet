@@ -245,6 +245,58 @@ public class FirmwareAttachmentsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Apply_FilesPickedFromWhereTheyAlreadyLie_NoFileBusyError()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Диалоги модерации открываются в папках самой версии на сервере — то есть по умолчанию
+        // предлагают ровно те файлы, что там уже лежат. Указав разом HMI, .lfs и .psl оттуда же,
+        // оператор получал «файл занят другим процессом»: копирование файла в самого себя.
+        var lfs = Path.Combine(record.DiskPath, "сборка.lfs");
+        File.WriteAllText(lfs, "x");
+        var psl = Path.Combine(record.DiskPath, "исходник.psl");
+        File.WriteAllText(psl, "x");
+
+        var hmiSrc = Path.Combine(Root, "hmi_src");
+        Directory.CreateDirectory(hmiSrc);
+        File.WriteAllText(Path.Combine(hmiSrc, "panel.fsprj"), "x");
+        File.WriteAllText(Path.Combine(hmiSrc, "model.bin"), "x");
+        request.HmiSourcePath = hmiSrc;
+        FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        // Второй заход: все три поля указывают на уже сохранённые файлы.
+        request.HmiSourcePath = Path.Combine(record.HmiPath, "panel.fsprj");
+        request.PlcFileSourcePath = lfs;
+        request.PslFileSourcePath = psl;
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.True(File.Exists(lfs));
+        Assert.True(File.Exists(psl));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "panel.fsprj")));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "model.bin")));
+    }
+
+    [Fact]
+    public void Apply_HmiFsprjFilePicked_StoresWholeProjectFolder()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Оператор выбирает файл .fsprj — это точка входа, а проект живёт всей папкой вокруг него.
+        var project = Path.Combine(Root, "Проект панели");
+        Directory.CreateDirectory(Path.Combine(project, "Driver"));
+        File.WriteAllText(Path.Combine(project, "panel.fsprj"), "x");
+        File.WriteAllText(Path.Combine(project, "Driver", "lib.dll"), "x");
+        request.HmiSourcePath = Path.Combine(project, "panel.fsprj");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal($"{record.VersionRaw}_hmi", Path.GetFileName(record.HmiPath));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "panel.fsprj")));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "Driver", "lib.dll")));
+    }
+
+    [Fact]
     public void Apply_UnavailableRoot_ChangesNothing()
     {
         var (record, request) = SeedUploadedVersion();
