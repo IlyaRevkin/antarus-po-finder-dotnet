@@ -11,6 +11,10 @@ public static class RolesConfig
         ("newversions", "Модерация прошивок"),
         ("upload", "Загрузка ПО"),
         ("params", "Параметры ПЧ/УПП"),
+        // Паспорта шкафов — компактным пунктом в свёрнутой секции «ДОПОЛНИТЕЛЬНО» рядом с
+        // «Сетевыми дисками» и «Тикетами»: заходят сюда редко (загрузить/поправить шаблон), а
+        // печатают паспорт с карточки поиска или прямо из выдачи.
+        ("passports", "Паспорта шкафов"),
         ("network", "Сетевые диски"),
         ("tickets", "Тикеты"),
     ];
@@ -26,9 +30,12 @@ public static class RolesConfig
     /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
-        ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
-        ["programmer"] = ["search", "upload", "params", "settings", "network", "tickets"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets"],
+        // "passports" доступна всем ролям по той же причине, что "params": паспорт печатает наладчик,
+        // а заводит/правит шаблон обычно программист или администратор — запрет на страницу означал бы,
+        // что наладчик не может даже посмотреть, что за паспорт у шкафа.
+        ["naladchik"] = ["search", "inspection", "newversions", "params", "passports", "settings", "network", "tickets"],
+        ["programmer"] = ["search", "upload", "params", "passports", "settings", "network", "tickets"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "passports", "settings", "network", "tickets"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =

@@ -611,12 +611,32 @@ public partial class SearchView : UserControl
     {
         var exact = ExactWordCheck.IsChecked == true;
         var filters = ActiveFilters();
+        _passportCount = 0;
         var results = SearchService.Search(_services.Db, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
             _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath());
-        if (results.Count == 0)
+
+        // Паспорта шкафов ищутся ТЕМ ЖЕ запросом и показываются здесь же, а не отдельным режимом:
+        // у части шкафов прошивки нет вовсе, и переключать режим ради них наладчику пришлось бы
+        // вслепую — он не знает заранее, есть ли у искомого шкафа программа. Запрос берётся тот, что
+        // реально дал выдачу (с поправкой на раскладку, если она сработала).
+        var passports = FindPassports(usedFallback ? convertedQuery : query, exact);
+
+        if (results.Count == 0 && passports.Count == 0)
         {
             ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
+            return;
+        }
+        if (results.Count == 0)
+        {
+            // Прошивок нет, паспорта есть — обычный случай «шкаф без программы». Фильтры прошивок
+            // к паспортам неприменимы, поэтому счётчик показывает только их.
+            _foundCount = 0;
+            _foundFiltered = false;
+            ShowPassportCards(passports);
+            UpdateFoundLabel();
+            if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+                ShowNoResults(query, NoResultsHint);
             return;
         }
 
@@ -649,6 +669,8 @@ public partial class SearchView : UserControl
         // покажет «правки этой прошивки ещё не на диске» (см. FirmwareCardFlags.TagsPending). Читаем
         // один раз на всю выдачу; на не-администраторских машинах набор обычно пуст (правят только они).
         var pendingSubjects = _services.Db.GetPendingSubjectKeys();
+        // Подтипы, у которых есть паспорт — одним запросом на всю выдачу (см. FirmwareCardFlags.HasPassport).
+        var subtypesWithPassport = _services.Db.GetSubtypeIdsWithPassports();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -665,6 +687,7 @@ public partial class SearchView : UserControl
                 HasLocal = HasLocal(result),
                 HasAnyLocal = HasAnyLocal(result),
                 HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
+                HasPassport = subtypesWithPassport.Contains(result.SubtypeId),
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
@@ -706,6 +729,9 @@ public partial class SearchView : UserControl
             card.EditInstructionRequested += (s, _) => EditInstruction(((FirmwareCard)s!).Result);
             card.OpenInstructionPdfRequested += (s, e) => { _ = OpenInstructionPdfAsync(((FirmwareCard)s!).Result); };
             card.PrintInstructionRequested += (s, e) => { _ = PrintInstructionAsync(((FirmwareCard)s!).Result); };
+            card.PrintPassportRequested += (s, e) => { _ = PrintPassportAsync(((FirmwareCard)s!).Result.SubtypeId); };
+            card.OpenPassportRequested += (s, _) => OpenPassport(((FirmwareCard)s!).Result.SubtypeId);
+            card.OpenPassportFolderRequested += (s, _) => OpenPassportFolder(((FirmwareCard)s!).Result.SubtypeId);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -715,6 +741,13 @@ public partial class SearchView : UserControl
         }
 
         foreach (var result in strong) pending.Add(BuildCard(result));
+
+        // Паспорта — сразу за прошивками, до сворачивания менее точных совпадений. Показываем только
+        // те, чей шкаф НЕ представлен карточкой прошивки: там паспорт и так доступен в «Ещё →
+        // Документация», и вторая карточка про тот же шкаф была бы дублем.
+        var shownSubtypes = strong.Concat(weak).Select(r => r.SubtypeId).ToHashSet();
+        ShowPassportCards(passports.Where(p => p.SubtypeId is null || !shownSubtypes.Contains(p.SubtypeId.Value)).ToList());
+        UpdateFoundLabel();
 
         if (weak.Count > 0) AddWeakMatchesFold(weak, BuildCard, generation);
 
@@ -764,7 +797,141 @@ public partial class SearchView : UserControl
     /// они по-прежнему есть — иначе «найдено 0» при видимых на экране карточках вводило в ступор.</summary>
     private void UpdateFoundLabel()
     {
-        StatusLabel.Text = _foundFiltered ? $"Найдено: {_foundCount} (с фильтрами)" : $"Найдено: {_foundCount}";
+        var text = _foundFiltered ? $"Найдено: {_foundCount} (с фильтрами)" : $"Найдено: {_foundCount}";
+        // Паспорта считаются отдельно: это не прошивки, и складывать их в одно число значило бы
+        // сказать «найдено 3 прошивки», когда одна из трёх — документ шкафа без всякой программы.
+        if (_passportCount > 0) text += $"  ·  паспортов: {_passportCount}";
+        StatusLabel.Text = text;
+    }
+
+    // ── Паспорта шкафов в выдаче ──────────────────────────────────────────────
+    // Паспорт — документ ШКАФА, а не версии прошивки (см. Domain.PassportTemplate). В выдаче он
+    // появляется двумя способами: пунктами в «Ещё → Документация» у карточки прошивки того же шкафа
+    // и — если прошивки у шкафа нет — собственной карточкой.
+
+    private int _passportCount;
+
+    private List<PassportTemplate> FindPassports(string query, bool exact)
+    {
+        var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0) return new List<PassportTemplate>();
+        return _services.Db.SearchPassportsByTokens(tokens, exact);
+    }
+
+    private void ShowPassportCards(List<PassportTemplate> passports)
+    {
+        if (passports.Count == 0) return;
+        _passportCount = passports.Count;
+        foreach (var passport in passports)
+            ResultsPanel.Children.Add(MakePassportCard(passport));
+    }
+
+    private Border MakePassportCard(PassportTemplate passport)
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"Паспорт: {passport.Name}",
+            Style = (Style)FindResource("SubtitleText"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = string.Join(" / ", new[] { passport.GroupName, passport.SubtypeName }
+                       .Where(s => !string.IsNullOrEmpty(s) && s != "—"))
+                   + (string.IsNullOrEmpty(passport.Filename) ? "" : $"  ·  {passport.Filename}"),
+            Style = (Style)FindResource("MutedText"),
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+        if (!string.IsNullOrEmpty(passport.Description))
+            panel.Children.Add(new TextBlock { Text = passport.Description, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+
+        var tags = TagString.Parse(passport.Tags);
+        if (tags.Count > 0)
+        {
+            var tagsView = new TagBubbleEditor { Margin = new Thickness(0, 4, 0, 0) };
+            tagsView.Configure(tags, null, readOnly: true, collapseAfter: 3);
+            panel.Children.Add(tagsView);
+        }
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        actions.Children.Add(MakePassportButton("Печать", () => { _ = PrintPassportAsync(passport); }));
+        actions.Children.Add(MakePassportButton("Открыть", () => OpenPassport(passport)));
+        actions.Children.Add(MakePassportButton("Открыть папку", () => OpenPassportFolder(passport)));
+        panel.Children.Add(actions);
+
+        return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
+    }
+
+    private Button MakePassportButton(string text, Action action)
+    {
+        var btn = new Button { Content = text, Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        btn.Click += (_, _) => action();
+        return btn;
+    }
+
+    /// <summary>Какой паспорт этого шкафа имел в виду оператор. Ноль — говорим об этом; один — он и
+    /// есть; несколько (разные исполнения одного шкафа) — спрашиваем, а не выбираем молча за него.</summary>
+    private PassportTemplate? PickPassport(int subtypeId)
+    {
+        var list = _services.Db.GetPassports(subtypeId);
+        if (list.Count == 0)
+        {
+            AppMessageBox.Show("Паспорт для этого шкафа не найден.\nЗагрузите его в разделе «Паспорта шкафов».",
+                "Паспорт", MessageBoxButton.OK, MessageBoxImage.Information);
+            return null;
+        }
+        if (list.Count == 1) return list[0];
+
+        var options = list.Select((p, i) => new PickOptionDialog.Option(i, p.Name)).ToList();
+        var chosen = PickOptionDialog.Pick(Window.GetWindow(this), "Паспорт шкафа",
+            "У этого шкафа несколько паспортов — какой открыть?", options, 0);
+        return chosen is null ? null : list[chosen.Value];
+    }
+
+    private async Task PrintPassportAsync(int subtypeId)
+    {
+        if (PickPassport(subtypeId) is { } passport) await PrintPassportAsync(passport);
+    }
+
+    private async Task PrintPassportAsync(PassportTemplate passport)
+    {
+        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath());
+        var pdf = await PrintableDocActions.EnsurePdfAsync(doc, _host, "Паспорт", "паспорта",
+            PassportsView.PdfTempFolder, PassportsView.EditHint);
+        if (pdf is null) return;
+        PrintableDocActions.Print(pdf);
+        _host.ShowStatus($"Паспорт отправлен на печать: {passport.Name}");
+    }
+
+    private void OpenPassport(int subtypeId)
+    {
+        if (PickPassport(subtypeId) is { } passport) OpenPassport(passport);
+    }
+
+    private void OpenPassport(PassportTemplate passport)
+    {
+        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath());
+        var path = doc.Docx ?? doc.Newest;
+        if (path is null)
+        {
+            AppMessageBox.Show($"Файл паспорта не найден:\n{passport.DiskPath}",
+                "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        TryOpen(path);
+    }
+
+    private void OpenPassportFolder(int subtypeId)
+    {
+        if (PickPassport(subtypeId) is { } passport) OpenPassportFolder(passport);
+    }
+
+    private void OpenPassportFolder(PassportTemplate passport)
+    {
+        var folder = FirmwarePathLocalizer.Localize(passport.DiskPath, _services.Cfg.RootPath());
+        if (Directory.Exists(folder)) TryOpen(folder);
+        else AppMessageBox.Show($"Папка паспорта не найдена:\n{folder}", "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // ── Что лежит рядом с версией на диске ────────────────────────────────
@@ -1640,7 +1807,7 @@ public partial class SearchView : UserControl
     private void EditParamTags(ParamFile file)
     {
         var title = $"{file.Filename} [{file.Manufacturer}]";
-        var dlg = new EditParamTagsDialog(_services.Db, file, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditParamTagsDialog(_services.Db, file.Tags, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateParamFileTags(file.Id!.Value, dlg.ResultTags);
@@ -2047,77 +2214,17 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>Готовый к печати PDF инструкции: если docx правили после последней сборки (или pdf ещё
-    /// нет), пересобирает его из docx рядом с исходником, иначе отдаёт уже лежащий PDF. Конвертация
-    /// небыстрая (поднимает Word/LibreOffice) — уводится в фон, окно не подвисает. null — печатать/
-    /// показывать нечего (сообщение об этом уже показано).</summary>
+    /// нет), пересобирает его из docx рядом с исходником, иначе отдаёт уже лежащий PDF. Сама работа —
+    /// в PrintableDocActions: она же обслуживает паспорт шкафа, и печататься эти два документа должны
+    /// одинаково. null — печатать/показывать нечего (сообщение об этом уже показано).</summary>
     private async Task<string?> EnsureInstructionPdfAsync(HierarchyResult result)
     {
         var doc = ResolveInstruction(result, CurrentDocRoots());
-        if (doc.Pdf is not null && !doc.PdfStale) return doc.Pdf;
-        if (doc.Docx is null)
-        {
-            if (doc.Pdf is not null) return doc.Pdf;
-            AppMessageBox.Show("Инструкция для печати не найдена.", "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return null;
-        }
-
-        // Сборка PDF поднимает Word/LibreOffice — на сетевом диске это легко несколько секунд, а то
-        // и десятки. Одной мелькающей строки статуса мало: оператор жаловался, что после клика
-        // «ничего не происходит» и кажется, что программа зависла. Показываем ПОСТОЯННЫЙ индикатор
-        // фоновой работы внизу окна (BusyTracker, крутится всё время конвертации) — он виден, пока
-        // using не закрыт, а не гаснет через несколько секунд, как ShowStatus.
-        string? made;
-        using (_host.BeginBusy("Готовим PDF инструкции для печати — открывается Word/LibreOffice, это может занять несколько секунд…"))
-        {
-            _host.ShowStatus("Готовим PDF инструкции для печати…", 8000);
-            made = await Task.Run(() => ConvertInstruction(doc));
-        }
-        _host.ShowStatus(made is not null ? "PDF инструкции готов" : "");
-        if (made is not null) return made;
-
-        // Конвертация не удалась. Устаревший PDF лучше, чем ничего; иначе честно говорим, что нужно.
-        if (doc.Pdf is not null) return doc.Pdf;
-        AppMessageBox.Show(
-            "Не удалось собрать PDF из документа Word.\n\nДля автоматической конвертации нужен установленный " +
-            "Microsoft Word или LibreOffice. Пока их нет — откройте и распечатайте исходный документ вручную " +
-            "пунктом «Редактировать инструкцию (docx)».",
-            "Инструкция", MessageBoxButton.OK, MessageBoxImage.Warning);
-        return null;
+        return await PrintableDocActions.EnsurePdfAsync(doc, _host, "Инструкция", "инструкции",
+            "AntarusInstr", "пунктом «Редактировать инструкцию (docx)»");
     }
 
-    /// <summary>Собирает PDF рядом с docx (в папке конвертации). Если общая папка недоступна для записи
-    /// (только чтение сетевой шары) — во временную папку, чтобы хотя бы напечатать. null — конвертера нет
-    /// или документ не удалось преобразовать.</summary>
-    private static string? ConvertInstruction(InstructionDoc doc)
-    {
-        var made = DocxToPdfConverter.Convert(doc.Docx!, doc.ExpectedPdfPath!);
-        if (made is not null) return made;
-        try
-        {
-            var tmpDir = Path.Combine(Path.GetTempPath(), "AntarusInstr");
-            Directory.CreateDirectory(tmpDir);
-            var tmp = Path.Combine(tmpDir, Path.GetFileNameWithoutExtension(doc.Docx!) + ".pdf");
-            return DocxToPdfConverter.Convert(doc.Docx!, tmp);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>Отправить файл на принтер по умолчанию через ассоциированное приложение (verb «print»).
-    /// Нет ассоциации/принтера — открываем файл, дальше оператор печатает сам.</summary>
-    private void PrintFile(string path)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(path) { Verb = "print", UseShellExecute = true });
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            TryOpen(path);
-        }
-    }
+    private static void PrintFile(string path) => PrintableDocActions.Print(path);
 
     private void ShowHistory(HierarchyResult result)
     {
@@ -2142,24 +2249,5 @@ public partial class SearchView : UserControl
         _host.ShowStatus($"Скопировано: {text}");
     }
 
-    private static void TryOpen(string path)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            var reply = AppMessageBox.Show(
-                $"Не удалось открыть файл:\n{path}\n\nВозможно, не установлена программа для этого типа файлов.\n\nОткрыть папку с файлом?",
-                "Открыть файл", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.Yes);
-            if (reply != MessageBoxResult.Yes) return;
-            try
-            {
-                var folder = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
-                if (folder is not null) Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
-            }
-            catch { /* give up gracefully, matches Python's swallowed OSError here */ }
-        }
-    }
+    private static void TryOpen(string path) => PrintableDocActions.Open(path);
 }

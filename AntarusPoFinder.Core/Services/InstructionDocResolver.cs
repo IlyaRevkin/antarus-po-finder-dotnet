@@ -31,15 +31,17 @@ public static class InstructionDocResolver
     /// <summary>storedPath — путь, записанный к версии в БД (файл или папка, может уже не существовать);
     /// sharedFolder — общая папка «Инструкция» рядом с папкой контроллера (каноническая папка конвертации).
     /// Папкой инструкции считается общая папка, если она есть, — именно в ней лежат docx и его pdf.</summary>
-    public static InstructionDoc Resolve(string? storedPath, string? sharedFolder)
+    /// <param name="excludeSubfolder">Подпапка, которую не считать частью документа — «Прежние
+    /// редакции» паспорта шкафа (см. DocFileResolver.Resolve). null — вся папка целиком, как было.</param>
+    public static InstructionDoc Resolve(string? storedPath, string? sharedFolder, string? excludeSubfolder = null)
     {
-        var newest = DocFileResolver.Resolve(storedPath, sharedFolder);
+        var newest = DocFileResolver.Resolve(storedPath, sharedFolder, excludeSubfolder);
         var folder = FolderOf(newest, storedPath, sharedFolder);
         if (folder is null || !Directory.Exists(folder))
             return new InstructionDoc(folder, null, null, newest, false);
 
-        var docx = NewestWithExt(folder, DocxExts);
-        var pdf = NewestWithExt(folder, new[] { ".pdf" });
+        var docx = NewestWithExt(folder, DocxExts, excludeSubfolder);
+        var pdf = NewestWithExt(folder, new[] { ".pdf" }, excludeSubfolder);
         var stale = docx is not null && (pdf is null || WrittenAt(docx) > WrittenAt(pdf));
         return new InstructionDoc(folder, docx, pdf, newest ?? docx ?? pdf, stale);
     }
@@ -58,14 +60,15 @@ public static class InstructionDocResolver
         return newestFile is not null ? Path.GetDirectoryName(newestFile) : null;
     }
 
-    private static string? NewestWithExt(string folder, string[] exts)
+    private static string? NewestWithExt(string folder, string[] exts, string? excludeSubfolder)
     {
         try
         {
             // .lnk отсеивается вместе с прочим неподходящим расширением — ярлык на уехавшую на
             // третий диск инструкцию документом не является (см. DocFileResolver.IsShortcut).
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-                .Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant())
+                            && !DocFileResolver.IsUnder(folder, f, excludeSubfolder))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }

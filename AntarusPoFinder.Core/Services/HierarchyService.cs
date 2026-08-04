@@ -77,13 +77,18 @@ public class HierarchyService
 
     private static string CtrlOrOpcFolder(string controller, bool isOpc) => isOpc ? HierarchyFolders.Opc : controller;
 
-    private string PoCtrlFolder(string root, string groupName, string subName, string controller, bool isOpc)
+    /// <summary>Папка типа/подтипа в дереве ПО — общий «родитель» всех папок контроллеров, «ОПЦ» и
+    /// «Паспорт». У подтипа-заглушки «—» своего сегмента нет (см. Database.EnsureEveryGroupHasSubtype),
+    /// за него стоит папка самого типа.</summary>
+    private static string GroupSubFolder(string root, string groupName, string subName)
     {
         var parts = new List<string> { root, FolderPo, groupName };
         if (subName != "—") parts.Add(subName);
-        parts.Add(CtrlOrOpcFolder(controller, isOpc));
         return Path.Combine(parts.ToArray());
     }
+
+    private string PoCtrlFolder(string root, string groupName, string subName, string controller, bool isOpc) =>
+        Path.Combine(GroupSubFolder(root, groupName, subName), CtrlOrOpcFolder(controller, isOpc));
 
     public string FwPath(string root, string groupName, string subName, string controller, string versionStr, bool isOpc = false) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, isOpc), versionStr);
@@ -105,6 +110,12 @@ public class HierarchyService
 
     public string HmiPath(string root, string groupName, string subName, string controller) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, false), HierarchyFolders.Hmi);
+
+    /// <summary>Общая папка паспортов шкафа — у ТИПА/ПОДТИПА, а не у контроллера (см.
+    /// HierarchyFolders.Passports): паспорт описывает шкаф, а не программу ПЛК, и у шкафа без
+    /// прошивки папки контроллера может не быть вовсе. Внутри — по подпапке на паспорт.</summary>
+    public string PassportsPath(string root, string groupName, string subName) =>
+        Path.Combine(GroupSubFolder(root, groupName, subName), HierarchyFolders.Passports);
 
     public string ParamsPath(string root, string groupName, string subName, string manufacturer)
     {
@@ -599,6 +610,10 @@ public class HierarchyService
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
                 }
                 folders.Add(Path.Combine(groupSubPath, HierarchyFolders.Opc));
+                // Паспорта — рядом с «ОПЦ», у подтипа: см. HierarchyFolders.Passports. Создаётся
+                // всегда, как и остальные служебные папки, чтобы оператору было куда положить файл
+                // руками и чтобы обход диска не считал её «неизвестной».
+                folders.Add(Path.Combine(groupSubPath, HierarchyFolders.Passports));
 
                 var paramsGroupSubPath = s.Name == "—"
                     ? Path.Combine(root, FolderParams, g.Name)
@@ -651,6 +666,7 @@ public class HierarchyService
             if (s.Name != "—") names.Add(s.Name);
         foreach (var c in _db.GetAllControllerModels()) names.Add(c.Name);
         names.Add(HierarchyFolders.Opc);
+        names.Add(HierarchyFolders.Passports);
         names.Add(HierarchyFolders.UnknownFw);
         names.Add(HierarchyFolders.Instructions);
         names.Add(HierarchyFolders.IoMap);
@@ -678,6 +694,10 @@ public class HierarchyService
         {
             HierarchyFolders.Opc, HierarchyFolders.Instructions, HierarchyFolders.IoMap,
             HierarchyFolders.Modbus, HierarchyFolders.Hmi, HierarchyFolders.UnknownFw,
+            // «Паспорт» — лист: внутри лежат папки самих паспортов, названные оператором свободно,
+            // и спуск туда пометил бы каждый паспорт как «неизвестное» (та же причина, что у папок
+            // контроллеров с их папками версий).
+            HierarchyFolders.Passports,
         },
         new HashSet<string>(_db.GetParamManufacturers(), StringComparer.OrdinalIgnoreCase)
         {

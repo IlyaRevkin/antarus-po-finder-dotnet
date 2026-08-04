@@ -170,7 +170,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _services = services;
 
         foreach (var (pageId, label) in RolesConfig.NavItems)
-            NavItems.Add(new NavItem(pageId, label, isCompact: pageId is "network" or "tickets"));
+            NavItems.Add(new NavItem(pageId, label, isCompact: pageId is "network" or "tickets" or "passports"));
 
         CurrentRole = _services.Cfg.CurrentRole();
         CurrentTheme = _services.Cfg.Theme();
@@ -223,6 +223,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             uploadView.RefreshIfActive();
         if (pageId == "params" && _pageCache[pageId] is ParamsView paramsView)
             paramsView.RefreshIfActive();
+        if (pageId == "passports" && _pageCache[pageId] is PassportsView passportsView)
+            passportsView.RefreshIfActive();
 
         foreach (var item in NavItems)
             item.IsActive = item.PageId == pageId;
@@ -464,6 +466,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "newversions" => new NewVersionsView(_services, this),
             "upload" => new UploadView(_services, this),
             "params" => new ParamsView(_services, this),
+            "passports" => new PassportsView(_services, this),
             "settings" => new SettingsView(_services, this),
             "network" => new NetworkSyncView(_services, this),
             "tickets" => new TicketsView(_services, this),
