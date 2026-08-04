@@ -133,8 +133,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Показывать ли секцию «ДЛЯ НАЛАДЧИКА» вообще. Пустая секция — это заголовок, который
     /// ничего не открывает: у роли, которой не досталось ни одного её пункта, он был бы просто
     /// обманом. Сегодня такой роли нет (наклейки и «Сформировать паспорт» доступны всем), но
-    /// достаточно закрыть кому-то параметры и паспорта в RolesConfig.RoleAccess, чтобы это стало
-    /// правдой, и проверка обязана быть на месте раньше, чем это случится.</summary>
+    /// достаточно закрыть кому-то параметры в RolesConfig.RoleAccess, чтобы это стало правдой, и
+    /// проверка обязана быть на месте раньше, чем это случится.</summary>
     [ObservableProperty] private bool _setupSectionVisible = true;
 
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
@@ -246,8 +246,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             uploadView.RefreshIfActive();
         if (pageId == "params" && _pageCache[pageId] is ParamsView paramsView)
             paramsView.RefreshIfActive();
-        if (pageId == "passports" && _pageCache[pageId] is PassportsView passportsView)
-            passportsView.RefreshIfActive();
 
         foreach (var item in NavItems)
             item.IsActive = item.PageId == pageId;
@@ -345,7 +343,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     /// <summary>«Наклейки» и «Сформировать паспорт» в секции «ДЛЯ НАЛАДЧИКА» — окна, а не страницы,
-    /// и роль их не ограничивает: печатает наладчик, а бланк заводит программист или администратор.
+    /// и роль их не ограничивает: печатает наладчик, а шаблон заводит программист или администратор.
     /// Отдельным свойством, а не просто константой в разметке, чтобы «секция пуста — секции нет»
     /// (см. SetupSectionVisible) считалось по тому же списку, что и рисуется.</summary>
     public bool SetupToolsVisible => true;
@@ -510,7 +508,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "newversions" => new NewVersionsView(_services, this),
             "upload" => new UploadView(_services, this),
             "params" => new ParamsView(_services, this),
-            "passports" => new PassportsView(_services, this),
             "settings" => new SettingsView(_services, this),
             "network" => new NetworkSyncView(_services, this),
             "tickets" => new TicketsView(_services, this),

@@ -611,32 +611,13 @@ public partial class SearchView : UserControl
     {
         var exact = ExactWordCheck.IsChecked == true;
         var filters = ActiveFilters();
-        _passportCount = 0;
         var results = SearchService.Search(_services.Db, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
             _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath());
 
-        // Паспорта шкафов ищутся ТЕМ ЖЕ запросом и показываются здесь же, а не отдельным режимом:
-        // у части шкафов прошивки нет вовсе, и переключать режим ради них наладчику пришлось бы
-        // вслепую — он не знает заранее, есть ли у искомого шкафа программа. Запрос берётся тот, что
-        // реально дал выдачу (с поправкой на раскладку, если она сработала).
-        var passports = FindPassports(usedFallback ? convertedQuery : query, exact);
-
-        if (results.Count == 0 && passports.Count == 0)
-        {
-            ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
-            return;
-        }
         if (results.Count == 0)
         {
-            // Прошивок нет, паспорта есть — обычный случай «шкаф без программы». Фильтры прошивок
-            // к паспортам неприменимы, поэтому счётчик показывает только их.
-            _foundCount = 0;
-            _foundFiltered = false;
-            ShowPassportCards(passports);
-            UpdateFoundLabel();
-            if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
-                ShowNoResults(query, NoResultsHint);
+            ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
             return;
         }
 
@@ -669,8 +650,6 @@ public partial class SearchView : UserControl
         // покажет «правки этой прошивки ещё не на диске» (см. FirmwareCardFlags.TagsPending). Читаем
         // один раз на всю выдачу; на не-администраторских машинах набор обычно пуст (правят только они).
         var pendingSubjects = _services.Db.GetPendingSubjectKeys();
-        // Подтипы, у которых есть паспорт — одним запросом на всю выдачу (см. FirmwareCardFlags.HasPassport).
-        var subtypesWithPassport = _services.Db.GetSubtypeIdsWithPassports();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -687,7 +666,6 @@ public partial class SearchView : UserControl
                 HasLocal = HasLocal(result),
                 HasAnyLocal = HasAnyLocal(result),
                 HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
-                HasPassport = subtypesWithPassport.Contains(result.SubtypeId),
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
@@ -730,9 +708,6 @@ public partial class SearchView : UserControl
             card.OpenInstructionPdfRequested += (s, e) => { _ = OpenInstructionPdfAsync(((FirmwareCard)s!).Result); };
             card.PrintInstructionRequested += (s, e) => { _ = PrintInstructionAsync(((FirmwareCard)s!).Result); };
             card.InstructionLabelRequested += (s, _) => ShowInstructionLabel(((FirmwareCard)s!).Result);
-            card.PrintPassportRequested += (s, e) => { _ = PrintPassportAsync(((FirmwareCard)s!).Result.SubtypeId); };
-            card.OpenPassportRequested += (s, _) => OpenPassport(((FirmwareCard)s!).Result.SubtypeId);
-            card.OpenPassportFolderRequested += (s, _) => OpenPassportFolder(((FirmwareCard)s!).Result.SubtypeId);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -742,13 +717,6 @@ public partial class SearchView : UserControl
         }
 
         foreach (var result in strong) pending.Add(BuildCard(result));
-
-        // Паспорта — сразу за прошивками, до сворачивания менее точных совпадений. Показываем только
-        // те, чей шкаф НЕ представлен карточкой прошивки: там паспорт и так доступен в «Ещё →
-        // Документация», и вторая карточка про тот же шкаф была бы дублем.
-        var shownSubtypes = strong.Concat(weak).Select(r => r.SubtypeId).ToHashSet();
-        ShowPassportCards(passports.Where(p => p.SubtypeId is null || !shownSubtypes.Contains(p.SubtypeId.Value)).ToList());
-        UpdateFoundLabel();
 
         if (weak.Count > 0) AddWeakMatchesFold(weak, BuildCard, generation);
 
@@ -798,162 +766,7 @@ public partial class SearchView : UserControl
     /// они по-прежнему есть — иначе «найдено 0» при видимых на экране карточках вводило в ступор.</summary>
     private void UpdateFoundLabel()
     {
-        var text = _foundFiltered ? $"Найдено: {_foundCount} (с фильтрами)" : $"Найдено: {_foundCount}";
-        // Паспорта считаются отдельно: это не прошивки, и складывать их в одно число значило бы
-        // сказать «найдено 3 прошивки», когда одна из трёх — документ шкафа без всякой программы.
-        if (_passportCount > 0) text += $"  ·  паспортов: {_passportCount}";
-        StatusLabel.Text = text;
-    }
-
-    // ── Паспорта шкафов в выдаче ──────────────────────────────────────────────
-    // Паспорт — документ ШКАФА, а не версии прошивки (см. Domain.PassportTemplate). В выдаче он
-    // появляется двумя способами: пунктами в «Ещё → Документация» у карточки прошивки того же шкафа
-    // и — если прошивки у шкафа нет — собственной карточкой.
-
-    private int _passportCount;
-
-    private List<PassportTemplate> FindPassports(string query, bool exact)
-    {
-        var tokens = SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0) return new List<PassportTemplate>();
-        return _services.Db.SearchPassportsByTokens(tokens, exact);
-    }
-
-    private void ShowPassportCards(List<PassportTemplate> passports)
-    {
-        if (passports.Count == 0) return;
-        _passportCount = passports.Count;
-        foreach (var passport in passports)
-            ResultsPanel.Children.Add(MakePassportCard(passport));
-    }
-
-    private Border MakePassportCard(PassportTemplate passport)
-    {
-        var panel = new StackPanel();
-        panel.Children.Add(new TextBlock
-        {
-            Text = $"Паспорт: {passport.Name}",
-            Style = (Style)FindResource("SubtitleText"),
-            TextWrapping = TextWrapping.Wrap,
-        });
-        // Типовой бланк тоже находится поиском — по тегу, куда как раз и пишут названия шкафов. Типа
-        // и подтипа у него нет по своей природе, и без явной подписи строка начиналась бы прямо с
-        // разделителя, будто справочник не доехал.
-        var general = passport.SubtypeId is null;
-        panel.Children.Add(new TextBlock
-        {
-            Text = (general
-                       ? "Типовой бланк"
-                       : string.Join(" / ", new[] { passport.GroupName, passport.SubtypeName }
-                           .Where(s => !string.IsNullOrEmpty(s) && s != "—")))
-                   + (string.IsNullOrEmpty(passport.Filename) ? "" : $"  ·  {passport.Filename}"),
-            Style = (Style)FindResource("MutedText"),
-            Margin = new Thickness(0, 2, 0, 0),
-        });
-        if (!string.IsNullOrEmpty(passport.Description))
-            panel.Children.Add(new TextBlock { Text = passport.Description, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
-
-        var tags = TagString.Parse(passport.Tags);
-        if (tags.Count > 0)
-        {
-            var tagsView = new TagBubbleEditor { Margin = new Thickness(0, 4, 0, 0) };
-            tagsView.Configure(tags, null, readOnly: true, collapseAfter: 3);
-            panel.Children.Add(tagsView);
-        }
-
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        // Бланк печатать «как есть» нельзя: в нём вместо названия шкафа стоит метка, и на бумагу ушёл
-        // бы лист с «{{Название}}». Поэтому у типового — окно печати с уже выбранным бланком, где
-        // название вписывают перед печатью.
-        // Название шкафа берётся из самого запроса: искали «ЩУН-3» — оно и подставится в бланк
-        // (см. PassportService.CabinetNameFromQuery). Считается в момент нажатия, а не при сборке
-        // карточки: к этому времени в строке поиска может стоять уже другое.
-        actions.Children.Add(general
-            ? MakePassportButton("Сформировать паспорт",
-                () => PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host, passport.Name,
-                    PassportService.CabinetNameFromQuery(SearchInput.Text, passport.Name)))
-            : MakePassportButton("Печать", () => { _ = PrintPassportAsync(passport); }));
-        actions.Children.Add(MakePassportButton("Открыть", () => OpenPassport(passport)));
-        actions.Children.Add(MakePassportButton("Открыть папку", () => OpenPassportFolder(passport)));
-        panel.Children.Add(actions);
-
-        return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
-    }
-
-    private Button MakePassportButton(string text, Action action)
-    {
-        var btn = new Button { Content = text, Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
-        btn.Click += (_, _) => action();
-        return btn;
-    }
-
-    /// <summary>Какой паспорт этого шкафа имел в виду оператор. Ноль — говорим об этом; один — он и
-    /// есть; несколько (разные исполнения одного шкафа) — спрашиваем, а не выбираем молча за него.</summary>
-    private PassportTemplate? PickPassport(int subtypeId)
-    {
-        var list = _services.Db.GetPassports(subtypeId);
-        if (list.Count == 0)
-        {
-            AppMessageBox.Show("Паспорт для этого шкафа не найден.\nЗагрузите его в разделе «Паспорта шкафов».",
-                "Паспорт", MessageBoxButton.OK, MessageBoxImage.Information);
-            return null;
-        }
-        if (list.Count == 1) return list[0];
-
-        var options = list.Select((p, i) => new PickOptionDialog.Option(i, p.Name)).ToList();
-        var chosen = PickOptionDialog.Pick(Window.GetWindow(this), "Паспорт шкафа",
-            "У этого шкафа несколько паспортов — какой открыть?", options, 0);
-        return chosen is null ? null : list[chosen.Value];
-    }
-
-    private async Task PrintPassportAsync(int subtypeId)
-    {
-        if (PickPassport(subtypeId) is { } passport) await PrintPassportAsync(passport);
-    }
-
-    /// <summary>Общая папка типовых бланков на этой машине — см. PassportService.FolderFor: типовой
-    /// паспорт лежит вне дерева «ПО», и его адрес собирается из настройки, а не из чужой записи.</summary>
-    private string? PassportTemplatesFolder() =>
-        PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
-
-    private async Task PrintPassportAsync(PassportTemplate passport)
-    {
-        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
-        var pdf = await PrintableDocActions.EnsurePdfAsync(doc, _host, "Паспорт", "паспорта",
-            PassportsView.PdfTempFolder, PassportsView.EditHint);
-        if (pdf is null) return;
-        PrintableDocActions.Print(pdf);
-        _host.ShowStatus($"Паспорт отправлен на печать: {passport.Name}");
-    }
-
-    private void OpenPassport(int subtypeId)
-    {
-        if (PickPassport(subtypeId) is { } passport) OpenPassport(passport);
-    }
-
-    private void OpenPassport(PassportTemplate passport)
-    {
-        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
-        var path = doc.Docx ?? doc.Newest;
-        if (path is null)
-        {
-            AppMessageBox.Show($"Файл паспорта не найден:\n{passport.DiskPath}",
-                "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        TryOpen(path);
-    }
-
-    private void OpenPassportFolder(int subtypeId)
-    {
-        if (PickPassport(subtypeId) is { } passport) OpenPassportFolder(passport);
-    }
-
-    private void OpenPassportFolder(PassportTemplate passport)
-    {
-        var folder = PassportService.FolderFor(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
-        if (Directory.Exists(folder)) TryOpen(folder);
-        else AppMessageBox.Show($"Папка паспорта не найдена:\n{folder}", "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);
+        StatusLabel.Text = _foundFiltered ? $"Найдено: {_foundCount} (с фильтрами)" : $"Найдено: {_foundCount}";
     }
 
     // ── Что лежит рядом с версией на диске ────────────────────────────────
@@ -2336,8 +2149,7 @@ public partial class SearchView : UserControl
 
     /// <summary>Готовый к печати PDF инструкции: если docx правили после последней сборки (или pdf ещё
     /// нет), пересобирает его из docx рядом с исходником, иначе отдаёт уже лежащий PDF. Сама работа —
-    /// в PrintableDocActions: она же обслуживает паспорт шкафа, и печататься эти два документа должны
-    /// одинаково. null — печатать/показывать нечего (сообщение об этом уже показано).</summary>
+    /// в PrintableDocActions. null — печатать/показывать нечего (сообщение об этом уже показано).</summary>
     private async Task<string?> EnsureInstructionPdfAsync(HierarchyResult result)
     {
         var doc = ResolveInstruction(result, CurrentDocRoots());

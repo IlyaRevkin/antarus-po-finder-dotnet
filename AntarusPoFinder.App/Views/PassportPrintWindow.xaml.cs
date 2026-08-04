@@ -6,30 +6,25 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using AntarusPoFinder.App.Services;
-using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
-/// <summary>«Сформировать паспорт»: вписать название шкафа в бланк, посмотреть, что получилось, и
+/// <summary>«Сформировать паспорт»: вписать название шкафа в шаблон, посмотреть, что получилось, и
 /// напечатать.
 ///
 /// Порядок работы задан Ильёй дословно: «я в настройках где-то загружу шаблон… И потом для работы я
 /// буду нажимать кнопку "сформировать паспорт" — будет окно со строкой ввода названия шкафа,
 /// программа подставит название в загруженный ранее шаблон, даст проверить предпросмотром файла, и
 /// кнопки для редактирования или, если всё ок, для печати». Отсюда всё устройство окна: два поля,
-/// одна кнопка, и только после неё — готовый лист с «Редактировать» и «Печать». Прежний вид (таблица
-/// бланков с шестью равнозначными кнопками, среди которых «Печать» и «Посмотреть» стояли рядом ещё
-/// до того, как что-либо сформировано) на эту просьбу не отвечал.
+/// одна кнопка, и только после неё — готовый лист с «Редактировать» и «Печать».
 ///
-/// Точка входа в окно ОДНА — «Сформировать паспорт» в секции «ДЛЯ НАЛАДЧИКА» бокового меню; вторая,
-/// контекстная, живёт на карточке найденного бланка в поиске (там название шкафа уже известно из
-/// запроса). Раньше то же окно открывалось ещё из «Осмотра», «Паспортов шкафов» и Настроек, и
-/// назывались все эти кнопки по-разному — отсюда и жалоба «по паспортам почему-то 2 кнопки, а не так
-/// как я просил».
+/// Шаблоны — это просто ФАЙЛЫ в общей папке (как наклейки), без всяких записей в базе: администратор
+/// кладёт их в Настройки → Печать → «Шаблоны паспортов», а окно показывает всё, что там лежит.
+/// Сформированный лист никуда не сохраняется — правится и печатается только КОПИЯ во временной папке,
+/// а сам шаблон на диске не меняется никогда.
 ///
-/// Три вещи, которые тут важнее всего и легко потерять:
-///   • правится всегда КОПИЯ бланка во временной папке — общий бланк на диске не меняется никогда;
+/// Две вещи, которые тут важнее всего и легко потерять:
 ///   • длинное название не должно ломать вёрстку (см. <see cref="DocxNameFit"/>);
 ///   • печать идёт с двух сторон с переворотом относительно короткого края (см.
 ///     <see cref="DuplexPrinting"/>) — иначе настройки каждый раз приходилось выставлять руками.</summary>
@@ -40,28 +35,22 @@ public partial class PassportPrintWindow : Window
     private string? _folder;
     private List<Row> _rows = new();
 
-    /// <summary>Бланк, который надо выделить сразу: окно открыли не «вообще», а с карточки
-    /// конкретного бланка в поиске. Перевешивает «выбранный в прошлый раз» — там привычка, здесь
-    /// прямое указание оператора.</summary>
+    /// <summary>Шаблон, который надо выделить сразу: окно открыли не «вообще», а с указанием
+    /// конкретного шаблона.</summary>
     private readonly string? _preselect;
 
-    /// <summary>Готовый лист: заполненная копия бланка и собранный из неё PDF. null — ещё не
-    /// формировали или сформированное устарело (поменяли название/бланк).</summary>
+    /// <summary>Готовый лист: заполненная копия шаблона и собранный из неё PDF. null — ещё не
+    /// формировали или сформированное устарело (поменяли название/шаблон).</summary>
     private Built? _built;
 
     private bool _loaded;
 
-    /// <summary>Подпапка в %TEMP% под заполненные копии — своя, чтобы «Паспорт ПЖ ПИ.pdf» бланка не
-    /// затирал одноимённый PDF паспорта шкафа (см. PassportsView.PdfTempFolder).</summary>
-    private const string TempFolder = @"AntarusPassport\Бланки";
+    /// <summary>Подпапка в %TEMP% под заполненные копии.</summary>
+    private const string TempFolder = @"AntarusPassport\Шаблоны";
 
     private sealed class Row
     {
-        /// <summary>Запись в базе; null — файл просто лежит в общей папке, записи о нём нет.</summary>
-        public PassportTemplate? Record { get; init; }
-
         public string Name { get; init; } = "";
-        public string Tags { get; init; } = "";
 
         /// <summary>Исходник Word — единственное, во что можно подставить название.</summary>
         public string? Docx { get; init; }
@@ -73,14 +62,14 @@ public partial class PassportPrintWindow : Window
 
         public string FileDisplay => Path.GetFileName(Docx ?? AnyFile ?? "") is { Length: > 0 } n ? n : "файл не найден";
 
-        /// <summary>Строка в списке бланков: название и имя файла — по одному названию бывает не
-        /// видно, тот ли это бланк, особенно когда рядом лежат docx и готовый PDF.</summary>
+        /// <summary>Строка в списке шаблонов: название и имя файла — по одному названию бывает не
+        /// видно, тот ли это шаблон, особенно когда рядом лежат docx и готовый PDF.</summary>
         public string Display => $"{Name}  ·  {FileDisplay}";
     }
 
-    /// <param name="Row">Из какого бланка сделан лист.</param>
-    /// <param name="Name">Название шкафа, которое подставили (пусто — печатаем бланк как есть).</param>
-    /// <param name="Document">Заполненный документ Word; null — бланк был не Word.</param>
+    /// <param name="Row">Из какого шаблона сделан лист.</param>
+    /// <param name="Name">Название шкафа, которое подставили (пусто — печатаем шаблон как есть).</param>
+    /// <param name="Document">Заполненный документ Word; null — шаблон был не Word.</param>
     /// <param name="Printable">Что открывать и печатать: PDF, а если собрать его нечем — сам документ.</param>
     private sealed record Built(Row Row, string Name, string? Document, string Printable);
 
@@ -102,34 +91,16 @@ public partial class PassportPrintWindow : Window
         };
     }
 
-    // ── Список бланков ────────────────────────────────────────────────────────
+    // ── Список шаблонов ───────────────────────────────────────────────────────
 
     private void Refresh()
     {
         _folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
-        var root = _services.Cfg.RootPath();
 
+        // Шаблоны — это файлы в общей папке (как наклейки), записей в базе у них нет. Показываем всё,
+        // что лежит в папке: положил файл — он появился и здесь, и у коллег.
         var rows = new List<Row>();
-        foreach (var record in _services.Db.GetGeneralPassports())
-        {
-            var doc = PassportService.ResolveDoc(record, root, _folder);
-            rows.Add(new Row
-            {
-                Record = record,
-                Name = record.Name,
-                Tags = record.Tags,
-                Docx = doc.Docx,
-                AnyFile = doc.Newest ?? doc.Pdf,
-                Folder = doc.Folder ?? FirmwarePathLocalizer.Localize(record.DiskPath, root),
-            });
-        }
-
-        // Файлы, положенные в общую папку руками, мимо загрузки — они видны здесь наравне с
-        // загруженными (папка ведёт себя как папка наклеек: положил файл — он появился у всех).
-        // Только верхний уровень: всё, что лежит в подпапках, — это папки самих загруженных бланков
-        // с их PDF и прежними редакциями, и показывать их вторым списком значило бы двоить каждый
-        // бланк.
-        foreach (var file in LooseFiles(_folder))
+        foreach (var file in TemplateFiles(_folder))
             rows.Add(new Row
             {
                 Name = Path.GetFileNameWithoutExtension(file),
@@ -141,8 +112,8 @@ public partial class PassportPrintWindow : Window
         _rows = rows.OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         TemplateCombo.ItemsSource = _rows;
 
-        // Бланк, выбранный в прошлый раз, — уже выбран: чаще всего печатают один и тот же. Если окно
-        // открыли с карточки конкретного бланка, выбирается он.
+        // Шаблон, выбранный в прошлый раз, — уже выбран: чаще всего печатают один и тот же. Если окно
+        // открыли с указанием конкретного шаблона, выбирается он.
         var wanted = _preselect ?? _services.Cfg.PassportTemplateLast();
         TemplateCombo.SelectedItem =
             _rows.FirstOrDefault(r => r.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase))
@@ -151,7 +122,10 @@ public partial class PassportPrintWindow : Window
         ShowHint();
     }
 
-    private static List<string> LooseFiles(string? folder)
+    /// <summary>Файлы-шаблоны в общей папке. Только верхний уровень и без ярлыков. Недоступная папка —
+    /// пустой список, а не исключение: шара отваливается регулярно, и окно из-за этого падать не
+    /// должно.</summary>
+    private static List<string> TemplateFiles(string? folder)
     {
         if (string.IsNullOrWhiteSpace(folder)) return new List<string>();
         try
@@ -162,7 +136,6 @@ public partial class PassportPrintWindow : Window
         }
         catch (Exception)
         {
-            // Шара отвалилась — окно из-за этого падать не должно, покажем то, что знаем из базы.
             return new List<string>();
         }
     }
@@ -171,18 +144,18 @@ public partial class PassportPrintWindow : Window
     {
         var placeholder = _services.Cfg.PassportNamePlaceholder();
         HintText.Text = _folder is null
-            ? "Диск не настроен — бланки брать неоткуда (Настройки → Печать)."
+            ? "Диск не настроен — шаблоны брать неоткуда (Настройки → Печать)."
             : _rows.Count == 0
-                ? $"В папке бланков пусто: {_folder}\nПоложите туда шаблон паспорта — он появится и у коллег."
-                : $"В бланке название встаёт вместо метки {placeholder}. Печать — с двух сторон, разворот относительно короткого края.";
+                ? $"В папке шаблонов пусто: {_folder}\nПоложите туда шаблон паспорта — он появится и у коллег."
+                : $"В шаблоне название встаёт вместо метки {placeholder}. Печать — с двух сторон, разворот относительно короткого края.";
     }
 
     private Row? Selected()
     {
         if (TemplateCombo.SelectedItem is Row row) return row;
         AppMessageBox.Show(_rows.Count == 0
-                ? "Бланков пока нет. Положите шаблон в общую папку (Настройки → Печать → «Открыть папку») или загрузите его на странице «Паспорта шкафов» как типовой."
-                : "Выберите бланк.",
+                ? "Шаблонов пока нет. Положите шаблон в общую папку (Настройки → Печать → «Шаблоны паспортов»)."
+                : "Выберите шаблон.",
             "Сформировать паспорт", MessageBoxButton.OK, MessageBoxImage.Information);
         return null;
     }
@@ -196,7 +169,7 @@ public partial class PassportPrintWindow : Window
         if (e.Key == Key.Enter) { e.Handled = true; _ = GenerateAsync(); }
     }
 
-    /// <summary>Название или бланк поменяли — готовый лист больше не про них. Прятать блок надёжнее,
+    /// <summary>Название или шаблон поменяли — готовый лист больше не про них. Прятать блок надёжнее,
     /// чем оставить: иначе «Печать» отправила бы на бумагу прошлый шкаф.</summary>
     private void NameInput_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e) => Invalidate();
 
@@ -223,7 +196,7 @@ public partial class PassportPrintWindow : Window
         _services.Cfg.SetPassportTemplateLast(built.Row.Name);
 
         ResultText.Text = built.Document is null
-            ? $"Готово: {built.Row.Name} — бланк не в формате Word, название вписывается ручкой.\nФайл: {Path.GetFileName(built.Printable)}"
+            ? $"Готово: {built.Row.Name} — шаблон не в формате Word, название вписывается ручкой.\nФайл: {Path.GetFileName(built.Printable)}"
             : built.Printable.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
                 ? $"Готово: {built.Row.Name}{(built.Name.Length > 0 ? $" — {built.Name}" : "")}\nФайл: {Path.GetFileName(built.Printable)}"
                 : $"Готово: {built.Row.Name}{(built.Name.Length > 0 ? $" — {built.Name}" : "")}\n" +
@@ -238,8 +211,8 @@ public partial class PassportPrintWindow : Window
         if (_built is { } built) PrintableDocActions.Open(built.Printable);
     }
 
-    /// <summary>«Редактировать» открывает ЗАПОЛНЕННУЮ КОПИЮ, а не сам бланк: правки нужны этому
-    /// конкретному паспорту (дописать исполнение, поправить строку), а общий бланк на диске должен
+    /// <summary>«Редактировать» открывает ЗАПОЛНЕННУЮ КОПИЮ, а не сам шаблон: правки нужны этому
+    /// конкретному паспорту (дописать исполнение, поправить строку), а общий шаблон на диске должен
     /// остаться каким был. Правится копия — значит перед печатью PDF надо пересобрать, этим
     /// занимается <see cref="PrintAsync"/>.</summary>
     private void Edit_Click(object sender, RoutedEventArgs e)
@@ -247,7 +220,7 @@ public partial class PassportPrintWindow : Window
         if (_built is not { } built) return;
         if (built.Document is null)
         {
-            AppMessageBox.Show("Этот бланк — не документ Word, править его здесь нечем.",
+            AppMessageBox.Show("Этот шаблон — не документ Word, править его здесь нечем.",
                 "Сформировать паспорт", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -298,7 +271,7 @@ public partial class PassportPrintWindow : Window
         }
     }
 
-    /// <summary>Собирает лист: копия бланка с подставленным названием плюс PDF из неё. null — дальше
+    /// <summary>Собирает лист: копия шаблона с подставленным названием плюс PDF из неё. null — дальше
     /// идти незачем, о причине уже сказано.</summary>
     private async Task<Built?> BuildAsync()
     {
@@ -307,18 +280,18 @@ public partial class PassportPrintWindow : Window
         var name = NameInput.Text.Trim();
         var placeholder = _services.Cfg.PassportNamePlaceholder();
 
-        // Бланк не в формате Word (готовый PDF, старый .doc) — подставлять некуда. Это не ошибка:
-        // такой бланк печатают как есть, а название вписывают ручкой.
+        // Шаблон не в формате Word (готовый PDF, старый .doc) — подставлять некуда. Это не ошибка:
+        // такой шаблон печатают как есть, а название вписывают ручкой.
         if (row.Docx is null)
         {
             if (row.AnyFile is null || !File.Exists(row.AnyFile))
             {
-                AppMessageBox.Show($"Файл бланка не найден:\n{row.Folder}", "Сформировать паспорт",
+                AppMessageBox.Show($"Файл шаблона не найден:\n{row.Folder}", "Сформировать паспорт",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return null;
             }
             var reply = AppMessageBox.Show(
-                $"Бланк «{row.Name}» — не документ Word, подставить в него название нельзя.\n\nВзять его как есть?",
+                $"Шаблон «{row.Name}» — не документ Word, подставить в него название нельзя.\n\nВзять его как есть?",
                 "Сформировать паспорт", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
             return reply == MessageBoxResult.Yes ? new Built(row, "", null, row.AnyFile) : null;
         }
@@ -326,7 +299,7 @@ public partial class PassportPrintWindow : Window
         if (name.Length == 0)
         {
             var reply = AppMessageBox.Show(
-                $"Название шкафа не введено — в бланке останется метка {placeholder}.\n\nВсё равно продолжить?",
+                $"Название шкафа не введено — в шаблоне останется метка {placeholder}.\n\nВсё равно продолжить?",
                 "Сформировать паспорт", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
             if (reply != MessageBoxResult.Yes) { NameInput.Focus(); return null; }
         }
@@ -346,21 +319,21 @@ public partial class PassportPrintWindow : Window
             return null;
         }
 
-        // Метки в бланке нет — сказать об этом СРАЗУ. Иначе на бумагу ушёл бы лист, в котором
+        // Метки в шаблоне нет — сказать об этом СРАЗУ. Иначе на бумагу ушёл бы лист, в котором
         // название шкафа не подставлено, и это заметили бы уже у шкафа.
         if (replacements == 0 && name.Length > 0)
         {
             var reply = AppMessageBox.Show(
-                $"В бланке «{row.Name}» не нашлось метки {placeholder} — подставлять название некуда.\n\n" +
+                $"В шаблоне «{row.Name}» не нашлось метки {placeholder} — подставлять название некуда.\n\n" +
                 "Впишите метку в шаблон (Настройки → Печать → «Открыть папку») или поменяйте её там же.\n\n" +
-                "Взять бланк как есть?",
+                "Взять шаблон как есть?",
                 "Сформировать паспорт", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
             if (reply != MessageBoxResult.Yes) return null;
         }
 
-        // PDF нужен ровно затем же, зачем инструкции и паспорту шкафа: печать через ассоциацию Word
-        // открывает редактор и ждёт человека, а PDF уходит на принтер сразу. Нет конвертера —
-        // остаёмся с документом Word: показать и напечатать его вручную всё равно можно.
+        // PDF нужен ровно затем же, зачем инструкции: печать через ассоциацию Word открывает редактор
+        // и ждёт человека, а PDF уходит на принтер сразу. Нет конвертера — остаёмся с документом Word:
+        // показать и напечатать его вручную всё равно можно.
         var pdf = await ToPdfAsync(filled);
         return new Built(row, name, filled, pdf ?? filled);
     }
@@ -371,10 +344,8 @@ public partial class PassportPrintWindow : Window
             return await Task.Run(() => DocxToPdfConverter.Convert(docx, Path.ChangeExtension(docx, ".pdf")));
     }
 
-    /// <param name="preselect">Название бланка, который надо выбрать сразу — когда окно открывают с
-    /// карточки конкретного бланка. null — обычное открытие «вообще».</param>
-    /// <param name="prefillName">Название шкафа, уже вписанное в поле — из поискового запроса
-    /// (см. PassportService.CabinetNameFromQuery). null/пусто — оператор впишет сам.</param>
+    /// <param name="preselect">Название шаблона, который надо выбрать сразу. null — обычное открытие.</param>
+    /// <param name="prefillName">Название шкафа, уже вписанное в поле. null/пусто — оператор впишет сам.</param>
     public static void ShowFor(Window? owner, AppServices services, IAppHost host, string? preselect = null,
         string? prefillName = null)
     {

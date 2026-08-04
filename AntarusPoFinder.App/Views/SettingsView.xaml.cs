@@ -278,8 +278,8 @@ public partial class SettingsView : UserControl
         TabBtnPrinting.Visibility = Visibility.Visible;
         PrintingSharedSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         StickersFolderSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
-        // Папка типовых бланков и метка подстановки — та же общая политика предприятия, что и папка
-        // наклеек рядом: правит администратор, печатают все.
+        // Папка шаблонов паспортов и метка подстановки — та же общая политика предприятия, что и
+        // папка наклеек рядом: правит администратор, печатают все.
         PassportTemplatesSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
 
         var allTabs = AllTabButtons();
@@ -1503,24 +1503,89 @@ public partial class SettingsView : UserControl
         ShowStickersFolderStatus();
     }
 
-    // ── Типовые паспорта ──────────────────────────────────────────────────────
+    // ── Шаблоны паспортов ──────────────────────────────────────────────────────
 
-    /// <summary>Куда программа будет смотреть за типовыми бланками с текущими настройками — тем же
-    /// вычислением, что и само окно печати (см. ShowStickersFolderStatus рядом и по той же
-    /// причине). Считаются только записи: файл, положенный в папку руками, окно тоже покажет, но
-    /// «сколько бланков заведено» — это про базу.</summary>
+    /// <summary>Куда программа будет смотреть за шаблонами паспортов с текущими настройками — тем же
+    /// вычислением, что и само окно печати. Шаблоны — это просто файлы в общей папке (записей в базе
+    /// у них нет), поэтому и считаем именно файлы.</summary>
     private void ShowPassportTemplatesStatus()
     {
         var folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
         if (folder is null)
         {
-            PassportTemplatesStatus.Text = "Сетевой диск не настроен — папку бланков взять неоткуда.";
+            PassportTemplatesStatus.Text = "Сетевой диск не настроен — папку шаблонов взять неоткуда.";
             return;
         }
-        var count = _services.Db.GetGeneralPassports().Count;
+        var count = CountPassportTemplateFiles(folder);
         PassportTemplatesStatus.Text = count > 0
-            ? $"{folder} — бланков: {count}"
-            : $"{folder} — бланков пока нет. Загрузите их на странице «Паспорта шкафов» или положите файлы в эту папку.";
+            ? $"{folder} — шаблонов: {count}"
+            : $"{folder} — шаблонов пока нет. Нажмите «Загрузить…» или положите файлы в эту папку.";
+    }
+
+    /// <summary>Сколько файлов-шаблонов лежит в папке (верхний уровень, без ярлыков). Недоступная
+    /// папка — ноль, а не исключение: шара отваливается регулярно.</summary>
+    private static int CountPassportTemplateFiles(string folder)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
+                .Count(f => !DocFileResolver.IsShortcut(f));
+        }
+        catch (Exception) { return 0; }
+    }
+
+    /// <summary>Загрузка шаблона паспорта — то же, что «Загрузить…» в окне наклеек: копирование файла
+    /// в общую папку, без всякой записи в базу. Несколько шаблонов / разные редакции просто лежат
+    /// файлами рядом.</summary>
+    private void UploadPassportTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
+        if (folder is null)
+        {
+            AppMessageBox.Show("Сетевой диск не настроен — класть шаблон некуда.", "Шаблоны паспортов",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выберите файлы шаблонов паспортов",
+            Multiselect = true,
+            Filter = "Документы (*.docx;*.doc;*.pdf)|*.docx;*.doc;*.pdf|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var copied = 0;
+        var errors = new List<string>();
+        foreach (var source in dlg.FileNames)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                var dst = Path.Combine(folder, Path.GetFileName(source));
+                if (File.Exists(dst))
+                {
+                    var answer = AppMessageBox.Show(
+                        $"«{Path.GetFileName(source)}» в папке уже есть. Заменить?",
+                        "Шаблоны паспортов", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+                    if (answer != MessageBoxResult.Yes) continue;
+                }
+                File.Copy(source, dst, overwrite: true);
+                copied++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{Path.GetFileName(source)}: {ex.Message}");
+            }
+        }
+
+        ShowPassportTemplatesStatus();
+        if (errors.Count > 0)
+            AppMessageBox.Show(string.Join("\n", errors), "Шаблоны паспортов", MessageBoxButton.OK, MessageBoxImage.Warning);
+        if (copied > 0)
+            _host.ShowStatus(copied == 1
+                ? "Шаблон паспорта загружен — он уже виден коллегам"
+                : $"Загружено шаблонов: {copied} — они уже видны коллегам");
     }
 
     private void PassportTemplatesFolder_LostFocus(object sender, RoutedEventArgs e)
@@ -1532,13 +1597,13 @@ public partial class SettingsView : UserControl
         _services.Cfg.SetPassportTemplatesFolder(path);
         ShowPassportTemplatesStatus();
         _host.ShowStatus(path.Length == 0
-            ? "Бланки паспортов берутся из Конфиг\\Паспорта на общем диске"
-            : $"Папка типовых паспортов: {path}");
+            ? "Шаблоны паспортов берутся из Конфиг\\Паспорта на общем диске"
+            : $"Папка шаблонов паспортов: {path}");
     }
 
     private void BrowsePassportTemplatesFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с бланками паспортов" };
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с шаблонами паспортов" };
         if (dlg.ShowDialog() != true) return;
 
         // Хвост от корня диска, а не буква этой машины — см. BrowseStickersFolder_Click рядом.
@@ -1548,7 +1613,7 @@ public partial class SettingsView : UserControl
     }
 
     /// <summary>Метка подстановки. Пустое поле — не «подставлять везде», а возврат к значению по
-    /// умолчанию: пустая метка нашлась бы в каждой точке текста и испортила бы весь бланк.</summary>
+    /// умолчанию: пустая метка нашлась бы в каждой точке текста и испортила бы весь шаблон.</summary>
     private void PassportPlaceholder_LostFocus(object sender, RoutedEventArgs e)
     {
         if (_printingTabFilling) return;
@@ -1557,11 +1622,11 @@ public partial class SettingsView : UserControl
 
         _services.Cfg.SetPassportNamePlaceholder(value);
         PassportPlaceholderInput.Text = _services.Cfg.PassportNamePlaceholder();
-        _host.ShowStatus($"Метка названия в бланке: {_services.Cfg.PassportNamePlaceholder()}");
+        _host.ShowStatus($"Метка названия в шаблоне: {_services.Cfg.PassportNamePlaceholder()}");
     }
 
     /// <summary>Двусторонняя печать паспорта. Переворот всегда по короткой стороне — по длинной
-    /// оборот разворота встаёт вверх ногами, и другого осмысленного варианта для бланка нет,
+    /// оборот разворота встаёт вверх ногами, и другого осмысленного варианта для шаблона нет,
     /// поэтому переключатель один, а не выбор из двух видов дуплекса.</summary>
     private void PassportDuplex_Click(object sender, RoutedEventArgs e)
     {
@@ -1580,7 +1645,7 @@ public partial class SettingsView : UserControl
         var folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
         if (folder is null)
         {
-            AppMessageBox.Show("Сетевой диск не настроен — открывать нечего.", "Типовые паспорта",
+            AppMessageBox.Show("Сетевой диск не настроен — открывать нечего.", "Шаблоны паспортов",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }

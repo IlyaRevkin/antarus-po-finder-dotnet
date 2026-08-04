@@ -883,8 +883,8 @@
 
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
-                            <TextBlock Text="ТИПОВЫЕ ПАСПОРТА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Бланки паспортов, не относящиеся ни к одному типу шкафа (НКУ, Щит СПЛ, ШР). Печатаются кнопкой «Сформировать паспорт» в боковом меню: название шкафа подставляется в бланк вместо метки."
+                            <TextBlock Text="ШАБЛОНЫ ПАСПОРТОВ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Шаблоны паспортов — файлы в общей папке на диске (как наклейки). Нажмите «Сформировать паспорт» в боковом меню: название шкафа подставится в копию шаблона вместо метки. Можно держать несколько шаблонов / разные редакции — они просто лежат файлами рядом."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <StackPanel x:Name="PassportTemplatesSection">
                                 <Grid Margin="0,0,0,4">
@@ -906,18 +906,20 @@
                                     <TextBlock Grid.Column="0" Text="Метка названия:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                     <TextBox Grid.Column="1" x:Name="PassportPlaceholderInput" Height="34"
                                              LostFocus="PassportPlaceholder_LostFocus" KeyDown="PrintingField_KeyDown"
-                                             ToolTip="Что написано в бланке там, куда должно встать название шкафа. Пусто — вернётся значение по умолчанию."/>
+                                             ToolTip="Что написано в шаблоне там, куда должно встать название шкафа. Пусто — вернётся значение по умолчанию."/>
                                 </Grid>
-                                <!-- Двусторонняя печать раньше жила только в конфиге. Бланк паспорта —
+                                <!-- Двусторонняя печать раньше жила только в конфиге. Паспорт —
                                      разворот на два листа, и переворот делается по КОРОТКОЙ стороне:
                                      по длинной оборот встаёт вверх ногами. Настройка общая (уезжает на
-                                     все машины), поэтому и стоит здесь, рядом с папкой бланков. -->
+                                     все машины), поэтому и стоит здесь, рядом с папкой шаблонов. -->
                                 <CheckBox x:Name="PassportDuplexCheck" Content="Печатать с двух сторон (переворот по короткой стороне)"
                                           Margin="0,6,0,0" Click="PassportDuplex_Click"
                                           ToolTip="Паспорт печатается разворотом на одном листе с двух сторон. Принтер без дуплекса настройку просто не применит — лист выйдет односторонним."/>
                             </StackPanel>
                             <TextBlock x:Name="PassportTemplatesStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <StackPanel Orientation="Horizontal">
+                                <Button Content="Загрузить…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="UploadPassportTemplate_Click"
+                                        ToolTip="Положить файл шаблона паспорта в общую папку — он сразу появится у всех машин"/>
                                 <Button Content="Сформировать паспорт" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenPassportPrint_Click"/>
                                 <Button Content="Открыть папку" Style="{StaticResource SecondaryButton}" Click="OpenPassportTemplatesFolder_Click"/>
                             </StackPanel>
