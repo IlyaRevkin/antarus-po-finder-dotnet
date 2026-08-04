@@ -62,6 +62,13 @@ public class FirmwareUploadRequest
     /// this once outside the service so a stale/misconfigured path fails the same way it always has.</summary>
     public string RootPath { get; set; } = "";
 
+    /// <summary>Корень третьего диска — только под инструкции (ConfigService.ThirdDiskPath()).
+    /// Пусто/недоступен — инструкция ложится на первый диск, как раньше. См. InstructionStorage.</summary>
+    public string ThirdDiskPath { get; set; } = "";
+
+    /// <summary>Класть ли на первом диске ярлык на уехавшую инструкцию (ConfigService.ThirdDiskShortcuts()).</summary>
+    public bool ThirdDiskShortcuts { get; set; } = true;
+
     public string IoMapSourcePath { get; set; } = "";
     public string InstructionsSourcePath { get; set; } = "";
     public string ModbusMapSourcePath { get; set; } = "";
@@ -276,7 +283,7 @@ public static class FirmwareUploadService
         var (plan, failure) = Prepare(db, hierarchy, request);
         if (plan is null) return failure!;
 
-        var copy = CopyFiles(plan);
+        var copy = CopyFiles(plan, shortcuts);
         if (copy.IoErrorMessage is not null) return FirmwareUploadResult.IoFailure(copy.IoErrorMessage);
 
         return Register(db, hierarchy, plan, copy, shortcuts);
@@ -458,7 +465,9 @@ public static class FirmwareUploadService
     /// <summary>Фаза 2 (только диск): копирует прошивку и вложения на сетевой диск, пишет
     /// CHANGELOG.md. В БД не ходит ни разу — вызывающий может выполнить её в фоновом потоке, чтобы
     /// окно не висело всё время копирования (см. UploadView.Upload_Click).</summary>
-    public static FirmwareUploadCopyResult CopyFiles(FirmwareUploadPlan plan)
+    /// <param name="shortcuts">Нужен только инструкции, уехавшей на третий диск: на первом остаётся
+    /// ярлык (см. InstructionStorage). null — ярлык не создаётся, всё остальное как прежде.</param>
+    public static FirmwareUploadCopyResult CopyFiles(FirmwareUploadPlan plan, IShortcutCreator? shortcuts = null)
     {
         var request = plan.Request;
         var warnings = new List<string>();
@@ -496,7 +505,14 @@ public static class FirmwareUploadService
         string instrStored = "";
         if (!string.IsNullOrEmpty(request.InstructionsSourcePath))
         {
-            try { instrStored = FileSystemHelpers.CopyFileOrFolderShallow(request.InstructionsSourcePath, plan.InstructionsFolder); }
+            // Единственное вложение, у которого есть свой диск: инструкции самые тяжёлые и нужны с
+            // телефона, поэтому уезжают на третий диск, если он настроен (см. InstructionStorage).
+            // В БД при этом всё равно пишется путь на первом — он и разъезжается по машинам.
+            try
+            {
+                instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
+                    request.RootPath, request.ThirdDiskPath, request.ThirdDiskShortcuts, shortcuts, warnings).StoredPath;
+            }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
         string modbusStored = "";

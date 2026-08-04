@@ -37,6 +37,14 @@
             <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Быстрый доступ" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- Лоадер и Подключение вынесены отдельными вкладками по прямой просьбе: настроек у
+                 каждого набралось на самостоятельный экран, и в «Общих» они тонули. -->
+            <Button x:Name="TabBtnLoader" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Лоадер" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnConnection" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Подключение" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
                 <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -311,20 +319,9 @@
                                       Checked="KeepArchives_Changed" Unchecked="KeepArchives_Changed"
                                       ToolTip="Выключено — распакованный архив удаляется, остаётся только его содержимое"/>
 
-                            <TextBlock Text="ЛОАДЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Загрузка проекта в ПЛК выполняется через локальный Automation API Segnetics Loader. Пустой путь выбирает Loader, установленный вместе с приложением. Можно указать папку Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe."
-                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" x:Name="LoaderExePathInput" Height="34" Margin="0,0,8,0"
-                                         LostFocus="LoaderExePathInput_LostFocus" KeyDown="LoaderExePathInput_KeyDown"
-                                         ToolTip="Папка Segnetics Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe. Пусто — встроенная копия."/>
-                                <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource SecondaryButton}"
-                                        Click="BrowseLoaderExe_Click" ToolTip="Выбрать файл — сохранится сразу"/>
-                            </Grid>
+                            <!-- Настройки лоадера переехали на свою вкладку «Лоадер» (см. LoaderTab):
+                                 к пути к Loader добавились режим подключения, адрес ПЛК, сетевой
+                                 адаптер и проверка связи — в «Общих» это уже не помещалось. -->
 
                             <!-- Единая drag&drop-зона ПЛК+HMI на странице «Загрузка прошивки» — бета,
                                  видна только программисту/администратору (см. ApplyRoleVisibility),
@@ -621,6 +618,178 @@
                     <TextBox x:Name="TagsFilterInput" Height="34" Margin="0,0,0,10"
                              ToolTip="Фильтр по подстроке в названии тега…" TextChanged="TagsFilter_Changed"/>
                     <WrapPanel x:Name="TagsBubblesPanel"/>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ЛОАДЕР ═══════════════════════════ -->
+                <!-- Всё про заливку в ПЛК в одном месте: где лежит Segnetics Loader, чем и куда
+                     подключаемся, и надо ли проверять связь до запуска. Доступна всем ролям —
+                     заливает как раз наладчик, а это настройки его собственной машины и его шнурка. -->
+                <StackPanel x:Name="LoaderTab" Visibility="Collapsed">
+                    <TextBlock Text="Загрузка проекта в ПЛК идёт через локальный Automation API Segnetics Loader. Здесь — где он лежит и как эта машина подключается к контроллеру."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ПУТЬ К SEGNETICS LOADER" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Пустой путь выбирает Loader, установленный вместе с приложением. Можно указать папку Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" x:Name="LoaderExePathInput" Height="34" Margin="0,0,8,0"
+                                         LostFocus="LoaderExePathInput_LostFocus" KeyDown="LoaderExePathInput_KeyDown"
+                                         ToolTip="Папка Segnetics Loader, SegneticsLoader.exe или SegneticsLoader.Automation.exe. Пусто — встроенная копия."/>
+                                <Button Grid.Column="1" Content="Обзор…" Style="{StaticResource SecondaryButton}"
+                                        Click="BrowseLoaderExe_Click" ToolTip="Выбрать файл — сохранится сразу"/>
+                            </Grid>
+                            <TextBlock x:Name="LoaderStatusText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ПОДКЛЮЧЕНИЕ К ПЛК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Сам Loader принимает параметры подключения только из своих настроек, поэтому выбранное здесь программа переносит туда перед каждой заливкой. Правятся только те поля, которые в настройках Loader уже есть; рядом с ними сохраняется резервная копия. «Как в Loader» — ничего не трогать вовсе."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Способ" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                <ComboBox Grid.Row="0" Grid.Column="1" x:Name="LoaderModeCombo" Height="34" Margin="0,0,0,8"
+                                          SelectionChanged="LoaderMode_Changed"
+                                          ToolTip="USB — шнурок в контроллер напрямую; Ethernet — по сети, тогда нужен адрес ниже."/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Адрес ПЛК" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="LoaderIpInput" Height="34" Margin="0,0,0,8"
+                                         LostFocus="LoaderIp_LostFocus" KeyDown="LoaderIp_KeyDown"
+                                         ToolTip="IP контроллера для Ethernet-подключения. Для USB не используется."/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Адаптер" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <ComboBox Grid.Row="2" Grid.Column="1" x:Name="LoaderAdapterCombo" Height="34"
+                                          SelectionChanged="LoaderAdapter_Changed"
+                                          ToolTip="Через какую сетевую карту идти к шкафу — обычно это переходник USB-Ethernet, а не рабочая сеть."/>
+                            </Grid>
+                            <TextBlock x:Name="LoaderAdapterHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                            <CheckBox x:Name="LoaderCheckLinkCheck" Content="Проверять связь с ПЛК перед заливкой" Margin="0,0,0,8"
+                                      Click="LoaderCheckLink_Click"
+                                      ToolTip="Быстрая проба порта SSH по адресу выше. Связи нет — программа предупредит сразу, а не через минуту ожидания в самом Loader. Заливку не запрещает: решает наладчик."/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Ждать ответа, мс" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox x:Name="LoaderLinkTimeoutInput" Width="90" Height="30"
+                                         LostFocus="LoaderLinkTimeout_LostFocus" KeyDown="LoaderLinkTimeout_KeyDown"
+                                         ToolTip="Сколько ждать ответа контроллера при проверке связи. По умолчанию 1500."/>
+                                <Button Content="Проверить связь" Style="{StaticResource SecondaryButton}" Margin="12,0,0,0"
+                                        Click="CheckPlcLink_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="LoaderLinkResultText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="ПО УМОЛЧАНИЮ В ОКНЕ ЗАГРУЗКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <CheckBox x:Name="LoaderPrepareDefaultCheck" Content="Форматировать проект и обновить ядро ПЛК"
+                                      Click="LoaderPrepareDefault_Click"
+                                      ToolTip="Каким будет состояние галочки подготовки при каждом открытии окна загрузки. Сама подготовка работает только по USB — так устроен Loader."/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ПОДКЛЮЧЕНИЕ ═══════════════════════════ -->
+                <!-- Всё про то, ЧЕМ приложение соединяется с внешним миром: чем подтверждается вход
+                     (домен напрямую, веб-проверка, корпоративный SSO) и как ходят общие данные
+                     (сетевая папка сегодня, сервер — когда его поднимут). Диагностика («Состояние
+                     подключения») открывается отсюда же. -->
+                <StackPanel x:Name="ConnectionTab" Visibility="Collapsed">
+                    <TextBlock Text="Чем подтверждается вход и как приложение обменивается данными. Разделы независимы: вход можно перевести на корпоративный SSO, оставив данные на сетевой папке."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ВХОД: ЧЕМ ПОДТВЕРЖДАЕМ ЛИЧНОСТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Домен — прямой запрос к контроллеру домена. Веб-проверка — запрос к веб-адресу компании, работает там, где до домена не достучаться. Оба вместе — сначала домен, при недоступном домене веб-проверка. Корпоративный вход (Keycloak / OpenID Connect) — вход через браузер, пароль приложение при этом не видит вовсе."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <ComboBox x:Name="AuthKindCombo" Height="34" Margin="0,0,0,10" SelectionChanged="AuthKind_Changed"
+                                      ToolTip="Что спрашивать при входе в приложение"/>
+
+                            <StackPanel x:Name="OidcSection">
+                                <TextBlock Text="Параметры выдаёт ИТ, когда поднимет Keycloak (см. docs/keycloak-setup.md). Адрес — это адрес realm; клиент — идентификатор приложения в нём."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Адрес realm" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="OidcAuthorityInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="OidcAuthority_LostFocus" KeyDown="OidcField_KeyDown"
+                                             ToolTip="Напр. https://sso.antarus.su/realms/antarus"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Клиент" VerticalAlignment="Center" Margin="0,0,12,8"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="OidcClientIdInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="OidcClientId_LostFocus" KeyDown="OidcField_KeyDown"
+                                             ToolTip="client_id, выданный ИТ для этого приложения"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Claim с ролями" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="OidcGroupsClaimInput" Height="34"
+                                             LostFocus="OidcGroupsClaim_LostFocus" KeyDown="OidcField_KeyDown"
+                                             ToolTip="Из какого поля токена брать группы пользователя — по ним считается роль в приложении. Обычно groups или roles."/>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Content="Проверить адрес" Style="{StaticResource SecondaryButton}" Click="CheckOidc_Click"
+                                            ToolTip="Запросить у сервера его описание (.well-known/openid-configuration) — сразу видно, тот ли адрес и жив ли сервер."/>
+                                </StackPanel>
+                                <TextBlock x:Name="OidcCheckResultText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ОБМЕН ДАННЫМИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Общий справочник, тикеты и решения модерации ездят файлом через сетевую папку — и пока это единственный работающий способ. Серверный обмен (HTTP + живые уведомления по WebSocket) описан планом, но самого сервера ещё нет и клиент к нему не написан: здесь можно заранее записать адрес и проверить кнопкой, отвечает ли он. Переключатель — задел на тот день, когда сервер поднимут; сегодня данные при любом его положении идут через папку."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <ComboBox x:Name="TransportCombo" Height="34" Margin="0,0,0,10" SelectionChanged="Transport_Changed"
+                                      ToolTip="Чем обмениваться общими данными"/>
+                            <StackPanel x:Name="ServerSection">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Адрес сервера" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox Grid.Column="1" x:Name="ServerUrlInput" Height="34"
+                                             LostFocus="ServerUrl_LostFocus" KeyDown="ServerUrl_KeyDown"
+                                             ToolTip="Напр. https://finder.antarus.su — живые уведомления пойдут по тому же адресу (wss://…/ws)."/>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Content="Проверить сервер" Style="{StaticResource SecondaryButton}" Click="CheckServer_Click"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ServerCheckResultText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="ПРОВЕРКА ВСЕГО СРАЗУ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Диск, домен, веб-проверка, GitHub, папка обновлений — одним прогоном, с таймаутами и отчётом, который можно скопировать в письмо."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}"
+                                    HorizontalAlignment="Left" Click="ShowConnectionStatus_Click"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
             </Grid>

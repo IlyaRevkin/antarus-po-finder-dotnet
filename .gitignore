@@ -28,6 +28,8 @@ AntarusPoFinder.Tests/scratch/
 .testout/
 .buildcheck/
 .commitmsg.txt
+## Стенд живого прогона GUI (pywinauto) и его изолированные профили — тоже черновик, не исходники.
+scratchpad/
 
 ## IDE
 .vs/

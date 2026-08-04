@@ -14,6 +14,13 @@ namespace AntarusPoFinder.Core.Services;
 public class FirmwareAttachmentsRequest
 {
     public string RootPath { get; set; } = "";
+
+    /// <summary>Корень третьего диска (только инструкции) и надо ли класть ярлык на первом — те же
+    /// настройки, что и при загрузке новой версии, чтобы доложенная инструкция ложилась туда же,
+    /// куда легла бы приложенная сразу. См. InstructionStorage.</summary>
+    public string ThirdDiskPath { get; set; } = "";
+    public bool ThirdDiskShortcuts { get; set; } = true;
+
     public string GroupName { get; set; } = "";
     public string SubtypeName { get; set; } = "";
     public string ControllerName { get; set; } = "";
@@ -80,8 +87,10 @@ public static class FirmwareAttachmentsService
         return dst;
     }
 
+    /// <param name="shortcuts">Нужен только инструкции, уехавшей на третий диск (см.
+    /// InstructionStorage): на первом остаётся ярлык. null — ярлык не создаётся.</param>
     public static FirmwareAttachmentsResult Apply(Database db, HierarchyService hierarchy,
-        FwVersionRecord record, FirmwareAttachmentsRequest request)
+        FwVersionRecord record, FirmwareAttachmentsRequest request, IShortcutCreator? shortcuts = null)
     {
         var applied = new List<string>();
         var warnings = new List<string>();
@@ -95,8 +104,13 @@ public static class FirmwareAttachmentsService
             () => hierarchy.IoMapPath(root, g, s, c), applied, warnings);
         string? modbus = Resolve("Карта modbus", request.ModbusMapSourcePath, record.ModbusMapPath,
             () => hierarchy.ModbusMapPath(root, g, s, c), applied, warnings);
+        // Инструкция копируется не тем же Resolve, что «карты»: у неё есть свой диск (третий) и
+        // ярлык-заглушка на первом — вся эта развилка живёт в InstructionStorage, здесь только
+        // подставляется способ копирования.
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
-            () => hierarchy.InstrPath(root, g, s, c), applied, warnings);
+            () => hierarchy.InstrPath(root, g, s, c), applied, warnings,
+            copy: (src, folder) => InstructionStorage.Copy(src, folder, root, request.ThirdDiskPath,
+                request.ThirdDiskShortcuts, shortcuts, warnings).StoredPath);
 
         string? hmi = null;
         if (request.HmiSourcePath is not null && !PathsEqual(request.HmiSourcePath, record.HmiPath))
@@ -178,9 +192,11 @@ public static class FirmwareAttachmentsService
         }
     }
 
-    /// <summary>Возвращает новое значение поля для записи в БД, или null — если менять нечего.</summary>
+    /// <summary>Возвращает новое значение поля для записи в БД, или null — если менять нечего.
+    /// <paramref name="copy"/> — чем копировать (источник, папка назначения) → путь для БД; по
+    /// умолчанию обычное копирование в общую папку контроллера, инструкция подставляет своё.</summary>
     private static string? Resolve(string label, string? requested, string current, Func<string> destFolder,
-        List<string> applied, List<string> warnings)
+        List<string> applied, List<string> warnings, Func<string, string, string>? copy = null)
     {
         if (requested is null || PathsEqual(requested, current)) return null;
 
@@ -196,7 +212,9 @@ public static class FirmwareAttachmentsService
         }
         try
         {
-            var stored = FileSystemHelpers.CopyFileOrFolderShallow(requested, destFolder());
+            var stored = copy is null
+                ? FileSystemHelpers.CopyFileOrFolderShallow(requested, destFolder())
+                : copy(requested, destFolder());
             applied.Add(label);
             return stored;
         }

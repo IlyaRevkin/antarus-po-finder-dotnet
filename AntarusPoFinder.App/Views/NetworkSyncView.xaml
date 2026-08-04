@@ -36,6 +36,25 @@
                         ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
 
+            <TextBlock Text="ТРЕТИЙ ДИСК (ИНСТРУКЦИИ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock Text="Необязательный отдельный диск только под инструкции: они самые тяжёлые и нужны в том числе с телефона. Структура папок на нём такая же, как на первом диске, — программа считает путь сама. Пусто или диск недоступен — инструкции лежат на первом, как раньше."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" x:Name="ThirdDiskInput" Height="34" Margin="0,0,8,0"
+                         LostFocus="ThirdDisk_LostFocus" KeyDown="ThirdDisk_KeyDown"
+                         ToolTip="Диск только под инструкции. Папки на нём повторяют первый диск, вручную ничего раскладывать не нужно."/>
+                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseThirdDisk_Click"
+                        ToolTip="Выбрать папку — сохранится сразу"/>
+            </Grid>
+            <CheckBox x:Name="ThirdDiskShortcutsCheck" Content="Оставлять на первом диске ярлык на уехавшую инструкцию"
+                      Margin="0,0,0,4" Click="ThirdDiskShortcuts_Click"
+                      ToolTip="Нужно, пока у кого-то из коллег стоит старая версия программы: без ярлыка он увидит пустую папку «Инструкция» и решит, что инструкции нет. Сама программа ярлыки не открывает — она читает третий диск напрямую."/>
+            <TextBlock x:Name="ThirdDiskStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
             <TextBlock Text="ПАПКА ОСМОТРА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <TextBlock Text="Сюда сохраняются сканы, фото по QR и файлы, накопленные во время осмотра оборудования."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>

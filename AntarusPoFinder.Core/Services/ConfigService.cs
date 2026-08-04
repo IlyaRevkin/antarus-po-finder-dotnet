@@ -46,6 +46,12 @@ public class ConfigService
     {
         ["root_path"] = @"Z:\Software\Antarus Finder",
         ["second_disk_path"] = "",
+        // Третий диск — только под инструкции (docs/hierarchy-rework-plan.md, Этап 3). Пусто = не
+        // настроен, тогда инструкции читаются и пишутся на первом диске, как раньше.
+        ["third_disk_path"] = "",
+        // Класть ли на первый диск ярлык .lnk на инструкцию, уехавшую на третий: коллега со старым
+        // клиентом иначе увидит пустую папку «Инструкция» и решит, что инструкции нет вовсе.
+        ["third_disk_shortcuts"] = "true",
         ["inspection_folder"] = "",
         // Значения ниже — фолбэк ТОЛЬКО для Get("admin_password")/Get("programmer_password"), если
         // строки settings ещё нет вовсе (крайне маловероятно после Database.SeedDefaultAdminPasswordHash,
@@ -148,6 +154,26 @@ public class ConfigService
         ["loader_format_default"] = "false",
         ["loader_update_kernel_default"] = "false",
         ["loader_last_target"] = "",
+        // Подключение к ПЛК. Сам Automation-процесс параметры подключения в запросе НЕ принимает —
+        // он читает их из настроек Segnetics Loader (docs/loader/LOADER_AUTOMATION_API.md, раздел
+        // «Запрос операции»), поэтому выбор наладчика мы переносим туда (LoaderConnectionSettings).
+        // Пусто у режима = «что выбрано в самом Loader, то и оставить» — так ведёт себя новая
+        // установка, пока наладчик ничего не выбрал.
+        // Корпоративный вход (Keycloak/OpenID Connect) и серверный обмен — оба выключены по
+        // умолчанию: без поднятого сервера и выданного client_id включать их нечем, а молчаливое
+        // включение отрезало бы машины со старой версией от общих данных (docs/client-server-plan.md).
+        ["oidc_authority"] = "",
+        ["oidc_client_id"] = "",
+        ["oidc_groups_claim"] = "groups",
+        ["sync_transport"] = "fileshare",
+        ["server_url"] = "",
+        ["loader_connection_mode"] = "",
+        ["loader_plc_ip"] = "",
+        ["loader_network_adapter"] = "",
+        // Проверять ли связь с ПЛК до заливки (TCP-проба по адресу выше). Экономит самый обидный
+        // случай: наладчик ждёт минуту, чтобы получить «CONNECTION_FAILED» из-за невоткнутого шнурка.
+        ["loader_check_link"] = "true",
+        ["loader_link_timeout_ms"] = "1500",
         // Бета-опция UploadView: одна общая drag&drop-зона для файла/папки ПЛК и HMI-проекта вместо
         // двух раздельных зон. Выключено по умолчанию — раздельные зоны остаются поведением по
         // умолчанию для всех существующих и новых установок, пока программист явно не включит эту
@@ -190,6 +216,15 @@ public class ConfigService
 
     public string SecondDiskPath() => Get("second_disk_path");
     public void SetSecondDiskPath(string path) => Set("second_disk_path", path);
+
+    /// <summary>Корень третьего диска — только под инструкции. Структура на нём ЗЕРКАЛЬНАЯ первому
+    /// диску (см. InstructionDiskResolver), поэтому отдельного справочника путей не нужно. Пусто —
+    /// диск не настроен, всё работает как раньше на первом.</summary>
+    public string ThirdDiskPath() => Get("third_disk_path");
+    public void SetThirdDiskPath(string path) => Set("third_disk_path", path.Trim());
+
+    public bool ThirdDiskShortcuts() => Get("third_disk_shortcuts").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetThirdDiskShortcuts(bool value) => Set("third_disk_shortcuts", value ? "true" : "false");
 
     /// <summary>Сетевая папка с релизными .exe приложения (см. AppUpdateService) — отдельная от root_path,
     /// т.к. обновление приложения логически не связано с диском прошивок.</summary>
@@ -335,6 +370,28 @@ public class ConfigService
     public string LoaderLastTarget() => Get("loader_last_target");
     public void SetLoaderLastTarget(string target) => Set("loader_last_target", target.Trim());
 
+    /// <summary>Как подключаемся к ПЛК: "usb" / "ethernet" / пусто («не трогать выбор в самом
+    /// Loader»). Переносится в настройки Segnetics Loader перед запуском операции — см.
+    /// <see cref="LoaderConnectionSettings"/> и комментарий у ключа в Defaults.</summary>
+    public string LoaderConnectionMode() => Get("loader_connection_mode");
+    public void SetLoaderConnectionMode(string mode) => Set("loader_connection_mode", mode.Trim().ToLowerInvariant());
+
+    /// <summary>Адрес ПЛК для Ethernet-подключения. Для USB не используется.</summary>
+    public string LoaderPlcIp() => Get("loader_plc_ip");
+    public void SetLoaderPlcIp(string ip) => Set("loader_plc_ip", ip.Trim());
+
+    /// <summary>Имя сетевого адаптера, через который идти к ПЛК (у наладчика их обычно два: рабочая
+    /// сеть и переходник USB-Ethernet в шкаф). Пусто — выбор Loader'а не трогаем.</summary>
+    public string LoaderNetworkAdapter() => Get("loader_network_adapter");
+    public void SetLoaderNetworkAdapter(string adapter) => Set("loader_network_adapter", adapter.Trim());
+
+    public bool LoaderCheckLink() => Get("loader_check_link").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetLoaderCheckLink(bool value) => Set("loader_check_link", value ? "true" : "false");
+
+    public int LoaderLinkTimeoutMs() =>
+        int.TryParse(Get("loader_link_timeout_ms"), out var ms) && ms > 0 ? ms : 1500;
+    public void SetLoaderLinkTimeoutMs(int ms) => Set("loader_link_timeout_ms", ms.ToString());
+
     /// <summary>Папка осмотра (фото/сканы). Defaults to LocalFw if not set.</summary>
     public string InspectionFolder()
     {
@@ -393,8 +450,49 @@ public class ConfigService
     /// недоступен (не если пароль неверный) — попробовать HTTP как запасной вариант. См.
     /// AntarusPoFinder.App.AdCredentialValidatorFactory за тем, как это значение превращается в
     /// конкретный IAdCredentialValidator.</summary>
-    public string AdAuthMode() => Get("ad_auth_mode") switch { "http" => "http", "both" => "both", _ => "ldap" };
-    public void SetAdAuthMode(string mode) => Set("ad_auth_mode", mode is "http" or "both" ? mode : "ldap");
+    /// <remarks>"oidc" — четвёртый вариант: вход через корпоративный SSO (Keycloak/OpenID Connect),
+    /// пароля приложение при этом не видит вовсе. Добавлен так же, как когда-то "http": прежние
+    /// значения и их поведение не тронуты, установка, ничего не менявшая, остаётся на "ldap".</remarks>
+    public string AdAuthMode() => Get("ad_auth_mode") switch
+    {
+        "http" => "http",
+        "both" => "both",
+        "oidc" => "oidc",
+        _ => "ldap",
+    };
+    public void SetAdAuthMode(string mode) => Set("ad_auth_mode", mode is "http" or "both" or "oidc" ? mode : "ldap");
+
+    /// <summary>Адрес realm Keycloak (или любого другого OpenID-провайдера): именно от него строится
+    /// адрес описания <c>{authority}/.well-known/openid-configuration</c>, из которого берутся все
+    /// остальные адреса. Пусто — SSO не настроен, и режим "oidc" выбрать нельзя (см. OidcConfigured).</summary>
+    public string OidcAuthority() => Get("oidc_authority");
+    public void SetOidcAuthority(string url) => Set("oidc_authority", url.Trim().TrimEnd('/'));
+
+    /// <summary>client_id этого приложения в Keycloak. Секрета нет и быть не должно: настольное
+    /// приложение — публичный клиент, безопасность даёт PKCE, а не спрятанный в exe секрет.</summary>
+    public string OidcClientId() => Get("oidc_client_id");
+    public void SetOidcClientId(string id) => Set("oidc_client_id", id.Trim());
+
+    /// <summary>Из какого claim'а токена брать группы пользователя — по ним считается роль в
+    /// приложении теми же тремя настройками ad_group_*, что и для AD.</summary>
+    public string OidcGroupsClaim() => Get("oidc_groups_claim") is { Length: > 0 } c ? c : "groups";
+    public void SetOidcGroupsClaim(string claim) => Set("oidc_groups_claim", claim.Trim());
+
+    /// <summary>Настроен ли SSO настолько, чтобы им можно было входить.</summary>
+    public bool OidcConfigured() =>
+        !string.IsNullOrWhiteSpace(OidcAuthority()) && !string.IsNullOrWhiteSpace(OidcClientId());
+
+    /// <summary>Чем обмениваться общими данными: "fileshare" (сетевая папка, как сегодня) или
+    /// "server" (HTTP + живые уведомления по WebSocket). Переключение на сервер — решение, которое
+    /// отрезает машины со старой версией программы от обновлений справочника, поэтому по умолчанию
+    /// файловая папка и остаётся (docs/client-server-plan.md, раздел 6).</summary>
+    public string SyncTransport() => Get("sync_transport") == "server" ? "server" : "fileshare";
+    public void SetSyncTransport(string kind) => Set("sync_transport", kind == "server" ? "server" : "fileshare");
+
+    /// <summary>Базовый адрес сервера приложения (когда он появится). От него же строится адрес
+    /// живых уведомлений: та же машина и путь /ws, схема http→ws, https→wss.</summary>
+    public string ServerUrl() => Get("server_url");
+    public void SetServerUrl(string url) => Set("server_url", url.Trim().TrimEnd('/'));
 
     /// <summary>Базовый URL внутреннего веб-сервера компании для способа №2 (HTTP-проверка пароля,
     /// см. HttpAdCredentialValidator). По умолчанию предустановлен рабочий адрес диска предприятия

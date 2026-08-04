@@ -198,9 +198,58 @@ public partial class LoaderDialog : Window
         }
     }
 
+    /// <summary>Готовит ПОДКЛЮЧЕНИЕ перед заливкой: переносит выбор наладчика (USB/Ethernet, адрес,
+    /// сетевой адаптер) в настройки самого Loader и, если попросили, проверяет связь заранее.
+    ///
+    /// Почему перенос, а не параметр запроса — см. <see cref="LoaderConnectionSettings"/>: Automation
+    /// параметры подключения в запросе не принимает вовсе. Почему проверка связи — см.
+    /// <see cref="PlcLinkCheck"/>: минута ожидания ради «CONNECTION_FAILED» из-за невоткнутого шнурка.
+    ///
+    /// Возвращает false, только если наладчик сам отказался продолжать после «связи нет»: запретить
+    /// заливку из-за неудачной пробы программа не вправе — он может знать лучше (ПЛК ещё грузится,
+    /// адрес временный).</summary>
+    private async Task<bool> PrepareConnectionAsync(CancellationToken cancellationToken)
+    {
+        var mode = LoaderConnectionSettings.ParseMode(_cfg.LoaderConnectionMode());
+        var ip = _cfg.LoaderPlcIp();
+        var adapter = _cfg.LoaderNetworkAdapter();
+
+        var applied = LoaderConnectionSettings.Apply(mode, ip, adapter);
+        if (applied.Applied)
+            AppendLog($"Подключение: {LoaderConnectionSettings.ModeCaption(mode)} — перенесено в настройки Loader " +
+                      $"({string.Join(", ", applied.ChangedKeys)}).");
+        else if (!string.IsNullOrEmpty(applied.Message))
+            AppendLog(applied.Message, LoaderLogLevel.Warning);
+
+        // Проверять нечего, пока не выбран Ethernet с адресом: у USB адреса нет, а «как в Loader»
+        // означает, что подключение нам вообще неизвестно.
+        if (mode != PlcConnectionMode.Ethernet || !_cfg.LoaderCheckLink() || string.IsNullOrWhiteSpace(ip))
+            return true;
+
+        StageLabel.Text = "Проверяем связь с ПЛК…";
+        AppendLog($"Проверяем связь с {ip}…");
+        var link = await PlcLinkCheck.CheckAsync(ip, _cfg.LoaderLinkTimeoutMs(), cancellationToken);
+        AppendLog($"{link.Message} ({link.ElapsedMs} мс)", link.Reachable ? LoaderLogLevel.Success : LoaderLogLevel.Warning);
+        if (link.Reachable) return true;
+
+        var answer = AppMessageBox.Show(
+            link.Message + "\n\nЗапустить загрузку всё равно?",
+            "Связь с ПЛК", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        return answer == MessageBoxResult.Yes;
+    }
+
     private async Task RunDeployAsync(
         string source, bool prepareController, IProgress<LoaderProgress> progress, CancellationToken cancellationToken)
     {
+        if (!await PrepareConnectionAsync(cancellationToken))
+        {
+            AppendLog("Загрузка не запущена: наладчик отменил её после проверки связи.", LoaderLogLevel.Warning);
+            Progress.IsIndeterminate = false;
+            PercentLabel.Text = "";
+            StageLabel.Text = "Не запускалось";
+            return;
+        }
+
         var workspace = LoaderWorkspace.Create(ConfigService.LocalLoader, _job.VersionName);
         _workspace = workspace;
         AppendLog($"Рабочая область: {workspace.Dir}");

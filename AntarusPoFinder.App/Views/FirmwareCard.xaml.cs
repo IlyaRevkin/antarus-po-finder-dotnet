@@ -83,6 +83,16 @@ public sealed record FirmwareCardFlags
     /// (SearchView.ScanDiskFlagsAsync), поэтому до конца обхода всегда false.</summary>
     public bool DiskMissing { get; init; }
 
+    /// <summary>Как эта машина подключается к ПЛК прямо сейчас — "" (как выбрано в самом Loader),
+    /// "usb" или "ethernet" (ConfigService.LoaderConnectionMode). Показывается списком рядом с
+    /// кнопкой загрузки: наладчик переключает USB/Ethernet на каждом шкафу, и ходить за этим в
+    /// Настройки — ровно то, на что он и пожаловался.</summary>
+    public string ConnectionMode { get; init; } = "";
+
+    /// <summary>Расшифровка выбора для подсказки списка: адрес ПЛК и сетевой адаптер, если заданы.
+    /// Пусто — показывается только общее пояснение.</summary>
+    public string ConnectionHint { get; init; } = "";
+
     /// <summary>Правки этой прошивки (теги/описание/типы пуска) ещё лежат в накопителе синхры и не
     /// уехали на общий диск — коллеги их пока не видят. Машинно-локальный признак: истинен только на
     /// той машине, где правку сделали, и только пока «Отправить всё» не унесло накопитель на диск
@@ -114,6 +124,10 @@ public partial class FirmwareCard : UserControl
     /// сама, см. SearchView.AutoSyncMissing).</summary>
     public event EventHandler? DownloadRequested;
     public event EventHandler? LoaderRequested;
+
+    /// <summary>Наладчик переключил способ подключения к ПЛК прямо на карточке (значение — "",
+    /// "usb" или "ethernet"). Сохраняет выбор SearchView: карточка про настройки не знает.</summary>
+    public event EventHandler<string>? ConnectionModeChangeRequested;
     public event EventHandler? MapRequested;
     public event EventHandler? ModbusMapRequested;
     public event EventHandler? ParamsRequested;
@@ -233,6 +247,7 @@ public partial class FirmwareCard : UserControl
                 ? "Загрузить найденный LFS или собрать и загрузить PSL через Segnetics Loader"
                 : "Segnetics Loader Automation не найден; при нажатии будет показана причина";
             ActionsPanel.Children.Add(loadBtn);
+            ActionsPanel.Children.Add(MakeConnectionModeBox(flags));
         }
         else
         {
@@ -506,6 +521,81 @@ public partial class FirmwareCard : UserControl
     }
 
     // ── Кнопки/меню ───────────────────────────────────────────────────────
+
+    /// <summary>Выбор «чем подключены к ПЛК» рядом с кнопкой загрузки. Наладчик меняет его от шкафа к
+    /// шкафу (в одном переходник USB, в другом сеть), поэтому список стоит здесь же, а не только в
+    /// Настройки → Лоадер: туда он всё равно попадает — это одна и та же настройка машины.
+    ///
+    /// Список короткий и без подписи: подпись «Подключение» рядом с тремя понятными словами занимала
+    /// бы ширину карточки, а смысл виден из самих пунктов и подсказки.</summary>
+    private ComboBox MakeConnectionModeBox(FirmwareCardFlags flags)
+    {
+        var box = new ComboBox
+        {
+            Margin = new Thickness(0, 0, 8, 8),
+            MinWidth = 118,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        foreach (var (value, caption) in ConnectionModeOptions) box.Items.Add(new ConnectionOption(value, caption));
+
+        SelectConnectionMode(box, flags.ConnectionMode);
+
+        var tip = "Как эта машина подключается к контроллеру. Выбор запоминается и переносится в " +
+                  "настройки самого Segnetics Loader перед заливкой.";
+        if (!string.IsNullOrEmpty(flags.ConnectionHint)) tip += "\n" + flags.ConnectionHint;
+        box.ToolTip = tip;
+
+        // Подписка ПОСЛЕ выставления текущего значения: SelectionChanged срабатывает и на
+        // программное заполнение, а Configure зовётся дважды на карточку (первая отрисовка + досмотр
+        // диска) — иначе каждый досмотр «сохранял» бы выбор, которого наладчик не делал.
+        box.SelectionChanged += (_, _) =>
+        {
+            if (_connectionFilling) return;
+            if (box.SelectedItem is ConnectionOption option)
+                ConnectionModeChangeRequested?.Invoke(this, option.Value);
+        };
+        _connectionBox = box;
+        return box;
+    }
+
+    private ComboBox? _connectionBox;
+    private bool _connectionFilling;
+
+    /// <summary>Показать текущий способ подключения, не сохраняя его. Настройка одна на машину, а
+    /// карточек на экране много: без этого списки соседних карточек показывали бы старое значение,
+    /// пока выдачу не перестроят, — два разных ответа на один вопрос на одном экране.</summary>
+    public void ShowConnectionMode(string mode)
+    {
+        if (_connectionBox is null) return;
+        SelectConnectionMode(_connectionBox, mode);
+    }
+
+    private void SelectConnectionMode(ComboBox box, string? mode)
+    {
+        var current = (mode ?? "").Trim().ToLowerInvariant();
+        _connectionFilling = true;
+        try
+        {
+            box.SelectedItem = box.Items.Cast<ConnectionOption>().FirstOrDefault(o => o.Value == current)
+                               ?? box.Items.Cast<ConnectionOption>().First();
+        }
+        finally
+        {
+            _connectionFilling = false;
+        }
+    }
+
+    private static readonly (string Value, string Caption)[] ConnectionModeOptions =
+    {
+        ("", "Как в Loader"),
+        ("usb", "USB"),
+        ("ethernet", "Ethernet"),
+    };
+
+    private sealed record ConnectionOption(string Value, string Caption)
+    {
+        public override string ToString() => Caption;
+    }
 
     private Button MakeActionButton(string text, RoutedEventHandler onClick)
     {

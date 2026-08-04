@@ -18,6 +18,15 @@ public partial class EditFirmwareDialog : Window
     private readonly AppServices _services;
     private readonly Database _db;
     private readonly FwVersionRecord _record;
+
+    /// <summary>Человекопонятное имя прошивки — «ПЖ SMH5 2.0.0042.0003», как его собирает вызывающая
+    /// сторона (тип шкафа + подтип + контроллер + номер). В сообщениях о правках стоит именно оно, а
+    /// не голый VersionRaw: по жалобе «пишет номер прошивки, а не человекопонятное название» — по
+    /// «2.0.0042.0003» в уведомлении невозможно понять, о каком шкафе речь. Из самой записи это имя
+    /// не собрать: GetFwVersionById читает только столбцы fw_versions, названия типа/подтипа/
+    /// контроллера лежат в других таблицах и в записи пустые.</summary>
+    private readonly string _title;
+
     private readonly LaunchTypeChecks _checks;
 
     private readonly string? _plcFolder;
@@ -71,6 +80,7 @@ public partial class EditFirmwareDialog : Window
         _services = services;
         _db = services.Db;
         _record = v;
+        _title = title;
         TitleLabel.Text = $"Модерация прошивки: {title}";
         DescriptionInput.Text = v.Description;
         TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
@@ -474,6 +484,8 @@ public partial class EditFirmwareDialog : Window
         var request = new FirmwareAttachmentsRequest
         {
             RootPath = _services.Cfg.RootPath(),
+            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
+            ThirdDiskShortcuts = _services.Cfg.ThirdDiskShortcuts(),
             GroupName = _names.Value.GroupName,
             SubtypeName = _names.Value.SubtypeName,
             ControllerName = _names.Value.ControllerName,
@@ -485,7 +497,8 @@ public partial class EditFirmwareDialog : Window
             // .psl-поле только у Segnetics; у остальных оно скрыто и в запрос не идёт.
             PslFileSourcePath = PslFilePanel.Visibility == Visibility.Visible ? PslFileInput.Text.Trim() : null,
         };
-        var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request);
+        var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request,
+            new Services.ShortcutCreator());
         if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;
     }
 
@@ -562,7 +575,7 @@ public partial class EditFirmwareDialog : Window
         if (r.Updated.Count > 0) parts.Add($"изменено {r.Updated.Count}");
         if (r.Removed.Count > 0) parts.Add($"убрано {r.Removed.Count}");
 
-        var what = $"Прошивка {dlg._record.VersionRaw}: конфигурации шкафов — {string.Join(", ", parts)}";
+        var what = $"{dlg._title}: конфигурации шкафов — {string.Join(", ", parts)}";
         host.ShowStatus(what, category: NotificationCategory.FirmwareAndParams);
         host.PushCatalogChange(what, dlg._record.Id?.ToString() ?? "");
         host.InvalidateSearchResults();
@@ -578,22 +591,45 @@ public partial class EditFirmwareDialog : Window
     private static void ReportMetadataEdits(EditFirmwareDialog dlg, IAppHost host)
     {
         var o = dlg._record;
-        bool tagsChanged = !new HashSet<string>(TagString.Parse(o.Tags), StringComparer.OrdinalIgnoreCase)
-            .SetEquals(TagString.Parse(dlg.ResultTags));
+        var tagsBefore = new HashSet<string>(TagString.Parse(o.Tags), StringComparer.OrdinalIgnoreCase);
+        var tagsAfter = new HashSet<string>(TagString.Parse(dlg.ResultTags), StringComparer.OrdinalIgnoreCase);
+        bool tagsChanged = !tagsBefore.SetEquals(tagsAfter);
         bool descChanged = (o.Description ?? "") != (dlg.ResultDescription ?? "");
         bool launchChanged = !new HashSet<string>(o.LaunchTypes ?? new(), StringComparer.OrdinalIgnoreCase)
             .SetEquals(dlg.ResultLaunchTypes);
         if (!tagsChanged && !descChanged && !launchChanged) return;
 
         var parts = new List<string>();
-        if (tagsChanged) parts.Add("теги");
-        if (descChanged) parts.Add("описание");
-        if (launchChanged) parts.Add("типы пуска");
+        if (tagsChanged) parts.Add(DescribeTagChange(tagsBefore, tagsAfter));
+        if (descChanged) parts.Add("изменено описание");
+        if (launchChanged) parts.Add("изменены типы пуска");
+
+        // Куда именно — человекопонятным именем прошивки (см. _title), а не номером версии.
+        var what = $"{dlg._title}: {string.Join("; ", parts)}";
+        host.ShowStatus(what, category: NotificationCategory.FirmwareAndParams);
         // subjectKey = FwVersionId — чтобы карточка именно этой прошивки в выдаче показала «правки ещё
         // не на диске», пока «Отправить всё» не унесёт накопитель (см. FirmwareCardFlags.TagsPending).
-        host.PushCatalogChange($"Прошивка {o.VersionRaw}: изменены {string.Join(", ", parts)}", o.Id?.ToString() ?? "");
+        host.PushCatalogChange(what, o.Id?.ToString() ?? "");
         // Правка тегов/описания могла поменять и порядок/состав поисковой выдачи.
         host.InvalidateSearchResults();
+    }
+
+    /// <summary>«теги добавлены: 2 насоса, жокей; убраны: черновик» — вместо прежнего безликого
+    /// «изменены теги». Именно этого не хватало в уведомлении и в списке «готово к отправке»:
+    /// увидев там одну строку, невозможно было понять, что именно уедет коллегам.
+    ///
+    /// Порядок сохраняется алфавитный — набор тегов множество, «как ввели» тут смысла не несёт.</summary>
+    private static string DescribeTagChange(HashSet<string> before, HashSet<string> after)
+    {
+        var added = after.Except(before, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var removed = before.Except(after, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+        var bits = new List<string>();
+        if (added.Count > 0) bits.Add("добавлены: " + string.Join(", ", added));
+        if (removed.Count > 0) bits.Add("убраны: " + string.Join(", ", removed));
+        return "теги " + string.Join("; ", bits);
     }
 
     private static void ReportSubtypes(FirmwareSubtypeLinkService.ApplyResult? result, IAppHost host)

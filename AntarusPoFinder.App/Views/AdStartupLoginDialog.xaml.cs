@@ -42,6 +42,19 @@ public partial class AdStartupLoginDialog : Window
         RememberCombo.ItemsSource = RememberOptions.All(_cfg.AdRequireLoginDefaultDays());
         RememberCombo.SelectedValuePath = "Key";
         RememberCombo.SelectedValue = RememberOptions.DefaultKey;
+
+        ApplyAuthMode();
+    }
+
+    /// <summary>Какой способ входа показывать. «oidc» с заполненными параметрами — корпоративный вход
+    /// вместо полей логина/пароля: при нём приложение пароль не спрашивает в принципе. Способ выбран,
+    /// но не настроен — молча оставляем прежний вход по AD: запереть человека окном, в котором нечем
+    /// войти, хуже любой непоследовательности.</summary>
+    private void ApplyAuthMode()
+    {
+        var sso = _cfg.AdAuthMode() == "oidc" && _cfg.OidcConfigured();
+        SsoPanel.Visibility = sso ? Visibility.Visible : Visibility.Collapsed;
+        AdPanel.Visibility = sso ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>Same personalization as RoleSwitchDialog.AdLoginInput_LostFocus — pre-selects
@@ -134,11 +147,9 @@ public partial class AdStartupLoginDialog : Window
         RetryPanel.Visibility = Visibility.Collapsed;
 
         var normalized = AppUserAuthService.NormalizeAdLogin(login);
-        // ТОЧКА РАСШИРЕНИЯ ПОД OIDC (сейчас НЕ реализована, см. IIdentityProvider): у AD-провайдера
-        // identity.Groups пуст, и роль по-прежнему определяется прямым запросом групп в AD — ровно тем
-        // же вызовом, что и до появления слоя провайдеров. Когда появится OIDC-провайдер, группы
-        // придут в identity.Groups claim'ом, и здесь встанет ветка «если Groups непусты — сопоставить
-        // claim с ролью приложения по настраиваемой таблице», а этот вызов останется только для AD.
+        // У AD-провайдера identity.Groups пуст намеренно: роль определяется прямым запросом групп в
+        // AD — тем же вызовом, что и до появления слоя провайдеров. Ветка «группы пришли claim'ом»
+        // живёт в SsoAuth_Click ниже и считает роль по тем же настройкам через RoleFromGroups.
         var groupRole = WindowsGroupAuth.DetectRoleForUser(_cfg, domain, login, password);
 
         string role;
@@ -170,6 +181,63 @@ public partial class AdStartupLoginDialog : Window
                 "Новый пользователь", MessageBoxButton.OK, MessageBoxImage.Information);
 
         DialogResult = true;
+    }
+
+    /// <summary>Корпоративный вход (Keycloak / OpenID Connect): браузер, PKCE, токен — см.
+    /// <see cref="OidcIdentityProvider"/>. Пароля здесь нет вообще, поэтому и роль определяется иначе:
+    /// группы приходят claim'ом в самом токене (<see cref="RoleFromGroups"/>), а не спрашиваются у
+    /// домена — это ровно та ветка, которую предусматривал комментарий в AdAuth_Click.
+    ///
+    /// Всё остальное — как у AD-входа: запомнить вход на этой машине, ростер приложения при
+    /// несовпадении групп (новому человеку достаётся минимальная роль), сообщение о первом входе.</summary>
+    private async void SsoAuth_Click(object sender, RoutedEventArgs e)
+    {
+        SsoButton.IsEnabled = false;
+        ErrorText.Visibility = Visibility.Collapsed;
+        SsoStatus.Visibility = Visibility.Visible;
+        SsoStatus.Text = "Открыт браузер — завершите вход на странице компании. Это окно ждёт ответа.";
+        try
+        {
+            var provider = new OidcIdentityProvider(_cfg.OidcAuthority(), _cfg.OidcClientId(), _cfg.OidcGroupsClaim());
+            var identity = await provider.SignInAsync(CancellationToken.None);
+            if (!identity.Success)
+            {
+                SsoStatus.Visibility = Visibility.Collapsed;
+                ShowError(identity.FailureReason ?? "Корпоративный вход не выполнен.");
+                return;
+            }
+
+            var normalized = AppUserAuthService.NormalizeAdLogin(identity.UserName);
+            var role = RoleFromGroups.Detect(_cfg, identity.Groups);
+            var isNewUser = false;
+            if (role is null)
+            {
+                isNewUser = _services.Db.FindAppUserByLogin(normalized) is null;
+                var user = _services.Db.TouchOrCreateAppUser(normalized);
+                role = user.Role;
+
+                // Best-effort, как и в AD-ветке: недоступная шара вход не отменяет.
+                try { ConfigSyncService.PushAppUsersOnly(_services, _cfg.RootPath(), $"{identity.UserName} ({RolesConfig.RoleLabel(role)})"); }
+                catch { /* поедет со следующим удачным входом или ручной отправкой */ }
+            }
+
+            RecordRememberChoice(normalized);
+            _services.CurrentAdLogin = normalized;
+            _cfg.SetRole(role);
+            SelectedRole = role;
+
+            if (isNewUser)
+                AppMessageBox.Show(
+                    $"Первый вход «{identity.UserName}» — назначена роль «{RolesConfig.RoleLabel(role)}».\n" +
+                    "Администратор может изменить её в Настройки → Пользователи.",
+                    "Новый пользователь", MessageBoxButton.OK, MessageBoxImage.Information);
+
+            DialogResult = true;
+        }
+        finally
+        {
+            SsoButton.IsEnabled = true;
+        }
     }
 
     /// <summary>The "бутылочное горлышко" escape: even with mandatory AD login on, the shared

@@ -91,6 +91,9 @@ public partial class NetworkSyncView : UserControl
     {
         RootPathInput.Text = _services.Cfg.RootPath();
         SecondDiskInput.Text = _services.Cfg.SecondDiskPath();
+        ThirdDiskInput.Text = _services.Cfg.ThirdDiskPath();
+        ThirdDiskShortcutsCheck.IsChecked = _services.Cfg.ThirdDiskShortcuts();
+        RefreshThirdDiskStatus();
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
 
         PushIntervalInput.Text = _services.Cfg.ConfigPushIntervalMin().ToString();
@@ -156,6 +159,64 @@ public partial class NetworkSyncView : UserControl
         _host.ShowStatus("Путь второго диска сохранён", category: NotificationCategory.Sync);
     }
 
+    // ── Третий диск (только инструкции) ───────────────────────────────────────
+    // Раскладка на нём зеркальна первому диску и нигде не хранится — путь считается заменой
+    // префикса (InstructionDiskResolver), поэтому настройка ровно одна: корень.
+
+    private void BrowseThirdDisk_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Третий диск (инструкции)" };
+        if (dlg.ShowDialog() != true) return;
+        ThirdDiskInput.Text = dlg.FolderName;
+        SaveThirdDiskPath();
+    }
+
+    private void ThirdDisk_LostFocus(object sender, RoutedEventArgs e) => SaveThirdDiskPath();
+
+    private void ThirdDisk_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveThirdDiskPath();
+    }
+
+    private void SaveThirdDiskPath()
+    {
+        var path = ThirdDiskInput.Text.Trim();
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.ThirdDiskPath()))
+        {
+            RefreshThirdDiskStatus();
+            return;
+        }
+
+        _services.Cfg.SetThirdDiskPath(path);
+        _host.ShowStatus("Путь третьего диска сохранён", category: NotificationCategory.Sync);
+        RefreshThirdDiskStatus();
+    }
+
+    private void ThirdDiskShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetThirdDiskShortcuts(ThirdDiskShortcutsCheck.IsChecked == true);
+        _host.ShowStatus("Настройка ярлыков сохранена", category: NotificationCategory.Sync);
+    }
+
+    /// <summary>Строка под полем: настроен ли третий диск и доступен ли он ПРЯМО СЕЙЧАС. Именно
+    /// недоступность — самый вероятный сюрприз (диск не подключён у этой машины), и молчать о ней
+    /// нельзя: инструкции в этом случае молча лягут на первый диск.</summary>
+    private void RefreshThirdDiskStatus()
+    {
+        var path = _services.Cfg.ThirdDiskPath();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            ThirdDiskStatus.Text = "Не настроен — инструкции лежат на первом диске.";
+            return;
+        }
+        bool exists;
+        try { exists = Directory.Exists(path); }
+        catch (Exception) { exists = false; }
+        ThirdDiskStatus.Text = exists
+            ? "Диск доступен — новые инструкции будут ложиться сюда."
+            : "Диск сейчас недоступен — до его появления инструкции будут ложиться на первый диск.";
+    }
+
     private void BrowseInspectionFolder_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка осмотра" };
@@ -200,25 +261,30 @@ public partial class NetworkSyncView : UserControl
             ConfigUpdateInfo? info;
             string? error;
             SharedConfigSnapshot? snapshot;
-            using (_host.BeginBusy("Проверка обновлений на диске…"))
+            // Пилюля синхры, а не общий индикатор фоновой работы: он остался за поиском и прочей
+            // работой страницы (см. IAppHost.BeginSync).
+            using (_host.BeginSync("проверка обновлений на диске"))
                 (info, error, snapshot) = await ConfigSyncService.CheckForUpdateAsync(_services);
 
             if (error is not null)
             {
+                _host.NoteSyncResult($"Не удалось проверить обновление конфига: {error}", isError: true);
                 AppMessageBox.Show($"Не удалось проверить обновление конфига:\n{error}", "Синхронизация", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             if (info is null || snapshot is null)
             {
                 LastSyncText.Text = $"Изменений нет. Последняя синхронизация: {_services.Cfg.ConfigLastSyncedAt()}";
+                _host.NoteSyncResult(null, isError: false);
                 _host.ShowStatus("Изменений на диске нет — конфиг уже актуален", category: NotificationCategory.Sync);
                 return;
             }
 
             ConfigApplyResult result;
-            using (_host.BeginBusy("Синхронизация прошивок с диском…"))
+            using (_host.BeginSync("приём справочника и прошивок"))
                 result = await ConfigSyncService.ApplyAsync(_services, snapshot, root);
 
+            _host.NoteSyncResult(null, isError: false);
             ShowSyncResult(result);
         }
         finally
@@ -300,8 +366,9 @@ public partial class NetworkSyncView : UserControl
         {
             var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
             ConfigExportResult result;
-            using (_host.BeginBusy("Отправка конфига на диск…"))
+            using (_host.BeginSync("отправка конфига на диск"))
                 result = await ConfigSyncService.ExportAsync(_services, root, exportedBy);
+            _host.NoteSyncResult(null, isError: false);
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
             AppMessageBox.Show(
                 // Файлы параметров считаем ЖИВЫЕ: в снимок теперь входят и архивные — это тумбстоуны
@@ -315,6 +382,7 @@ public partial class NetworkSyncView : UserControl
         }
         catch (Exception ex)
         {
+            _host.NoteSyncResult($"Не удалось отправить конфиг: {ex.Message}", isError: true);
             AppMessageBox.Show($"Не удалось отправить конфиг:\n{ex.Message}", "Отправка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -363,7 +431,7 @@ public partial class NetworkSyncView : UserControl
         {
             var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
             ConfigExportResult result;
-            using (_host.BeginBusy("Отправка эталонного справочника на диск…"))
+            using (_host.BeginSync("отправка эталонного справочника"))
                 result = await ConfigSyncService.ExportAsync(_services, root, exportedBy, authoritative: true);
 
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";

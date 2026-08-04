@@ -270,19 +270,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (string.IsNullOrEmpty(root) || !System.IO.Directory.Exists(root)) return;
 
         _ticketSyncRunning = true;
-        using var activity = BeginSyncActivity();
+        using var activity = BeginSyncActivity("тикеты");
         try
         {
-            int applied;
-            using (Busy.Begin("Синхронизация тикетов…"))
-            {
-                TicketSyncService.FlushOutbox(_services, root, out var flushFailed);
-                applied = TicketSyncService.PullNewEvents(_services, root, out var pullFailed);
-                if (flushFailed + pullFailed > 0)
-                    NoteSyncOutcome($"Тикеты: не удалось обработать файлов: {flushFailed + pullFailed}", isError: true);
-                else
-                    NoteSyncOutcome(applied > 0 ? $"Тикеты: получено событий: {applied}" : null, isError: false);
-            }
+            TicketSyncService.FlushOutbox(_services, root, out var flushFailed);
+            var applied = TicketSyncService.PullNewEvents(_services, root, out var pullFailed);
+            if (flushFailed + pullFailed > 0)
+                NoteSyncOutcome($"Тикеты: не удалось обработать файлов: {flushFailed + pullFailed}", isError: true);
+            else
+                NoteSyncOutcome(applied > 0 ? $"Тикеты: получено событий: {applied}" : null, isError: false);
             RefreshTicketsBadge(notify: true);
             // Тикет мог сменить статус на «в очереди на отправке нечего» — освежаем и пилюлю.
             RefreshSyncStatus();
@@ -356,15 +352,34 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     /// <summary>Отмечает начало операции синхронизации: пилюля переходит в «крутящиеся стрелки», пока
     /// scope не освобождён. Считает вложенно (несколько синхр разом — нормально), поэтому int-счётчик,
-    /// а не bool.</summary>
-    private IDisposable BeginSyncActivity()
+    /// а не bool.
+    ///
+    /// <paramref name="stage"/> — что именно синхронизируется («Приём конфига с диска», «Тикеты»…);
+    /// попадает в подсказку пилюли. Синхронизация НЕ занимает индикатор фоновой работы (Busy) внизу:
+    /// он остался за видимой работой страницы — поиском, копированием, сборкой PDF. Раньше обе
+    /// работы делили одну полоску, и во время поиска снизу мог висеть текст про синхру — ровно
+    /// жалоба «отделить анимацию синхронизации от анимации поиска».</summary>
+    private IDisposable BeginSyncActivity(string? stage = null)
     {
         _syncActivity++;
+        if (!string.IsNullOrEmpty(stage)) _syncStages.Add(stage!);
         RefreshSyncStatus();
-        return new SyncActivityScope(this);
+        return new SyncActivityScope(this, stage);
     }
 
-    private sealed class SyncActivityScope(MainWindowViewModel owner) : IDisposable
+    /// <summary>IAppHost — то же самое для страниц (ручная синхронизация с «Сетевых дисков» и из
+    /// Настроек): крутит пилюлю, а не полоску поиска.</summary>
+    public IDisposable BeginSync(string stage) => BeginSyncActivity(stage);
+
+    /// <summary>IAppHost — итог ручной синхронизации со страницы: ошибка красит пилюлю (и держится до
+    /// следующего удачного тика), успех её гасит.</summary>
+    public void NoteSyncResult(string? message, bool isError) => NoteSyncOutcome(message, isError);
+
+    /// <summary>Что синхронизируется прямо сейчас — по строке на каждый живой scope; в подсказке
+    /// показывается последняя начатая (как и в BusyTracker).</summary>
+    private readonly List<string> _syncStages = new();
+
+    private sealed class SyncActivityScope(MainWindowViewModel owner, string? stage) : IDisposable
     {
         private bool _disposed;
         public void Dispose()
@@ -372,6 +387,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             if (_disposed) return;
             _disposed = true;
             owner._syncActivity--;
+            if (!string.IsNullOrEmpty(stage)) owner._syncStages.Remove(stage!);
             owner.RefreshSyncStatus();
         }
     }
@@ -404,7 +420,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (_syncActivity > 0)
         {
             state = "syncing";
-            tip = "Идёт синхронизация с сетевым диском…";
+            tip = _syncStages.Count > 0
+                ? $"Идёт синхронизация с сетевым диском: {_syncStages[^1]}"
+                : "Идёт синхронизация с сетевым диском…";
         }
         else if (_syncLastError is not null)
         {
@@ -1186,14 +1204,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         if (_configSyncRunning) return; // тик пришёл, пока предыдущий ещё тянет диск — просто пропускаем
         _configSyncRunning = true;
-        using var activity = BeginSyncActivity();
+        using var activity = BeginSyncActivity("проверка обновлений на диске");
         try
         {
             SharedConfigSnapshot? snapshot;
             ConfigUpdateInfo? info;
             string? error;
-            using (Busy.Begin("Проверка обновлений на диске…"))
-                (info, error, snapshot) = await ConfigSyncService.CheckForUpdateAsync(_services);
+            (info, error, snapshot) = await ConfigSyncService.CheckForUpdateAsync(_services);
 
             if (error is not null)
             {
@@ -1207,7 +1224,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             if (info is null || snapshot is null) { NoteSyncOutcome(null, isError: false); return; }
 
             var root = _services.Cfg.RootPath();
-            using (Busy.Begin("Синхронизация прошивок с диском…"))
+            using (BeginSyncActivity("приём справочника и прошивок"))
                 await ConfigSyncService.ApplyAsync(_services, snapshot, root);
 
             ReloadSidebarApps();
@@ -1375,7 +1392,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         try
         {
-            using var busy = Busy.Begin("Отправка изменений на диск…");
+            using var activity = BeginSyncActivity("отправка изменений на диск");
             // Забрать чужое перед тем как отдать своё — тот же порядок, что PushCatalogChangeAsync
             // (Export перезаписывает ВЕСЬ общий снимок, отправка без предварительного приёма рискует
             // затереть чужие изменения).
@@ -1746,13 +1763,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private async Task PushConfigNowAsync()
     {
         var root = _services.Cfg.RootPath();
-        using var activity = BeginSyncActivity();
+        using var activity = BeginSyncActivity("отправка конфига на диск");
         try
         {
             var exportedBy = $"{_services.CurrentUserName} ({RoleLabel})";
             var descriptions = _services.Db.GetSyncPendingChanges().Select(c => c.Description).ToList();
-            using (Busy.Begin("Отправка конфига на диск…"))
-                await ConfigSyncService.ExportAsync(_services, root, exportedBy, descriptions);
+            await ConfigSyncService.ExportAsync(_services, root, exportedBy, descriptions);
             RefreshPendingChangesBanner();
             NoteSyncOutcome(descriptions.Count > 0 ? $"Отправлено на диск (правок: {descriptions.Count})" : null, isError: false);
             if (_configPushLastFailed)
