@@ -240,6 +240,14 @@ public class ConfigService
         // Бланк, выбранный в окне печати в прошлый раз — per-machine (SkipSettingsKeys): у каждого
         // наладчика свой привычный, и навязывать чужой выбор незачем.
         ["passport_template_last"] = "",
+        // Паспорт печатается с двух сторон, разворот относительно КОРОТКОГО края — прямая просьба
+        // Ильи (см. DuplexPrinting). Синхронизируемая: как оформляется паспорт, идущий заказчику, —
+        // политика предприятия, а не привычка машины. Выключать штатно неоткуда (в интерфейсе этого
+        // переключателя нет) — ключ оставлен на случай принтера, который двусторонней не умеет.
+        ["passport_duplex_short_edge"] = "true",
+        // Развёрнута ли секция бокового меню «ДЛЯ НАЛАДЧИКА». Per-machine (SkipSettingsKeys): это
+        // состояние окна на конкретном компьютере, а не общая настройка — у соседа своя привычка.
+        ["sidebar_setup_expanded"] = "false",
     };
 
     private readonly Database _db;
@@ -346,6 +354,18 @@ public class ConfigService
     /// <summary>Название бланка, выбранного в окне печати паспорта в прошлый раз (per-machine).</summary>
     public string PassportTemplateLast() => Get("passport_template_last");
     public void SetPassportTemplateLast(string name) => Set("passport_template_last", name.Trim());
+
+    /// <summary>Печатать паспорт с двух сторон с переворотом относительно короткого края (см.
+    /// DuplexPrinting). По умолчанию включено — так просил Илья.</summary>
+    public bool PassportDuplexShortEdge() => Get("passport_duplex_short_edge").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetPassportDuplexShortEdge(bool value) => Set("passport_duplex_short_edge", value ? "true" : "false");
+
+    /// <summary>Развёрнута ли секция бокового меню «ДЛЯ НАЛАДЧИКА» (per-machine). В отличие от
+    /// «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой, эта секция помнит своё состояние: в неё
+    /// заходят за работой (параметры, наклейки, паспорта), а не «посмотреть настройку раз в месяц», и
+    /// сворачивать её заново на каждый запуск значило бы мешать тому, кто ей пользуется каждый день.</summary>
+    public bool SidebarSetupExpanded() => Get("sidebar_setup_expanded").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetSidebarSetupExpanded(bool value) => Set("sidebar_setup_expanded", value ? "true" : "false");
 
     /// <summary>Размер этикетки пишется через точку (InvariantCulture): 97,5 на машине с русской
     /// локалью и 97.5 на английской — это одно и то же значение, и на чужой машине оно не должно
