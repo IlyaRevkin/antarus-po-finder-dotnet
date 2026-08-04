@@ -836,10 +836,16 @@ public partial class SearchView : UserControl
             Style = (Style)FindResource("SubtitleText"),
             TextWrapping = TextWrapping.Wrap,
         });
+        // Типовой бланк тоже находится поиском — по тегу, куда как раз и пишут названия шкафов. Типа
+        // и подтипа у него нет по своей природе, и без явной подписи строка начиналась бы прямо с
+        // разделителя, будто справочник не доехал.
+        var general = passport.SubtypeId is null;
         panel.Children.Add(new TextBlock
         {
-            Text = string.Join(" / ", new[] { passport.GroupName, passport.SubtypeName }
-                       .Where(s => !string.IsNullOrEmpty(s) && s != "—"))
+            Text = (general
+                       ? "Типовой бланк"
+                       : string.Join(" / ", new[] { passport.GroupName, passport.SubtypeName }
+                           .Where(s => !string.IsNullOrEmpty(s) && s != "—")))
                    + (string.IsNullOrEmpty(passport.Filename) ? "" : $"  ·  {passport.Filename}"),
             Style = (Style)FindResource("MutedText"),
             Margin = new Thickness(0, 2, 0, 0),
@@ -856,7 +862,17 @@ public partial class SearchView : UserControl
         }
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        actions.Children.Add(MakePassportButton("Печать", () => { _ = PrintPassportAsync(passport); }));
+        // Бланк печатать «как есть» нельзя: в нём вместо названия шкафа стоит метка, и на бумагу ушёл
+        // бы лист с «{{Название}}». Поэтому у типового — окно печати с уже выбранным бланком, где
+        // название вписывают перед печатью.
+        // Название шкафа берётся из самого запроса: искали «ЩУН-3» — оно и подставится в бланк
+        // (см. PassportService.CabinetNameFromQuery). Считается в момент нажатия, а не при сборке
+        // карточки: к этому времени в строке поиска может стоять уже другое.
+        actions.Children.Add(general
+            ? MakePassportButton("Печать по шаблону",
+                () => PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host, passport.Name,
+                    PassportService.CabinetNameFromQuery(SearchInput.Text, passport.Name)))
+            : MakePassportButton("Печать", () => { _ = PrintPassportAsync(passport); }));
         actions.Children.Add(MakePassportButton("Открыть", () => OpenPassport(passport)));
         actions.Children.Add(MakePassportButton("Открыть папку", () => OpenPassportFolder(passport)));
         panel.Children.Add(actions);
@@ -895,9 +911,14 @@ public partial class SearchView : UserControl
         if (PickPassport(subtypeId) is { } passport) await PrintPassportAsync(passport);
     }
 
+    /// <summary>Общая папка типовых бланков на этой машине — см. PassportService.FolderFor: типовой
+    /// паспорт лежит вне дерева «ПО», и его адрес собирается из настройки, а не из чужой записи.</summary>
+    private string? PassportTemplatesFolder() =>
+        PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
+
     private async Task PrintPassportAsync(PassportTemplate passport)
     {
-        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath());
+        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
         var pdf = await PrintableDocActions.EnsurePdfAsync(doc, _host, "Паспорт", "паспорта",
             PassportsView.PdfTempFolder, PassportsView.EditHint);
         if (pdf is null) return;
@@ -912,7 +933,7 @@ public partial class SearchView : UserControl
 
     private void OpenPassport(PassportTemplate passport)
     {
-        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath());
+        var doc = PassportService.ResolveDoc(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
         var path = doc.Docx ?? doc.Newest;
         if (path is null)
         {
@@ -930,7 +951,7 @@ public partial class SearchView : UserControl
 
     private void OpenPassportFolder(PassportTemplate passport)
     {
-        var folder = FirmwarePathLocalizer.Localize(passport.DiskPath, _services.Cfg.RootPath());
+        var folder = PassportService.FolderFor(passport, _services.Cfg.RootPath(), PassportTemplatesFolder());
         if (Directory.Exists(folder)) TryOpen(folder);
         else AppMessageBox.Show($"Папка паспорта не найдена:\n{folder}", "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);
     }

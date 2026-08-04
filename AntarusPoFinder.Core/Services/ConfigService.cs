@@ -212,6 +212,17 @@ public class ConfigService
         // Пусто — берётся Конфиг\Наклейки на общем диске (см. StickerTemplates.FolderFor): чтобы
         // это заработало, настраивать ничего не нужно.
         ["stickers_folder"] = "",
+        // Папка типовых паспортов — бланков, которые не ложатся ни на один тип шкафа (НКУ, Щит СПЛ,
+        // ШР): пусто = Конфиг\Паспорта на общем диске (см. PassportService.TemplatesFolder).
+        // Синхронизируемая, как и папка наклеек: где лежат общие бланки — политика предприятия.
+        ["passport_templates_folder"] = "",
+        // Метка в бланке, вместо которой подставляется название шкафа при печати
+        // (DocxTemplateFiller). Синхронизируемая: бланки общие, значит и метка в них одна на всех —
+        // разъехавшись, она перестала бы находиться в чужих шаблонах.
+        ["passport_name_placeholder"] = DocxTemplateFiller.DefaultPlaceholder,
+        // Бланк, выбранный в окне печати в прошлый раз — per-machine (SkipSettingsKeys): у каждого
+        // наладчика свой привычный, и навязывать чужой выбор незачем.
+        ["passport_template_last"] = "",
     };
 
     private readonly Database _db;
@@ -264,6 +275,26 @@ public class ConfigService
     /// разворачивается в <c>&lt;диск&gt;\Конфиг\Наклейки</c> (см. StickerTemplates.FolderFor).</summary>
     public string StickersFolder() => Get("stickers_folder");
     public void SetStickersFolder(string path) => Set("stickers_folder", path.Trim());
+
+    /// <summary>Папка типовых паспортов — как её задал администратор. Пусто = «по умолчанию»,
+    /// разворачивается в <c>&lt;диск&gt;\Конфиг\Паспорта</c> (см. PassportService.TemplatesFolder).</summary>
+    public string PassportTemplatesFolder() => Get("passport_templates_folder");
+    public void SetPassportTemplatesFolder(string path) => Set("passport_templates_folder", path.Trim());
+
+    /// <summary>Метка в бланке, вместо которой при печати подставляется название шкафа. Пустое
+    /// значение в настройках означает «вернуть метку по умолчанию», а не «подставлять везде»:
+    /// пустая метка нашлась бы в каждой точке текста.</summary>
+    public string PassportNamePlaceholder()
+    {
+        var value = Get("passport_name_placeholder").Trim();
+        return value.Length > 0 ? value : DocxTemplateFiller.DefaultPlaceholder;
+    }
+
+    public void SetPassportNamePlaceholder(string value) => Set("passport_name_placeholder", value.Trim());
+
+    /// <summary>Название бланка, выбранного в окне печати паспорта в прошлый раз (per-machine).</summary>
+    public string PassportTemplateLast() => Get("passport_template_last");
+    public void SetPassportTemplateLast(string name) => Set("passport_template_last", name.Trim());
 
     /// <summary>Размер этикетки пишется через точку (InvariantCulture): 97,5 на машине с русской
     /// локалью и 97.5 на английской — это одно и то же значение, и на чужой машине оно не должно

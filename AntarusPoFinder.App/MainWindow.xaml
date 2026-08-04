@@ -331,6 +331,12 @@
                             <Button x:Name="StickersNavButton" Content="Наклейки" Style="{StaticResource CompactNavButton}"
                                     Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="Stickers_Click"
                                     ToolTip="Шаблоны наклеек из общей папки — открыть или напечатать"/>
+                            <!-- «Паспорт по шаблону» — соседняя мелочь того же рода: типовой бланк
+                                 (НКУ, Щит СПЛ, ШР) печатается с подставленным названием шкафа. Тоже
+                                 окно и тоже здесь, а не разделом меню: действие на полминуты. -->
+                            <Button x:Name="PassportPrintNavButton" Content="Паспорт по шаблону" Style="{StaticResource CompactNavButton}"
+                                    Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="PassportPrint_Click"
+                                    ToolTip="Типовой бланк паспорта: вписать название шкафа и напечатать"/>
 
                             <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Grid Margin="0,2,0,0">

@@ -69,11 +69,34 @@ public partial class PassportsView : UserControl
             : -1;
         PopulateSubtypes(prevSubtypeId);
 
-        var filterGroups = new List<EquipmentGroup> { new() { Id = null, Name = "Все типы" } };
+        var filterGroups = new List<EquipmentGroup>
+        {
+            new() { Id = null, Name = "Все типы" },
+            // Отбор «только типовые бланки»: у них подтипа нет вовсе, поэтому обычным типом их не
+            // выбрать. Id = GeneralFilterId — не существующая группа, а метка отбора (проверяется
+            // в ReloadTable): заводить ради этого второй комбобокс над одной таблицей ни к чему.
+            new() { Id = GeneralFilterId, Name = "Типовые бланки" },
+        };
         filterGroups.AddRange(groups);
         FilterGroupCombo.ItemsSource = filterGroups;
         FilterGroupCombo.SelectedIndex = 0;
     }
+
+    /// <summary>Метка отбора «типовые бланки» в списке типов. Отрицательный — настоящих id таких не
+    /// бывает (rowid в SQLite всегда положителен).</summary>
+    private const int GeneralFilterId = -1;
+
+    /// <summary>Типовой бланк не привязан ни к типу, ни к подтипу — списки для него не нужны, и
+    /// оставлять их доступными значило бы предлагать выбор, который всё равно не учтётся.</summary>
+    private void GeneralCheck_Click(object sender, RoutedEventArgs e)
+    {
+        var general = GeneralCheck.IsChecked == true;
+        GroupCombo.IsEnabled = !general;
+        SubtypeCombo.IsEnabled = !general;
+    }
+
+    private void PrintByTemplate_Click(object sender, RoutedEventArgs e) =>
+        PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host);
 
     private void PopulateSubtypes(int? keepSelectedId = null)
     {
@@ -135,15 +158,24 @@ public partial class PassportsView : UserControl
             AppMessageBox.Show("Выберите документ паспорта.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (GroupCombo.SelectedItem is not EquipmentGroup group)
+        var general = GeneralCheck.IsChecked == true;
+        EquipmentGroup? group = null;
+        EquipmentSubType? subtype = null;
+        if (!general)
         {
-            AppMessageBox.Show("Выберите тип шкафа.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (SubtypeCombo.SelectedItem is not EquipmentSubType subtype || subtype.Id is null)
-        {
-            AppMessageBox.Show("Выберите подтип шкафа.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            group = GroupCombo.SelectedItem as EquipmentGroup;
+            if (group is null)
+            {
+                AppMessageBox.Show("Выберите тип шкафа — или отметьте «типовой бланк», если паспорт не относится ни к одному типу.",
+                    "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            subtype = SubtypeCombo.SelectedItem as EquipmentSubType;
+            if (subtype?.Id is null)
+            {
+                AppMessageBox.Show("Выберите подтип шкафа.", "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
         }
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
@@ -157,7 +189,24 @@ public partial class PassportsView : UserControl
         var name = NameInput.Text.Trim();
         if (name.Length == 0) name = Path.GetFileNameWithoutExtension(srcPath);
 
-        var dstFolder = PassportService.Folder(_services.Hierarchy, root, group.Name, subtype.Name, name);
+        string dstFolder;
+        if (general)
+        {
+            // Типовой бланк ложится в общую папку диска (по умолчанию Конфиг\Паспорта) — внутри ПО
+            // ему места нет: там раскладка начинается с типа шкафа, а типа у него и не бывает.
+            var templates = PassportService.TemplatesFolder(root, _services.Cfg.PassportTemplatesFolder());
+            if (templates is null)
+            {
+                AppMessageBox.Show("Папка типовых бланков не настроена (Настройки → Печать).",
+                    "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            dstFolder = PassportService.GeneralFolder(templates, name);
+        }
+        else
+        {
+            dstFolder = PassportService.Folder(_services.Hierarchy, root, group!.Name, subtype!.Name, name);
+        }
         var now = DateTime.Now;
         string? archivedPrevious = null;
         try
@@ -186,7 +235,7 @@ public partial class PassportsView : UserControl
 
         var record = new PassportTemplate
         {
-            SubtypeId = subtype.Id,
+            SubtypeId = general ? null : subtype!.Id,
             Name = name,
             Filename = Path.GetFileName(srcPath),
             DiskPath = dstFolder,
@@ -233,7 +282,11 @@ public partial class PassportsView : UserControl
         var searchText = SearchInput.Text.Trim();
 
         var passports = _services.Db.GetPassports();
-        if (filterGroup.Id is not null)
+        if (filterGroup.Id == GeneralFilterId)
+        {
+            passports = passports.Where(p => p.SubtypeId is null).ToList();
+        }
+        else if (filterGroup.Id is not null)
         {
             var subtypeIds = _services.Db.GetSubtypesForGroup(filterGroup.Id.Value).Select(s => s.Id!.Value).ToHashSet();
             passports = passports.Where(p => p.SubtypeId is not null && subtypeIds.Contains(p.SubtypeId.Value)).ToList();
@@ -249,9 +302,11 @@ public partial class PassportsView : UserControl
         {
             Id = p.Id ?? 0,
             Name = p.Name,
-            GroupSubtypeDisplay = string.IsNullOrEmpty(p.SubtypeName) || p.SubtypeName == "—"
-                ? p.GroupName
-                : $"{p.GroupName} / {p.SubtypeName}",
+            GroupSubtypeDisplay = p.SubtypeId is null
+                ? "Типовой бланк"
+                : string.IsNullOrEmpty(p.SubtypeName) || p.SubtypeName == "—"
+                    ? p.GroupName
+                    : $"{p.GroupName} / {p.SubtypeName}",
             Filename = p.Filename,
             Tags = p.Tags,
             DateOnly = p.UploadDate.Length >= 10 ? p.UploadDate[..10] : p.UploadDate,
@@ -278,10 +333,15 @@ public partial class PassportsView : UserControl
         return null;
     }
 
+    /// <summary>Общая папка типовых бланков на этой машине — типовой паспорт лежит вне дерева «ПО», и
+    /// без неё его адрес не собрать (см. PassportService.FolderFor).</summary>
+    private string? TemplatesFolder() =>
+        PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
+
     private void OpenFile_Click(object sender, RoutedEventArgs e)
     {
         if (Selected("Паспорт") is not { } row) return;
-        var doc = PassportService.ResolveDoc(row.Source, _services.Cfg.RootPath());
+        var doc = PassportService.ResolveDoc(row.Source, _services.Cfg.RootPath(), TemplatesFolder());
         // Открываем ИСХОДНИК (docx), если он есть: с этой страницы паспорт обычно открывают, чтобы
         // поправить шаблон; печать — отдельной кнопкой, она сама соберёт свежий PDF.
         var path = doc.Docx ?? doc.Newest;
@@ -297,7 +357,7 @@ public partial class PassportsView : UserControl
     private async void Print_Click(object sender, RoutedEventArgs e)
     {
         if (Selected("Паспорт") is not { } row) return;
-        var doc = PassportService.ResolveDoc(row.Source, _services.Cfg.RootPath());
+        var doc = PassportService.ResolveDoc(row.Source, _services.Cfg.RootPath(), TemplatesFolder());
         var pdf = await PrintableDocActions.EnsurePdfAsync(doc, _host, "Паспорт", "паспорта", PdfTempFolder, EditHint);
         if (pdf is null) return;
         PrintableDocActions.Print(pdf);
@@ -307,7 +367,7 @@ public partial class PassportsView : UserControl
     private void OpenFolder_Click(object sender, RoutedEventArgs e)
     {
         if (Selected("Паспорт") is not { } row) return;
-        var folder = FirmwarePathLocalizer.Localize(row.Source.DiskPath, _services.Cfg.RootPath());
+        var folder = PassportService.FolderFor(row.Source, _services.Cfg.RootPath(), TemplatesFolder());
         if (!Directory.Exists(folder))
         {
             AppMessageBox.Show($"Папка не найдена:\n{folder}", "Паспорт", MessageBoxButton.OK, MessageBoxImage.Warning);

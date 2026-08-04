@@ -10,7 +10,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
             <TextBlock Text="Паспорта шкафов" Style="{StaticResource TitleText}"/>
             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,4,0,0"
-                       Text="Шаблон паспорта, который печатают и вкладывают в шкаф. Привязывается к типу/подтипу шкафа, а не к версии прошивки — поэтому находится и у шкафов, для которых прошивки нет вовсе, и живёт рядом с прошивкой там, где есть и то и другое."/>
+                       Text="Шаблон паспорта, который печатают и вкладывают в шкаф. Привязывается к типу/подтипу шкафа, а не к версии прошивки — поэтому находится и у шкафов, для которых прошивки нет вовсе. Бланк, который не относится ни к одному типу (НКУ, Щит СПЛ, ШР), грузится как типовой: он ложится в общую папку, находится по тегам и печатается с подстановкой названия шкафа."/>
         </StackPanel>
 
         <!-- Страница целиком прокручивается, карточки сами по себе по высоте — тот же приём и по той
@@ -48,6 +48,14 @@
                         <ComboBox x:Name="SubtypeCombo" Grid.Column="4" Height="34" DisplayMemberPath="Name"/>
                     </Grid>
 
+                    <!-- Типовой бланк — паспорт, который не ложится ни на один тип и подтип (НКУ,
+                         Щит СПЛ, ШР): его печатают под конкретный шкаф, вписывая название. Флажок,
+                         а не строка-заглушка в списке типов: «типов шкафа» такого не существует, и
+                         пункт в справочнике врал бы про иерархию. -->
+                    <CheckBox x:Name="GeneralCheck" Margin="110,0,0,8" Click="GeneralCheck_Click"
+                              Content="Типовой бланк — без привязки к шкафу (НКУ, Щит СПЛ, ШР)"
+                              ToolTip="Ляжет в общую папку бланков, а не в папку «Паспорт» подтипа. Печатается через «Паспорт по шаблону» с подстановкой названия шкафа."/>
+
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="110"/>
@@ -84,7 +92,12 @@
                     <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="110,8,0,0"
                                Text="Лучше грузить .docx: из него программа сама соберёт PDF для печати и пересоберёт его, если документ правили. Готовый .pdf тоже принимается — тогда печать идёт прямо из него."/>
 
-                    <Button x:Name="UploadBtn" Content="Загрузить паспорт" HorizontalAlignment="Right" Height="36" Margin="0,10,0,0" Click="Upload_Click"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <Button Content="Паспорт по шаблону…" Style="{StaticResource SecondaryButton}" Height="36" Margin="0,0,8,0"
+                                Click="PrintByTemplate_Click"
+                                ToolTip="Напечатать типовой бланк, подставив в него название шкафа"/>
+                        <Button x:Name="UploadBtn" Content="Загрузить паспорт" Height="36" Click="Upload_Click"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 

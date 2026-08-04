@@ -278,6 +278,9 @@ public partial class SettingsView : UserControl
         TabBtnPrinting.Visibility = Visibility.Visible;
         PrintingSharedSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         StickersFolderSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // Папка типовых бланков и метка подстановки — та же общая политика предприятия, что и папка
+        // наклеек рядом: правит администратор, печатают все.
+        PassportTemplatesSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
 
         var allTabs = AllTabButtons();
         var activeTab = allTabs.FirstOrDefault(b => (string?)b.Tag == "Active");
@@ -1329,6 +1332,10 @@ public partial class SettingsView : UserControl
 
             StickersFolderInput.Text = _services.Cfg.StickersFolder();
             ShowStickersFolderStatus();
+
+            PassportTemplatesFolderInput.Text = _services.Cfg.PassportTemplatesFolder();
+            PassportPlaceholderInput.Text = _services.Cfg.PassportNamePlaceholder();
+            ShowPassportTemplatesStatus();
         }
         finally
         {
@@ -1488,6 +1495,78 @@ public partial class SettingsView : UserControl
         try { Directory.CreateDirectory(folder); } catch (Exception) { /* сеть недоступна — покажем как есть */ }
         PrintableDocActions.Open(folder);
         ShowStickersFolderStatus();
+    }
+
+    // ── Типовые паспорта ──────────────────────────────────────────────────────
+
+    /// <summary>Куда программа будет смотреть за типовыми бланками с текущими настройками — тем же
+    /// вычислением, что и само окно печати (см. ShowStickersFolderStatus рядом и по той же
+    /// причине). Считаются только записи: файл, положенный в папку руками, окно тоже покажет, но
+    /// «сколько бланков заведено» — это про базу.</summary>
+    private void ShowPassportTemplatesStatus()
+    {
+        var folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
+        if (folder is null)
+        {
+            PassportTemplatesStatus.Text = "Сетевой диск не настроен — папку бланков взять неоткуда.";
+            return;
+        }
+        var count = _services.Db.GetGeneralPassports().Count;
+        PassportTemplatesStatus.Text = count > 0
+            ? $"{folder} — бланков: {count}"
+            : $"{folder} — бланков пока нет. Загрузите их на странице «Паспорта шкафов» или положите файлы в эту папку.";
+    }
+
+    private void PassportTemplatesFolder_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var path = PassportTemplatesFolderInput.Text.Trim();
+        if (string.Equals(path, _services.Cfg.PassportTemplatesFolder(), StringComparison.OrdinalIgnoreCase)) return;
+
+        _services.Cfg.SetPassportTemplatesFolder(path);
+        ShowPassportTemplatesStatus();
+        _host.ShowStatus(path.Length == 0
+            ? "Бланки паспортов берутся из Конфиг\\Паспорта на общем диске"
+            : $"Папка типовых паспортов: {path}");
+    }
+
+    private void BrowsePassportTemplatesFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с бланками паспортов" };
+        if (dlg.ShowDialog() != true) return;
+
+        PassportTemplatesFolderInput.Text = dlg.FolderName;
+        PassportTemplatesFolder_LostFocus(sender, e);
+    }
+
+    /// <summary>Метка подстановки. Пустое поле — не «подставлять везде», а возврат к значению по
+    /// умолчанию: пустая метка нашлась бы в каждой точке текста и испортила бы весь бланк.</summary>
+    private void PassportPlaceholder_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var value = PassportPlaceholderInput.Text.Trim();
+        if (string.Equals(value, _services.Cfg.PassportNamePlaceholder(), StringComparison.Ordinal)) return;
+
+        _services.Cfg.SetPassportNamePlaceholder(value);
+        PassportPlaceholderInput.Text = _services.Cfg.PassportNamePlaceholder();
+        _host.ShowStatus($"Метка названия в бланке: {_services.Cfg.PassportNamePlaceholder()}");
+    }
+
+    private void OpenPassportPrint_Click(object sender, RoutedEventArgs e) =>
+        PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host);
+
+    private void OpenPassportTemplatesFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = PassportService.TemplatesFolder(_services.Cfg.RootPath(), _services.Cfg.PassportTemplatesFolder());
+        if (folder is null)
+        {
+            AppMessageBox.Show("Сетевой диск не настроен — открывать нечего.", "Типовые паспорта",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        try { Directory.CreateDirectory(folder); } catch (Exception) { /* сеть недоступна — покажем как есть */ }
+        PrintableDocActions.Open(folder);
+        ShowPassportTemplatesStatus();
     }
 
     /// <summary>Опрашивает ОБА источника (папка и GitHub) и показывает всё сразу: что нашлось в

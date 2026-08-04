@@ -20,15 +20,9 @@ public static class StickerTemplates
     public const string DefaultSubfolder = @"Конфиг\Наклейки";
 
     /// <summary>Куда смотреть за наклейками. <paramref name="configured"/> — то, что задано в
-    /// настройках: пусто = папка по умолчанию, относительный путь = от корня диска, абсолютный —
-    /// как есть. null — корень диска не настроен и путь не абсолютный: показывать нечего.</summary>
-    public static string? FolderFor(string? diskRoot, string? configured)
-    {
-        var value = (configured ?? "").Trim();
-        if (value.Length > 0 && Path.IsPathRooted(value)) return value;
-        if (string.IsNullOrWhiteSpace(diskRoot)) return null;
-        return Path.Combine(diskRoot, value.Length > 0 ? value : DefaultSubfolder);
-    }
+    /// настройках; разбор пути общий для всех переназначаемых общих папок, см. SharedFolderPath.</summary>
+    public static string? FolderFor(string? diskRoot, string? configured) =>
+        SharedFolderPath.Resolve(diskRoot, configured, DefaultSubfolder);
 
     /// <summary>Файлы-шаблоны в папке: всё, что можно открыть и напечатать, включая вложенные папки
     /// (наклейки удобно раскладывать по темам). Недоступная папка — пустой список, а не исключение:
