@@ -804,7 +804,10 @@
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ЭТИКЕТКА С QR НА ИНСТРУКЦИЮ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Печатается из карточки прошивки: «Ещё» → «QR и этикетка»."
+                            <!-- Кнопка в карточке называется «QR инструкции» и стоит в самом ряду действий,
+                                 а не в меню «Ещё»: подсказка звала в «Ещё» → «QR и этикетка», где этого
+                                 пункта нет, и человек по ней ничего бы не нашёл. -->
+                            <TextBlock Text="Печатается из карточки прошивки — кнопка «QR инструкции»."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
                             <!-- Адрес и размер этикетки — общие для предприятия (уезжают на все машины
