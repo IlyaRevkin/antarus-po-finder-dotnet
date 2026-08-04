@@ -77,14 +77,14 @@ public sealed record LabelLayout
         };
     }
 
-    /// <summary>Сторона QR в миллиметрах с учётом «0 = сам». Считается здесь, а не в отрисовке,
-    /// чтобы окно предпросмотра и печать не разошлись.</summary>
-    public double EffectiveQrMm()
-    {
-        var available = Math.Max(8, HeightMm - 2 * MarginMm - (ShowLink ? CaptionPt * 25.4 / 72 * 2.6 : 0));
-        var byWidth = Math.Max(8, WidthMm / 2 - MarginMm);
-        return QrMm > 0 ? Math.Min(QrMm, Math.Min(available, WidthMm - 2 * MarginMm)) : Math.Min(available, byWidth);
-    }
+    /// <summary>Сторона QR в миллиметрах с учётом «0 = сам».
+    ///
+    /// Раньше здесь была своя формула, и именно её расхождение с настоящей вёрсткой давало «увеличил
+    /// QR — обрезался текст»: место под ссылку она оценивала в 2.6 строки кегля, а сам блок ссылки
+    /// занимал до 3.6 строки плюс отступ, и про рамку с промежутком между блоками формула не знала
+    /// вовсе. Теперь величина берётся из общей компоновки (<see cref="LabelPlanner"/>) — той самой,
+    /// по которой этикетка и рисуется, так что разойтись им больше негде.</summary>
+    public double EffectiveQrMm() => LabelPlanner.Plan(this, "Заголовок", "", ShowLink ? "ссылка" : "").Qr.W;
 
     private static double Clamp(double value, double min, double max) =>
         double.IsNaN(value) ? min : Math.Min(max, Math.Max(min, value));
