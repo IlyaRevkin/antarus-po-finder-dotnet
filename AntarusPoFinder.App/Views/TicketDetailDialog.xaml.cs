@@ -40,6 +40,15 @@ public partial class TicketDetailDialog : Window
                 }
             }
         }
+
+        // Фокус в текст сразу при открытии: колесо мыши работает и без этого, но PageUp/PageDown,
+        // стрелки и Ctrl+End — только у контрола с фокусом, а длинный тикет чаще всего листают
+        // именно клавиатурой. Каретка ставится в начало, чтобы окно открывалось на первой строке.
+        Loaded += (_, _) =>
+        {
+            BodyText.Focus();
+            BodyText.CaretIndex = 0;
+        };
     }
 
     private void OpenAttachment_Click(object sender, RoutedEventArgs e)

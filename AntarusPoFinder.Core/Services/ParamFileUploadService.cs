@@ -32,9 +32,18 @@ public static class ParamFileUploadService
     /// прежнего файла в папке не было.</param>
     public record UploadOutcome(int RecordId, bool Updated, string? ArchivedPreviousName);
 
-    /// <summary>Помечает уже лежащий в папке одноимённый файл как прежнюю редакцию: «имя (до
-    /// ГГГГ-ММ-ДД).ext». Дата — та, НА которую редакция была актуальна (день перезаливки), поэтому
-    /// «до», а не «от». Возвращает новое имя файла либо null, если переименовывать было нечего.
+    /// <summary>Подпапка, в которой живут сохранённые прежние редакции. Раньше они лежали ПРЯМО
+    /// РЯДОМ с рабочим файлом, и после нескольких перезаливок папка подтипа выглядела как россыпь
+    /// почти одинаковых файлов — ровно жалоба «создаются дубликаты файлов параметров, накапливаются
+    /// при перезаливке». Требование Ильи («без истории как у прошивок; кому нужна старая — пусть
+    /// откроет папку и найдёт») выполняется по-прежнему: редакции никуда не удаляются, просто лежат
+    /// в одной подписанной папке, а не вперемешку с актуальным файлом.</summary>
+    public const string ArchiveFolderName = "Прежние редакции";
+
+    /// <summary>Убирает уже лежащий в папке одноимённый файл в подпапку «Прежние редакции» под именем
+    /// «имя (до ГГГГ-ММ-ДД).ext». Дата — та, НА которую редакция была актуальна (день перезаливки),
+    /// поэтому «до», а не «от». Возвращает имя относительно папки файла («Прежние редакции\имя (до
+    /// …).ext») — оно же попадает в журнал описания — либо null, если убирать было нечего.
     ///
     /// Вызывается ДО копирования нового файла. Если имя «до …» уже занято (в один день перезалили
     /// дважды), добавляется порядковый номер — прежняя редакция не затирается никогда, в этом весь
@@ -49,13 +58,20 @@ public static class ParamFileUploadService
         var ext = Path.GetExtension(filename);
         var stamp = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
+        var archiveDir = Path.Combine(folder, ArchiveFolderName);
+        Directory.CreateDirectory(archiveDir);
+
+        // Занятость имени проверяется в ОБЕИХ папках: у машин, обновившихся с прежней версии, рядом
+        // с рабочим файлом ещё могут лежать редакции старого образца, и совпадение имён при их
+        // последующем переносе в подпапку (см. ParamFileDuplicateCleanup.TidyArchives) стоило бы
+        // одной из них жизни.
         var candidateName = $"{stem} (до {stamp}){ext}";
         var counter = 1;
-        while (File.Exists(Path.Combine(folder, candidateName)))
+        while (File.Exists(Path.Combine(archiveDir, candidateName)) || File.Exists(Path.Combine(folder, candidateName)))
             candidateName = $"{stem} (до {stamp}, {++counter}){ext}";
 
-        File.Move(current, Path.Combine(folder, candidateName));
-        return candidateName;
+        File.Move(current, Path.Combine(archiveDir, candidateName));
+        return Path.Combine(ArchiveFolderName, candidateName);
     }
 
     /// <summary>Признак «это сохранённая прежняя редакция, а не самостоятельный файл» — по нему

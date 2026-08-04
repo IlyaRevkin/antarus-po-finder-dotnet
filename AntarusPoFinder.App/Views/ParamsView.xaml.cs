@@ -105,6 +105,72 @@ public partial class ParamsView : UserControl
 
     private bool _duplicateCleanupStarted;
 
+    /// <summary>Та же чистка, но по кнопке и с отчётом: сколько прежних редакций убрано в подпапку,
+    /// сколько точных копий удалено, что оставлено «на разбор» и — отдельно — сколько записей
+    /// ссылается на файл, которого на диске уже нет.
+    ///
+    /// Висячие записи здесь только ПОКАЗЫВАЮТСЯ, а не удаляются: ровно так же выглядит временно
+    /// отвалившаяся шара, а удалённая запись уедет тумбстоуном ко всем коллегам — цена ошибки
+    /// несоразмерна пользе от автоматизма. Убрать их можно построчно, кнопкой «Удалить запись».</summary>
+    private async void Tidy_Click(object sender, RoutedEventArgs e)
+    {
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        {
+            AppMessageBox.Show("Сетевой диск сейчас недоступен — чистку папок делать не по чему.",
+                "Параметры", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var targets = ParamFileDuplicateCleanup.Targets(_services.Db);
+        var rows = _services.Db.GetParamFiles();
+        var paramsRoot = Path.Combine(root, "Параметры");
+
+        ParamFileDuplicateCleanup.Result result;
+        List<string> missing;
+        try
+        {
+            TidyBtn.IsEnabled = false;
+            using (_host.BeginBusy("Проверка папок параметров"))
+            {
+                result = await Task.Run(() => ParamFileDuplicateCleanup.CleanFolders(targets, paramsRoot));
+                missing = await Task.Run(() => rows
+                    .Where(r => !string.IsNullOrWhiteSpace(r.DiskPath) && !string.IsNullOrWhiteSpace(r.Filename))
+                    .Where(r => !File.Exists(Path.Combine(r.DiskPath, r.Filename)))
+                    .Select(r => Path.Combine(r.DiskPath, r.Filename))
+                    .Distinct()
+                    .ToList());
+            }
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show(ex.Message, "Параметры", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        finally
+        {
+            TidyBtn.IsEnabled = true;
+        }
+
+        ParamFileDuplicateCleanup.ArchiveRemovedRows(_services.Db, result.Removed);
+        ReloadTable();
+
+        var report = new List<string>();
+        report.Add(result.Tidied.Count > 0
+            ? $"Прежних редакций убрано в подпапку «{ParamFileUploadService.ArchiveFolderName}»: {result.Tidied.Count}"
+            : "Прежних редакций, лежащих не на своём месте, не нашлось.");
+        if (result.Removed.Count > 0) report.Add($"Удалено точных копий-двойников: {result.Removed.Count}");
+        if (missing.Count > 0)
+            report.Add($"Записей, за которыми на диске нет файла: {missing.Count}. Они не удалены — проверьте и уберите кнопкой «Удалить запись»:"
+                + Environment.NewLine + string.Join(Environment.NewLine, missing.Take(10)));
+        if (result.Skipped.Count > 0)
+            report.Add("Оставлено как есть (отличается от актуального файла либо не прочиталось):"
+                + Environment.NewLine + string.Join(Environment.NewLine, result.Skipped.Take(10)));
+
+        AppMessageBox.Show(string.Join(Environment.NewLine + Environment.NewLine, report),
+            "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     /// <summary>Страница живёт в кэше между переходами (MainWindowViewModel._pageCache), поэтому
     /// справочники в комбобоксах — те, что были на момент её первой отрисовки. Всё, что поменялось
     /// потом (в Настройках или прилетело синхронизацией с другой машины), до неё не доезжало: новый
@@ -166,6 +232,8 @@ public partial class ParamsView : UserControl
         // Row actions need the table actually open to act on a selection — collapsed together with
         // it, not just left dangling above a hidden grid (see the XAML comment on this StackPanel).
         var rowActionsVisibility = expanding ? Visibility.Visible : Visibility.Collapsed;
+        OpenFileBtn.Visibility = rowActionsVisibility;
+        TidyBtn.Visibility = rowActionsVisibility;
         OpenFolderBtn.Visibility = rowActionsVisibility;
         EditTagsBtn.Visibility = rowActionsVisibility;
         EditSubtypesBtn.Visibility = rowActionsVisibility;
@@ -259,8 +327,8 @@ public partial class ParamsView : UserControl
         var dstFolder = _services.Hierarchy.ParamsPath(root, primaryTarget.GroupName, subtype.Name, manuf);
         var srcPath = _srcPath;
         var now = DateTime.Now;
-        // Перезаливка под тем же именем больше НЕ затирает прежний файл: он переименовывается в
-        // «имя (до ГГГГ-ММ-ДД).ext» и остаётся в папке для просмотра, а новый ложится под исходным
+        // Перезаливка под тем же именем больше НЕ затирает прежний файл: он уезжает в подпапку
+        // «Прежние редакции» под именем «имя (до ГГГГ-ММ-ДД).ext», а новый ложится под исходным
         // именем — «Открыть» всегда ведёт на свежий, за старым идут через «Открыть папку»
         // (см. ParamFileUploadService).
         string? archivedPrevious = null;
@@ -307,7 +375,7 @@ public partial class ParamsView : UserControl
         if (outcome.Updated)
             notes.Add(archivedPrevious is null
                 ? "Запись обновлена — дата загрузки освежена, изменение записано в описание."
-                : $"Файл перезалит. Прежняя редакция сохранена в той же папке как «{archivedPrevious}».");
+                : $"Файл перезалит. Прежняя редакция убрана в подпапку: «{archivedPrevious}».");
         if (link.CreatedIds.Count > 0)
             notes.Add($"Тот же файл добавлен ещё для {link.CreatedIds.Count} подтип(ов) — ярлыком, без копирования.");
         if (link.Warnings.Count > 0)
@@ -365,6 +433,32 @@ public partial class ParamsView : UserControl
 
         FilesGrid.ItemsSource = rows;
         CountLabel.Text = $"Записей: {rows.Count}";
+    }
+
+    /// <summary>Двойной клик по строке = «Открыть файл». Через DataGridClickGuard, иначе двойной
+    /// клик по заголовку колонки (сортировка) открывал бы файл, выделенный когда-то раньше.</summary>
+    private void FilesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!DataGridClickGuard.IsOverDataRow(e)) return;
+        OpenSelectedFile();
+    }
+
+    private void OpenFile_Click(object sender, RoutedEventArgs e) => OpenSelectedFile();
+
+    /// <summary>Файла может не быть на месте (запись есть, а на диске уже нет — типовая ситуация
+    /// после ручной чистки папки): тогда открываем хотя бы папку, как это делает то же действие в
+    /// окне параметров карточки, и только если и её нет — сообщаем.</summary>
+    private void OpenSelectedFile()
+    {
+        if (FilesGrid.SelectedItem is not ParamFileRow row)
+        {
+            AppMessageBox.Show("Выберите строку.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var full = Path.Combine(row.DiskPath, row.Filename);
+        if (File.Exists(full)) Process.Start(new ProcessStartInfo(full) { UseShellExecute = true });
+        else if (Directory.Exists(row.DiskPath)) Process.Start(new ProcessStartInfo(row.DiskPath) { UseShellExecute = true });
+        else AppMessageBox.Show($"Файл не найден:\n{full}", "Параметры", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void OpenFolder_Click(object sender, RoutedEventArgs e)

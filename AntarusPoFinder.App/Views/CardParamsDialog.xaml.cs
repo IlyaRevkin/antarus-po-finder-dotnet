@@ -34,7 +34,21 @@ public partial class CardParamsDialog : Window
         return null;
     }
 
-    private void Open_Click(object sender, RoutedEventArgs e)
+    /// <summary>Двойной клик открывает файл — ровно то же, что кнопка «Открыть». Клик по пустому
+    /// месту списка (ниже строк) игнорируем: SelectedItem там остаётся от прошлого выделения, и
+    /// открывать по нему файл — не то, что человек имел в виду.</summary>
+    private void FilesList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        while (source is not null && source is not System.Windows.Controls.ListBoxItem)
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        if (source is null) return;
+        OpenSelected();
+    }
+
+    private void Open_Click(object sender, RoutedEventArgs e) => OpenSelected();
+
+    private void OpenSelected()
     {
         var item = Selected();
         if (item is null) return;

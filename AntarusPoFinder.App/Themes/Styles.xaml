@@ -39,6 +39,17 @@
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="4"
                             Padding="{TemplateBinding Padding}">
+                        <!-- MaxWidth выше сам по себе подсказку НЕ переносил: строковый ToolTip="…"
+                             WPF заворачивает в сгенерированный TextBlock, а тот берёт неявный стиль
+                             TextBlock (выше в этом же файле), где TextWrapping не задан — текст
+                             оставался одной строкой и обрезался по MaxWidth. Неявный стиль в
+                             ресурсах шаблона накрывает и сгенерированный TextBlock, и явные
+                             TextBlock'и внутри составных подсказок — переносятся все. -->
+                        <Border.Resources>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                            </Style>
+                        </Border.Resources>
                         <ContentPresenter/>
                     </Border>
                 </ControlTemplate>

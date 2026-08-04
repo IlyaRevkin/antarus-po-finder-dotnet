@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -90,9 +91,9 @@ public class ParamFileReuploadTests : IDisposable
         };
         var outcome2 = ParamFileUploadService.SaveRecord(_db, record2, archived, second);
 
-        // Прежняя редакция цела и лежит рядом; свежая — под исходным именем.
-        Assert.Equal("params (до 2026-08-03).par", archived);
-        Assert.Equal("версия 1", File.ReadAllText(Path.Combine(folder, "params (до 2026-08-03).par")));
+        // Прежняя редакция цела и лежит в подпапке; свежая — под исходным именем в самой папке.
+        Assert.Equal(Path.Combine(ParamFileUploadService.ArchiveFolderName, "params (до 2026-08-03).par"), archived);
+        Assert.Equal("версия 1", File.ReadAllText(Path.Combine(folder, ParamFileUploadService.ArchiveFolderName, "params (до 2026-08-03).par")));
         Assert.Equal("версия 2", File.ReadAllText(Path.Combine(folder, "params.par")));
 
         // Запись ОДНА и та же, обновлённая.
@@ -117,14 +118,47 @@ public class ParamFileReuploadTests : IDisposable
         Directory.CreateDirectory(folder);
         var day = new DateTime(2026, 8, 3);
 
+        var archiveDir = Path.Combine(folder, ParamFileUploadService.ArchiveFolderName);
+
         File.WriteAllText(Path.Combine(folder, "p.par"), "1");
-        Assert.Equal("p (до 2026-08-03).par", ParamFileUploadService.ArchivePreviousOnDisk(folder, "p.par", day));
+        Assert.Equal(Path.Combine(ParamFileUploadService.ArchiveFolderName, "p (до 2026-08-03).par"),
+            ParamFileUploadService.ArchivePreviousOnDisk(folder, "p.par", day));
 
         File.WriteAllText(Path.Combine(folder, "p.par"), "2");
-        Assert.Equal("p (до 2026-08-03, 2).par", ParamFileUploadService.ArchivePreviousOnDisk(folder, "p.par", day));
+        Assert.Equal(Path.Combine(ParamFileUploadService.ArchiveFolderName, "p (до 2026-08-03, 2).par"),
+            ParamFileUploadService.ArchivePreviousOnDisk(folder, "p.par", day));
 
-        Assert.Equal("1", File.ReadAllText(Path.Combine(folder, "p (до 2026-08-03).par")));
-        Assert.Equal("2", File.ReadAllText(Path.Combine(folder, "p (до 2026-08-03, 2).par")));
+        Assert.Equal("1", File.ReadAllText(Path.Combine(archiveDir, "p (до 2026-08-03).par")));
+        Assert.Equal("2", File.ReadAllText(Path.Combine(archiveDir, "p (до 2026-08-03, 2).par")));
+    }
+
+    /// <summary>Редакции, накопленные версиями ДО появления подпапки (лежат прямо рядом с рабочим
+    /// файлом), переезжают в «Прежние редакции» — это и есть та «россыпь дубликатов», на которую
+    /// жаловались. Рабочий файл и посторонние файлы не трогаются.</summary>
+    [Fact]
+    public void TidyArchives_MovesLegacyRevisionsIntoSubfolder()
+    {
+        var folder = Path.Combine(Root, "старые_редакции");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "p.par"), "актуальный");
+        File.WriteAllText(Path.Combine(folder, "p (до 2026-07-01).par"), "старый 1");
+        File.WriteAllText(Path.Combine(folder, "p (до 2026-07-02).par"), "старый 2");
+        File.WriteAllText(Path.Combine(folder, "заметка.txt"), "не трогать");
+
+        var skipped = new List<string>();
+        var moved = ParamFileDuplicateCleanup.TidyArchives(folder, skipped);
+
+        Assert.Equal(2, moved.Count);
+        Assert.Empty(skipped);
+        var archiveDir = Path.Combine(folder, ParamFileUploadService.ArchiveFolderName);
+        Assert.Equal("старый 1", File.ReadAllText(Path.Combine(archiveDir, "p (до 2026-07-01).par")));
+        Assert.Equal("старый 2", File.ReadAllText(Path.Combine(archiveDir, "p (до 2026-07-02).par")));
+        Assert.Equal("актуальный", File.ReadAllText(Path.Combine(folder, "p.par")));
+        Assert.True(File.Exists(Path.Combine(folder, "заметка.txt")));
+
+        // Идемпотентность: второй прогон уже нечего переносить и не на что жаловаться.
+        Assert.Empty(ParamFileDuplicateCleanup.TidyArchives(folder, skipped));
+        Assert.Empty(skipped);
     }
 
     /// <summary>Первая загрузка (в папке ещё пусто) остаётся ровно тем, чем была: никаких «до …»,
@@ -317,7 +351,11 @@ public class ParamFileReuploadTests : IDisposable
         // Всё сомнительное осталось на диске.
         Assert.True(File.Exists(Path.Combine(folder, "параметры X2.par")));
         Assert.True(File.Exists(Path.Combine(folder, "параметры X2 (черновик).par")));
-        Assert.True(File.Exists(Path.Combine(folder, "параметры X2 (до 2026-07-01).par")));
+        // Прежняя редакция не удалена — она переехала в подпапку (см. TidyArchives): удалять её
+        // нельзя никогда, но и лежать рядом с актуальным файлом она больше не должна.
+        Assert.False(File.Exists(Path.Combine(folder, "параметры X2 (до 2026-07-01).par")));
+        Assert.True(File.Exists(Path.Combine(folder, ParamFileUploadService.ArchiveFolderName, "параметры X2 (до 2026-07-01).par")));
+        Assert.Single(result.Tidied);
         Assert.Contains(result.Skipped, s => s.Contains("черновик"));
 
         var live = _db.GetParamFiles(target.Id).Select(f => f.Id).ToList();

@@ -11,7 +11,11 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ListBox Grid.Row="0" x:Name="FilesList" DisplayMemberPath="Display"/>
+        <!-- Двойной клик по строке = кнопка «Открыть» ниже: в списке из одного-двух файлов путь
+             «выделить → дотянуться до кнопки» лишний, а двойной клик здесь ожидаем так же, как в
+             проводнике и в таблице тикетов. -->
+        <ListBox Grid.Row="0" x:Name="FilesList" DisplayMemberPath="Display"
+                 MouseDoubleClick="FilesList_MouseDoubleClick"/>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Open_Click"/>
