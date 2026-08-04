@@ -92,10 +92,11 @@
                     <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="110,8,0,0"
                                Text="Лучше грузить .docx: из него программа сама соберёт PDF для печати и пересоберёт его, если документ правили. Готовый .pdf тоже принимается — тогда печать идёт прямо из него."/>
 
+                    <!-- Кнопка «Паспорт по шаблону…» отсюда УБРАНА: эта страница про то, чтобы
+                         ЗАВЕСТИ паспорт (загрузить и привязать), а формируют и печатают его одной
+                         кнопкой «Сформировать паспорт» в боковом меню. Две кнопки про паспорт рядом
+                         и были тем, на что жаловался Илья. -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-                        <Button Content="Паспорт по шаблону…" Style="{StaticResource SecondaryButton}" Height="36" Margin="0,0,8,0"
-                                Click="PrintByTemplate_Click"
-                                ToolTip="Напечатать типовой бланк, подставив в него название шкафа"/>
                         <Button x:Name="UploadBtn" Content="Загрузить паспорт" Height="36" Click="Upload_Click"/>
                     </StackPanel>
                 </StackPanel>
