@@ -355,7 +355,8 @@
                                  (MainWindow.xaml.cs) — версия сборки не меняется, пока приложение не
                                  перезапустится после обновления. -->
                             <TextBlock x:Name="SidebarVersionText" Text="" HorizontalAlignment="Center"
-                                       Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0"/>
+                                       Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0"
+                                       Background="Transparent" MouseLeftButtonDown="SidebarVersionText_MouseLeftButtonDown"/>
                         </StackPanel>
                     </StackPanel>
 
