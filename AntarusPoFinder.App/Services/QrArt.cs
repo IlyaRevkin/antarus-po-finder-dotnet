@@ -22,8 +22,13 @@ namespace AntarusPoFinder.App.Services;
 /// трогать их нельзя.</summary>
 public static class QrArt
 {
-    /// <summary>Сторона выреза под подпись в долях стороны кода.</summary>
-    private const double CenterHoleRatio = 0.20;
+    /// <summary>Сторона выреза под подпись в долях стороны кода.
+    ///
+    /// Величину НЕ увеличиваем: 0.20 стороны — это 4 % площади кода, а уровень коррекции Q
+    /// восстанавливает до 25 % кодовых слов; запас нужен потому, что вырез бьёт по модулям сплошным
+    /// пятном, а не равномерно, и часть его площади приходится на служебные дорожки. Если подпись не
+    /// помещается — уменьшается подпись (см. <see cref="FitFontSize"/>), а не плашка.</summary>
+    public const double CenterHoleRatio = 0.20;
 
     /// <summary>Тихая зона, которую QRCoder уже вложил в матрицу. Она обязательна для считывания, но
     /// мы отводим под неё поле самой этикетки, а не пиксели кода — иначе на маленькой наклейке треть
@@ -116,23 +121,75 @@ public static class QrArt
         return group;
     }
 
+    /// <summary>Гарнитура подписи задаётся явно: визуал собирается вне окна, наследовать шрифт не от
+    /// кого, а кегль подбирается замером именно этой гарнитуры.</summary>
+    private static readonly FontFamily HoleFont = new("Segoe UI");
+
+    /// <summary>Внутренний отступ подписи от рамки плашки, в долях её стороны. Тот самый «запас», без
+    /// которого буквы липнут к рамке и выглядят подрезанными, даже когда формально помещаются.</summary>
+    private const double HolePaddingRatio = 0.12;
+
+    /// <summary>Кегль, при котором строка целиком помещается в окно <paramref name="box"/>.
+    ///
+    /// <b>Зачем замер, а не формула.</b> Раньше кегль был жёстко привязан к стороне плашки
+    /// (0.42 от неё), и подпись из четырёх букв в неё просто не влезала по ширине: «ИНСТ»
+    /// печаталось с подрезанными «И» и «Т». Ширина зависит и от числа букв, и от гарнитуры, и от
+    /// того, что кириллица в полужирном шире латиницы, — угадать её коэффициентом нельзя, поэтому
+    /// строка меряется настоящим FormattedText на пробном кегле и масштабируется.
+    ///
+    /// Плашка при этом НЕ растёт: её площадь ограничена тем, что уровень коррекции Q восстанавливает
+    /// (см. <see cref="CenterHoleRatio"/>), — не помещается подпись, уменьшается подпись.</summary>
+    public static double FitFontSize(string text, Size box, double probe = 100)
+    {
+        if (string.IsNullOrEmpty(text) || box.Width <= 0 || box.Height <= 0) return 1;
+
+        var measured = Measure(text, probe);
+        var scale = Math.Min(box.Width / Math.Max(0.01, measured.Width),
+                             box.Height / Math.Max(0.01, measured.Height));
+        return Math.Max(1, probe * scale);
+    }
+
+    /// <summary>Размер строки в единицах WPF при заданном кегле — тем же начертанием, каким она потом
+    /// и печатается.</summary>
+    public static Size Measure(string text, double fontSize)
+    {
+        var formatted = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            new Typeface(HoleFont, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
+            fontSize, Brushes.Black, 96);
+        return new Size(formatted.WidthIncludingTrailingWhitespace, formatted.Height);
+    }
+
+    /// <summary>Геометрия окна под подпись: сторона плашки, толщина её рамки и тот прямоугольник, в
+    /// который подпись обязана поместиться целиком. Отдельно от отрисовки, чтобы «помещается ли
+    /// „ИНСТ“» можно было проверить тестом, а не глазами на напечатанной наклейке.</summary>
+    public static (double Plate, double Border, Size Inner) HoleGeometry(double side, double step)
+    {
+        var plate = side * CenterHoleRatio;
+        var border = Math.Max(0.6, step * 0.25);
+        var free = Math.Max(1, plate - 2 * (border + plate * HolePaddingRatio));
+        return (plate, border, new Size(free, free));
+    }
+
     private static void AddHole(Canvas canvas, double side, double step, string text)
     {
-        var size = side * CenterHoleRatio;
+        var (size, border, inner) = HoleGeometry(side, step);
+
         var box = new Border
         {
             Width = size,
             Height = size,
             Background = Brushes.White,
             BorderBrush = Brushes.Black,
-            BorderThickness = new Thickness(Math.Max(0.6, step * 0.25)),
+            BorderThickness = new Thickness(border),
             CornerRadius = new CornerRadius(size / 5),
             Child = new TextBlock
             {
                 Text = text,
                 Foreground = Brushes.Black,
+                FontFamily = HoleFont,
                 FontWeight = FontWeights.Bold,
-                FontSize = size * 0.42,
+                FontSize = FitFontSize(text, inner),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextAlignment = TextAlignment.Center,
