@@ -24,13 +24,34 @@
          пришлось бы перечислять каждый тип контрола, включая Border и RadioButton, у которых своего
          неявного стиля здесь нет. Поэтому они переопределены разом для FrameworkElement в
          App.OnStartup (см. ApplyToolTipTiming) — единственный способ накрыть всё приложение. -->
+    <!-- Перенос текста подсказки по строкам. Задаётся ЯВНЫМ шаблоном, а не неявным стилем
+         TextBlock: строку WPF рисует TextBlock'ом из собственного шаблона ContentPresenter, а
+         внутри шаблона неявные стили ищутся в ресурсах самого шаблона и приложения — но не в
+         окружающем дереве. Из-за этого стиль, положенный рядом с ContentPresenter (в ресурсы
+         Border внутри шаблона ToolTip), до сгенерированного TextBlock не доезжал: две прошлые
+         попытки «включить переносы всем подсказкам» ничего не меняли, длинная подсказка так и
+         оставалась одной строкой и обрезалась по MaxWidth. Подробнее — в
+         ToolTipTextTemplateSelector. -->
+    <conv:ToolTipTextTemplateSelector x:Key="ToolTipTextTemplate">
+        <conv:ToolTipTextTemplateSelector.TextTemplate>
+            <DataTemplate>
+                <TextBlock Text="{Binding}" TextWrapping="Wrap"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ToolTip}, Path=Foreground}"/>
+            </DataTemplate>
+        </conv:ToolTipTextTemplateSelector.TextTemplate>
+    </conv:ToolTipTextTemplateSelector>
+
     <Style TargetType="{x:Type ToolTip}">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="8,5"/>
-        <Setter Property="MaxWidth" Value="480"/>
+        <!-- Ширина, на которой подсказка переносится. 420 против прежних 480: подсказка не должна
+             растягиваться через пол-экрана, а на самой узкой рабочей машине (1366 точек) обязана
+             помещаться целиком вместе с отступами всплывающего окна. -->
+        <Setter Property="MaxWidth" Value="420"/>
+        <Setter Property="ContentTemplateSelector" Value="{StaticResource ToolTipTextTemplate}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ToolTip}">
@@ -39,12 +60,8 @@
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="4"
                             Padding="{TemplateBinding Padding}">
-                        <!-- MaxWidth выше сам по себе подсказку НЕ переносил: строковый ToolTip="…"
-                             WPF заворачивает в сгенерированный TextBlock, а тот берёт неявный стиль
-                             TextBlock (выше в этом же файле), где TextWrapping не задан — текст
-                             оставался одной строкой и обрезался по MaxWidth. Неявный стиль в
-                             ресурсах шаблона накрывает и сгенерированный TextBlock, и явные
-                             TextBlock'и внутри составных подсказок — переносятся все. -->
+                        <!-- На случай составной подсказки из готовых контролов: её шаблон-селектор
+                             пропускает как есть, и переносы ей задаёт этот неявный стиль. -->
                         <Border.Resources>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                 <Setter Property="TextWrapping" Value="Wrap"/>
