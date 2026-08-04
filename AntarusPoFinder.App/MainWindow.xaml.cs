@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Navigation;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.App.Views;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App;
 
@@ -13,6 +15,10 @@ public partial class MainWindow : Window
     private readonly AppServices _services;
     private readonly MainWindowViewModel _vm;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
+
+    /// <summary>Счётчик быстрых кликов по номеру версии в сайдбаре — тихая пасхалка (см.
+    /// EasterEggClickCounter/EasterEggPhoto и SidebarVersionText_MouseLeftButtonDown).</summary>
+    private readonly EasterEggClickCounter _versionClicks = new();
 
     /// <summary>Escape hatch for code that must guarantee the process actually exits — the self-update
     /// restart flow (AppUpdateService.InstallAndRestartAsync) calls Application.Current.Shutdown()
@@ -344,6 +350,61 @@ public partial class MainWindow : Window
             ForceRealExit = true;
             Application.Current.Shutdown();
         }
+    }
+
+    // ── Пасхалка на номере версии ────────────────────────────────────────────
+    // Двенадцать быстрых кликов подряд по номеру версии открывают общую фотографию во встроенном
+    // окне; те же двенадцать с зажатым Ctrl — задают/меняют её (файл копируется в общую папку на
+    // диске и путь запоминается, синхронизируясь между машинами). Тихо: никаких подсказок и
+    // уведомлений. Вся логика счётчика — в EasterEggClickCounter (проверена тестами без WPF).
+    private void SidebarVersionText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        switch (_versionClicks.Click(System.DateTime.UtcNow, ctrl))
+        {
+            case EasterEggAction.Set:
+                // «Задать/сменить» — только выбрать и положить файл, без показа (см. требование).
+                ImportEasterPhoto();
+                break;
+            case EasterEggAction.Open:
+                OpenEasterPhoto();
+                break;
+        }
+    }
+
+    /// <summary>Открыть фотографию-пасхалку. Уже задана и читается — показываем. Ещё нет — предлагаем
+    /// выбрать (тот же выбор, что по Ctrl), сохраняем и сразу показываем. Всё тихо: диск недоступен
+    /// или файл битый — просто ничего не происходит.</summary>
+    private void OpenEasterPhoto()
+    {
+        var existing = EasterEggPhoto.Resolve(_services.Cfg.RootPath(), _services.Cfg.EasterPhotoPath());
+        if (existing is not null && PhotoViewerWindow.TryShow(this, existing))
+            return;
+
+        if (ImportEasterPhoto())
+        {
+            var justSet = EasterEggPhoto.Resolve(_services.Cfg.RootPath(), _services.Cfg.EasterPhotoPath());
+            PhotoViewerWindow.TryShow(this, justSet);
+        }
+    }
+
+    /// <summary>Выбор картинки → копия в общую папку на диске → запоминание машинно-независимого пути.
+    /// Возвращает true, если файл выбран и успешно сохранён. Отмена диалога, недоступный диск или
+    /// ошибка копирования — false, тихо, без сообщений.</summary>
+    private bool ImportEasterPhoto()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выберите изображение",
+            Filter = "Изображения (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return false;
+
+        var portable = EasterEggPhoto.Import(_services.Cfg.RootPath(), dlg.FileName);
+        if (portable is null) return false;
+
+        _services.Cfg.SetEasterPhotoPath(portable);
+        return true;
     }
 
     private void GitHubLink_RequestNavigate(object sender, RequestNavigateEventArgs e)

@@ -338,6 +338,12 @@ public class ConfigService
     public string StickersFolder() => Get("stickers_folder");
     public void SetStickersFolder(string path) => Set("stickers_folder", path.Trim());
 
+    /// <summary>Машинно-независимый путь к фотографии-пасхалке (хвост от корня диска, см.
+    /// EasterEggPhoto). СОЗНАТЕЛЬНО не в ConfigSyncService.SkipSettingsKeys — синхронизируется между
+    /// машинами, чтобы у всех открывалась одна и та же. Пусто — фотографии ещё нет.</summary>
+    public string EasterPhotoPath() => Get("easter_photo");
+    public void SetEasterPhotoPath(string value) => Set("easter_photo", value.Trim());
+
     /// <summary>Папка типовых паспортов — как её задал администратор. Пусто = «по умолчанию»,
     /// разворачивается в <c>&lt;диск&gt;\Конфиг\Паспорта</c> (см. PassportService.TemplatesFolder).</summary>
     public string PassportTemplatesFolder() => Get("passport_templates_folder");
