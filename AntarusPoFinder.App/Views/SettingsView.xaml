@@ -881,7 +881,7 @@
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="ТИПОВЫЕ ПАСПОРТА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Бланки паспортов, не относящиеся ни к одному типу шкафа (НКУ, Щит СПЛ, ШР). Печатаются кнопкой «Паспорт по шаблону» в боковом меню: название шкафа подставляется в бланк вместо метки."
+                            <TextBlock Text="Бланки паспортов, не относящиеся ни к одному типу шкафа (НКУ, Щит СПЛ, ШР). Печатаются кнопкой «Сформировать паспорт» в боковом меню: название шкафа подставляется в бланк вместо метки."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <StackPanel x:Name="PassportTemplatesSection">
                                 <Grid Margin="0,0,0,4">
@@ -905,10 +905,17 @@
                                              LostFocus="PassportPlaceholder_LostFocus" KeyDown="PrintingField_KeyDown"
                                              ToolTip="Что написано в бланке там, куда должно встать название шкафа. Пусто — вернётся значение по умолчанию."/>
                                 </Grid>
+                                <!-- Двусторонняя печать раньше жила только в конфиге. Бланк паспорта —
+                                     разворот на два листа, и переворот делается по КОРОТКОЙ стороне:
+                                     по длинной оборот встаёт вверх ногами. Настройка общая (уезжает на
+                                     все машины), поэтому и стоит здесь, рядом с папкой бланков. -->
+                                <CheckBox x:Name="PassportDuplexCheck" Content="Печатать с двух сторон (переворот по короткой стороне)"
+                                          Margin="0,6,0,0" Click="PassportDuplex_Click"
+                                          ToolTip="Паспорт печатается разворотом на одном листе с двух сторон. Принтер без дуплекса настройку просто не применит — лист выйдет односторонним."/>
                             </StackPanel>
                             <TextBlock x:Name="PassportTemplatesStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Паспорт по шаблону" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenPassportPrint_Click"/>
+                                <Button Content="Сформировать паспорт" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenPassportPrint_Click"/>
                                 <Button Content="Открыть папку" Style="{StaticResource SecondaryButton}" Click="OpenPassportTemplatesFolder_Click"/>
                             </StackPanel>
                         </StackPanel>

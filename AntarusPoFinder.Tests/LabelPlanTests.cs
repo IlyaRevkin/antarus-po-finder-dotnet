@@ -169,6 +169,42 @@ public class LabelPlanTests
         Assert.True(plan.Caption.Bottom <= plan.Band.Bottom + 0.01);
     }
 
+    /// <summary>Решение Ильи: доля высоты под ссылку — 30 %, а не 40 %. На мелкой наклейке 40×30
+    /// при 40 % ссылка отъедала столько, что код падал почти к нижнему пределу читаемости (~13 мм)
+    /// и телефоном брался через раз. Здесь закреплено и то, ради чего меняли (мелкая наклейка), и
+    /// то, что при этом не должно было пострадать (стандартная 97.5×72: там ссылка укладывается в
+    /// свои строки задолго до предела доли, поэтому доля на неё вообще не влияет).</summary>
+    [Fact]
+    public void Plan_SmallLabel_LeavesTheCodeReadable_AndStandardLabelIsUntouched()
+    {
+        Assert.Equal(0.3, LabelPlanner.CaptionShareMax, 3);
+
+        // Мелкая наклейка. При доле 0.4 здесь получалось 14.3 мм — почти нижний предел (12 мм),
+        // с которого код и перестаёт браться телефоном; при 0.3 остаётся 15.6 мм.
+        var small = LabelPlanner.Plan(
+            new LabelLayout { WidthMm = 40, HeightMm = 30, MarginMm = 2 }, Title, Subtitle, Url);
+
+        Assert.True(small.FitsInsideBand(), "содержимое вышло за печатную область на 40×30");
+        Assert.True(small.Qr.W >= 15,
+            $"на 40×30 код прижался к нижнему пределу читаемости: {small.Qr.W:0.##} мм");
+
+        // Ссылке достаётся не больше объявленной доли — иначе смысл ограничения теряется.
+        var inner = small.Band.H - 2 * (LabelPlanner.FrameMm + LabelPlanner.FramePadMm);
+        Assert.True(small.Caption.H <= inner * LabelPlanner.CaptionShareMax + 0.01,
+            $"ссылка заняла {small.Caption.H:0.##} мм при доступных {inner * LabelPlanner.CaptionShareMax:0.##} мм");
+
+        // Стандартная этикетка: раскладка обязана остаться ТОЙ ЖЕ, что была при доле 0.4, — ссылка
+        // укладывается в две строки заданным кеглем задолго до предела доли, и доля её не трогает.
+        var standard = LabelPlanner.Plan(
+            new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }, Title, Subtitle, Url);
+
+        Assert.True(standard.HasCaption);
+        Assert.Equal(2, standard.CaptionLines);
+        Assert.Equal(9, standard.CaptionPt, 3);
+        Assert.Equal(54.96, standard.Qr.W, 1);
+        Assert.Empty(standard.Warnings);
+    }
+
     /// <summary>Ссылку можно выключить — тогда её место целиком уходит коду.</summary>
     [Fact]
     public void Plan_WithoutLink_GivesTheRoomToTheCode()
