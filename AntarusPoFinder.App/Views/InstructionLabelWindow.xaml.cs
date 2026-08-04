@@ -126,17 +126,27 @@ public partial class InstructionLabelWindow : Window
 
     private void Redraw()
     {
-        LabelHost.Content = BuildLabel();
+        LabelHost.Content = BuildLabel(out var plan);
+
+        // Раскладка сама ужимает то, что не помещается, — значит, обрезанного содержимого не будет
+        // ни при каких настройках. Но молчать о том, что напечатается не ровно заказанное, нельзя:
+        // человек ставит «сторону QR 85» и должен видеть здесь же, что реально уйдёт 55.
+        WarningText.Text = plan.WarningText;
+        WarningBox.Visibility = plan.Warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
         var printer = _services.Cfg.LabelPrinter();
         PrinterText.Text = (string.IsNullOrWhiteSpace(printer) ? "Принтер: по умолчанию" : $"Принтер: {printer}")
                            + $" · этикетка {_layout.SizeCaption()} мм · поля {Num(_layout.MarginMm)} мм"
+                           + $" · QR {Num(plan.Qr.W)} мм"
                            + " · сменить принтер — Настройки → Печать";
     }
 
     /// <summary>«ИНСТ» в окошке кода — не украшение: наклейки на шкафу оказываются рядом (паспорт,
     /// ОТК, инструкция), и по одному взгляду должно быть понятно, куда ведёт именно эта.</summary>
-    private FrameworkElement BuildLabel() =>
-        LabelPrinter.BuildLabel(_layout, _qrContent, _title, _subtitle, _qrContent, "ИНСТ");
+    private FrameworkElement BuildLabel() => BuildLabel(out _);
+
+    private FrameworkElement BuildLabel(out LabelPlan plan) =>
+        LabelPrinter.BuildLabel(_layout, _qrContent, _title, _subtitle, _qrContent, "ИНСТ", out plan);
 
     // ── Содержимое кода ──────────────────────────────────────────────────────
 
