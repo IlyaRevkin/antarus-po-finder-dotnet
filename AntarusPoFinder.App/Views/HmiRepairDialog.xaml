@@ -1,0 +1,25 @@
+<Window x:Class="AntarusPoFinder.App.Views.HmiRepairDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="HMI-проект"
+        Width="560" SizeToContent="Height"
+        Background="{DynamicResource BgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <StackPanel Margin="20">
+        <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="Копия проекта панели на диске лежит без своего окружения: рядом с ней нет ни модели панели, ни драйверов, поэтому среда откроет проект пустым («модель HMI не соответствует текущему программному обеспечению»)."/>
+        <TextBlock TextWrapping="Wrap" Margin="0,0,0,4" FontWeight="SemiBold" Text="Речь про эту копию:"/>
+        <TextBlock x:Name="PathText" TextWrapping="Wrap" Margin="0,0,0,8" FontFamily="Consolas"/>
+        <TextBlock x:Name="NeighboursText" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Style="{StaticResource MutedText}"/>
+        <TextBlock TextWrapping="Wrap" Margin="0,0,0,16"
+                   Text="Оригинал у вас на машине при этом целый — программа положила на диск только один файл. Укажите оригинальный файл проекта, и она заберёт всю его папку целиком, заменив эту копию."/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="110" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button Content="Всё равно открыть" Style="{StaticResource SecondaryButton}" Width="150" Margin="0,0,8,0" Click="OpenAnyway_Click"/>
+            <Button Content="Указать оригинал..." Width="160" IsDefault="True" Click="Repair_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -297,6 +297,53 @@ public class FirmwareAttachmentsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Apply_HmiRepairedWithWholeFolder_RemovesTheOldSingleFileCopy()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Так проект панели лежал на диске до исправления: один переименованный файл. Он открывается
+        // пустым, и оставлять его рядом с починенной папкой нельзя — у половины версий контроллера в
+        // общей папке «HMI» лежат оба, и открывался (а потом уезжал коллегам) именно обрубок.
+        var stray = Path.Combine(Root, "HMI-старый", $"{record.VersionRaw}_hmi.fsprj");
+        Directory.CreateDirectory(Path.GetDirectoryName(stray)!);
+        File.WriteAllText(stray, "обрубок");
+        record.HmiPath = stray;
+
+        var project = Path.Combine(Root, "Оригинал проекта");
+        Directory.CreateDirectory(Path.Combine(project, "Driver"));
+        File.WriteAllText(Path.Combine(project, "panel.fsprj"), "x");
+        File.WriteAllText(Path.Combine(project, "Driver", "lib.dll"), "x");
+        request.HmiSourcePath = Path.Combine(project, "panel.fsprj");
+
+        var result = FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.Empty(result.Warnings);
+        Assert.False(File.Exists(stray));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "panel.fsprj")));
+        Assert.True(File.Exists(Path.Combine(record.HmiPath, "Driver", "lib.dll")));
+    }
+
+    [Fact]
+    public void Apply_HmiPathPointedAtSomeoneElsesFile_LeavesItAlone()
+    {
+        var (record, request) = SeedUploadedVersion();
+        // Имя не наше («{версия}_hmi») — значит файл положил человек, и удалять его мы не вправе.
+        var foreignFile = Path.Combine(Root, "HMI-старый", "panel.fsprj");
+        Directory.CreateDirectory(Path.GetDirectoryName(foreignFile)!);
+        File.WriteAllText(foreignFile, "чужой");
+        record.HmiPath = foreignFile;
+
+        var project = Path.Combine(Root, "Оригинал проекта");
+        Directory.CreateDirectory(Path.Combine(project, "Driver"));
+        File.WriteAllText(Path.Combine(project, "panel.fsprj"), "x");
+        File.WriteAllText(Path.Combine(project, "Driver", "lib.dll"), "x");
+        request.HmiSourcePath = Path.Combine(project, "panel.fsprj");
+
+        FirmwareAttachmentsService.Apply(_db, _hierarchy, record, request);
+
+        Assert.True(File.Exists(foreignFile));
+    }
+
+    [Fact]
     public void Apply_UnavailableRoot_ChangesNothing()
     {
         var (record, request) = SeedUploadedVersion();

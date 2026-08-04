@@ -2005,14 +2005,19 @@ public partial class SearchView : UserControl
             // случится (см. FirmwareAttachmentsService.CopyHmiProject), но у всех, кто загрузил панель
             // до этого, такие проекты на диске лежат — и молча открывать их нельзя: человек решит, что
             // сломан сам проект, а не то, как его положили.
-            if (HmiProjectFormat.LooksStrippedOfCompanions(target)
-                && AppMessageBox.Show(
-                    "Проект панели загружен без сопутствующих файлов: рядом с ним нет ни модели панели, " +
-                    "ни драйверов, поэтому среда откроет его пустым.\n\n" +
-                    "Почините через «Изменить» у этой версии — выберите файл проекта заново, теперь " +
-                    "программа заберёт всю папку целиком.\n\nВсё равно открыть?",
-                    "HMI-проект", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-                return;
+            if (HmiProjectFormat.IsStrippedCopy(target, result.VersionRaw))
+            {
+                switch (HmiRepairDialog.Ask(Window.GetWindow(this), target))
+                {
+                    case HmiRepairChoice.Repair:
+                        RepairHmiProject(result);
+                        return;
+                    case HmiRepairChoice.OpenAnyway:
+                        break;
+                    default:
+                        return;
+                }
+            }
             TryOpen(target);
             return;
         }
@@ -2024,6 +2029,82 @@ public partial class SearchView : UserControl
         else
             AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.",
                 "Открыть HMI", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>Заменяет лежащий на диске обрубок проекта панели нормальной папкой — прямо отсюда, с
+    /// карточки, а не «сходите в модерацию»: путь через модерацию для таких версий не работал (поле
+    /// «Открывать файл» указывало в папку прошивки), да и наткнувшийся на пустой проект наладчик идти
+    /// туда не обязан. Оригинал спрашиваем у него: на диске его нет — программа когда-то забрала
+    /// оттуда один файл, а остальное осталось на машине программиста.</summary>
+    private void RepairHmiProject(HierarchyResult result)
+    {
+        var root = _services.Cfg.RootPath();
+        var record = _services.Db.GetFwVersionById(result.FwVersionId);
+        var names = _services.Db.GetFwVersionNames(result.FwVersionId);
+        if (record is null || names is null || string.IsNullOrEmpty(root))
+        {
+            AppMessageBox.Show("Починить не получилось: не нашлась запись версии либо недоступен сетевой диск.",
+                "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Оригинальный файл HMI-проекта",
+            Filter = "HMI-проект (*.fsprj)|*.fsprj|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        var picked = dlg.FileName;
+
+        // Выбрали такую же копию без окружения (проще всего — ту же самую, диалог открывается там, где
+        // был последний раз): скопировать её обратно значит получить ровно тот же пустой проект.
+        if (HmiProjectFormat.IsStrippedCopy(picked, record.VersionRaw))
+        {
+            AppMessageBox.Show(
+                "Этот файл лежит без своего окружения — то есть это такая же копия, а не оригинал.\n\n" +
+                "Выберите проект там, где он открывается нормально: рядом с ним должны лежать модель " +
+                "панели и драйверы.", "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (HmiProjectFormat.SelectionWarning(picked) is { } warning)
+        {
+            AppMessageBox.Show(warning, "HMI-проект", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var request = new FirmwareAttachmentsRequest
+        {
+            RootPath = root,
+            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
+            GroupName = names.Value.GroupName,
+            SubtypeName = names.Value.SubtypeName,
+            ControllerName = names.Value.ControllerName,
+            HmiSourcePath = picked,
+        };
+        FirmwareAttachmentsResult applied;
+        try
+        {
+            applied = FirmwareAttachmentsService.Apply(_services.Db, _services.Hierarchy, record, request);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AppMessageBox.Show($"Не удалось скопировать проект панели:\n{ex.Message}", "HMI-проект",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (applied.Warnings.Count > 0)
+        {
+            AppMessageBox.Show(string.Join("\n", applied.Warnings), "HMI-проект",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Запись обновилась (Apply пишет hmi_path) — карточки в выдаче держат прежний путь, поэтому
+        // поиск перечитываем, а открываем уже по новому пути из записи.
+        PerformSearch();
+        if (HmiOpenResolver.Resolve(HmiSources(result) with { HmiPath = record.HmiPath }) is { } repaired)
+            TryOpen(repaired);
     }
 
     private void OpenFirmwareFolder(HierarchyResult result)
