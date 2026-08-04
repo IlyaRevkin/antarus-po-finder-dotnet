@@ -1004,7 +1004,7 @@ public partial class UploadView : UserControl
             {
                 FirmwareUploadCopyResult copy;
                 using (_host.BeginBusy($"Загрузка на диск: {plan.Version.Raw}"))
-                    copy = await Task.Run(() => FirmwareUploadService.CopyFiles(plan));
+                    copy = await Task.Run(() => FirmwareUploadService.CopyFiles(plan, shortcuts));
 
                 result = copy.IoErrorMessage is not null
                     ? FirmwareUploadResult.IoFailure(copy.IoErrorMessage)
@@ -1140,6 +1140,8 @@ public partial class UploadView : UserControl
             CabinetSnRaw = CabinetSnInput.Text,
             Reservation = GetSelectedReservation(),
             RootPath = _services.Cfg.RootPath(),
+            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
+            ThirdDiskShortcuts = _services.Cfg.ThirdDiskShortcuts(),
             IoMapSourcePath = IoMapInput.Text,
             InstructionsSourcePath = InstructionsInput.Text,
             ModbusMapSourcePath = ModbusMapInput.Text,

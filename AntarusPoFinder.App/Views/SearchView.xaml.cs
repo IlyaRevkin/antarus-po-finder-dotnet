@@ -673,6 +673,8 @@ public partial class SearchView : UserControl
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint),
+                ConnectionMode = _services.Cfg.LoaderConnectionMode(),
+                ConnectionHint = ConnectionHintText(),
             };
 
             var card = new FirmwareCard();
@@ -694,6 +696,7 @@ public partial class SearchView : UserControl
                 OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.PslExtension, "PSL");
             };
             card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader(((FirmwareCard)s!).Result); };
+            card.ConnectionModeChangeRequested += (_, mode) => SaveConnectionMode(mode);
             card.DownloadRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); DownloadFirmware(((FirmwareCard)s!).Result); };
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
@@ -778,7 +781,7 @@ public partial class SearchView : UserControl
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
     /// нашлось. Только папки САМОЙ версии (VersionFolders): признак «есть LFS» должен относиться к
     /// той версии, на карточке которой он написан.</summary>
-    private static DiskScan ScanVersionFolder(HierarchyResult result)
+    private static DiskScan ScanVersionFolder(HierarchyResult result, DocRoots roots)
     {
         bool lfs = false, psl = false, hmiFile = false, networkAlive = false;
         foreach (var dir in VersionFolders(result))
@@ -808,7 +811,7 @@ public partial class SearchView : UserControl
         var hasIoMap = ResolveDocFile(result, result.IoMapPath, "Карта ВВ") is not null;
         // Инструкция разбирается детальнее прочих документов: у неё различаются исходный docx (для правки)
         // и pdf (для печати), от чего зависят разные пункты меню карточки (см. FirmwareCard.AddInstructionItems).
-        var instr = ResolveInstruction(result);
+        var instr = ResolveInstruction(result, roots);
         var hasInstructions = instr.HasAny;
         var hasInstrDocx = instr.Docx is not null;
         var hasInstrPrintable = instr.CanPrint;
@@ -856,10 +859,24 @@ public partial class SearchView : UserControl
     private static string? ResolveDocFile(HierarchyResult result, string? storedPath, string sharedFolderName) =>
         DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, sharedFolderName));
 
-    /// <summary>docx/pdf инструкции этой версии — папка «Инструкция» рядом с папкой контроллера
-    /// (см. InstructionDocResolver). Ходит на диск — из фонового обхода или по клику, не в отрисовке.</summary>
-    private static InstructionDoc ResolveInstruction(HierarchyResult result) =>
-        InstructionDocResolver.Resolve(result.InstructionsPath, FindSiblingFolder(result, "Инструкция"));
+    /// <summary>Корни дисков, от которых зависит поиск инструкции: первый (прошивки) и третий
+    /// (только инструкции, см. InstructionDiskResolver). Читаются из настроек на потоке интерфейса и
+    /// передаются в фоновый обход параметром — лезть за ними в базу из фонового потока нельзя
+    /// (соединение SQLite одно на приложение и не потокобезопасно).</summary>
+    private readonly record struct DocRoots(string First, string Third);
+
+    private DocRoots CurrentDocRoots() => new(_services.Cfg.RootPath(), _services.Cfg.ThirdDiskPath());
+
+    /// <summary>Папка, из которой читается инструкция: зеркало на третьем диске, если оно там есть,
+    /// иначе общая папка «Инструкция» рядом с папкой контроллера на первом.</summary>
+    private static string? InstructionFolder(HierarchyResult result, DocRoots roots) =>
+        InstructionDiskResolver.PreferredReadFolder(roots.First, roots.Third,
+            FindSiblingFolder(result, "Инструкция"));
+
+    /// <summary>docx/pdf инструкции этой версии (см. InstructionDocResolver). Ходит на диск — из
+    /// фонового обхода или по клику, не в отрисовке.</summary>
+    private static InstructionDoc ResolveInstruction(HierarchyResult result, DocRoots roots) =>
+        InstructionDocResolver.Resolve(result.InstructionsPath, InstructionFolder(result, roots));
 
     /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
     /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
@@ -873,12 +890,14 @@ public partial class SearchView : UserControl
         // выдача схлопнулась бы в ноль (см. #12: «прошивка есть локально, а на диске её нет»).
         var root = _services.Cfg.RootPath();
         var netReachable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
+        // Читаем настройки один раз здесь, на потоке интерфейса: обход ниже уходит в Task.Run.
+        var roots = CurrentDocRoots();
 
         foreach (var (card, result, baseFlags) in cards)
         {
             if (generation != _searchGeneration) return;
 
-            var scan = await Task.Run(() => ScanVersionFolder(result));
+            var scan = await Task.Run(() => ScanVersionFolder(result, roots));
             if (generation != _searchGeneration) return;
 
             // Версия, которой нет ни в локальном кэше, ни в папке на доступном сетевом диске — это
@@ -1656,8 +1675,10 @@ public partial class SearchView : UserControl
 
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        // Что именно изменилось (какие теги добавились/убрались и у какой прошивки по-человечески)
+        // сообщает сам ReportChanges — прежняя строка «Теги обновлены: 2.0.0042.0003» дублировала
+        // его и была заметно менее внятной.
         EditFirmwareDialog.ReportChanges(dlg, _host);
-        _host.ShowStatus($"Теги обновлены: {result.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
         PerformSearch();
     }
 
@@ -1846,6 +1867,35 @@ public partial class SearchView : UserControl
         TryOpen(path);
     }
 
+    /// <summary>Сохраняет выбор способа подключения, сделанный прямо на карточке (см.
+    /// FirmwareCard.ConnectionModeChangeRequested). Настройка машинная и общая для всех карточек —
+    /// та же, что в Настройки → Лоадер, поэтому уже открытые карточки просто подхватят её при
+    /// следующей отрисовке, отдельно их обновлять не нужно.</summary>
+    private void SaveConnectionMode(string mode)
+    {
+        if (mode == _services.Cfg.LoaderConnectionMode()) return;
+        _services.Cfg.SetLoaderConnectionMode(mode);
+        // Настройка одна на машину — показываем её сразу на ВСЕХ карточках выдачи, иначе соседние
+        // списки продолжали бы показывать прежний способ до перестроения выдачи.
+        foreach (var card in ResultsPanel.Children.OfType<FirmwareCard>()) card.ShowConnectionMode(mode);
+        var caption = LoaderConnectionSettings.ModeCaption(LoaderConnectionSettings.ParseMode(mode));
+        _host.ShowStatus($"Подключение к ПЛК: {caption}");
+    }
+
+    /// <summary>Строка для подсказки списка на карточке: адрес и адаптер видны, не заходя в Настройки —
+    /// «Ethernet» без адреса ничего наладчику не говорит.</summary>
+    private string ConnectionHintText()
+    {
+        var parts = new List<string>();
+        var ip = _services.Cfg.LoaderPlcIp();
+        if (ip.Length > 0) parts.Add($"адрес ПЛК: {ip}");
+        var adapter = _services.Cfg.LoaderNetworkAdapter();
+        if (adapter.Length > 0) parts.Add($"адаптер: {adapter}");
+        return parts.Count == 0
+            ? "Адрес ПЛК и сетевой адаптер — в Настройки → Лоадер."
+            : string.Join(", ", parts) + " (меняются в Настройки → Лоадер)";
+    }
+
     /// <summary>Открывает интерактивную загрузку через Automation API. Готовый LFS имеет приоритет;
     /// при его отсутствии PSL собирается и загружается production-пайплайном Loader, а собранный
     /// файл уезжает в папку версии НА ДИСКЕ (LoaderJob.NetworkFolder) — чтобы следующий наладчик на
@@ -1952,7 +2002,9 @@ public partial class SearchView : UserControl
 
     private void OpenInstructions(HierarchyResult result)
     {
-        var path = ResolveDocFile(result, result.InstructionsPath, "Инструкция");
+        // Не общий ResolveDocFile: у инструкции своя папка чтения — зеркало на третьем диске,
+        // если оно есть (см. InstructionFolder).
+        var path = DocFileResolver.Resolve(result.InstructionsPath, InstructionFolder(result, CurrentDocRoots()));
         if (path is null)
         {
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -1963,7 +2015,7 @@ public partial class SearchView : UserControl
 
     private void OpenInstructionFolder(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result);
+        var doc = ResolveInstruction(result, CurrentDocRoots());
         if (doc.Folder is not null && Directory.Exists(doc.Folder))
             TryOpen(doc.Folder);
         else
@@ -1972,7 +2024,7 @@ public partial class SearchView : UserControl
 
     private void EditInstruction(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result);
+        var doc = ResolveInstruction(result, CurrentDocRoots());
         if (doc.Docx is not null && File.Exists(doc.Docx))
             TryOpen(doc.Docx);
         else
@@ -2000,7 +2052,7 @@ public partial class SearchView : UserControl
     /// показывать нечего (сообщение об этом уже показано).</summary>
     private async Task<string?> EnsureInstructionPdfAsync(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result);
+        var doc = ResolveInstruction(result, CurrentDocRoots());
         if (doc.Pdf is not null && !doc.PdfStale) return doc.Pdf;
         if (doc.Docx is null)
         {

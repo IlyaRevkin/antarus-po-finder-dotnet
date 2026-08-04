@@ -34,9 +34,13 @@ public static class DocFileResolver
     private static string? StoredCandidate(string? storedPath)
     {
         if (string.IsNullOrEmpty(storedPath)) return null;
-        if (File.Exists(storedPath)) return storedPath;
+        if (File.Exists(storedPath)) return IsShortcut(storedPath) ? null : storedPath;
         return Directory.Exists(storedPath) ? LatestFileIn(storedPath) : null;
     }
+
+    /// <summary>Ярлык Windows — не документ. Общая проверка для обоих резолверов документации.</summary>
+    public static bool IsShortcut(string path) =>
+        string.Equals(Path.GetExtension(path), ".lnk", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Недоступный файл (шара отвалилась между обходом и сравнением) считается самым старым —
     /// сравнение не должно падать из-за одного пути.</summary>
@@ -53,13 +57,19 @@ public static class DocFileResolver
     }
 
     /// <summary>Самый свежий по времени изменения файл во всём дереве папки, или null — папка пуста,
-    /// не существует или недоступна (отвалившаяся сетевая шара — это «нечего открыть», не ошибка).</summary>
+    /// не существует или недоступна (отвалившаяся сетевая шара — это «нечего открыть», не ошибка).
+    ///
+    /// Ярлыки .lnk пропускаются: с появлением третьего диска инструкций на первом остаётся ярлык на
+    /// уехавший файл (для коллег со старым клиентом, см. InstructionDiskResolver), и он — самый
+    /// свежий файл в папке. Открыть его тоже можно, но тогда «последний актуальный документ» вечно
+    /// оказывался бы ярлыком, а не самим документом.</summary>
     public static string? LatestFileIn(string? folder)
     {
         if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
         try
         {
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Where(f => !IsShortcut(f))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }

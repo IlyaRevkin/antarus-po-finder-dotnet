@@ -6,6 +6,21 @@
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
     <StackPanel Margin="16">
+        <!-- Корпоративный вход (Keycloak/OpenID Connect). Виден, только когда его выбрали в
+             Настройки → Подключение И параметры заполнены — иначе окно входа выглядело бы так,
+             будто есть способ, которым войти нельзя. Вход открывает системный браузер: пароль
+             приложение при этом не видит вовсе (см. OidcIdentityProvider). Поля логина/пароля AD
+             ниже при этом скрываются, а аварийный вход администратором остаётся всегда. -->
+        <StackPanel x:Name="SsoPanel" Visibility="Collapsed" Margin="0,0,0,8">
+            <TextBlock Text="КОРПОРАТИВНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock x:Name="SsoDescription" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                       Text="Вход выполняется в браузере — тем же способом, что и в другие корпоративные системы. Пароль вводится на странице компании, программа его не видит."/>
+            <Button x:Name="SsoButton" Content="Войти через браузер" HorizontalAlignment="Right" Click="SsoAuth_Click" Margin="0,0,0,4"/>
+            <TextBlock x:Name="SsoStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Visibility="Collapsed"/>
+            <Separator Margin="0,10,0,10"/>
+        </StackPanel>
+
+        <StackPanel x:Name="AdPanel">
         <TextBlock Text="ВХОД ПО ЛОГИНУ И ПАРОЛЮ AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: ivanov.i, ivanov.i@Elita или Elita\ivanov.i"
@@ -48,6 +63,7 @@
                 <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowConnectionStatus_Click"/>
                 <Button Content="Проверить снова" Click="AdAuth_Click"/>
             </StackPanel>
+        </StackPanel>
         </StackPanel>
 
         <Separator Margin="0,8,0,12"/>

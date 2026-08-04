@@ -62,6 +62,8 @@ public static class InstructionDocResolver
     {
         try
         {
+            // .lnk отсеивается вместе с прочим неподходящим расширением — ярлык на уехавшую на
+            // третий диск инструкцию документом не является (см. DocFileResolver.IsShortcut).
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
                 .Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant()))
                 .OrderByDescending(File.GetLastWriteTimeUtc)

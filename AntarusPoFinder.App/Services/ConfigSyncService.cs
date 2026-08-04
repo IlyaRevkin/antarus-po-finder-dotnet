@@ -110,10 +110,21 @@ public static class ConfigSyncService
     /// above, which doesn't go through this list at all.</summary>
     private static readonly HashSet<string> SkipSettingsKeys = new()
     {
-        "root_path", "second_disk_path", "inspection_folder", "admin_password", "programmer_password",
+        // third_disk_path/third_disk_shortcuts — рядом со вторым диском и по той же причине: буква
+        // сетевого диска у каждой машины своя, а «класть ли ярлык на первом» зависит от того, есть
+        // ли рядом коллеги со старым клиентом, и это тоже решение конкретной машины.
+        "root_path", "second_disk_path", "third_disk_path", "third_disk_shortcuts",
+        "inspection_folder", "admin_password", "programmer_password",
         "current_role", "theme", "keep_archives", "image_server_port", "ad_domain",
         "ad_group_administrator", "ad_group_programmer", "ad_group_naladchik", "ad_auth_mode", "ad_http_url",
         "sync_interval_min", "quick_apps",
+        // Подключение и лоадер — настройки конкретной машины: свой шнурок/переходник в шкаф, свой
+        // экземпляр Loader, свой выбор способа входа (домен может быть недоступен ровно на одной
+        // машине). Уехав в общий конфиг, любая из них ломала бы соседей.
+        "oidc_authority", "oidc_client_id", "oidc_groups_claim", "sync_transport", "server_url",
+        "loader_exe_path", "loader_connection_mode", "loader_plc_ip", "loader_network_adapter",
+        "loader_check_link", "loader_link_timeout_ms", "loader_format_default",
+        "loader_update_kernel_default", "loader_last_target",
         "app_update_path", "app_auto_update", "fw_auto_update_dirs", "config_last_synced_at", "config_last_checked_at",
         // config_last_pushed_at — тот же per-machine watermark, что и два соседних выше, но раньше
         // (до этого фикса) сюда не был добавлен: FinishExport пишет его ПОСЛЕ того, как первый

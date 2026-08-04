@@ -15,6 +15,7 @@ using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Infrastructure;
+using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
 
 using AntarusPoFinder.App;
@@ -184,9 +185,18 @@ public partial class SettingsView : UserControl
 
     // ── Tab switching ─────────────────────────────────────────────────────────
 
+    /// <summary>Все кнопки вкладок в порядке показа — один список на переключение, сброс подсветки
+    /// и выбор запасной вкладки при смене роли (раньше он был выписан трижды и при добавлении
+    /// вкладки его забывали в одном из трёх мест).</summary>
+    private Button[] AllTabButtons() => new[]
+    {
+        TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
+        TabBtnTags, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnUsers,
+    };
+
     private void Tab_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var btn in new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps, TabBtnUsers })
+        foreach (var btn in AllTabButtons())
             btn.Tag = null;
         ((Button)sender).Tag = "Active";
 
@@ -198,8 +208,12 @@ public partial class SettingsView : UserControl
         TagsTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
+        LoaderTab.Visibility = Visibility.Collapsed;
+        ConnectionTab.Visibility = Visibility.Collapsed;
 
-        if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
+        if (sender == TabBtnLoader) { LoaderTab.Visibility = Visibility.Visible; LoadLoaderTab(); }
+        else if (sender == TabBtnConnection) { ConnectionTab.Visibility = Visibility.Visible; LoadConnectionTab(); }
+        else if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnHierarchy) HierarchyTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnFirmware) FirmwareTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
@@ -238,7 +252,13 @@ public partial class SettingsView : UserControl
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // TabBtnGeneral/TabBtnQuickApps: no role restriction — everyone who can reach Настройки at all sees them.
 
-        var allTabs = new[] { TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations, TabBtnTags, TabBtnQuickApps, TabBtnUsers };
+        // «Лоадер» видят наладчик и программист (они и заливают), администратор — как и всё
+        // остальное. «Подключение» — только администратор: способ входа и адрес сервера общие для
+        // машины, а не личная настройка того, кто сейчас за ней сидит.
+        TabBtnLoader.Visibility = Visibility.Visible;
+        TabBtnConnection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+
+        var allTabs = AllTabButtons();
         var activeTab = allTabs.FirstOrDefault(b => (string?)b.Tag == "Active");
         if (activeTab is null || activeTab.Visibility != Visibility.Visible)
             Tab_Click(allTabs.First(b => b.Visibility == Visibility.Visible), new RoutedEventArgs());
@@ -570,6 +590,169 @@ public partial class SettingsView : UserControl
 
         _services.Cfg.SetLoaderExePath(path);
         _host.ShowStatus(path.Length == 0 ? "Будет использован встроенный Segnetics Loader" : "Путь к лоадеру сохранён");
+        RefreshLoaderStatus();
+    }
+
+    // ── Вкладка «Лоадер» ──────────────────────────────────────────────────────
+    // Всё, что раньше было размазано между «Общими» и окном загрузки: где Loader, чем подключаемся
+    // к ПЛК и надо ли проверять связь заранее. Настройки машинные (свой шнурок, свой переходник),
+    // в общий конфиг не уезжают — см. ConfigSyncService.SkipSettingsKeys.
+
+    /// <summary>Пункт списка «Способ подключения»: показываем по-человечески, храним значением.</summary>
+    private sealed record ModeOption(PlcConnectionMode Mode)
+    {
+        public override string ToString() => LoaderConnectionSettings.ModeCaption(Mode);
+    }
+
+    /// <summary>Заполняется один раз при первом открытии вкладки: список адаптеров ходит в систему,
+    /// а SelectionChanged у ComboBox срабатывает и при программном заполнении — флаг не даёт
+    /// заполнению сохранить «выбор», которого человек не делал (та же защита, что _fillingFilters
+    /// в SearchView).</summary>
+    private bool _loaderTabFilling;
+    private bool _loaderTabLoaded;
+
+    private void LoadLoaderTab()
+    {
+        _loaderTabFilling = true;
+        try
+        {
+            LoaderExePathInput.Text = _services.Cfg.LoaderExePath();
+
+            if (LoaderModeCombo.Items.Count == 0)
+                foreach (var mode in new[] { PlcConnectionMode.Unspecified, PlcConnectionMode.Usb, PlcConnectionMode.Ethernet })
+                    LoaderModeCombo.Items.Add(new ModeOption(mode));
+            var current = LoaderConnectionSettings.ParseMode(_services.Cfg.LoaderConnectionMode());
+            LoaderModeCombo.SelectedItem = LoaderModeCombo.Items.Cast<ModeOption>().First(o => o.Mode == current);
+
+            LoaderIpInput.Text = _services.Cfg.LoaderPlcIp();
+
+            // Список адаптеров перечитывается при каждом заходе: переходник USB-Ethernet наладчик
+            // втыкает уже после запуска программы, и «его нет в списке» было бы враньём.
+            var saved = _services.Cfg.LoaderNetworkAdapter();
+            LoaderAdapterCombo.Items.Clear();
+            LoaderAdapterCombo.Items.Add("Как в Loader");
+            foreach (var name in PlcLinkCheck.Adapters()) LoaderAdapterCombo.Items.Add(name);
+            // Сохранённого адаптера может уже не быть в системе (переходник вынут) — показываем его
+            // отдельной строкой, иначе выбор молча слетел бы на «Как в Loader».
+            if (saved.Length > 0 && !LoaderAdapterCombo.Items.Cast<string>().Any(s => string.Equals(s, saved, StringComparison.CurrentCultureIgnoreCase)))
+                LoaderAdapterCombo.Items.Add(saved);
+            LoaderAdapterCombo.SelectedItem = saved.Length == 0
+                ? LoaderAdapterCombo.Items[0]
+                : LoaderAdapterCombo.Items.Cast<string>().First(s => string.Equals(s, saved, StringComparison.CurrentCultureIgnoreCase));
+
+            LoaderCheckLinkCheck.IsChecked = _services.Cfg.LoaderCheckLink();
+            LoaderLinkTimeoutInput.Text = _services.Cfg.LoaderLinkTimeoutMs().ToString();
+            LoaderPrepareDefaultCheck.IsChecked = _services.Cfg.LoaderFormatAndUpdateDefault();
+        }
+        finally
+        {
+            _loaderTabFilling = false;
+        }
+
+        _loaderTabLoaded = true;
+        RefreshLoaderStatus();
+        RefreshAdapterHint();
+    }
+
+    /// <summary>Строка под путём: найден ли Loader и что именно нашлось. Без неё «пустой путь =
+    /// встроенная копия» проверяется только заливкой, то есть в поле и в самый неподходящий момент.</summary>
+    private void RefreshLoaderStatus()
+    {
+        if (!_loaderTabLoaded) return;
+        var backend = FirmwareLoaderFactory.Create(_services.Cfg.LoaderExePath());
+        LoaderStatusText.Text = backend.IsAvailable
+            ? $"Loader найден: {backend.Name}{(string.IsNullOrEmpty(backend.DisplayVersion) ? "" : $", версия {backend.DisplayVersion}")}"
+            : $"Loader не найден: {backend.UnavailableReason}";
+    }
+
+    private void RefreshAdapterHint()
+    {
+        var adapter = _services.Cfg.LoaderNetworkAdapter();
+        if (adapter.Length == 0)
+        {
+            LoaderAdapterHint.Text = "Адаптер выбирает сам Loader.";
+            return;
+        }
+        var address = PlcLinkCheck.AdapterAddress(adapter);
+        LoaderAdapterHint.Text = address.Length > 0
+            ? $"Адрес этого адаптера сейчас: {address}"
+            : "У этого адаптера сейчас нет адреса — он выключен или кабель не воткнут.";
+    }
+
+    private void LoaderMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loaderTabFilling || LoaderModeCombo.SelectedItem is not ModeOption option) return;
+        _services.Cfg.SetLoaderConnectionMode(LoaderConnectionSettings.ModeToConfig(option.Mode));
+        _host.ShowStatus($"Подключение к ПЛК: {LoaderConnectionSettings.ModeCaption(option.Mode)}");
+    }
+
+    private void LoaderAdapter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loaderTabFilling || LoaderAdapterCombo.SelectedItem is not string name) return;
+        // Первая строка списка — «как в Loader», то есть пустое значение настройки.
+        _services.Cfg.SetLoaderNetworkAdapter(LoaderAdapterCombo.SelectedIndex == 0 ? "" : name);
+        RefreshAdapterHint();
+        _host.ShowStatus("Сетевой адаптер для ПЛК сохранён");
+    }
+
+    private void LoaderIp_LostFocus(object sender, RoutedEventArgs e) => SaveLoaderIp();
+
+    private void LoaderIp_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveLoaderIp();
+    }
+
+    private void SaveLoaderIp()
+    {
+        var ip = LoaderIpInput.Text.Trim();
+        if (ip == _services.Cfg.LoaderPlcIp()) return;
+        _services.Cfg.SetLoaderPlcIp(ip);
+        _host.ShowStatus(ip.Length == 0 ? "Адрес ПЛК очищен" : $"Адрес ПЛК сохранён: {ip}");
+    }
+
+    private void LoaderCheckLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loaderTabFilling) return;
+        _services.Cfg.SetLoaderCheckLink(LoaderCheckLinkCheck.IsChecked == true);
+        _host.ShowStatus(LoaderCheckLinkCheck.IsChecked == true
+            ? "Связь с ПЛК будет проверяться перед заливкой"
+            : "Проверка связи перед заливкой выключена");
+    }
+
+    private void LoaderPrepareDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loaderTabFilling) return;
+        _services.Cfg.SetLoaderFormatAndUpdateDefault(LoaderPrepareDefaultCheck.IsChecked == true);
+        _host.ShowStatus("Значение по умолчанию для окна загрузки сохранено");
+    }
+
+    private void LoaderLinkTimeout_LostFocus(object sender, RoutedEventArgs e) => SaveLoaderLinkTimeout();
+
+    private void LoaderLinkTimeout_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveLoaderLinkTimeout();
+    }
+
+    private void SaveLoaderLinkTimeout()
+    {
+        if (!int.TryParse(LoaderLinkTimeoutInput.Text.Trim(), out var ms) || ms <= 0)
+        {
+            // Возвращаем показанное значение к сохранённому, а не ругаемся окном: поле числовое,
+            // и молча принять «абв» хуже, чем показать, что осталось прежним.
+            LoaderLinkTimeoutInput.Text = _services.Cfg.LoaderLinkTimeoutMs().ToString();
+            return;
+        }
+        if (ms == _services.Cfg.LoaderLinkTimeoutMs()) return;
+        _services.Cfg.SetLoaderLinkTimeoutMs(ms);
+        _host.ShowStatus($"Ожидание ответа ПЛК: {ms} мс");
+    }
+
+    private async void CheckPlcLink_Click(object sender, RoutedEventArgs e)
+    {
+        var ip = LoaderIpInput.Text.Trim();
+        LoaderLinkResultText.Text = "Проверяем связь…";
+        var result = await PlcLinkCheck.CheckAsync(ip, _services.Cfg.LoaderLinkTimeoutMs());
+        LoaderLinkResultText.Text = $"{result.Message} ({result.ElapsedMs} мс)";
     }
 
     /// <summary>Как SearchAutoSync_Changed выше — сохраняется сразу по щелчку, без отдельной кнопки
@@ -895,6 +1078,195 @@ public partial class SettingsView : UserControl
     {
         var dlg = new ConnectionStatusDialog(_services.Cfg) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
+    }
+
+    // ── Вкладка «Подключение» ─────────────────────────────────────────────────
+    // Два независимых вопроса на одном экране: чем подтверждается вход и как ходят общие данные.
+    // Оба переключателя намеренно НЕ переключают ничего сами по себе задним числом: смена способа
+    // входа действует со следующего запуска (гейт показывается до главного окна), а серверный
+    // обмен вообще нельзя включать раньше, чем сервер поднят — см. docs/client-server-plan.md.
+
+    private sealed record AuthOption(string Value, string Caption)
+    {
+        public override string ToString() => Caption;
+    }
+
+    private sealed record TransportOption(string Value, string Caption)
+    {
+        public override string ToString() => Caption;
+    }
+
+    private bool _connectionTabFilling;
+
+    private void LoadConnectionTab()
+    {
+        _connectionTabFilling = true;
+        try
+        {
+            if (AuthKindCombo.Items.Count == 0)
+            {
+                AuthKindCombo.Items.Add(new AuthOption("ldap", "Домен напрямую (LDAP)"));
+                AuthKindCombo.Items.Add(new AuthOption("http", "Веб-проверка пароля"));
+                AuthKindCombo.Items.Add(new AuthOption("both", "Домен, при недоступности — веб-проверка"));
+                AuthKindCombo.Items.Add(new AuthOption("oidc", "Корпоративный вход (Keycloak / OpenID Connect)"));
+            }
+            var mode = _services.Cfg.AdAuthMode();
+            AuthKindCombo.SelectedItem = AuthKindCombo.Items.Cast<AuthOption>().First(o => o.Value == mode);
+
+            OidcAuthorityInput.Text = _services.Cfg.OidcAuthority();
+            OidcClientIdInput.Text = _services.Cfg.OidcClientId();
+            OidcGroupsClaimInput.Text = _services.Cfg.OidcGroupsClaim();
+
+            if (TransportCombo.Items.Count == 0)
+            {
+                TransportCombo.Items.Add(new TransportOption("fileshare", "Сетевая папка (как сейчас)"));
+                // Подпись честно говорит, что сервера ещё нет: выбрать пункт можно (адрес и проверка
+                // пригодятся в день запуска), но обмен от этого сегодня не меняется — см. текст
+                // раздела в SettingsView.xaml и предупреждение в Transport_Changed.
+                TransportCombo.Items.Add(new TransportOption("server", "Сервер: HTTP + WebSocket (сервера ещё нет)"));
+            }
+            var transport = _services.Cfg.SyncTransport();
+            TransportCombo.SelectedItem = TransportCombo.Items.Cast<TransportOption>().First(o => o.Value == transport);
+            ServerUrlInput.Text = _services.Cfg.ServerUrl();
+        }
+        finally
+        {
+            _connectionTabFilling = false;
+        }
+
+        UpdateConnectionSections();
+    }
+
+    /// <summary>Поля SSO и сервера показываются всегда, но приглушаются, когда соответствующий
+    /// способ не выбран: заполнить их ДО переключения — нормальный порядок действий (сначала ИТ
+    /// прислал параметры, потом переключаем), поэтому прятать их совсем было бы неудобно.</summary>
+    private void UpdateConnectionSections()
+    {
+        var oidc = (AuthKindCombo.SelectedItem as AuthOption)?.Value == "oidc";
+        OidcSection.Opacity = oidc ? 1.0 : 0.6;
+        var server = (TransportCombo.SelectedItem as TransportOption)?.Value == "server";
+        ServerSection.Opacity = server ? 1.0 : 0.6;
+    }
+
+    private void AuthKind_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_connectionTabFilling || AuthKindCombo.SelectedItem is not AuthOption option) return;
+
+        if (option.Value == "oidc" && !_services.Cfg.OidcConfigured())
+        {
+            AppMessageBox.Show(
+                "Сначала заполните адрес realm и клиент — без них корпоративный вход выполнить нечем.\n" +
+                "Параметры выдаёт ИТ, когда поднимет Keycloak.",
+                "Корпоративный вход", MessageBoxButton.OK, MessageBoxImage.Information);
+            LoadConnectionTab();
+            return;
+        }
+
+        _services.Cfg.SetAdAuthMode(option.Value);
+        UpdateConnectionSections();
+        _host.ShowStatus($"Способ входа сохранён: {option.Caption}. Подействует при следующем запуске программы.");
+    }
+
+    private void OidcAuthority_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var url = OidcAuthorityInput.Text.Trim().TrimEnd('/');
+        if (url == _services.Cfg.OidcAuthority()) return;
+        _services.Cfg.SetOidcAuthority(url);
+        _host.ShowStatus("Адрес сервера входа сохранён");
+    }
+
+    private void OidcClientId_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var id = OidcClientIdInput.Text.Trim();
+        if (id == _services.Cfg.OidcClientId()) return;
+        _services.Cfg.SetOidcClientId(id);
+        _host.ShowStatus("Клиент сервера входа сохранён");
+    }
+
+    private void OidcGroupsClaim_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var claim = OidcGroupsClaimInput.Text.Trim();
+        if (claim.Length == 0 || claim == _services.Cfg.OidcGroupsClaim()) return;
+        _services.Cfg.SetOidcGroupsClaim(claim);
+        _host.ShowStatus("Поле с ролями сохранено");
+    }
+
+    /// <summary>Enter в любом поле SSO = «сохранить», как и уход фокусом: три поля с одинаковым
+    /// поведением не заслуживают трёх одинаковых обработчиков.</summary>
+    private void OidcField_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (sender == OidcAuthorityInput) OidcAuthority_LostFocus(sender, e);
+        else if (sender == OidcClientIdInput) OidcClientId_LostFocus(sender, e);
+        else if (sender == OidcGroupsClaimInput) OidcGroupsClaim_LostFocus(sender, e);
+    }
+
+    private async void CheckOidc_Click(object sender, RoutedEventArgs e)
+    {
+        var authority = OidcAuthorityInput.Text.Trim().TrimEnd('/');
+        OidcCheckResultText.Text = "Спрашиваем сервер…";
+        var result = await OidcIdentityProvider.DiscoverAsync(authority);
+        OidcCheckResultText.Text = result.Message;
+    }
+
+    private void Transport_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_connectionTabFilling || TransportCombo.SelectedItem is not TransportOption option) return;
+
+        if (option.Value == "server")
+        {
+            if (string.IsNullOrWhiteSpace(ServerUrlInput.Text))
+            {
+                AppMessageBox.Show("Сначала укажите адрес сервера.", "Обмен данными",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                LoadConnectionTab();
+                return;
+            }
+            // Клиента к серверу ещё нет (docs/client-server-plan.md — план, а не реализация), поэтому
+            // предупреждение говорит ровно две вещи: сегодня выбор ничего не меняет, а в день запуска
+            // сервера он отрежет от общих данных машины со старой версией.
+            var answer = AppMessageBox.Show(
+                "Сервера пока нет, и обмен с ним в программе ещё не написан: данные и после переключения\n" +
+                "продолжат ездить через сетевую папку. Настройка запомнится на будущее.\n\n" +
+                "Когда сервер поднимут, этот выбор отрежет от общих данных машины со старой версией —\n" +
+                "они умеют только папку.\n\nЗапомнить выбор?",
+                "Обмен данными", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                LoadConnectionTab();
+                return;
+            }
+        }
+
+        _services.Cfg.SetSyncTransport(option.Value);
+        UpdateConnectionSections();
+        _host.ShowStatus($"Обмен данными: {option.Caption}", category: NotificationCategory.Sync);
+    }
+
+    private void ServerUrl_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var url = ServerUrlInput.Text.Trim().TrimEnd('/');
+        if (url == _services.Cfg.ServerUrl()) return;
+        _services.Cfg.SetServerUrl(url);
+        _host.ShowStatus("Адрес сервера сохранён");
+    }
+
+    private void ServerUrl_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) ServerUrl_LostFocus(sender, e);
+    }
+
+    private async void CheckServer_Click(object sender, RoutedEventArgs e)
+    {
+        var url = ServerUrlInput.Text.Trim().TrimEnd('/');
+        if (url.Length == 0)
+        {
+            ServerCheckResultText.Text = "Адрес сервера не задан.";
+            return;
+        }
+        ServerCheckResultText.Text = "Проверяем сервер…";
+        var result = await ServerEndpointCheck.CheckAsync(url);
+        ServerCheckResultText.Text = result.Message;
     }
 
     /// <summary>Опрашивает ОБА источника (папка и GitHub) и показывает всё сразу: что нашлось в
@@ -1911,7 +2283,7 @@ public partial class SettingsView : UserControl
         // в БД по найденному делаются здесь же, на потоке интерфейса.
         var plan = _services.Hierarchy.PlanFwSync(root);
         FwDiskScan scan;
-        using (_host.BeginBusy("Синхронизация прошивок с диском…"))
+        using (_host.BeginSync("поиск прошивок на диске"))
             scan = await Task.Run(() => HierarchyService.ScanFwDisk(plan));
         var result = _services.Hierarchy.ImportFwCandidates(scan);
         if (!result.Ok)
@@ -2176,9 +2548,8 @@ public partial class SettingsView : UserControl
         var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        // "Прошивка обновлена" is misleading when the only thing that changed is tags (no new
-        // firmware version, nothing re-uploaded) — same distinction ModerateFirmware_Click already
-        // makes below. Compare tags as an unordered set (space-joined, order isn't meaningful).
+        // Изменилось что-то или нет — считаем здесь только ради случая «ничего»: обо всём остальном
+        // (что именно за теги и у какой прошивки — человекопонятным именем) сообщает ReportChanges.
         bool tagsChanged = !new HashSet<string>(TagString.Parse(v.Tags), StringComparer.OrdinalIgnoreCase)
             .SetEquals(TagString.Parse(dlg.ResultTags));
         bool otherChanged = v.Description != dlg.ResultDescription ||
@@ -2187,9 +2558,8 @@ public partial class SettingsView : UserControl
         _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
             dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
         EditFirmwareDialog.ReportChanges(dlg, _host);
-        _host.ShowStatus(otherChanged ? $"Прошивка обновлена: {v.VersionRaw}"
-            : tagsChanged ? $"Теги обновлены: {v.VersionRaw}"
-            : $"Без изменений: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        if (!tagsChanged && !otherChanged)
+            _host.ShowStatus($"Без изменений: {title}", category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
