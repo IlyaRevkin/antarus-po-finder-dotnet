@@ -42,27 +42,33 @@ public static class HmiOpenResolver
         //    «HMI» рядом с контроллером. Внутри открываем указанный оператором файл, если он указан.
         if (!string.IsNullOrEmpty(src.HmiPath))
         {
-            var folder = Exists(src.HmiPath) ? src.HmiPath
+            var stored = Exists(src.HmiPath) ? src.HmiPath
                 : Exists(src.SiblingHmiFolder) ? src.SiblingHmiFolder
                 : null;
             // Путь в записи есть, но на диске нет ни его, ни общей папки — это «не найдено», и
             // подменять его детектом по расширениям нельзя: открылся бы файл другого проекта.
-            if (folder is null) return null;
-            if (ExecutableHintResolver.Resolve(folder, src.ExecutableHint) is { } hintedInProject) return hintedInProject;
-            // Подсказки нет, но в папке проекта ровно один файл панели — открывать надо его, а не
-            // папку: оператору всё равно оставалось сделать по ней двойной клик, а на кнопке при этом
-            // не было расширения. Ровно один — значит выбор однозначен; больше одного (или ноль) —
-            // открываем папку, пусть оператор выберет сам.
-            if (ExecutableHintResolver.AutoDetect(folder, PlcOpenResolver.HmiExtensions) is { } onlyProjectFile)
-                return Path.Combine(folder, onlyProjectFile);
-            return folder;
+            if (stored is null) return null;
+            if (Directory.Exists(stored))
+            {
+                if (ExecutableHintResolver.Resolve(stored, src.ExecutableHint) is { } hintedInProject) return hintedInProject;
+                // Подсказки нет, но в папке проекта ровно один файл панели — открывать надо его, а не
+                // папку: оператору всё равно оставалось сделать по ней двойной клик, а на кнопке при этом
+                // не было расширения. Ровно один — значит выбор однозначен; больше одного (или ноль) —
+                // открываем папку, пусть оператор выберет сам.
+                if (ExecutableHintResolver.AutoDetect(stored, PlcOpenResolver.HmiExtensions) is { } onlyProjectFile)
+                    return Path.Combine(stored, onlyProjectFile);
+                return stored;
+            }
+            // В записи не папка, а ОДИН файл — так проекты панели складывались раньше, и у форматов
+            // вроде .fsprj такой файл открывается пустым (см. HmiProjectFormat). Указанный оператором
+            // файл панели тут важнее записанного пути: подсказка относительна папке ВЕРСИИ, и
+            // резолвить её внутри файла бессмысленно — раньше она просто молча игнорировалась, из-за
+            // чего «выбрал исполняемый файл в модерации, а открывается всё тот же пустой проект».
+            return HintedInVersionFolders(src) ?? stored;
         }
 
         // 2. Панель лежит в папке самой версии, и оператор указал, какой файл в ней — панельный.
-        if (ExecutableHintResolver.Normalize(src.ExecutableHint) is not null)
-            foreach (var dir in src.CandidateFolders)
-                if (ExecutableHintResolver.Resolve(dir, src.ExecutableHint) is { } hinted)
-                    return hinted;
+        if (HintedInVersionFolders(src) is { } hintedBeside) return hintedBeside;
 
         // 3. Старый детект по расширениям панели.
         return PlcOpenResolver.FindByExtensions(src.FilteredFolders, PlcOpenResolver.HmiExtensions);
@@ -71,6 +77,16 @@ public static class HmiOpenResolver
     /// <summary>Расширение того, что откроет кнопка — то же, что пишется на ней. null — откроется
     /// папка либо файл без расширения.</summary>
     public static string? ResolveExtension(HmiOpenSources src) => PlcOpenResolver.ExtensionOf(Resolve(src));
+
+    /// <summary>Файл, на который указывает подсказка оператора, в папках самой версии — или null.</summary>
+    private static string? HintedInVersionFolders(HmiOpenSources src)
+    {
+        if (ExecutableHintResolver.Normalize(src.ExecutableHint) is null) return null;
+        foreach (var dir in src.CandidateFolders)
+            if (ExecutableHintResolver.Resolve(dir, src.ExecutableHint) is { } hinted)
+                return hinted;
+        return null;
+    }
 
     private static bool Exists(string? path) =>
         !string.IsNullOrEmpty(path) && (File.Exists(path) || Directory.Exists(path));

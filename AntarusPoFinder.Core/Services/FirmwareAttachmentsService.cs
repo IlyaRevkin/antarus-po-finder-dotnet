@@ -94,12 +94,41 @@ public static class FirmwareAttachmentsService
             if (replaceExisting && Directory.Exists(hmiDstFolder)) FileSystemHelpers.RmtreeSafe(hmiDstFolder);
             Directory.CreateDirectory(hmiDstFolder);
             FileSystemHelpers.CopyTree(sourceFolder, hmiDstFolder, overwrite: false);
+            RemoveOurSingleFileCopy(hmiRootFolder, versionRaw);
             return hmiDstFolder;
         }
         var hmiDstName = $"{versionRaw}_hmi{Path.GetExtension(sourcePath)}";
         var dst = Path.Combine(hmiRootFolder, hmiDstName);
         if (!SamePath(sourcePath, dst)) File.Copy(sourcePath, dst, overwrite: true);
         return dst;
+    }
+
+    /// <summary>То же, но для прежнего пути из записи: он мог указывать на обрубок в ДРУГОЙ папке
+    /// (общая «HMI» контроллера до перестройки диска). Удаляем только собственную копию под нашим же
+    /// именем и только если она не внутри нового проекта.</summary>
+    private static void RemoveSupersededSingleFileCopy(string? previousPath, string versionRaw, string newPath)
+    {
+        if (string.IsNullOrWhiteSpace(previousPath)) return;
+        if (!HmiProjectFormat.IsOurSingleFileCopy(previousPath, versionRaw)) return;
+        if (SamePath(previousPath!, newPath) || IsInside(previousPath!, newPath)) return;
+        try { if (File.Exists(previousPath)) File.Delete(previousPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Сносит обрубок «{версия}_hmi.fsprj» — то, что программа клала на место проекта-папки
+    /// до исправления. Теперь на его место лёг нормальный проект папкой, и оставлять рядом файл нельзя:
+    /// у половины версий контроллера в общей папке «HMI» так и лежат оба, и открывается (а потом
+    /// синхронизируется коллегам) именно пустой файл. Имя целиком наше — пользовательский файл так
+    /// называться не может, поэтому удаление безопасно. Не удалось удалить — не беда: рабочий проект
+    /// уже на месте, а путь в БД теперь указывает на папку.</summary>
+    private static void RemoveOurSingleFileCopy(string hmiRootFolder, string versionRaw)
+    {
+        foreach (var ext in HmiProjectFormat.FolderProjectExtensions)
+        {
+            var stray = Path.Combine(hmiRootFolder, $"{versionRaw}{HmiProjectFormat.StoredFolderSuffix}{ext}");
+            try { if (File.Exists(stray)) File.Delete(stray); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>Один и тот же путь с точностью до формы записи (хвостовой слеш, регистр, «..»).
@@ -182,6 +211,10 @@ public static class FirmwareAttachmentsService
                 {
                     hmi = CopyHmiProject(SlotFolder(HierarchyFolders.Hmi), record.VersionRaw, request.HmiSourcePath, replaceExisting: true);
                     applied.Add("HMI-проект");
+                    // Прежний обрубок мог лежать не там, куда пишем сейчас: до перестройки диска папка
+                    // «HMI» была общей у контроллера, а теперь она внутри версии (VersionLayout). Путь
+                    // из записи — единственное, что про то место известно, поэтому чистим по нему.
+                    RemoveSupersededSingleFileCopy(FirmwarePathLocalizer.Localize(record.HmiPath, root), record.VersionRaw, hmi);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

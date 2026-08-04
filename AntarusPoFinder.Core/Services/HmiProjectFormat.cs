@@ -92,6 +92,68 @@ public static class HmiProjectFormat
         }
     }
 
+    /// <summary>Проект панели, лежащий на диске обрубком, — по любому из двух признаков: либо имя
+    /// файла целиком наше («{версия}_hmi.fsprj»), либо рядом с ним нет ничего, кроме таких же
+    /// одиночных проектов.
+    ///
+    /// Одного второго признака мало. Общая папка «HMI» контроллера — это не только наши обрубки: у
+    /// кого-то там же лежит документ или карта соседней версии, и от одного постороннего файла
+    /// проверка замолкала, хотя проект открылся бы ровно так же пустым. Имя же файла задавала сама
+    /// программа (см. <see cref="IsOurSingleFileCopy"/>) — по нему обрубок виден независимо от соседей.
+    ///
+    /// Файл ВНУТРИ нашей папки проекта под этот признак не попадает, как бы он ни назывался: раз мы
+    /// забрали папку целиком, окружение рядом с ним есть.
+    ///
+    /// Ходит на диск — звать по клику.</summary>
+    public static bool IsStrippedCopy(string? path, string versionRaw)
+    {
+        if (!IsFolderProjectFile(path) || !SafeFileExists(path)) return false;
+        var folder = SafeParent(path!);
+        var insideOurProjectFolder = folder is not null && IsStoredProjectFolder(folder);
+        if (IsOurSingleFileCopy(path, versionRaw) && !insideOurProjectFolder) return true;
+        return LooksStrippedOfCompanions(path);
+    }
+
+    /// <summary>Что программа ВИДИТ рядом с файлом — строкой для показа оператору. Нужно ровно там,
+    /// где она утверждает «проект лежит без сопутствующих файлов»: у оператора рядом с ОРИГИНАЛОМ на
+    /// его машине всё на месте, и без этой строки предупреждение выглядит враньём — непонятно, что
+    /// речь про другую папку (нашу копию на сетевом диске). Показав путь и содержимое, спор
+    /// заканчивается за секунду.
+    ///
+    /// Ходит на диск — звать по клику.</summary>
+    public static string Neighbourhood(string? path, int maxNames = 8)
+    {
+        var folder = string.IsNullOrWhiteSpace(path) ? null : SafeParent(path!);
+        if (folder is null || !SafeDirExists(folder)) return "папку прочитать не удалось";
+        try
+        {
+            var names = Directory.EnumerateFileSystemEntries(folder)
+                .Where(e => !string.Equals(e, path, StringComparison.OrdinalIgnoreCase))
+                .Select(e => Directory.Exists(e) ? Path.GetFileName(e.TrimEnd(Path.DirectorySeparatorChar)) + "\\" : Path.GetFileName(e))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Take(maxNames + 1)
+                .ToList();
+            if (names.Count == 0) return "кроме него — ничего";
+            return names.Count > maxNames
+                ? string.Join(", ", names.Take(maxNames)) + " и другие"
+                : string.Join(", ", names);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return "папку прочитать не удалось";
+        }
+    }
+
+    /// <summary>Имя, под которым программа кладёт проект-папку ОДНИМ файлом — то, что она делала до
+    /// исправления. Знать его надо, чтобы такой обрубок снести, когда на его место лёг нормальный
+    /// проект-папка: имя целиком наше, пользовательский файл так называться не может.</summary>
+    public static bool IsOurSingleFileCopy(string? path, string versionRaw)
+    {
+        if (!IsFolderProjectFile(path) || string.IsNullOrWhiteSpace(versionRaw)) return false;
+        var name = Path.GetFileNameWithoutExtension(path!);
+        return string.Equals(name, versionRaw + StoredFolderSuffix, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsStoredProjectFolder(string folder) =>
         Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar))
             .EndsWith(StoredFolderSuffix, StringComparison.OrdinalIgnoreCase);

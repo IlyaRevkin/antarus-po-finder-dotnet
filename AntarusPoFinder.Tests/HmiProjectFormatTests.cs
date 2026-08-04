@@ -204,6 +204,133 @@ public class HmiProjectFormatTests
     }
 
     [Fact]
+    public void CopyHmiProject_WholeFolder_RemovesTheOldSingleFileCopyBesideIt()
+    {
+        using var root = new TempRoot();
+        var hmiRoot = Path.Combine(root.Path, "HMI");
+        var stray = Touch(hmiRoot, "2.1.041_hmi.fsprj");
+        var project = Path.Combine(root.Path, "Проект панели");
+        var entry = Touch(project, "panel.fsprj");
+        Touch(project, "model.bin");
+
+        var stored = FirmwareAttachmentsService.CopyHmiProject(hmiRoot, "2.1.041", entry, replaceExisting: true);
+
+        // Обрубок и папка с тем же именем прекрасно уживаются в одной папке — и открывался обрубок.
+        Assert.False(File.Exists(stray));
+        Assert.True(File.Exists(Path.Combine(stored, "panel.fsprj")));
+    }
+
+    [Fact]
+    public void IsStrippedCopy_SeesOurOwnCopy_EvenWithStrangersInTheSameFolder()
+    {
+        using var root = new TempRoot();
+        var hmiRoot = Path.Combine(root.Path, "HMI");
+        var ours = Touch(hmiRoot, "2.1.041_hmi.fsprj");
+        // В общей папке «HMI» контроллера рядом с обрубком лежат и документы соседних версий — от
+        // одного такого файла проверка «нет соседей» замолкала, а проект открывался всё так же пустым.
+        Touch(hmiRoot, "инструкция.pdf");
+
+        Assert.True(HmiProjectFormat.IsStrippedCopy(ours, "2.1.041"));
+        // Соседний обрубок — беда ДРУГОЙ версии, её карточка о нём и предупредит.
+        Assert.False(HmiProjectFormat.IsStrippedCopy(Touch(hmiRoot, "2.1.040_hmi.fsprj"), "2.1.041"));
+    }
+
+    [Fact]
+    public void IsStrippedCopy_FileInsideOurProjectFolder_IsFine_WhateverItIsCalled()
+    {
+        using var root = new TempRoot();
+        var project = Path.Combine(root.Path, "HMI", "2.1.041_hmi");
+        // Проект забран папкой целиком, а внутри файл случайно назван так же, как наша старая копия:
+        // окружение рядом с ним есть, пугать оператора нечем.
+        var entry = Touch(project, "2.1.041_hmi.fsprj");
+        Touch(project, "model.bin");
+
+        Assert.False(HmiProjectFormat.IsStrippedCopy(entry, "2.1.041"));
+    }
+
+    [Fact]
+    public void IsStrippedCopy_LoneProjectWithoutOurNaming_StillCaught()
+    {
+        using var root = new TempRoot();
+        var lone = Touch(Path.Combine(root.Path, "HMI"), "panel.fsprj");
+        Assert.True(HmiProjectFormat.IsStrippedCopy(lone, "2.1.041"));
+
+        // Целый проект — рядом модель панели: ни имя, ни соседи ни о чём не говорят.
+        var project = Path.Combine(root.Path, "Проект");
+        var entry = Touch(project, "panel.fsprj");
+        Touch(project, "model.bin");
+        Assert.False(HmiProjectFormat.IsStrippedCopy(entry, "2.1.041"));
+    }
+
+    [Fact]
+    public void Neighbourhood_TellsOperatorWhatTheProgramActuallySees()
+    {
+        using var root = new TempRoot();
+        var lone = Touch(Path.Combine(root.Path, "HMI"), "2.1.041_hmi.fsprj");
+        Assert.Equal("кроме него — ничего", HmiProjectFormat.Neighbourhood(lone));
+
+        var project = Path.Combine(root.Path, "Проект панели");
+        var entry = Touch(project, "panel.fsprj");
+        Touch(project, "model.bin");
+        Touch(Path.Combine(project, "Driver"), "lib.dll");
+        Assert.Equal("Driver\\, model.bin", HmiProjectFormat.Neighbourhood(entry));
+    }
+
+    [Fact]
+    public void IsOurSingleFileCopy_OnlyOurOwnNaming()
+    {
+        Assert.True(HmiProjectFormat.IsOurSingleFileCopy(@"C:\HMI\2.1.041_hmi.fsprj", "2.1.041"));
+        // Чужой файл в той же папке трогать нельзя, как и одиночный формат — он рабочий.
+        Assert.False(HmiProjectFormat.IsOurSingleFileCopy(@"C:\HMI\panel.fsprj", "2.1.041"));
+        Assert.False(HmiProjectFormat.IsOurSingleFileCopy(@"C:\HMI\2.1.040_hmi.fsprj", "2.1.041"));
+        Assert.False(HmiProjectFormat.IsOurSingleFileCopy(@"C:\HMI\2.1.041_hmi.dpj", "2.1.041"));
+    }
+
+    [Fact]
+    public void Resolve_StoredAsLoneFile_OperatorsPickedFileWins()
+    {
+        using var root = new TempRoot();
+        // Жалоба: «через модерацию исполняемый я выбрал, а он всё равно пустой». Подсказка относительна
+        // папке ВЕРСИИ, а записанный путь — файл; резолвить подсказку внутри файла бессмысленно, и она
+        // молча игнорировалась — открывался всё тот же обрубок.
+        var stored = Touch(Path.Combine(root.Path, "HMI"), "2.1.041_hmi.fsprj");
+        var version = Path.Combine(root.Path, "2.1.041");
+        var real = Touch(version, "panel.fsprj");
+
+        var src = new HmiOpenSources
+        {
+            HmiPath = stored,
+            ExecutableHint = "panel.fsprj",
+            CandidateFolders = new[] { version },
+        };
+        Assert.Equal(real, HmiOpenResolver.Resolve(src));
+
+        // Подсказки нет — открывается записанный путь, как и раньше.
+        Assert.Equal(stored, HmiOpenResolver.Resolve(src with { ExecutableHint = "" }));
+        // Подсказка есть, но такого файла в папке версии нет — тоже записанный путь.
+        Assert.Equal(stored, HmiOpenResolver.Resolve(src with { ExecutableHint = "нет-такого.fsprj" }));
+    }
+
+    [Fact]
+    public void Resolve_StoredAsFolder_HintStillResolvedInsideTheProject()
+    {
+        using var root = new TempRoot();
+        var project = Path.Combine(root.Path, "HMI", "2.1.041_hmi");
+        Touch(project, "panel.fsprj");
+        var nested = Touch(Path.Combine(project, "Панель"), "main.fsprj");
+        var version = Path.Combine(root.Path, "2.1.041");
+        Touch(version, "другой.fsprj");
+
+        // Внутри папки проекта подсказка важнее папки версии — иначе открылся бы чужой файл.
+        Assert.Equal(nested, HmiOpenResolver.Resolve(new HmiOpenSources
+        {
+            HmiPath = project,
+            ExecutableHint = @"Панель\main.fsprj",
+            CandidateFolders = new[] { version },
+        }));
+    }
+
+    [Fact]
     public void HmiExtensions_KnowFsprj_SoAutoDetectAndButtonCaptionSeeIt()
     {
         using var root = new TempRoot();
