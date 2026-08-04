@@ -143,7 +143,10 @@ public partial class MainWindow : Window
     private void Stickers_Click(object sender, RoutedEventArgs e) =>
         StickersWindow.ShowFor(this, _services, _vm);
 
-    /// <summary>Печать типового бланка паспорта — окном, по той же причине, что и наклейки выше.</summary>
+    /// <summary>«Сформировать паспорт» — единственная точка входа в работу с бланком паспорта
+    /// (окном, по той же причине, что и наклейки выше). Раньше то же окно открывалось ещё из
+    /// «Осмотра», «Паспортов шкафов» и Настроек — отсюда и жалоба Ильи «по паспортам почему-то
+    /// 2 кнопки, а не так как я просил».</summary>
     private void PassportPrint_Click(object sender, RoutedEventArgs e) =>
         PassportPrintWindow.ShowFor(this, _services, _vm);
 
@@ -186,7 +189,15 @@ public partial class MainWindow : Window
         var wasMoreExpanded = MoreSectionToggle.IsChecked == true;
         MoreSectionToggle.IsChecked = true;
         MoreSectionContent.SetCurrentValue(VisibilityProperty, Visibility.Visible);
+
+        // Ровно то же самое для секции «ДЛЯ НАЛАДЧИКА» (Параметры ПЧ/УПП, Паспорта, Модерация) — она
+        // тоже сворачиваемая, и её пункты в свёрнутом виде подсвечивать не на чем.
+        var wasSetupExpanded = SetupSectionToggle.IsChecked == true;
+        SetupSectionToggle.IsChecked = true;
+        SetupSectionContent.SetCurrentValue(VisibilityProperty, Visibility.Visible);
         UpdateLayout();
+
+        var setupIntroShown = false;
 
         foreach (var navItem in _vm.NavItems.Where(n => n.IsVisible))
         {
@@ -208,6 +219,15 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            // Перед первым пунктом секции «ДЛЯ НАЛАДЧИКА» — рассказ про саму секцию: иначе тур
+            // подсвечивал бы кнопки внутри блока, о существовании которого ещё не сказал.
+            if (navItem.Section == NavSection.Setup && !setupIntroShown)
+            {
+                setupIntroShown = true;
+                steps.Add(new OnboardingStep(() => SetupSectionToggle, "Для наладчика",
+                    "Параметры ПЧ/УПП, наклейки, паспорта шкафов и модерация прошивок — нужны реже поиска, поэтому вынесены в отдельную сворачиваемую секцию. Она запоминает, свёрнутой или развёрнутой её оставили."));
+            }
+
             if (!NavStepText.TryGetValue(pageId, out var text)) continue;
             // "Сетевые диски"/"Тикеты" (IsCompact) render in CompactNavItemsControl, everything else
             // in NavItemsControl — but NavItems is bound (unfiltered) to BOTH controls, so a compact
@@ -217,9 +237,12 @@ public partial class MainWindow : Window
             // "?? "fallback below never ran, and the tour highlighted a zero-size collapsed element
             // wherever it happened to flow (right under the last visible item above it) instead of
             // the real button. Route by IsCompact instead of chaining "??" across both.
-            var container = (navItem.IsCompact
-                ? CompactNavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem)
-                : NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem)) as FrameworkElement;
+            var container = (navItem.Section switch
+            {
+                NavSection.More => CompactNavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem),
+                NavSection.Setup => SetupNavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem),
+                _ => NavItemsControl.ItemContainerGenerator.ContainerFromItem(navItem),
+            }) as FrameworkElement;
             if (container is null) continue;
             steps.Add(new OnboardingStep(() => container, text.Title, text.Body));
 
@@ -263,6 +286,7 @@ public partial class MainWindow : Window
         {
             OnboardingHost.Content = null;
             MoreSectionToggle.IsChecked = wasMoreExpanded;
+            SetupSectionToggle.IsChecked = wasSetupExpanded;
             if (markAsShown) _services.Cfg.SetOnboardingShown(true);
             // The tour hops between pages to show real controls — land back where the user actually
             // was, not wherever the last step happened to leave the ContentControl.

@@ -95,9 +95,6 @@ public partial class PassportsView : UserControl
         SubtypeCombo.IsEnabled = !general;
     }
 
-    private void PrintByTemplate_Click(object sender, RoutedEventArgs e) =>
-        PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host);
-
     private void PopulateSubtypes(int? keepSelectedId = null)
     {
         if (GroupCombo.SelectedItem is not EquipmentGroup group || group.Id is null)

@@ -869,7 +869,7 @@ public partial class SearchView : UserControl
         // (см. PassportService.CabinetNameFromQuery). Считается в момент нажатия, а не при сборке
         // карточки: к этому времени в строке поиска может стоять уже другое.
         actions.Children.Add(general
-            ? MakePassportButton("Печать по шаблону",
+            ? MakePassportButton("Сформировать паспорт",
                 () => PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host, passport.Name,
                     PassportService.CabinetNameFromQuery(SearchInput.Text, passport.Name)))
             : MakePassportButton("Печать", () => { _ = PrintPassportAsync(passport); }));

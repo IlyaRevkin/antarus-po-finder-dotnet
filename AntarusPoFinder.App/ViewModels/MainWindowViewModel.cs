@@ -119,6 +119,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// заголовочный прячется (см. MainWindow.xaml).</summary>
     [ObservableProperty] private int _moreSectionBadgeCount;
 
+    /// <summary>То же для секции «ДЛЯ НАЛАДЧИКА»: сумма бейджей спрятанных в ней пунктов. Сейчас
+    /// бейдж там один — очередь модерации прошивок, и она как раз тот случай, ради которого
+    /// заголовочный счётчик и нужен: пункт «Модерация прошивок» переехал из основного списка в
+    /// свёрнутую секцию, и без этого числа администратор перестал бы видеть, что версии ждут
+    /// разметки.</summary>
+    [ObservableProperty] private int _setupSectionBadgeCount;
+
+    /// <summary>Развёрнута ли секция «ДЛЯ НАЛАДЧИКА». Пишется в настройки при каждом переключении —
+    /// см. ConfigService.SidebarSetupExpanded.</summary>
+    [ObservableProperty] private bool _setupSectionExpanded;
+
+    /// <summary>Показывать ли секцию «ДЛЯ НАЛАДЧИКА» вообще. Пустая секция — это заголовок, который
+    /// ничего не открывает: у роли, которой не досталось ни одного её пункта, он был бы просто
+    /// обманом. Сегодня такой роли нет (наклейки и «Сформировать паспорт» доступны всем), но
+    /// достаточно закрыть кому-то параметры и паспорта в RolesConfig.RoleAccess, чтобы это стало
+    /// правдой, и проверка обязана быть на месте раньше, чем это случится.</summary>
+    [ObservableProperty] private bool _setupSectionVisible = true;
+
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
     /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
     /// "syncing" — идёт синхра (стрелки крутятся), "error" — последний тик упал (оранжевый ⚠),
@@ -169,8 +187,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     {
         _services = services;
 
-        foreach (var (pageId, label) in RolesConfig.NavItems)
-            NavItems.Add(new NavItem(pageId, label, isCompact: pageId is "network" or "tickets" or "passports"));
+        foreach (var (pageId, label, section) in RolesConfig.NavItems)
+            NavItems.Add(new NavItem(pageId, label, section));
+
+        // Свёрнута/развёрнута секция «ДЛЯ НАЛАДЧИКА» — запоминается между запусками (в отличие от
+        // «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой): туда ходят работать, а не смотреть
+        // настройку раз в месяц. Ставится ДО первого показа окна, чтобы секция не «моргала».
+        _setupSectionExpanded = _services.Cfg.SidebarSetupExpanded();
 
         CurrentRole = _services.Cfg.CurrentRole();
         CurrentTheme = _services.Cfg.Theme();
@@ -246,6 +269,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             var count = _services.Db.GetUnreleasedFwVersionsCount();
             item.BadgeCount = count;
+            // «Модерация прошивок» переехала в свёрнутую секцию «ДЛЯ НАЛАДЧИКА» — её бейдж теперь
+            // обязан всплывать на заголовок секции, иначе очередь модерации не видна вовсе, пока
+            // секция закрыта.
+            RecomputeSectionBadges();
 
             if (CurrentRole == "administrator" && _lastModerationCount.HasValue && count > _lastModerationCount.Value)
                 ShowStatus($"Новая прошивка ожидает модерации (всего в очереди: {count})", 8000, NotificationCategory.FirmwareAndParams);
@@ -307,7 +334,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeen) > 0);
 
             item.BadgeCount = unseen;
-            RecomputeMoreSectionBadge();
+            RecomputeSectionBadges();
 
             if (notify && _lastUnseenTickets.HasValue && unseen > _lastUnseenTickets.Value && unseen > 0)
                 ShowStatus(unseen == 1 ? "Новый тикет — нажмите «Показать»" : $"Новые тикеты/изменения: {unseen} — нажмите «Показать»",
@@ -317,11 +344,28 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         catch { /* best effort — бейдж просто не обновится в этот раз */ }
     }
 
-    /// <summary>Сумма непросмотренных по всем компактным (спрятанным в «ДОПОЛНИТЕЛЬНО») пунктам —
-    /// заголовок секции показывает её, пока секция свёрнута. Сейчас бейдж есть только у «Тикеты», но
-    /// суммируем по всем компактным на случай будущих.</summary>
-    private void RecomputeMoreSectionBadge() =>
-        MoreSectionBadgeCount = NavItems.Where(n => n.IsCompact && n.IsVisible).Sum(n => n.BadgeCount);
+    /// <summary>«Наклейки» и «Сформировать паспорт» в секции «ДЛЯ НАЛАДЧИКА» — окна, а не страницы,
+    /// и роль их не ограничивает: печатает наладчик, а бланк заводит программист или администратор.
+    /// Отдельным свойством, а не просто константой в разметке, чтобы «секция пуста — секции нет»
+    /// (см. SetupSectionVisible) считалось по тому же списку, что и рисуется.</summary>
+    public bool SetupToolsVisible => true;
+
+    /// <summary>Сумма непросмотренных по всем пунктам свёрнутых секций — заголовок секции показывает
+    /// её, пока та свёрнута. Иначе пришедшее событие ставит бейдж на пункт, которого на экране нет.</summary>
+    private void RecomputeSectionBadges()
+    {
+        MoreSectionBadgeCount = NavItems.Where(n => n.Section == NavSection.More && n.IsVisible).Sum(n => n.BadgeCount);
+        SetupSectionBadgeCount = NavItems.Where(n => n.Section == NavSection.Setup && n.IsVisible).Sum(n => n.BadgeCount);
+        SetupSectionVisible = NavItems.Any(n => n.Section == NavSection.Setup && n.IsVisible) || SetupToolsVisible;
+    }
+
+    /// <summary>Секцию раскрыли/свернули — запомнить. Единственное состояние сайдбара, которое
+    /// переживает перезапуск: см. ConfigService.SidebarSetupExpanded.</summary>
+    partial void OnSetupSectionExpandedChanged(bool value)
+    {
+        try { _services.Cfg.SetSidebarSetupExpanded(value); }
+        catch (Exception) { /* не смогли записать настройку — на работу секции это не влияет */ }
+    }
 
     /// <summary>IAppHost — TicketsView зовёт после того, как показал страницу (и подтянул новые
     /// события с диска), чтобы пометка «просмотрено» ставилась по актуальному списку.</summary>
@@ -488,6 +532,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         foreach (var item in NavItems)
             item.IsVisible = allowed.Contains(item.PageId);
         SettingsVisible = allowed.Contains("settings");
+        // Роль сменилась — пункты секций появились/исчезли: пересчитать и заголовочные бейджи, и
+        // «показывать ли секцию вообще».
+        RecomputeSectionBadges();
 
         // Redirect to the first page this role actually has access to if the current page is no
         // longer allowed for the new role — landing on "search" regardless (the old behavior) sent
@@ -510,7 +557,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private static string FirstAllowedPageId(string role)
     {
         var allowed = RolesConfig.RoleAccess.GetValueOrDefault(role, new HashSet<string>());
-        foreach (var (pageId, _) in RolesConfig.NavItems)
+        foreach (var (pageId, _, _) in RolesConfig.NavItems)
             if (allowed.Contains(pageId)) return pageId;
         return "search";
     }
