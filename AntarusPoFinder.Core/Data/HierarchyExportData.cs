@@ -157,6 +157,12 @@ public class ExportedPassport
     [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
     [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+
+    /// <summary>1 — типовой паспорт: бланк, не привязанный ни к какому шкафу (НКУ, Щит СПЛ, ШР —
+    /// см. PassportService). Признак явный, а не «подтип пустой»: подтип у такой записи пуст
+    /// НЕИЗБЕЖНО, и без флага получатель не отличил бы «это бланк» от «подтип не доехал/потерялся»
+    /// и молча выбросил бы запись. Старый снимок флага не содержит — там 0, и всё как раньше.</summary>
+    [JsonPropertyName("general")] public int General { get; set; }
 }
 
 public class ExportedAppUser

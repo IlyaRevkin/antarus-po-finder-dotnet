@@ -222,4 +222,124 @@ public class PassportSyncTests
         Assert.Contains(category.Removed, s => s.EndsWith("Черновик паспорта", StringComparison.Ordinal));
         Assert.Contains(category.Added, s => s.EndsWith("Паспорт ПЖ ПИ", StringComparison.Ordinal));
     }
+
+    // ── Типовые бланки ──────────────────────────────────────────────────────────────────────
+    // Бланк (НКУ, Щит СПЛ, ШР) подтипа не имеет вовсе — см. GeneralPassportTests. Для синхронизации
+    // это единственное отличие, и оно ровно там, где ошибиться проще всего: «подтипа нет» ни на
+    // отправке, ни на приёме не должно прочитаться как «подтип потерялся по дороге».
+
+    private static int AddGeneral(Database db, string name, string uploadDate,
+        string diskPath = @"Z:\Antarus\Конфиг\Паспорта\НКУ") =>
+        db.AddPassport(new PassportTemplate
+        {
+            SubtypeId = null,
+            Name = name,
+            Filename = "Паспорт.docx",
+            DiskPath = diskPath,
+            UploadDate = uploadDate,
+        });
+
+    /// <summary>Бланк доезжает до коллеги и остаётся бланком — вместе с тегом, по которому его и
+    /// ищут. Снимок собирается ЛЕВЫМ соединением как раз ради этого: внутреннее выбросило бы записи
+    /// без подтипа, и до коллег бланки не доехали бы никогда.</summary>
+    [Fact]
+    public void GeneralBlank_TravelsToTheOtherMachine_AndStaysGeneral()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        Handshake(m);
+
+        var id = AddGeneral(m.DbA, "НКУ", "2026-08-04 12:00:00");
+        m.DbA.UpdatePassportTags(id, "ЩУН-5");
+
+        var exported = m.DbA.ExportHierarchyData();
+        Assert.Contains(exported.Passports!, p => p.Name == "НКУ" && p.General == 1);
+
+        var counts = m.DbB.ImportHierarchyData(exported);
+        Assert.Equal(1, counts.Passports);
+
+        var arrived = Assert.Single(m.DbB.GetGeneralPassports());
+        Assert.Equal("НКУ", arrived.Name);
+        Assert.Null(arrived.SubtypeId);
+        Assert.Contains("ЩУН-5", arrived.Tags);
+        Assert.Single(m.DbB.SearchPassportsByTokens(new[] { "ЩУН-5" }));
+    }
+
+    /// <summary>Бланк и паспорт шкафа с одним названием не должны склеиться при первом контакте двух
+    /// баз: натуральный ключ у бланка — «нет подтипа» плюс название, а не «любой подтип».</summary>
+    [Fact]
+    public void GeneralBlank_IsNeverMatchedWithASameNamedCabinetPassport()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        Handshake(m);
+
+        AddGeneral(m.DbA, "НКУ", "2026-08-04 12:00:00");
+        AddPassport(m.DbB, PickSubtype(m.DbB), "НКУ", "2026-08-01 10:00:00");
+
+        var counts = m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData());
+        Assert.Equal(1, counts.Passports); // приехал именно НОВОЙ записью
+
+        Assert.Equal(2, m.DbB.GetPassports().Count(p => p.Name == "НКУ"));
+        Assert.Null(Assert.Single(m.DbB.GetGeneralPassports()).SubtypeId);
+    }
+
+    /// <summary>Снятый у себя бланк снимается и у коллег — тем же тумбстоуном, что у обычного
+    /// паспорта.</summary>
+    [Fact]
+    public void GeneralBlank_Deletion_TravelsAsATombstone()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        Handshake(m);
+
+        var id = AddGeneral(m.DbA, "НКУ", "2026-08-04 12:00:00");
+        m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData());
+        Assert.Single(m.DbB.GetGeneralPassports());
+
+        m.DbA.DeletePassport(id);
+
+        Assert.Equal(1, m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData()).PassportsRemoved);
+        Assert.Empty(m.DbB.GetGeneralPassports());
+    }
+
+    /// <summary>В предпросмотре эталонной синхронизации бланк подписан «Типовой», а не пустым
+    /// «ничего / ничего»: администратор должен понимать, что именно исчезнет у получателей.</summary>
+    [Fact]
+    public void PreviewAuthoritativeDiff_LabelsBlanksAsGeneral()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        Handshake(m);
+
+        AddGeneral(m.DbA, "НКУ", "2026-08-04 12:00:00");
+
+        var diff = Database.PreviewAuthoritativeDiff(m.DbA.ExportHierarchyData(), m.DbB.ExportHierarchyData());
+        var category = diff.Categories.Single(c => c.Label == "Паспорта шкафов");
+
+        Assert.Contains("Типовой / НКУ", category.Added);
+    }
+
+    /// <summary>Предохранитель: пустой подтип у записи, НЕ помеченной типовой, по-прежнему означает
+    /// «этой ветки справочника у нас нет» — такую строку пропускают, а не заводят бланком. Иначе
+    /// любой паспорт, чей подтип не доехал, тихо превращался бы в типовой бланк.</summary>
+    [Fact]
+    public void PassportWithAnUnknownSubtype_IsStillSkipped_NotTurnedIntoABlank()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        Handshake(m);
+
+        AddPassport(m.DbA, PickSubtype(m.DbA), "Паспорт ПЖ ПИ", "2026-08-04 12:00:00");
+
+        var exported = m.DbA.ExportHierarchyData();
+        var orphan = exported.Passports!.Single(p => p.Name == "Паспорт ПЖ ПИ");
+        orphan.SubtypeSyncId = "нет-такого-подтипа";
+        orphan.SubtypeName = "Неизвестный подтип";
+        orphan.GroupName = "Неизвестный тип";
+
+        Assert.Equal(0, m.DbB.ImportHierarchyData(exported).Passports);
+        Assert.Empty(m.DbB.GetPassports());
+        Assert.Empty(m.DbB.GetGeneralPassports());
+    }
 }

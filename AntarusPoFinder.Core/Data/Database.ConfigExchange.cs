@@ -171,14 +171,17 @@ public partial class Database
                 });
 
         // Паспорта шкафов — тоже ЦЕЛИКОМ, вместе с архивными: та же логика тумбстоунов, что у файлов
-        // параметров выше (см. ExportedPassport).
+        // параметров выше (см. ExportedPassport). LEFT JOIN, а не JOIN: у типового паспорта подтипа
+        // нет вовсе (см. PassportService), и внутреннее соединение выбросило бы такие бланки из
+        // снимка — до коллег они не доехали бы никогда.
         data.Passports = new List<ExportedPassport>();
         using (var r = ExecuteReader("""
             SELECT p.name, p.filename, p.disk_path, p.description, p.upload_date, p.archived, p.sync_id, p.tags,
-                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name
+                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name,
+                   CASE WHEN p.subtype_id IS NULL THEN 1 ELSE 0 END AS general
             FROM passports p
-            JOIN equipment_subtypes es ON p.subtype_id = es.id
-            JOIN equipment_groups   eg ON es.group_id   = eg.id
+            LEFT JOIN equipment_subtypes es ON p.subtype_id = es.id
+            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
             ORDER BY p.id
             """))
             while (r.Read())
@@ -188,7 +191,7 @@ public partial class Database
                     Description = r.GetString(3), UploadDate = r.GetString(4), Archived = r.GetInt32(5),
                     SyncId = GetString(r, "sync_id"), Tags = GetString(r, "tags"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
-                    GroupName = GetString(r, "group_name"),
+                    GroupName = GetString(r, "group_name"), General = GetInt(r, "general"),
                 });
 
         using (var r = ExecuteReader("SELECT sync_id, ad_login, role, first_login_at, last_login_at, role_updated_at FROM app_users ORDER BY ad_login"))
@@ -348,7 +351,7 @@ public partial class Database
     /// паспортов подряд бывает одинаковым («Паспорт.docx»), по нему одному не разобрать, какой из
     /// них исчезнет.</summary>
     private static string PassportDiffLabel(ExportedPassport p) =>
-        $"{p.GroupName} / {p.SubtypeName} / {p.Name}";
+        p.General != 0 ? $"Типовой / {p.Name}" : $"{p.GroupName} / {p.SubtypeName} / {p.Name}";
 
     /// <summary>Одна категория PreviewAuthoritativeDiff — множественная разница по строковым именам,
     /// регистронезависимо и с обрезкой пробелов, как и везде в плоских списках-справочниках этого
@@ -1389,14 +1392,23 @@ public partial class Database
         {
             if (!string.IsNullOrEmpty(pp.SyncId)) incomingSyncIds.Add(pp.SyncId);
 
-            var subId = ResolveId("equipment_subtypes", pp.SubtypeSyncId, subtypeSyncToId, "name", pp.SubtypeName, pp.GroupName);
-            if (subId is null) continue;
+            // Типовой паспорт (бланк без привязки к шкафу) подтипа не имеет по своей природе —
+            // его отсутствие здесь не ошибка адресации, а сама запись, поэтому ResolveId для него
+            // не зовём вовсе. У обычного паспорта не найденный подтип по-прежнему означает «этой
+            // ветки справочника у нас нет» — такую строку пропускаем.
+            var general = pp.General != 0;
+            int? subId = null;
+            if (!general)
+            {
+                subId = ResolveId("equipment_subtypes", pp.SubtypeSyncId, subtypeSyncToId, "name", pp.SubtypeName, pp.GroupName);
+                if (subId is null) continue;
+            }
 
             var local = FindPassportBySyncId(pp.SyncId);
             var adoptSyncId = false;
             if (local is null)
             {
-                local = FindLivePassport(subId.Value, pp.Name);
+                local = FindLivePassport(subId, pp.Name);
                 if (local is not null && local.Id is not null && claimed.Contains(local.Id.Value)) local = null;
                 adoptSyncId = local is not null && !string.IsNullOrEmpty(pp.SyncId) && local.SyncId != pp.SyncId;
             }
@@ -1411,7 +1423,7 @@ public partial class Database
                 if (!apply) continue;
                 AddPassport(new Domain.PassportTemplate
                 {
-                    SubtypeId = subId.Value,
+                    SubtypeId = subId,
                     Name = pp.Name,
                     Filename = pp.Filename,
                     DiskPath = pp.DiskPath,

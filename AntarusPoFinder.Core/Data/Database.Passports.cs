@@ -72,18 +72,35 @@ public partial class Database
         GroupName = GetString(reader, "group_name"),
     };
 
+    /// <summary>Только типовые паспорта — те, что не привязаны ни к какому шкафу (см.
+    /// PassportService про «Конфиг\Паспорта»). Отдельный метод, потому что null-фильтр по подтипу
+    /// нельзя выразить через необязательный параметр GetPassports: там «не задан» уже значит
+    /// «любой».</summary>
+    public List<PassportTemplate> GetGeneralPassports()
+    {
+        var result = new List<PassportTemplate>();
+        using var reader = ExecuteReader(PassportSelect +
+            " WHERE p.archived = 0 AND p.subtype_id IS NULL ORDER BY p.name COLLATE NOCASE");
+        while (reader.Read())
+            result.Add(ReadPassport(reader));
+        return result;
+    }
+
     /// <summary>Живая запись по натуральному ключу «подтип + название» (без учёта регистра — папка
     /// на диске у Windows тоже без регистра, и два паспорта «ПЖ ПИ» и «пж пи» были бы одной папкой).
     /// Тот же ключ использует перезаливка, чтобы ОБНОВИТЬ запись вместо заведения дубля, и импорт
-    /// конфига при первом контакте двух баз.</summary>
-    public PassportTemplate? FindLivePassport(int subtypeId, string name)
+    /// конфига при первом контакте двух баз.
+    ///
+    /// <paramref name="subtypeId"/> = null — типовой паспорт: у него половина ключа не «какой-то
+    /// подтип», а именно «подтипа нет», и сравнение через <c>= NULL</c> в SQL не сработало бы
+    /// никогда (NULL не равен ничему, включая себя) — отсюда отдельная ветка IS NULL.</summary>
+    public PassportTemplate? FindLivePassport(int? subtypeId, string name)
     {
-        using var reader = ExecuteReader(PassportSelect + """
-             WHERE p.archived = 0 AND p.subtype_id = @s AND p.name = @n COLLATE NOCASE
-             ORDER BY p.id
-            """, cmd =>
+        var condition = subtypeId is null ? "p.subtype_id IS NULL" : "p.subtype_id = @s";
+        using var reader = ExecuteReader(PassportSelect +
+            $" WHERE p.archived = 0 AND {condition} AND p.name = @n COLLATE NOCASE ORDER BY p.id", cmd =>
         {
-            cmd.Parameters.AddWithValue("@s", subtypeId);
+            if (subtypeId is not null) cmd.Parameters.AddWithValue("@s", subtypeId.Value);
             cmd.Parameters.AddWithValue("@n", name);
         });
         return reader.Read() ? ReadPassport(reader) : null;
