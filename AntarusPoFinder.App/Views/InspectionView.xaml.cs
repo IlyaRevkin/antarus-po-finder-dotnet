@@ -186,11 +186,6 @@ public partial class InspectionView : UserControl
         Process.Start(new ProcessStartInfo(proto) { UseShellExecute = true });
     }
 
-    /// <summary>Типовой бланк паспорта — то же окно, что открывается из бокового меню; здесь оно под
-    /// рукой в момент, когда паспорт как раз и нужен.</summary>
-    private void PassportPrint_Click(object sender, RoutedEventArgs e) =>
-        PassportPrintWindow.ShowFor(Window.GetWindow(this), _services, _host);
-
     private void ClearProtocolFolder_Click(object sender, RoutedEventArgs e)
     {
         var proto = _services.Cfg.Get("inspection_folder");
