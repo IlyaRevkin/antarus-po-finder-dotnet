@@ -22,10 +22,15 @@ public static class DocFileResolver
     /// записанный к версии год назад, не должен перебивать карту, обновлённую в общей папке на прошлой
     /// неделе. null — открывать нечего (файла нет, папки нет или она пуста), тогда и пункта в меню
     /// карточки быть не должно.</summary>
-    public static string? Resolve(string? storedPath, string? sharedFolder)
+    /// <param name="excludeSubfolder">Имя подпапки, содержимое которой документом не считается —
+    /// «Прежние редакции» у паспорта шкафа (см. PassportService.ResolveDoc). Без этого прежняя
+    /// редакция, у которой время изменения оказалось свежее (файл копируется со своей датой, а не с
+    /// датой загрузки), выигрывала бы у актуального документа — ровно наоборот к требованию
+    /// «всегда открывать свежую». null — прежнее поведение: вся папка целиком.</param>
+    public static string? Resolve(string? storedPath, string? sharedFolder, string? excludeSubfolder = null)
     {
         var stored = StoredCandidate(storedPath);
-        var shared = LatestFileIn(sharedFolder);
+        var shared = LatestFileIn(sharedFolder, excludeSubfolder);
         if (stored is null) return shared;
         if (shared is null) return stored;
         return WrittenAt(shared) > WrittenAt(stored) ? shared : stored;
@@ -63,13 +68,13 @@ public static class DocFileResolver
     /// уехавший файл (для коллег со старым клиентом, см. InstructionDiskResolver), и он — самый
     /// свежий файл в папке. Открыть его тоже можно, но тогда «последний актуальный документ» вечно
     /// оказывался бы ярлыком, а не самим документом.</summary>
-    public static string? LatestFileIn(string? folder)
+    public static string? LatestFileIn(string? folder, string? excludeSubfolder = null)
     {
         if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
         try
         {
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-                .Where(f => !IsShortcut(f))
+                .Where(f => !IsShortcut(f) && !IsUnder(folder, f, excludeSubfolder))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }
@@ -77,5 +82,16 @@ public static class DocFileResolver
         {
             return null;
         }
+    }
+
+    /// <summary>Лежит ли файл внутри подпапки с таким именем (на любой глубине от <paramref name="root"/>).
+    /// Пустое имя — не исключаем ничего.</summary>
+    public static bool IsUnder(string root, string file, string? subfolderName)
+    {
+        if (string.IsNullOrEmpty(subfolderName)) return false;
+        return Path.GetRelativePath(root, file)
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .SkipLast(1)
+            .Any(segment => string.Equals(segment, subfolderName, StringComparison.OrdinalIgnoreCase));
     }
 }

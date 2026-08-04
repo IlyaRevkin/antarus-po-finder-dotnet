@@ -140,6 +140,25 @@ public class ExportedParamFile
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
 }
 
+/// <summary>Шаблон паспорта шкафа в общем конфиге. Устроен дословно как ExportedParamFile выше и по
+/// тем же причинам: archived=1 едет ПОЛОЖИТЕЛЬНЫМ тумбстоуном (таблица аддитивная — у каждой машины
+/// бывают свои загрузки, поэтому «строки нет в снимке» никогда не означает «удалили»), подтип
+/// адресуется переносимо (sync_id + запасной ключ по именам на первом контакте двух баз).</summary>
+public class ExportedPassport
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("filename")] public string Filename { get; set; } = "";
+    [JsonPropertyName("disk_path")] public string DiskPath { get; set; } = "";
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+    [JsonPropertyName("upload_date")] public string UploadDate { get; set; } = "";
+    [JsonPropertyName("archived")] public int Archived { get; set; }
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("tags")] public string Tags { get; set; } = "";
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+}
+
 public class ExportedAppUser
 {
     [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
@@ -280,6 +299,12 @@ public class HierarchyExportData
     /// остальных всю таблицу параметров. Старый экспорт ключа не содержит → false → прежнее
     /// поведение (только добавлять) сохраняется байт в байт.</summary>
     [JsonPropertyName("param_files_have_sync")] public bool ParamFilesHaveSync { get; set; }
+
+    /// <summary>Шаблоны паспортов шкафов — полный список, вместе с архивными (они и есть тумбстоуны).
+    /// Nullable без дефолта: экспорт со старой версии приложения ключа не содержит вовсе, и импорт
+    /// тогда паспорта просто не трогает (у получателя они остаются как были), а не считает, что
+    /// «у отправителя их ноль».</summary>
+    [JsonPropertyName("passports")] public List<ExportedPassport>? Passports { get; set; }
     // Always present with a default empty list (unlike Tags/AllowedExtensions/ParamManufacturers
     // above) — an export from an older app version without this feature simply carries zero users,
     // which correctly means "nothing to add/update", never "delete everyone" (app_users is
@@ -404,6 +429,12 @@ public class ImportCounts
     /// <summary>Файлы параметров, у которых входящий снимок обновил дату загрузки/описание/теги —
     /// раньше уже совпавшая строка не обновлялась никогда (импорт был строго «только добавлять»).</summary>
     public int ParamFilesUpdated { get; set; }
+    /// <summary>Шаблоны паспортов шкафов: заведённые здесь по входящему снимку / снятые по входящему
+    /// тумбстоуну (или эталонной синхронизацией) / обновлённые (дата, описание, теги). Полные аналоги
+    /// трёх счётчиков ParamFiles* выше — таблица устроена так же.</summary>
+    public int Passports { get; set; }
+    public int PassportsRemoved { get; set; }
+    public int PassportsUpdated { get; set; }
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
 
@@ -429,5 +460,6 @@ public class ImportCounts
         ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + FwVersionsRenamed +
         ParamFiles + ParamFilesRemoved + ParamFilesUpdated +
+        Passports + PassportsRemoved + PassportsUpdated +
         AppUsersAdded + AppUsersUpdated + ModerationApplied;
 }

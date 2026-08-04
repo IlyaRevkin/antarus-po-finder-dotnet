@@ -131,6 +131,23 @@ public partial class Database : IDisposable
                  sync_id      TEXT    NOT NULL DEFAULT ''
              );
 
+             -- Шаблоны паспортов шкафов. Отдельная таблица, а не вложение прошивки: паспорт
+             -- описывает ШКАФ, и у части шкафов прошивки нет вовсе — тогда паспорт единственная
+             -- запись, по которой этот шкаф вообще находится поиском. Устройство дословно как у
+             -- param_files выше (sync_id + archived-тумбстоун), см. Database.Passports.cs.
+             CREATE TABLE IF NOT EXISTS passports (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 subtype_id  INTEGER REFERENCES equipment_subtypes(id),
+                 name        TEXT    NOT NULL DEFAULT '',
+                 filename    TEXT    NOT NULL DEFAULT '',
+                 disk_path   TEXT    NOT NULL DEFAULT '',
+                 description TEXT    NOT NULL DEFAULT '',
+                 upload_date TEXT    NOT NULL DEFAULT '',
+                 archived    INTEGER NOT NULL DEFAULT 0,
+                 tags        TEXT    NOT NULL DEFAULT '',
+                 sync_id     TEXT    NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS users (
                  id            INTEGER PRIMARY KEY AUTOINCREMENT,
                  name          TEXT    NOT NULL,
@@ -429,6 +446,7 @@ public partial class Database : IDisposable
         CREATE INDEX IF NOT EXISTS idx_fw_versions_version_raw  ON fw_versions(version_raw);
         CREATE INDEX IF NOT EXISTS idx_fw_versions_sync_id      ON fw_versions(sync_id);
         CREATE INDEX IF NOT EXISTS idx_param_files_subtype      ON param_files(subtype_id);
+        CREATE INDEX IF NOT EXISTS idx_passports_subtype        ON passports(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
         CREATE INDEX IF NOT EXISTS idx_fw_search_usage_version  ON fw_search_usage(fw_version_id);
         CREATE INDEX IF NOT EXISTS idx_fw_usage_shared_query    ON fw_usage_shared(query_key);
@@ -610,7 +628,7 @@ public partial class Database : IDisposable
         // к другому контроллеру, переписывание hw) плодила бы дубликаты. Разойтись машины при этом
         // не могут: на первой же синхронизации строки совпадают по натуральному ключу, и получатель
         // перенимает sync_id отправителя (см. ImportHierarchyDataCore) — дальше они связаны уже им.
-        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "fw_versions", "param_files" })
+        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "fw_versions", "param_files", "passports" })
         {
             var ids = QueryInts($"SELECT id FROM {table} WHERE sync_id IS NULL OR sync_id = ''");
             foreach (var id in ids)
@@ -665,6 +683,7 @@ public partial class Database : IDisposable
         var placeholders = IntParamPlaceholders(staleIds);
         ExecWithIntParams($"DELETE FROM fw_versions WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM param_files WHERE subtype_id IN ({placeholders})", staleIds);
+        ExecWithIntParams($"DELETE FROM passports WHERE subtype_id IN ({placeholders})", staleIds);
         ExecWithIntParams($"DELETE FROM equipment_subtypes WHERE name = '—' AND id IN ({placeholders})", staleIds);
     }
 

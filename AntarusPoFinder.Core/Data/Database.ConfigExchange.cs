@@ -170,6 +170,27 @@ public partial class Database
                     GroupName = GetString(r, "group_name"),
                 });
 
+        // Паспорта шкафов — тоже ЦЕЛИКОМ, вместе с архивными: та же логика тумбстоунов, что у файлов
+        // параметров выше (см. ExportedPassport).
+        data.Passports = new List<ExportedPassport>();
+        using (var r = ExecuteReader("""
+            SELECT p.name, p.filename, p.disk_path, p.description, p.upload_date, p.archived, p.sync_id, p.tags,
+                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name
+            FROM passports p
+            JOIN equipment_subtypes es ON p.subtype_id = es.id
+            JOIN equipment_groups   eg ON es.group_id   = eg.id
+            ORDER BY p.id
+            """))
+            while (r.Read())
+                data.Passports.Add(new ExportedPassport
+                {
+                    Name = r.GetString(0), Filename = r.GetString(1), DiskPath = r.GetString(2),
+                    Description = r.GetString(3), UploadDate = r.GetString(4), Archived = r.GetInt32(5),
+                    SyncId = GetString(r, "sync_id"), Tags = GetString(r, "tags"),
+                    SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
+                    GroupName = GetString(r, "group_name"),
+                });
+
         using (var r = ExecuteReader("SELECT sync_id, ad_login, role, first_login_at, last_login_at, role_updated_at FROM app_users ORDER BY ad_login"))
             while (r.Read())
                 data.AppUsers.Add(new ExportedAppUser
@@ -307,6 +328,13 @@ public partial class Database
             DiffCategory("Файлы параметров",
                 local.ParamFiles.Where(p => p.Archived == 0).Select(ParamFileDiffLabel),
                 onDisk.ParamFiles.Where(p => p.Archived == 0).Select(ParamFileDiffLabel)),
+            // Паспорта шкафов — вторая такая категория «данных, а не справочника», и по той же
+            // причине: эталонный снимок снимает у получателей паспорта, которых в нём нет (см.
+            // ImportPassports). Снимок старого клиента паспортов не содержит вовсе (Passports ==
+            // null) — тогда категория пуста и никого не пугает.
+            DiffCategory("Паспорта шкафов",
+                (local.Passports ?? new()).Where(p => p.Archived == 0).Select(PassportDiffLabel),
+                (onDisk.Passports ?? new()).Where(p => p.Archived == 0).Select(PassportDiffLabel)),
         };
         return new AuthoritativeSyncDiff(categories);
     }
@@ -315,6 +343,12 @@ public partial class Database
     /// одного имени файла мало (одноимённые файлы под разными подтипами/производителями — норма).</summary>
     private static string ParamFileDiffLabel(ExportedParamFile p) =>
         $"{p.GroupName} / {p.SubtypeName} / {p.Manufacturer} / {p.Filename}";
+
+    /// <summary>То же для паспорта шкафа: адресуется типом/подтипом и названием — имя файла у всех
+    /// паспортов подряд бывает одинаковым («Паспорт.docx»), по нему одному не разобрать, какой из
+    /// них исчезнет.</summary>
+    private static string PassportDiffLabel(ExportedPassport p) =>
+        $"{p.GroupName} / {p.SubtypeName} / {p.Name}";
 
     /// <summary>Одна категория PreviewAuthoritativeDiff — множественная разница по строковым именам,
     /// регистронезависимо и с обрезкой пробелов, как и везде в плоских списках-справочниках этого
@@ -447,6 +481,7 @@ public partial class Database
         }
         Collect("fw_versions");
         Collect("param_files");
+        Collect("passports");
         return used;
     }
 
@@ -652,6 +687,7 @@ public partial class Database
             var referenced = ExecuteScalar("""
                 SELECT 1 WHERE EXISTS(SELECT 1 FROM fw_versions WHERE subtype_id=@id)
                    OR EXISTS(SELECT 1 FROM param_files WHERE subtype_id=@id)
+                   OR EXISTS(SELECT 1 FROM passports WHERE subtype_id=@id)
                    OR EXISTS(SELECT 1 FROM fw_version_reservations WHERE subtype_id=@id)
                 """, cmd => cmd.Parameters.AddWithValue("@id", id)) is not null;
             if (referenced)
@@ -1320,8 +1356,128 @@ public partial class Database
         ApplyModerationDecisions(data.ModerationDecisions, counts, apply, subtypeSyncToId, controllerSyncToId);
 
         ImportParamFiles(data, subtypeSyncToId, counts, apply, authoritative);
+        ImportPassports(data, subtypeSyncToId, counts, apply, authoritative);
 
         return counts;
+    }
+
+    /// <summary>Синхронизация шаблонов паспортов шкафов. Правила дословно те же, что у файлов
+    /// параметров (см. ImportParamFiles ниже — там же разбор, почему именно так и чем кончалось
+    /// «только добавлять»):
+    ///   • соотнесение по sync_id, при первом контакте двух баз — откат на натуральный ключ
+    ///     «подтип + название» и усыновление входящего идентификатора;
+    ///   • archived=1 — положительный тумбстоун, снимает запись и здесь;
+    ///   • локальная архивация постоянна: снятую здесь запись не воскрешает входящая живая копия;
+    ///   • совпавшая живая строка обновляется (дата/описание/имя файла — от более свежей загрузки,
+    ///     теги — объединением).
+    ///
+    /// disk_path у совпавшей строки НЕ трогается: он абсолютный и записан машиной-источником;
+    /// открывающая сторона приводит его к своему корню (FirmwarePathLocalizer). Исключение — новое
+    /// имя файла при перезаливке: оно от корня не зависит.
+    ///
+    /// data.Passports == null — снимок писало приложение, которое о паспортах ещё не знает: не
+    /// трогаем ничего (иначе «у отправителя их нет» прочиталось бы как «удалить все»).</summary>
+    private void ImportPassports(HierarchyExportData data, Dictionary<string, int> subtypeSyncToId,
+        ImportCounts counts, bool apply, bool authoritative)
+    {
+        if (data.Passports is null) return;
+
+        var incomingSyncIds = new HashSet<string>(StringComparer.Ordinal);
+        var claimed = new HashSet<int>();
+
+        foreach (var pp in data.Passports)
+        {
+            if (!string.IsNullOrEmpty(pp.SyncId)) incomingSyncIds.Add(pp.SyncId);
+
+            var subId = ResolveId("equipment_subtypes", pp.SubtypeSyncId, subtypeSyncToId, "name", pp.SubtypeName, pp.GroupName);
+            if (subId is null) continue;
+
+            var local = FindPassportBySyncId(pp.SyncId);
+            var adoptSyncId = false;
+            if (local is null)
+            {
+                local = FindLivePassport(subId.Value, pp.Name);
+                if (local is not null && local.Id is not null && claimed.Contains(local.Id.Value)) local = null;
+                adoptSyncId = local is not null && !string.IsNullOrEmpty(pp.SyncId) && local.SyncId != pp.SyncId;
+            }
+
+            if (local is null)
+            {
+                // Строки нет, а входящая уже снята — заводить её только чтобы тут же спрятать под
+                // archived значит показать коллеге фантом (та же логика, что у param_files).
+                if (pp.Archived != 0) continue;
+
+                counts.Passports++;
+                if (!apply) continue;
+                AddPassport(new Domain.PassportTemplate
+                {
+                    SubtypeId = subId.Value,
+                    Name = pp.Name,
+                    Filename = pp.Filename,
+                    DiskPath = pp.DiskPath,
+                    Description = pp.Description,
+                    UploadDate = string.IsNullOrEmpty(pp.UploadDate) ? NowIso() : pp.UploadDate,
+                    Tags = pp.Tags,
+                    SyncId = pp.SyncId,
+                });
+                continue;
+            }
+
+            var localId = local.Id!.Value;
+            claimed.Add(localId);
+            if (apply && adoptSyncId) SetPassportSyncId(localId, pp.SyncId);
+
+            if (local.Archived) continue;
+
+            if (pp.Archived != 0)
+            {
+                counts.PassportsRemoved++;
+                if (apply) DeletePassport(localId);
+                continue;
+            }
+
+            var incomingNewer = string.CompareOrdinal(pp.UploadDate, local.UploadDate) > 0;
+            var newDescription = local.Description;
+            if (!string.IsNullOrWhiteSpace(pp.Description) &&
+                (incomingNewer || string.IsNullOrWhiteSpace(local.Description)))
+                newDescription = pp.Description;
+            var newUploadDate = incomingNewer ? pp.UploadDate : local.UploadDate;
+            // Имя файла — только от более свежей загрузки: паспорт могли перезалить в другом формате
+            // (docx вместо pdf), и тогда «Открыть» обязано вести на новый файл. Назад не тянем.
+            var newFilename = incomingNewer && !string.IsNullOrEmpty(pp.Filename) ? pp.Filename : local.Filename;
+
+            var localTagList = Services.TagString.Parse(local.Tags);
+            var haveTags = new HashSet<string>(localTagList, StringComparer.OrdinalIgnoreCase);
+            var addedTags = Services.TagString.Parse(pp.Tags).Where(t => haveTags.Add(t)).ToList();
+            var newTags = addedTags.Count == 0 ? local.Tags : Services.TagString.Join(localTagList.Concat(addedTags));
+
+            if (newDescription == local.Description && newUploadDate == local.UploadDate &&
+                newFilename == local.Filename && newTags == local.Tags)
+                continue;
+
+            counts.PassportsUpdated++;
+            if (!apply) continue;
+            UpdatePassportUpload(localId, local.DiskPath, newFilename, newDescription, newUploadDate);
+            if (newTags != local.Tags) UpdatePassportTags(localId, newTags);
+        }
+
+        // Эталонная синхронизация: паспорта, которых в полном снимке отправителя нет вовсе (ни живых,
+        // ни архивных) — тот же случай, что тумбстоуном не закрывается в принципе (мусорная строка
+        // завелась на чужой машине, «эталонная» её никогда не видела). Архивируем, а не удаляем:
+        // файл на диске остаётся, решение уезжает дальше тумбстоуном.
+        if (!authoritative) return;
+
+        var localLive = new List<(int Id, string SyncId)>();
+        using (var r = ExecuteReader("SELECT id, sync_id FROM passports WHERE archived = 0 AND sync_id IS NOT NULL AND sync_id != ''"))
+            while (r.Read())
+                localLive.Add((r.GetInt32(0), r.GetString(1)));
+
+        foreach (var (id, syncId) in localLive)
+        {
+            if (incomingSyncIds.Contains(syncId) || claimed.Contains(id)) continue;
+            counts.PassportsRemoved++;
+            if (apply) DeletePassport(id);
+        }
     }
 
     /// <summary>Синхронизация файлов параметров. Раньше здесь было три строки: «нашли по тройке
@@ -1772,6 +1928,25 @@ public partial class Database
             var (disk, changed) = Remap(row.DiskPath);
             if (!changed) continue;
             ExecuteNonQuery("UPDATE param_files SET disk_path=@d WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@d", disk);
+                cmd.Parameters.AddWithValue("@id", row.Id);
+            });
+            changedCount++;
+        }
+
+        // Паспорта лежат в дереве ПО (ПО\<тип>[\<подтип>]\Паспорт\<название>), поэтому их путь
+        // задевает и смена корня, и переименование папки типа/подтипа — ровно как у прошивок выше.
+        var passportRows = new List<(int Id, string DiskPath)>();
+        using (var r = ExecuteReader("SELECT id, disk_path FROM passports"))
+            while (r.Read())
+                passportRows.Add((r.GetInt32(0), GetString(r, "disk_path")));
+
+        foreach (var row in passportRows)
+        {
+            var (disk, changed) = Remap(row.DiskPath);
+            if (!changed) continue;
+            ExecuteNonQuery("UPDATE passports SET disk_path=@d WHERE id=@id", cmd =>
             {
                 cmd.Parameters.AddWithValue("@d", disk);
                 cmd.Parameters.AddWithValue("@id", row.Id);

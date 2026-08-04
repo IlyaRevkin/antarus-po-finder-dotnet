@@ -36,6 +36,12 @@ public sealed record FirmwareCardFlags
     /// инструкцию». Считается тем же обходом, что и HasInstructions (см. SearchView.ResolveInstruction).</summary>
     public bool HasInstructionDocx { get; init; }
 
+    /// <summary>У ШКАФА этой прошивки (тип+подтип) есть шаблон паспорта — см. Domain.PassportTemplate.
+    /// В отличие от карт и инструкции считается НЕ обходом диска, а одним запросом в базу на всю
+    /// выдачу (Database.GetSubtypeIdsWithPassports): паспорт привязан к шкафу, а не к папке версии,
+    /// и лезть за ним на сетевой диск ради подписи пункта меню незачем — файл резолвится по клику.</summary>
+    public bool HasPassport { get; init; }
+
     /// <summary>Инструкцию есть чем печатать — готовый PDF рядом ЛИБО docx, из которого PDF соберётся по
     /// первому требованию (см. DocxToPdfConverter). От этого зависят пункты «…для печати (PDF)» и «Печать».</summary>
     public bool HasInstructionPrintable { get; init; }
@@ -142,6 +148,11 @@ public partial class FirmwareCard : UserControl
     public event EventHandler? OpenInstructionPdfRequested;
     /// <summary>Отправить PDF инструкции на принтер по умолчанию.</summary>
     public event EventHandler? PrintInstructionRequested;
+    /// <summary>Паспорт шкафа: напечатать / открыть документ / открыть его папку. Какой именно
+    /// паспорт (у шкафа их может быть несколько) — решает SearchView, спросив оператора.</summary>
+    public event EventHandler? PrintPassportRequested;
+    public event EventHandler? OpenPassportRequested;
+    public event EventHandler? OpenPassportFolderRequested;
     public event EventHandler? HistoryRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
@@ -310,7 +321,7 @@ public partial class FirmwareCard : UserControl
         // жалоба «зачем она, файла же нет»). Клик всегда открывает самый свежий файл документа, а не
         // путь конкретной версии (см. SearchView.OpenMap/OpenInstructions/OpenModbusMap). Раздел целиком
         // пропускается, если показывать нечего — иначе «ДОКУМЕНТАЦИЯ» висела бы пустым заголовком.
-        if (flags.HasIoMap || flags.HasModbus || flags.HasInstructions)
+        if (flags.HasIoMap || flags.HasModbus || flags.HasInstructions || flags.HasPassport)
         {
             AddMenuHeader("Документация");
             if (flags.HasIoMap)
@@ -321,6 +332,17 @@ public partial class FirmwareCard : UserControl
                     "Открывается самый свежий файл карты Modbus");
             if (flags.HasInstructions)
                 AddInstructionItems(flags);
+            // Паспорт шкафа — здесь же, а не отдельной кнопкой: он относится к шкафу, а не к версии,
+            // и открывают его реже, чем прошивку. Печать первым пунктом — ради неё паспорт и заводят.
+            if (flags.HasPassport)
+            {
+                AddMenuItem("Печать паспорта шкафа", () => PrintPassportRequested?.Invoke(this, EventArgs.Empty),
+                    "Отправить PDF паспорта на принтер по умолчанию (соберётся из docx, если тот правили)");
+                AddMenuItem("Открыть паспорт шкафа", () => OpenPassportRequested?.Invoke(this, EventArgs.Empty),
+                    "Открыть сам документ паспорта — например, чтобы заполнить перед печатью");
+                AddMenuItem("Открыть папку с паспортом", () => OpenPassportFolderRequested?.Invoke(this, EventArgs.Empty),
+                    "Папка паспорта: документ, PDF для печати и прежние редакции");
+            }
         }
 
         AddMenuHeader("Версия");
@@ -449,6 +471,7 @@ public partial class FirmwareCard : UserControl
         if (flags.HasIoMap) parts.Add("карта ВВ ✓");
         if (flags.HasModbus) parts.Add("карта modbus ✓");
         if (flags.HasInstructions) parts.Add("инструкция ✓");
+        if (flags.HasPassport) parts.Add("паспорт ✓");
         // Ни одного файла-спутника — строка не нужна вовсе, пустое «Файлы:» только занимает место.
         FilesLabel.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FilesLabel.Text = "Файлы: " + string.Join(" · ", parts);

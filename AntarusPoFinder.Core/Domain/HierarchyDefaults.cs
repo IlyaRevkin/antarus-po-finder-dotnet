@@ -10,6 +10,12 @@ public static class HierarchyFolders
     public const string Modbus = "Карта Modbus";
     public const string Hmi = "HMI";
     public const string Opc = "ОПЦ";
+
+    /// <summary>Паспорта шкафа — единственная из этих папок, которая живёт НЕ у контроллера, а прямо
+    /// у типа/подтипа (ПО\&lt;тип&gt;[\&lt;подтип&gt;]\Паспорт), рядом с «ОПЦ». Паспорт описывает шкаф, а не
+    /// программу конкретного ПЛК: он должен находиться и у шкафа, у которого прошивки нет вовсе.
+    /// Внутри — по подпапке на каждый паспорт (см. PassportService).</summary>
+    public const string Passports = "Паспорт";
     public const string UnknownFw = "! Неизвестное";
     public const string UnknownParams = "! Неизвестные параметры";
 }

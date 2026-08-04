@@ -483,8 +483,7 @@ public partial class ParamsView : UserControl
             AppMessageBox.Show("Выберите строку.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        var file = new ParamFile { Id = row.Id, Tags = row.Tags };
-        var dlg = new EditParamTagsDialog(_services.Db, file, row.Filename) { Owner = Window.GetWindow(this) };
+        var dlg = new EditParamTagsDialog(_services.Db, row.Tags, row.Filename) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateParamFileTags(row.Id, dlg.ResultTags);
