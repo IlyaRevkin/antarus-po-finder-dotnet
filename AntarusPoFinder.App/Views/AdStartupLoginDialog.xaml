@@ -10,13 +10,21 @@
              Настройки → Подключение И параметры заполнены — иначе окно входа выглядело бы так,
              будто есть способ, которым войти нельзя. Вход открывает системный браузер: пароль
              приложение при этом не видит вовсе (см. OidcIdentityProvider). Поля логина/пароля AD
-             ниже при этом скрываются, а аварийный вход администратором остаётся всегда. -->
+             ниже в этом режиме свёрнуты, но НЕ убраны: их всегда можно раскрыть кнопкой «Войти по
+             доменной учётной записи», а если сервер Keycloak не ответил — они раскрываются сами
+             (см. SsoAuth_Click). Аварийный вход администратором остаётся всегда. Так переключение
+             всех машин на Keycloak не запирает тех, у кого он в этот момент недоступен. -->
         <StackPanel x:Name="SsoPanel" Visibility="Collapsed" Margin="0,0,0,8">
             <TextBlock Text="КОРПОРАТИВНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <TextBlock x:Name="SsoDescription" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
                        Text="Вход выполняется в браузере — тем же способом, что и в другие корпоративные системы. Пароль вводится на странице компании, программа его не видит."/>
             <Button x:Name="SsoButton" Content="Войти через браузер" HorizontalAlignment="Right" Click="SsoAuth_Click" Margin="0,0,0,4"/>
             <TextBlock x:Name="SsoStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Visibility="Collapsed"/>
+            <!-- Запасной путь: раскрывает вход по доменной учётной записи, не покидая окно. Виден,
+                 пока панель AD свёрнута; после раскрытия прячется (см. RevealAdFallback). -->
+            <Button x:Name="ShowAdFallbackButton" Content="Войти по доменной учётной записи"
+                    HorizontalAlignment="Left" Margin="0,6,0,0"
+                    Style="{StaticResource SecondaryButton}" Click="ShowAdFallback_Click"/>
             <Separator Margin="0,10,0,10"/>
         </StackPanel>
 

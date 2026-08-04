@@ -101,13 +101,27 @@ public static class ConfigSyncService
         (kv.Value is null || (kv.Value is JsonValue v && v.TryGetValue<string>(out _)))
         && !SkipKeys.Contains(kv.Key) && !SkipSettingsKeys.Contains(kv.Key);
 
-    /// <summary>Every plain setting key lives on either Настройки → Общие or Настройки → Быстрый
-    /// доступ, and per the operator's decision both of those tabs are configured per-machine only —
-    /// nothing under them should ever be overwritten by an import from the shared config, nor
-    /// offered as a "settings changed" diff in the update banner. That leaves nothing left to sync
-    /// through this flat map; equipment catalog data (groups/subtypes/controllers/tags/fw_versions/
-    /// etc. — "everything else") already syncs unconditionally via the separate hierarchy merge
-    /// above, which doesn't go through this list at all.</summary>
+    /// <summary>Настройки, которые НИКОГДА не уезжают в общий конфиг — то, что у каждой машины
+    /// действительно своё: пароли/хеши, локальные пути и буквы дисков, выбор шнурка/адаптера у
+    /// лоадера, per-machine watermark'и синхронизации, состояние окон. Всё, чего здесь НЕТ, —
+    /// синхронизируется: и справочник оборудования (он идёт отдельным слиянием иерархии, мимо этого
+    /// плоского списка вовсе), и часть настроек-политик из этого же плоского map'а.
+    ///
+    /// Политика единого входа СИНХРОНИЗИРУЕТСЯ намеренно (её здесь специально НЕТ): способ входа
+    /// (ad_auth_mode), домен (ad_domain), адрес HTTP-проверки пароля (ad_http_url), сопоставление
+    /// групп ролям (ad_group_*), параметры Keycloak/OIDC (oidc_authority/oidc_client_id/
+    /// oidc_groups_claim). Это одинаковые для всех машин переносимые значения (ни путей, ни букв
+    /// дисков), и по замыслу владельца администратор задаёт их ОДИН раз, после чего они доезжают до
+    /// всех через тот же общий конфиг, а не настраиваются на каждой машине руками. Совместимость со
+    /// старым клиентом сохраняется механикой IsSetting: клиент, у которого эти ключи ещё в его
+    /// SkipSettingsKeys, просто не применит их из общего конфига (и не запишет в свой экспорт) —
+    /// сломать его новый ключ не может. Пароли/хеши при этом не уезжают НИКОГДА (они здесь остаются).
+    ///
+    /// А вот саму реакцию на политику — включён ли гейт входа (ad_require_login) и когда сюда
+    /// последний раз входили (ad_last_login) — держим локальными: это состояние КОНКРЕТНОЙ машины, а
+    /// не общее правило (обязательность входа задаётся значением по умолчанию в ConfigService, а не
+    /// синхронизацией). Транспорт обмена (sync_transport/server_url) тоже локальный: переключение на
+    /// сервер отрезает машины со старой версией и потому решается на каждой машине отдельно.</summary>
     private static readonly HashSet<string> SkipSettingsKeys = new()
     {
         // third_disk_path/third_disk_shortcuts — рядом со вторым диском и по той же причине: буква
@@ -115,13 +129,14 @@ public static class ConfigSyncService
         // ли рядом коллеги со старым клиентом, и это тоже решение конкретной машины.
         "root_path", "second_disk_path", "third_disk_path", "third_disk_shortcuts",
         "inspection_folder", "admin_password", "programmer_password",
-        "current_role", "theme", "keep_archives", "image_server_port", "ad_domain",
-        "ad_group_administrator", "ad_group_programmer", "ad_group_naladchik", "ad_auth_mode", "ad_http_url",
+        "current_role", "theme", "keep_archives", "image_server_port",
         "sync_interval_min", "quick_apps",
-        // Подключение и лоадер — настройки конкретной машины: свой шнурок/переходник в шкаф, свой
-        // экземпляр Loader, свой выбор способа входа (домен может быть недоступен ровно на одной
-        // машине). Уехав в общий конфиг, любая из них ломала бы соседей.
-        "oidc_authority", "oidc_client_id", "oidc_groups_claim", "sync_transport", "server_url",
+        // ВНИМАНИЕ: ad_domain, ad_auth_mode, ad_http_url, ad_group_* и oidc_authority/oidc_client_id/
+        // oidc_groups_claim ЗДЕСЬ СОЗНАТЕЛЬНО ОТСУТСТВУЮТ — это политика единого входа, она
+        // синхронизируется (см. doc-комментарий поля выше). Локальными остаются только транспорт
+        // обмена и лоадер: свой шнурок/переходник в шкаф, свой экземпляр Loader, выбор fileshare/
+        // сервер. Уехав в общий конфиг, любая из них ломала бы соседей.
+        "sync_transport", "server_url",
         "loader_exe_path", "loader_connection_mode", "loader_plc_ip", "loader_network_adapter",
         "loader_check_link", "loader_link_timeout_ms", "loader_format_default",
         "loader_update_kernel_default", "loader_last_target",
