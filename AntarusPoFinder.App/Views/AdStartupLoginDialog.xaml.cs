@@ -47,15 +47,46 @@ public partial class AdStartupLoginDialog : Window
     }
 
     /// <summary>Какой способ входа показывать. «oidc» с заполненными параметрами — корпоративный вход
-    /// вместо полей логина/пароля: при нём приложение пароль не спрашивает в принципе. Способ выбран,
-    /// но не настроен — молча оставляем прежний вход по AD: запереть человека окном, в котором нечем
-    /// войти, хуже любой непоследовательности.</summary>
+    /// как основной способ: панель Keycloak сверху, а вход по доменной учётной записи свёрнут в
+    /// запасной (раскрывается кнопкой или сам при недоступности сервера входа — см. SsoAuth_Click и
+    /// RevealAdFallback). Ни в одном режиме вход по AD не убирается совсем: переключение всех машин
+    /// на Keycloak не должно запирать тех, у кого он в этот момент недоступен (см.
+    /// StartupLoginOptions). Способ oidc выбран, но не настроен — молча оставляем обычный вход по AD:
+    /// запереть человека окном, в котором нечем войти, хуже любой непоследовательности.</summary>
     private void ApplyAuthMode()
     {
-        var sso = _cfg.AdAuthMode() == "oidc" && _cfg.OidcConfigured();
+        var mode = _cfg.AdAuthMode();
+        var oidcConfigured = _cfg.OidcConfigured();
+        var sso = StartupLoginOptions.ShowCorporateLogin(mode, oidcConfigured);
+
         SsoPanel.Visibility = sso ? Visibility.Visible : Visibility.Collapsed;
-        AdPanel.Visibility = sso ? Visibility.Collapsed : Visibility.Visible;
+
+        // Вход по AD доступен всегда (StartupLoginOptions.AdFallbackAvailable) — в режиме oidc лишь
+        // свёрнут по умолчанию, а раскрывается кнопкой ShowAdFallbackButton или автоматически, если
+        // сервер корпоративного входа не ответил.
+        var adCollapsed = StartupLoginOptions.AdFallbackCollapsedInitially(mode, oidcConfigured);
+        AdPanel.Visibility = adCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        ShowAdFallbackButton.Visibility = adCollapsed ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    /// <summary>Раскрыть запасной вход по доменной учётной записи, не покидая окно. Вызывается по
+    /// кнопке «Войти по доменной учётной записи» и автоматически, когда сервер корпоративного входа
+    /// не ответил (<paramref name="offerMessage"/>=true — тогда над панелью появляется явная
+    /// подсказка, что делать дальше, вместо тупика «не вошёл»).</summary>
+    private void RevealAdFallback(bool offerMessage)
+    {
+        AdPanel.Visibility = Visibility.Visible;
+        ShowAdFallbackButton.Visibility = Visibility.Collapsed;
+        AdLoginInput.Focus();
+        if (offerMessage)
+        {
+            SsoStatus.Visibility = Visibility.Visible;
+            SsoStatus.Text = "Сервер корпоративного входа не отвечает. Войдите по доменной учётной записи ниже " +
+                             "или, если это тоже недоступно, паролем администратора внизу окна.";
+        }
+    }
+
+    private void ShowAdFallback_Click(object sender, RoutedEventArgs e) => RevealAdFallback(offerMessage: false);
 
     /// <summary>Same personalization as RoleSwitchDialog.AdLoginInput_LostFocus — pre-selects
     /// whatever duration this login chose last time it authenticated on this machine.</summary>
@@ -202,8 +233,15 @@ public partial class AdStartupLoginDialog : Window
             var identity = await provider.SignInAsync(CancellationToken.None);
             if (!identity.Success)
             {
-                SsoStatus.Visibility = Visibility.Collapsed;
                 ShowError(identity.FailureReason ?? "Корпоративный вход не выполнен.");
+                // Сервер входа не ответил (не «отказал в доступе») — это тупик, если не предложить
+                // запасной путь: раскрываем вход по доменной учётной записи прямо здесь и говорим,
+                // что делать. Пользователь мог сам отменить/ошибиться (Rejected) — тогда просто
+                // показываем причину, панель AD остаётся свёрнутой (её всё равно видно по кнопке).
+                if (identity.Failure == IdentityFailureKind.Unavailable)
+                    RevealAdFallback(offerMessage: true);
+                else
+                    SsoStatus.Visibility = Visibility.Collapsed;
                 return;
             }
 

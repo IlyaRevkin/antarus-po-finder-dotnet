@@ -88,7 +88,10 @@ public class ConfigService
         // Адрес внутреннего веб-сервера для способа №2 (HTTP-проверка пароля, см.
         // HttpAdCredentialValidator). Предустановлен рабочий адрес диска предприятия; администратор
         // может сменить его в Настройки → Общие или в «Доп. параметрах» окна входа, если IT поменяет
-        // формат. Ключ per-machine, как и весь AD-блок (ConfigSyncService.SkipSettingsKeys).
+        // формат. Синхронизируемый ключ политики входа (его НЕТ в ConfigSyncService.SkipSettingsKeys):
+        // адрес один на всё предприятие, администратор задаёт его один раз, и он доезжает до всех.
+        // Правка в «Доп. параметрах» окна входа остаётся локальной страховкой на случай, когда домен
+        // временно отвечает по другому адресу только у этой машины.
         ["ad_http_url"] = "https://disk.antarus.su/cloud",
         ["sync_interval_min"] = "5",
         ["quick_apps"] = "[]",
@@ -649,7 +652,8 @@ public class ConfigService
     /// см. HttpAdCredentialValidator). По умолчанию предустановлен рабочий адрес диска предприятия
     /// (https://disk.antarus.su/cloud, см. Defaults); администратор может сменить его в Настройки →
     /// Общие или в «Доп. параметрах» окна входа, если IT поменяет формат (см. AdHttpUrlPlaceholder
-    /// в SettingsView для подсказки в самом поле).</summary>
+    /// в SettingsView для подсказки в самом поле). Синхронизируемая политика входа — задаётся один
+    /// раз администратором и доезжает до всех машин (нет в ConfigSyncService.SkipSettingsKeys).</summary>
     public string AdHttpUrl() => Get("ad_http_url");
     public void SetAdHttpUrl(string url) => Set("ad_http_url", url.Trim());
 
