@@ -59,6 +59,28 @@ public static class ChangelogFile
         File.WriteAllText(Path.Combine(versionFolder, FileName), string.Join("\n", lines), new UTF8Encoding(false));
     }
 
+    /// <summary>Строка версии из заголовка «# …» — единственное место НА ДИСКЕ, где номер версии
+    /// записан отдельно от имени папки. До этапа 5 это было не нужно (имя папки и есть номер), но у
+    /// ОПЦ имя папки теперь — номер заявки/SN, и номер версии восстанавливается отсюда (см.
+    /// OpcLayout.ResolveVersion). Разбор снисходительный к тому же, к чему и TryRead: заголовок ищется
+    /// среди первых строк, а не строго в первой — файл люди правят руками.
+    ///
+    /// null — файла нет, он нечитаем или заголовка в нём не оказалось.</summary>
+    public static string? TryReadVersionRaw(string versionFolder)
+    {
+        string[] lines;
+        try { lines = File.ReadAllLines(Path.Combine(versionFolder, FileName)); }
+        catch { return null; }
+
+        foreach (var line in lines.Take(10))
+        {
+            if (!line.StartsWith("# ", StringComparison.Ordinal)) continue;
+            var value = line[2..].Trim();
+            if (value.Length > 0) return value;
+        }
+        return null;
+    }
+
     /// <summary>Возвращает null, если файла нет или он нечитаем — вызывающий откатывается на заглушку.
     /// Разбор намеренно снисходительный: CHANGELOG.md люди правят руками прямо на сетевом диске, и
     /// потерять описание из-за лишней пустой строки или переставленных местами шапочных полей было бы

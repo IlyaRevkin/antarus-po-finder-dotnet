@@ -53,6 +53,12 @@ public class ConfigService
         // Класть ли на первый диск ярлык .lnk на инструкцию, уехавшую на третий: коллега со старым
         // клиентом иначе увидит пустую папку «Инструкция» и решит, что инструкции нет вовсе.
         ["third_disk_shortcuts"] = "true",
+        // «Диск перестроен под новую раскладку» (docs/hierarchy-rework-plan.md, этап 4): у версии
+        // есть свои «Прошивка» и четыре папки документов. Ставится САМА, когда человек выполнил
+        // перестройку диска (DiskMigrationDialog), и синхронизируется — это свойство ОБЩЕГО ДИСКА, а
+        // не машины: перестройку запускают один раз, а класть файлы по-новому должны сразу все,
+        // иначе одна машина будет разбирать папку версии обратно в плоскую.
+        ["disk_layout_v2"] = "false",
         ["inspection_folder"] = "",
         // Значения ниже — фолбэк ТОЛЬКО для Get("admin_password")/Get("programmer_password"), если
         // строки settings ещё нет вовсе (крайне маловероятно после Database.SeedDefaultAdminPasswordHash,
@@ -205,6 +211,17 @@ public class ConfigService
         // Размер этикетки в миллиметрах — под конкретный рулон/лист этикеток предприятия.
         ["label_width_mm"] = "97.5",
         ["label_height_mm"] = "72",
+        // Остальной макет этикетки — см. LabelLayout, там же разобрано, почему поля и сдвиг это
+        // разные настройки и почему без полей у любого размера «обрезался верх».
+        ["label_margin_mm"] = "3",
+        ["label_offset_x_mm"] = "0",
+        ["label_offset_y_mm"] = "0",
+        ["label_qr_mm"] = "0",
+        ["label_title_pt"] = "16",
+        ["label_caption_pt"] = "9",
+        ["label_show_link"] = "true",
+        ["label_show_frame"] = "true",
+        ["label_fancy_qr"] = "true",
         // Принтер этикеток — per-machine (у каждой машины свои принтеры). Пусто — печать на принтер
         // Windows по умолчанию.
         ["label_printer"] = "",
@@ -254,6 +271,15 @@ public class ConfigService
     public bool ThirdDiskShortcuts() => Get("third_disk_shortcuts").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetThirdDiskShortcuts(bool value) => Set("third_disk_shortcuts", value ? "true" : "false");
 
+    /// <summary>Диск уже перестроен под раскладку «пять папок внутри версии» (этап 4). Пока false,
+    /// новая версия рождается ровно так же, как рождалась всегда — файл прошивки в корне папки
+    /// версии, документы в общих папках контроллера: иначе на неперестроенном диске одни версии были
+    /// бы новой раскладки, другие старой, и разобраться, где что лежит, стало бы невозможно.
+    /// Читается программа обе раскладки в любом случае (VersionLayout) — флаг влияет только на
+    /// ЗАПИСЬ.</summary>
+    public bool DiskLayoutV2() => Get("disk_layout_v2").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetDiskLayoutV2(bool value) => Set("disk_layout_v2", value ? "true" : "false");
+
     // ── Печать этикеток с QR и наклеек ───────────────────────────────────────────────────────
 
     /// <summary>Базовый веб-адрес диска инструкций (без хвостового «/»). Пусто — ссылки в QR нет,
@@ -266,6 +292,31 @@ public class ConfigService
 
     public double LabelHeightMm() => ParseMm(Get("label_height_mm"), 72);
     public void SetLabelHeightMm(double mm) => Set("label_height_mm", mm.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Числовая настройка макета этикетки (миллиметры или пункты) — читается тем же
+    /// снисходительным к запятой разбором, что размер (см. <see cref="ParseMm"/>), но допускает 0 и
+    /// отрицательные значения: сдвиг калибровки бывает в обе стороны, а «0» у стороны QR означает
+    /// «посчитай сам». Границы разумного — не здесь, а в LabelLayout.Clamped: правило одно на всех,
+    /// включая значения, приехавшие синхронизацией с чужой машины.</summary>
+    public double LabelNumber(string key, double fallback)
+    {
+        var raw = Get(key);
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) return v;
+        if (double.TryParse(raw.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out v)) return v;
+        return fallback;
+    }
+
+    public void SetLabelNumber(string key, double value) =>
+        Set(key, value.ToString(CultureInfo.InvariantCulture));
+
+    public bool LabelFlag(string key, bool fallback)
+    {
+        var raw = Get(key).Trim();
+        return raw.Length == 0 ? fallback : raw.Equals("true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void SetLabelFlag(string key, bool value) => Set(key, value ? "true" : "false");
 
     /// <summary>Имя принтера этикеток как его видит Windows. Пусто — принтер по умолчанию.</summary>
     public string LabelPrinter() => Get("label_printer");

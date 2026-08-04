@@ -3,10 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
         Title="QR и этикетка"
-        Width="640" Height="560" MinWidth="480" MinHeight="420"
+        Width="900" Height="620" MinWidth="640" MinHeight="460"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -15,20 +19,72 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" x:Name="HeaderText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" x:Name="HeaderText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,4"/>
 
         <!-- Предпросмотр — тот же самый визуал, который уйдёт на принтер (см. LabelPrinter.BuildLabel):
              отдельной «версии для экрана» нет, иначе напечатанное расходилось бы с показанным. -->
-        <Border Grid.Row="1" Background="{DynamicResource BgCardBrush}" CornerRadius="4" Padding="12" Margin="0,8,0,8">
+        <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource BgCardBrush}" CornerRadius="4" Padding="12" Margin="0,8,12,8">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                 <ContentControl x:Name="LabelHost" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </ScrollViewer>
         </Border>
 
-        <TextBlock Grid.Row="2" x:Name="LinkText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,4"/>
-        <TextBlock Grid.Row="3" x:Name="PrinterText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
+        <!-- Макет правится прямо здесь, а не в настройках: подобрать поля так, чтобы принтер ничего
+             не срезал, можно только глядя на этикетку. Сохранение — отдельной кнопкой, чтобы разовая
+             подгонка под конкретную наклейку не меняла настройку у всех. -->
+        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BgCardBrush}" CornerRadius="4"
+                Padding="12" Margin="0,8,0,8" Width="270">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="МАКЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="Ширина / высота, мм" Style="{StaticResource MutedText}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
+                        <TextBox x:Name="WidthInput" Width="80" TextChanged="Layout_Changed"/>
+                        <TextBlock Text="×" VerticalAlignment="Center" Margin="6,0"/>
+                        <TextBox x:Name="HeightInput" Width="80" TextChanged="Layout_Changed"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Поля от краёв, мм" Style="{StaticResource MutedText}"
+                               ToolTip="Главное средство от обрезанного верха: у принтера этикеток есть непечатаемая кромка, и содержимое должно начинаться после неё."/>
+                    <TextBox x:Name="MarginInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8" TextChanged="Layout_Changed"/>
+
+                    <TextBlock Text="Сдвиг X / Y, мм" Style="{StaticResource MutedText}"
+                               ToolTip="Если принтер тянет лист со смещением — двигаем макет целиком, не трогая поля. Настройка этой машины, коллегам не уезжает."/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
+                        <TextBox x:Name="OffsetXInput" Width="80" TextChanged="Layout_Changed"/>
+                        <TextBlock Text="/" VerticalAlignment="Center" Margin="6,0"/>
+                        <TextBox x:Name="OffsetYInput" Width="80" TextChanged="Layout_Changed"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Сторона QR, мм (0 — сам)" Style="{StaticResource MutedText}"/>
+                    <TextBox x:Name="QrInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8" TextChanged="Layout_Changed"/>
+
+                    <TextBlock Text="Кегль заголовка / ссылки, пт" Style="{StaticResource MutedText}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
+                        <TextBox x:Name="TitlePtInput" Width="80" TextChanged="Layout_Changed"/>
+                        <TextBlock Text="/" VerticalAlignment="Center" Margin="6,0"/>
+                        <TextBox x:Name="CaptionPtInput" Width="80" TextChanged="Layout_Changed"/>
+                    </StackPanel>
+
+                    <CheckBox x:Name="ShowLinkCheck" Content="Печатать ссылку текстом" Margin="0,0,0,4" Click="Layout_Changed"
+                              ToolTip="Запасной путь, когда телефон код не берёт. На узкой этикетке можно выключить."/>
+                    <CheckBox x:Name="ShowFrameCheck" Content="Рамка по краю" Margin="0,0,0,4" Click="Layout_Changed"/>
+                    <CheckBox x:Name="FancyQrCheck" Content="Фирменный QR" Margin="0,0,0,8" Click="Layout_Changed"
+                              ToolTip="Векторный код со скруглёнными модулями и подписью в центре. Снимите галочку, если какой-то сканер его не берёт."/>
+
+                    <Button Content="Сохранить как настройки по умолчанию" Style="{StaticResource SecondaryButton}"
+                            Margin="0,4,0,4" Click="SaveLayout_Click"
+                            ToolTip="Размер, поля, кегли и стиль уедут ко всем машинам; сдвиг останется на этой."/>
+                    <Button Content="Вернуть исходный макет" Style="{StaticResource SecondaryButton}" Click="ResetLayout_Click"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" x:Name="LinkText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="3" Grid.ColumnSpan="2" x:Name="PrinterText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Копировать ссылку" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CopyLink_Click"/>
             <Button Content="Печать" Width="120" Margin="0,0,8,0" Click="Print_Click"/>
             <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="100" IsCancel="True" Click="Close_Click"/>

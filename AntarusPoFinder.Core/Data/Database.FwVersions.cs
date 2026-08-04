@@ -119,6 +119,23 @@ public partial class Database
         return affected;
     }
 
+    /// <summary>Перецелить запись на другую папку версии на диске, ничего больше не трогая. Нужно
+    /// ровно двум операциям, и обе — про перестройку диска: перенос ОПЦ внутрь контроллера
+    /// (docs/hierarchy-rework-plan.md, этап 5 — единственный переезд, меняющий disk_path) и его
+    /// локальная починка на машинах, которые перестройку не запускали
+    /// (HierarchyService.RepairOpcDiskPaths). Отдельно от UpdateFwVersion, потому что там правится
+    /// карточка версии целиком, а здесь — один столбец, и правит его не человек, а операция над
+    /// диском. Пустой путь игнорируется: «потерять» disk_path такой правкой нельзя.</summary>
+    public void RepointFwVersionDiskPath(int versionId, string newDiskPath)
+    {
+        if (string.IsNullOrWhiteSpace(newDiskPath)) return;
+        ExecuteNonQuery("UPDATE fw_versions SET disk_path=@d WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", newDiskPath);
+            cmd.Parameters.AddWithValue("@id", versionId);
+        });
+    }
+
     /// <summary>Пути доп. файлов (Карта ВВ / Инструкция / Карта modbus / HMI) — отдельным методом от
     /// UpdateFwVersion, т.к. меняются другим сценарием: «доложить файлы к уже загруженной прошивке»
     /// (см. FirmwareAttachmentsService), а не правкой описания/тегов. null — «не трогать поле»,

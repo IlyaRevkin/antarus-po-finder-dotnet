@@ -22,18 +22,26 @@ namespace AntarusPoFinder.Core.Services;
 /// зеркальную папку (см. <see cref="InstructionDiskResolver"/>), на первом по желанию остаётся .lnk.
 /// В БД пути не правятся вовсе — там и так лежит путь на ПЕРВОМ диске, а читающая сторона сама
 /// считает зеркало (см. <see cref="InstructionStorage"/>).</description></item>
+/// <item><description><b>Файлы прошивки — в подпапку «Прошивка»</b> внутри папки версии
+/// (docs/hierarchy-rework-plan.md, этап 4). Имя самой папки версии НЕ меняется, поэтому disk_path
+/// остаётся валидным у всех коллег, включая тех, кто ещё не обновился.</description></item>
+/// <item><description><b>ОПЦ — внутрь контроллера</b>, с переименованием папки в номер заявки/SN
+/// (этап 5). Единственная операция всей перестройки, которая МЕНЯЕТ disk_path; у коллег он не
+/// обновится импортом конфига никогда, и чинится локальным проходом
+/// HierarchyService.RepairOpcDiskPaths на каждой машине.</description></item>
 /// </list>
+///
+/// <b>Имя папки версии не переименовывается никогда</b> (кроме ОПЦ) — этот якорь и делает этапы 4
+/// бесплатными для синхронизации. Порядок выкатки тоже задан планом и соблюдён: сначала релиз,
+/// который УМЕЕТ ЧИТАТЬ обе раскладки и ничего не переносит (VersionLayout/OpcLayout — режим
+/// совместимости), и только потом, отдельным решением человека, галочки переноса в этом окне.
 ///
 /// Три свойства, без которых такую операцию нельзя выпускать, и они здесь есть:
 /// • <b>сухой прогон</b> — <see cref="Plan"/> ничего не делает, только перечисляет операции;
 /// • <b>журнал</b> — <see cref="Apply"/> отдаёт список выполненного с исходом каждой операции,
 ///   вызывающий сохраняет его файлом ДО того, как показать результат человеку;
 /// • <b>идемпотентность</b> — повторный прогон видит уже переименованное/переехавшее и не делает
-///   ничего; прерванный на середине прогон дочищается следующим.
-///
-/// Класс сознательно НЕ трогает: имена папок версий, ОПЦ-раскладку и перенос пяти папок внутрь
-/// версии (docs/hierarchy-rework-plan.md, этапы 4–5) — это переезд данных с изменением disk_path,
-/// его нельзя делать раньше, чем все машины научатся читать обе раскладки.</summary>
+///   ничего; прерванный на середине прогон дочищается следующим.</summary>
 public static class DiskLayoutMigrator
 {
     /// <summary>Файлы, которые в папке версии не считаются файлом прошивки: журнал изменений (его
@@ -50,6 +58,14 @@ public static class DiskLayoutMigrator
 
         /// <summary>Положить на первом диске ярлык на уехавшую инструкцию.</summary>
         InstructionShortcut,
+
+        /// <summary>Этап 4: собрать файлы прошивки в подпапку «Прошивка» внутри папки версии. Имя
+        /// самой папки версии не меняется — значит disk_path остаётся валидным у всех коллег.</summary>
+        FoldIntoVersion,
+
+        /// <summary>Этап 5: перенести ОПЦ-версию из общей «ОПЦ» подтипа в «ОПЦ» её контроллера,
+        /// переименовав папку в номер заявки/SN. Единственная операция, меняющая disk_path.</summary>
+        MoveOpc,
     }
 
     public sealed class Op
@@ -79,15 +95,24 @@ public static class DiskLayoutMigrator
         public string Status { get; set; } = "";
         public string Error { get; set; } = "";
 
+        /// <summary>Id записи fw_versions, чей disk_path надо переписать после удачного переноса
+        /// (только <see cref="OpKind.MoveOpc"/>). 0 — правка БД этой операции не нужна.</summary>
+        public int FwVersionId { get; init; }
+
         public string KindLabel => Kind switch
         {
             OpKind.RenameFirmware => "Переименовать прошивку",
             OpKind.MoveInstruction => "Инструкция → третий диск",
+            OpKind.FoldIntoVersion => "Файлы прошивки → «Прошивка»",
+            OpKind.MoveOpc => "ОПЦ → внутрь контроллера",
             _ => "Ярлык на инструкцию",
         };
     }
 
-    public sealed record MigrationOptions(bool RenameFirmwareFiles, bool MoveInstructionsToThirdDisk);
+    /// <param name="FoldFilesIntoVersion">Этап 4: собрать файлы прошивки в подпапку «Прошивка».</param>
+    /// <param name="MoveOpcIntoController">Этап 5: перенести ОПЦ внутрь контроллера.</param>
+    public sealed record MigrationOptions(bool RenameFirmwareFiles, bool MoveInstructionsToThirdDisk,
+        bool FoldFilesIntoVersion = false, bool MoveOpcIntoController = false);
 
     /// <summary>Вход планировщика. Версии берутся из БД (та же выборка, что и вкладка «Прошивки»):
     /// именно они задают, где папка версии и какое у файла должно быть каноническое имя.</summary>
@@ -112,17 +137,131 @@ public static class DiskLayoutMigrator
 
         if (input.Options.RenameFirmwareFiles)
             PlanRenames(input, ops, skipped);
+        // Порядок важен: сначала «Прошивка\» внутри версии, потом перенос ОПЦ. Наоборот было бы
+        // неверно — переехавшая ОПЦ-папка перестала бы совпадать с disk_path, по которому этап 4
+        // ищет свои папки версий в этом же прогоне.
+        if (input.Options.FoldFilesIntoVersion)
+            PlanFoldIntoVersion(input, ops, skipped);
+        if (input.Options.MoveOpcIntoController)
+            PlanOpcMoves(input, ops, skipped);
         if (input.Options.MoveInstructionsToThirdDisk)
             PlanInstructionMoves(input, ops, skipped);
 
         return new MigrationPlan(ops, skipped);
     }
 
-    private static void PlanRenames(MigrationInput input, List<Op> ops, List<string> skipped)
+    // ── Этап 4: файлы прошивки внутрь «Прошивка\» ───────────────────────────
+
+    /// <summary>Одна операция на папку версии: создать «Прошивка\» и перенести туда файлы верхнего
+    /// уровня, кроме служебных (CHANGELOG.md остаётся в корне — его читает досмотр диска по
+    /// фиксированному пути; ярлыки тоже остаются, они для людей в проводнике).
+    ///
+    /// Вместе с файлами заводятся все ПЯТЬ папок версии — «Прошивка» и четыре папки документов
+    /// (VersionLayout.EnsureFolders). Именно этого и ждут от перестройки: человек открывает папку
+    /// версии в проводнике и видит, куда что класть. Пустая папка документа ничего не прячет — пока в
+    /// ней нет файлов, документ читается из общей папки контроллера (VersionLayout.SlotBestReadFolder).
+    ///
+    /// Чего операция СОЗНАТЕЛЬНО не делает — не копирует в них содержимое общих папок контроллера.
+    /// Копирование удвоило бы диск и убило бы смысл «карту обновляют в одном месте, и она обновилась
+    /// у всех версий». Внутрь версии попадают ровно те документы, которые приложат ИМЕННО К НЕЙ после
+    /// переезда (VersionLayout.SlotWriteFolder).</summary>
+    private static void PlanFoldIntoVersion(MigrationInput input, List<Op> ops, List<string> skipped)
     {
-        // Одна папка версии может быть записана у нескольких строк (конфигурации шкафа делят файлы) —
-        // планируем по папке, а не по записи, иначе на один файл придётся несколько переименований.
-        // Попутно собираем все disk_path, которыми эта папка записана в базе (см. Op.RecordPaths).
+        foreach (var (dir, first, dbPaths) in VersionDirs(input))
+        {
+            // Планируем по тому, что осталось НАВЕРХУ, а не по наличию «Прошивка\». Разница видна
+            // ровно в том случае, ради которого этот этап и делался продолжаемым: прогон, прерванный
+            // обрывом шары, оставляет папку созданной, а часть файлов — наверху. Проверяй мы
+            // «Прошивка\ уже есть», такая версия молча пропускалась бы всеми последующими прогонами
+            // и осталась бы недоперестроенной навсегда.
+            // Записи, чьей папки на диске нет, сюда не доходят вовсе — их отсеивает VersionDirs, так
+            // же как и у переименования: создавать дерево там, где прошивки нет, эта операция не
+            // должна. Кроме файлов, поводом для операции служат недостающие папки версии: их пять, и
+            // завести их надо даже там, где файлы уже внизу (прерванный прогон) или где их не
+            // осталось вовсе.
+            var files = TopLevelFiles(dir).Where(f => !VersionLayout.IsServiceFile(f)).ToList();
+            if (files.Count == 0 && VersionLayout.HasAllFolders(dir)) continue;
+
+            ops.Add(new Op
+            {
+                Kind = OpKind.FoldIntoVersion,
+                Source = dir,
+                Target = VersionLayout.FirmwareFolder(dir),
+                VersionDir = dir,
+                RecordPaths = dbPaths,
+                Note = files.Count > 0
+                    ? $"{first.VersionRaw}: файлов {files.Count} → «{VersionLayout.FirmwareFolderName}», папки версии"
+                    : $"{first.VersionRaw}: завести недостающие папки версии",
+            });
+        }
+    }
+
+    // ── Этап 5: ОПЦ внутрь контроллера ──────────────────────────────────────
+
+    /// <summary>Перенос ОПЦ-версии из общей «ОПЦ» подтипа в «ОПЦ» её контроллера с переименованием
+    /// папки в номер заявки/SN. Три обязательных предосторожности, без которых это выпускать нельзя:
+    /// <list type="number">
+    /// <item><description><b>CHANGELOG.md дописывается ДО переноса</b> (см. Apply): после
+    /// переименования имя папки номером версии уже не является, и восстановить его будет неоткуда —
+    /// такая папка станет для досмотра диска безымянной.</description></item>
+    /// <item><description><b>disk_path правится только после удачного переноса</b> — через колбэк
+    /// вызывающего (см. Apply), в той же связке «диск → БД», что и переименование файла.</description></item>
+    /// <item><description><b>Занятая цель не перезаписывается</b>: две ОПЦ-версии одного шкафа (одна
+    /// заявка, разные сборки) дали бы одно имя папки — вторая уходит в Skipped с внятной причиной, а
+    /// не затирает первую.</description></item>
+    /// </list></summary>
+    private static void PlanOpcMoves(MigrationInput input, List<Op> ops, List<string> skipped)
+    {
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var v in input.Versions)
+        {
+            if (!v.IsOpc || string.IsNullOrWhiteSpace(v.DiskPath)) continue;
+
+            var dir = FirmwareDiskPresence.ResolveVersionDir(v.DiskPath, v.VersionRaw);
+            if (string.IsNullOrEmpty(dir) || !SafeDirExists(dir)) continue;
+
+            var ctrlFolder = Path.Combine(
+                HierarchyService.GroupSubFolder(input.Root, v.GroupName, v.SubtypeName), v.CtrlName);
+            if (!SafeDirExists(ctrlFolder))
+            {
+                skipped.Add($"{v.VersionRaw}: папки контроллера {v.CtrlName} на диске нет — перенос ОПЦ пропущен");
+                continue;
+            }
+
+            var target = Path.Combine(OpcLayout.ControllerOpcFolder(ctrlFolder),
+                OpcLayout.FolderName(v.RequestNum, v.CabinetSn, v.VersionRaw));
+
+            // Уже переехала (повторный прогон, либо перенёс коллега) — молча пропускаем.
+            if (string.Equals(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar),
+                    Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (SafeDirExists(target) || !claimed.Add(target))
+            {
+                skipped.Add($"{v.VersionRaw}: «{Path.GetFileName(target)}» в ОПЦ контроллера уже занято " +
+                            "(две сборки под один шкаф) — перенесите вручную");
+                continue;
+            }
+
+            ops.Add(new Op
+            {
+                Kind = OpKind.MoveOpc,
+                Source = dir,
+                Target = target,
+                VersionDir = dir,
+                FwVersionId = v.Id ?? 0,
+                RecordPaths = new List<string> { v.DiskPath },
+                Note = $"{v.VersionRaw} → {v.CtrlName}\\ОПЦ\\{Path.GetFileName(target)}",
+            });
+        }
+    }
+
+    /// <summary>Папки версий, по которым идут пооперационные проходы: по ПАПКЕ, а не по записи (одну
+    /// папку могут делить несколько строк — конфигурации шкафа), вместе со всеми disk_path, которыми
+    /// она записана в базе.</summary>
+    private static List<(string Dir, FwVersionRecord First, List<string> Paths)> VersionDirs(MigrationInput input)
+    {
         var byDir = new Dictionary<string, (FwVersionRecord First, List<string> Paths)>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
 
@@ -141,10 +280,20 @@ public static class DiskLayoutMigrator
                 entry.Paths.Add(v.DiskPath);
         }
 
-        foreach (var dir in order)
+        return order.Select(dir =>
         {
-            var (v, dbPaths) = byDir[dir];
+            var (first, paths) = byDir[dir];
+            return (dir, first, paths.Count > 0 ? paths : new List<string> { dir });
+        }).ToList();
+    }
 
+    private static void PlanRenames(MigrationInput input, List<Op> ops, List<string> skipped)
+    {
+        // Одна папка версии может быть записана у нескольких строк (конфигурации шкафа делят файлы) —
+        // планируем по папке, а не по записи, иначе на один файл придётся несколько переименований
+        // (см. VersionDirs; там же собираются все disk_path этой папки — Op.RecordPaths).
+        foreach (var (dir, v, dbPaths) in VersionDirs(input))
+        {
             var files = FirmwareFilesIn(dir);
             if (files.Count == 0) continue;
             if (files.Count > 1)
@@ -232,8 +381,11 @@ public static class DiskLayoutMigrator
     /// и в тестах без неё.</param>
     /// <param name="shortcuts">Чем создавать .lnk. null — ярлыки просто не создаются.</param>
     /// <param name="progress">Сколько операций выполнено — для индикатора; зовётся из рабочего потока.</param>
+    /// <param name="repointed">Зовётся после КАЖДОГО удавшегося переноса ОПЦ — вызывающий переписывает
+    /// disk_path записи (Op.FwVersionId, Op.Target). Отдельно от <paramref name="renamed"/>, потому
+    /// что правится другой столбец и другим методом БД.</param>
     public static MigrationPlan Apply(MigrationPlan plan, Action<Op>? renamed,
-        IShortcutCreator? shortcuts, Action<int, int>? progress = null)
+        IShortcutCreator? shortcuts, Action<int, int>? progress = null, Action<Op>? repointed = null)
     {
         var total = plan.Ops.Count;
         var done = 0;
@@ -258,6 +410,15 @@ public static class DiskLayoutMigrator
                         Directory.CreateDirectory(Path.GetDirectoryName(op.Target)!);
                         shortcuts.Create(op.Target, op.Source, "Инструкция лежит на диске инструкций");
                         op.Status = "ok";
+                        break;
+
+                    case OpKind.FoldIntoVersion:
+                        op.Status = FoldIntoVersion(op.Source) ? "ok" : "skip";
+                        break;
+
+                    case OpKind.MoveOpc:
+                        op.Status = MoveOpcFolder(op.Source, op.Target) ? "ok" : "skip";
+                        if (op.Status == "ok") repointed?.Invoke(op);
                         break;
                 }
             }
@@ -306,6 +467,69 @@ public static class DiskLayoutMigrator
         return true;
     }
 
+    /// <summary>Этап 4 на диске: создать «Прошивка\» и перенести туда файлы прошивки верхнего уровня.
+    /// Идемпотентно и продолжаемо — прерванный обрывом шары прогон дочищается следующим: уже
+    /// перенесённые файлы просто не найдутся наверху, а «Прошивка\» создаётся один раз.
+    ///
+    /// Порядок операций строго такой: сначала ФАЙЛЫ, и только потом папка считается созданной для
+    /// внешнего мира. На практике это значит «переносим по одному»: файл, который не удалось
+    /// перенести (открыт в SMLogix), остаётся наверху и находится по-прежнему — VersionLayout ищет
+    /// в обеих папках именно ради этого случая.</summary>
+    private static bool FoldIntoVersion(string versionDir)
+    {
+        var files = Directory.EnumerateFiles(versionDir, "*", SearchOption.TopDirectoryOnly)
+            .Where(f => !VersionLayout.IsServiceFile(f))
+            .ToList();
+
+        // Пять папок версии — и когда есть что переносить, и когда файлы уже наверху не лежат:
+        // операция могла быть запланирована ровно ради недостающих папок (см. PlanFoldIntoVersion).
+        var createdFolders = VersionLayout.EnsureFolders(versionDir);
+        if (files.Count == 0) return createdFolders > 0;
+
+        var target = VersionLayout.FirmwareFolder(versionDir);
+
+        var moved = 0;
+        foreach (var file in files)
+        {
+            var dst = Path.Combine(target, Path.GetFileName(file));
+            // Одноимённый файл уже в «Прошивка\» (повторный прогон после частичного переноса, либо
+            // коллега положил туда свежую копию) — свой НЕ затираем: удалить чужой файл эта операция
+            // не вправе, он останется наверху и попадёт в следующий прогон.
+            if (File.Exists(dst)) continue;
+            File.Move(file, dst);
+            moved++;
+        }
+        return moved > 0 || createdFolders > 0;
+    }
+
+    /// <summary>Этап 5 на диске: перенести папку ОПЦ-версии в «ОПЦ» её контроллера под именем
+    /// заявки/SN. CHANGELOG.md с номером версии дописывается ДО переноса и только если его там нет:
+    /// после переименования имя папки номером версии уже не является, и без журнала такая папка стала
+    /// бы для досмотра диска безымянной (см. OpcLayout.ResolveVersion).</summary>
+    private static bool MoveOpcFolder(string source, string target)
+    {
+        if (!Directory.Exists(source)) return false;
+        if (Directory.Exists(target)) return false; // цель занята — план уже сказал об этом человеку
+
+        EnsureChangelogVersionHeader(source);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        Directory.Move(source, target);
+        return true;
+    }
+
+    /// <summary>Дописывает CHANGELOG.md с одним лишь заголовком «# {номер версии}», если файла нет.
+    /// Существующий не трогает вовсе: там уже есть и номер, и описание, и типы пуска, и переписывать
+    /// их этой операцией нельзя.</summary>
+    private static void EnsureChangelogVersionHeader(string versionDir)
+    {
+        var path = Path.Combine(versionDir, ChangelogFile.FileName);
+        if (File.Exists(path)) return;
+
+        var raw = Path.GetFileName(versionDir.TrimEnd(Path.DirectorySeparatorChar));
+        if (FwVersionNumber.Parse(raw) is null) return; // имя папки уже не номер — придумывать нечего
+        File.WriteAllText(path, $"# {raw}\n", new System.Text.UTF8Encoding(false));
+    }
+
     private static bool MoveFile(string source, string target)
     {
         if (!File.Exists(source)) return false;
@@ -325,21 +549,29 @@ public static class DiskLayoutMigrator
 
     // ── Обход диска ─────────────────────────────────────────────────────────
 
-    /// <summary>Файлы верхнего уровня папки версии, которые считаются файлом прошивки.</summary>
+    /// <summary>Файлы прошивки этой версии: верхний уровень «Прошивка\», если версия уже перестроена
+    /// (этап 4), иначе верхний уровень самой папки версии. Именно первая непустая из двух, а не обе
+    /// вместе: иначе после перестройки один и тот же файл считался бы дважды и «в папке 2 файла»
+    /// отменяло бы переименование там, где файл на самом деле один.</summary>
     private static List<string> FirmwareFilesIn(string dir)
     {
-        try
+        foreach (var folder in VersionLayout.FirmwareFolders(dir))
         {
-            return Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly)
-                .Where(f => !NonFirmwareNames.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
-                .Where(f => !DocFileResolver.IsShortcut(f))
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            try
+            {
+                var files = Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
+                    .Where(f => !NonFirmwareNames.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+                    .Where(f => !DocFileResolver.IsShortcut(f))
+                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (files.Count > 0) return files;
+            }
+            catch (Exception)
+            {
+                // Недоступная папка — «файлов не нашли», следующая пара глаз (повторный прогон) доделает.
+            }
         }
-        catch (Exception)
-        {
-            return new List<string>();
-        }
+        return new List<string>();
     }
 
     private static List<string> TopLevelFiles(string dir)

@@ -17,6 +17,8 @@
         <TextBlock Grid.Row="0" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
                    Text="Готовые шаблоны наклеек на печать. Двойной клик по строке — открыть шаблон."/>
 
+        <!-- Две колонки, а не три: «когда изменён» у шаблона наклейки не спрашивал никто, а место на
+             узком окне занимало. Раздел — это подпапка, по ней их и раскладывают. -->
         <DataGrid Grid.Row="1" x:Name="FilesGrid" AutoGenerateColumns="False" IsReadOnly="True"
                   Style="{StaticResource RoomyDataGrid}" MouseDoubleClick="FilesGrid_MouseDoubleClick">
             <DataGrid.Columns>
@@ -24,8 +26,6 @@
                                     ElementStyle="{StaticResource DataGridCellText}"/>
                 <DataGridTextColumn Header="Раздел" Binding="{Binding Folder}" Width="Auto" MinWidth="120"
                                     ElementStyle="{StaticResource DataGridCellText}"/>
-                <DataGridTextColumn Header="Изменён" Binding="{Binding Changed}" Width="Auto" MinWidth="120"
-                                    ElementStyle="{StaticResource DataGridCellTextCentered}"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -33,11 +33,12 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal">
             <Button Content="Печать" Width="110" Margin="0,0,8,0" Click="Print_Click"/>
+            <Button Content="Загрузить…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Upload_Click"
+                    ToolTip="Положить новый шаблон в общую папку — он сразу появится у всех машин"/>
             <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Open_Click"
                     ToolTip="Открыть шаблон — например, чтобы вписать что-то перед печатью"/>
             <Button Content="Открыть папку" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenFolder_Click"
-                    ToolTip="Сюда кладут новые шаблоны — они появятся у всех машин"/>
-            <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"/>
+                    ToolTip="Общая папка наклеек на диске"/>
             <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="100" IsCancel="True" Click="Close_Click"/>
         </StackPanel>
     </Grid>

@@ -95,6 +95,9 @@ public partial class ParamsView : UserControl
         {
             _host.ShowStatus($"Убраны дубликаты файлов параметров: {result.Removed.Count}",
                 category: NotificationCategory.FirmwareAndParams);
+            // Записи снятых двойников архивированы — это те же надгробия, что и при удалении вручную,
+            // и им нужен тот же толчок к отправке (см. DeleteRow_Click).
+            _host.PushCatalogChange($"Убраны дубликаты файлов параметров: {result.Removed.Count}");
             ReloadTable();
         }
         // Всё сомнительное — не удалено, а показано человеку: решать ему.
@@ -153,6 +156,8 @@ public partial class ParamsView : UserControl
         }
 
         ParamFileDuplicateCleanup.ArchiveRemovedRows(_services.Db, result.Removed);
+        if (result.Removed.Count > 0)
+            _host.PushCatalogChange($"Убраны дубликаты файлов параметров: {result.Removed.Count}");
         ReloadTable();
 
         var report = new List<string>();
@@ -390,6 +395,11 @@ public partial class ParamsView : UserControl
         SubtypesSelect.ClearExtras();
         DropZoneLabel.Text = "Перетащите файл сюда, или нажмите для выбора";
 
+        // См. DeleteRow_Click: без этого загруженный файл параметров лежал в базе, но плашка
+        // «готово к отправке» о нём не знала, и до коллег он доезжал только попутно — с ближайшей
+        // отправкой, вызванной чем-нибудь другим.
+        _host.PushCatalogChange($"Файл параметров загружен: {Path.GetFileName(srcPath)}");
+
         ReloadTable();
     }
 
@@ -488,6 +498,8 @@ public partial class ParamsView : UserControl
 
         _services.Db.UpdateParamFileTags(row.Id, dlg.ResultTags);
         _host.ShowStatus($"Теги обновлены: {row.Filename}", category: NotificationCategory.FirmwareAndParams);
+        // См. DeleteRow_Click: правки параметров тоже обязаны поднимать плашку «готово к отправке».
+        _host.PushCatalogChange($"Теги файла параметров «{row.Filename}» изменены", $"param:{row.Id}");
         ReloadTable();
     }
 
@@ -522,6 +534,10 @@ public partial class ParamsView : UserControl
             if (result.Warnings.Count > 0)
                 AppMessageBox.Show(string.Join("\n", result.Warnings), "Предупреждения",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
+            // См. DeleteRow_Click: набор подтипов у файла — это записи параметров, они уезжают
+            // синхронизацией и обязаны поднимать плашку «готово к отправке».
+            if (result.Added.Count > 0 || result.Removed.Count > 0)
+                _host.PushCatalogChange($"Подтипы файла параметров «{row.Filename}» изменены", $"param:{row.Id}");
         }
         ReloadTable();
     }
@@ -539,6 +555,13 @@ public partial class ParamsView : UserControl
         if (result != MessageBoxResult.Yes) return;
 
         _services.Db.DeleteParamFile(row.Id);
+        // Удаление записи параметров — такое же изменение справочника, как удаление типа шкафа, и
+        // обязано попасть в накопитель «готово к отправке». Пока этого вызова здесь не было,
+        // происходило вот что: запись архивировалась (надгробие для коллег в базе уже лежало), но
+        // плашка не поднималась, автоотправка (config_push_interval_min = 0 по умолчанию) не
+        // срабатывала, и на диск ничего не уезжало — «у себя почистил, у коллеги всё осталось, как
+        // будто синхрон не идёт». Само надгробие работало исправно, не хватало ровно толчка.
+        _host.PushCatalogChange($"Запись параметров удалена: {row.Filename}", $"param:{row.Id}");
         ReloadTable();
     }
 }

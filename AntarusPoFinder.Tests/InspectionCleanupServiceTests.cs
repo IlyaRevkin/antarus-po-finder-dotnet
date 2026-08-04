@@ -137,6 +137,78 @@ public class InspectionCleanupServiceTests
         }
     }
 
+    // ── Журнал «когда файл впервые увидели» ──────────────────────────────────
+
+    /// <summary>Жалоба: «закинул файл в папку сторонним образом — он и 10 минут не пролежал, а
+    /// программа уже почистила». Причина — возраст считался по дате изменения файла, а перетащенный
+    /// из проводника снимок приносит с собой ЧУЖУЮ, старую дату. Теперь отсчёт идёт с момента, когда
+    /// файл впервые увидели в папке (InspectionSeenLedger), и такой файл проживает полный срок.</summary>
+    [Fact]
+    public void Cleanup_FileCopiedInFromOutside_SurvivesItsFullTerm()
+    {
+        var folder = NewTempFolder();
+        var ledgerPath = Path.Combine(folder, "..", $"antarus_seen_{Guid.NewGuid():N}.json");
+        try
+        {
+            var now = new DateTime(2026, 7, 20, 12, 0, 0);
+            var file = Path.Combine(folder, "с телефона.jpg");
+            File.WriteAllText(file, "x");
+            File.SetLastWriteTime(file, now.AddYears(-1));   // снимок годичной давности
+
+            // Первый обход только регистрирует файл.
+            Assert.Equal(0, InspectionCleanupService
+                .Cleanup(folder, 10, now, InspectionSeenLedger.Load(ledgerPath)).DeletedCount);
+            Assert.True(File.Exists(file));
+
+            // Через 5 минут он всё ещё живёт — хотя по дате изменения ему год.
+            Assert.Equal(0, InspectionCleanupService
+                .Cleanup(folder, 10, now.AddMinutes(5), InspectionSeenLedger.Load(ledgerPath)).DeletedCount);
+            Assert.True(File.Exists(file));
+
+            // А когда СВОЙ срок вышел — удаляется, как и любой другой.
+            Assert.Equal(1, InspectionCleanupService
+                .Cleanup(folder, 10, now.AddMinutes(11), InspectionSeenLedger.Load(ledgerPath)).DeletedCount);
+            Assert.False(File.Exists(file));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+            try { File.Delete(Path.GetFullPath(ledgerPath)); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>Журнал не должен превращаться в вечную память: удалённый файл забывается, и файл с
+    /// тем же именем, положенный заново, начинает свой срок заново, а не наследует чужой.</summary>
+    [Fact]
+    public void SeenLedger_ForgetsDeletedFiles_SoAReuploadStartsOver()
+    {
+        var folder = NewTempFolder();
+        var ledgerPath = Path.Combine(Path.GetTempPath(), $"antarus_seen_{Guid.NewGuid():N}.json");
+        try
+        {
+            var now = new DateTime(2026, 7, 20, 12, 0, 0);
+            var file = Path.Combine(folder, "снимок.jpg");
+            File.WriteAllText(file, "x");
+            File.SetLastWriteTime(file, now.AddYears(-1));
+
+            InspectionCleanupService.Cleanup(folder, 10, now, InspectionSeenLedger.Load(ledgerPath));
+            InspectionCleanupService.Cleanup(folder, 10, now.AddMinutes(11), InspectionSeenLedger.Load(ledgerPath));
+            Assert.False(File.Exists(file));
+
+            // Положили заново — срок начинается с нуля.
+            File.WriteAllText(file, "x");
+            File.SetLastWriteTime(file, now.AddYears(-1));
+            var again = InspectionCleanupService.Cleanup(folder, 10, now.AddMinutes(12), InspectionSeenLedger.Load(ledgerPath));
+            Assert.Equal(0, again.DeletedCount);
+            Assert.True(File.Exists(file));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+            try { File.Delete(ledgerPath); } catch (IOException) { }
+        }
+    }
+
     [Theory]
     [InlineData(0, "0 мин.")]
     [InlineData(45, "45 мин.")]

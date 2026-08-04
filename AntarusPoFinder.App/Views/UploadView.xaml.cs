@@ -1142,6 +1142,10 @@ public partial class UploadView : UserControl
             RootPath = _services.Cfg.RootPath(),
             ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
             ThirdDiskShortcuts = _services.Cfg.ThirdDiskShortcuts(),
+            // Перестроен ли диск под «пять папок внутри версии»: флаг ставит перестройка диска и
+            // уносит синхронизацией всем — новые версии обязаны рождаться в той же раскладке, в
+            // которой лежат остальные (см. ConfigService.DiskLayoutV2).
+            NewDiskLayout = _services.Cfg.DiskLayoutV2(),
             IoMapSourcePath = IoMapInput.Text,
             InstructionsSourcePath = InstructionsInput.Text,
             ModbusMapSourcePath = ModbusMapInput.Text,

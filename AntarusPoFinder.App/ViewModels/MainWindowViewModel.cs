@@ -1549,8 +1549,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         try
         {
             var now = DateTime.Now;
+            // Журнал «когда файл впервые увидели в этой папке» — без него возраст считался по дате
+            // изменения файла, и снимок, скопированный в папку со стороны (у него дата своя, старая),
+            // сносило первым же тиком (см. InspectionSeenLedger). Журнал машинно-локальный, лежит
+            // рядом с базой, а не в самой папке осмотра — там ему делать нечего.
+            var ledgerPath = System.IO.Path.Combine(ConfigService.AppData, "inspection_seen.json");
             var result = await Task.Run(() =>
-                System.IO.Directory.Exists(folder) ? InspectionCleanupService.Cleanup(folder, minutes, now) : null);
+                System.IO.Directory.Exists(folder)
+                    ? InspectionCleanupService.Cleanup(folder, minutes, now, InspectionSeenLedger.Load(ledgerPath))
+                    : null);
             if (result is null || result.DeletedCount == 0) return;
 
             var preview = string.Join(", ", result.DeletedNames.Take(3));
@@ -1568,7 +1575,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         // План — по БД (быстро, здесь), создание папок на сетевом диске — в фоне. Сотни CreateDirectory
         // по медленной шаре и были одной из тех «программа не отвечает при запуске» пауз.
-        var plan = _services.Hierarchy.PlanStructure(root);
+        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
         using (Busy.Begin("Проверка структуры диска…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));

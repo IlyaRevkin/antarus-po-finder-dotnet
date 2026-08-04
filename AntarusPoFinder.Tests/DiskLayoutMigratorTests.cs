@@ -53,8 +53,33 @@ public class DiskLayoutMigratorTests
     }
 
     private static DiskLayoutMigrator.MigrationInput Input(string root, string? third,
-        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool instructions = false, bool shortcuts = false) =>
-        new(root, third, shortcuts, versions, new DiskLayoutMigrator.MigrationOptions(rename, instructions));
+        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool instructions = false, bool shortcuts = false,
+        bool fold = false, bool opc = false) =>
+        new(root, third, shortcuts, versions, new DiskLayoutMigrator.MigrationOptions(rename, instructions, fold, opc));
+
+    /// <summary>ОПЦ-версия в ПРЕЖНЕЙ раскладке: общая папка «ОПЦ» на уровне подтипа, имя папки —
+    /// строка версии. Именно её и переносит этап 5.</summary>
+    private static (FwVersionRecord Record, string Dir) MakeLegacyOpc(string root, string versionRaw,
+        string fileName, string requestNum = "", string cabinetSn = "")
+    {
+        var dir = Path.Combine(root, "ПО", "ПЖ", "2.0", HierarchyFolders.Opc, versionRaw);
+        Touch(dir, fileName);
+        // Папка контроллера должна существовать — иначе переносить некуда, и план честно откажется.
+        Directory.CreateDirectory(Path.Combine(root, "ПО", "ПЖ", "2.0", "SMH5"));
+        return (new FwVersionRecord
+        {
+            Id = 7,
+            VersionRaw = versionRaw,
+            DiskPath = dir,
+            Filename = fileName,
+            IsOpc = true,
+            RequestNum = requestNum,
+            CabinetSn = cabinetSn,
+            GroupName = "ПЖ",
+            SubtypeName = "2.0",
+            CtrlName = "SMH5",
+        }, dir);
+    }
 
     // ── Переименование файла прошивки ────────────────────────────────────────
 
@@ -223,5 +248,220 @@ public class DiskLayoutMigratorTests
 
         Assert.Empty(plan.Ops);
         Assert.Contains(plan.Skipped, s => s.Contains("Третий диск не настроен"));
+    }
+
+    // ── Этап 4: файлы прошивки внутрь «Прошивка\» ────────────────────────────
+
+    /// <summary>Файлы уезжают в подпапку, CHANGELOG.md остаётся в корне папки версии (его читают по
+    /// фиксированному пути), а сама папка версии не переименовывается — именно поэтому disk_path
+    /// остаётся валидным у всех коллег, включая не обновившихся.</summary>
+    [Fact]
+    public void Fold_MovesFirmwareFilesOnly_AndKeepsVersionFolderName()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+        Touch(dir, "ресурсы.bin");
+        Touch(dir, ChangelogFile.FileName);
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            renamed: null, shortcuts: null);
+
+        var inner = VersionLayout.FirmwareFolder(dir);
+        Assert.True(File.Exists(Path.Combine(inner, "1.0.0004.0003.psl")));
+        Assert.True(File.Exists(Path.Combine(inner, "ресурсы.bin")));
+        // Журнал остался наверху, папка версии на месте.
+        Assert.True(File.Exists(Path.Combine(dir, ChangelogFile.FileName)));
+        Assert.True(Directory.Exists(dir));
+        Assert.Equal(record.DiskPath, dir);
+    }
+
+    [Fact]
+    public void Fold_IsIdempotent_AndSecondRunPlansNothing()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            renamed: null, shortcuts: null);
+
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)).Ops);
+        Assert.Single(Directory.EnumerateFiles(VersionLayout.FirmwareFolder(dir)));
+    }
+
+    /// <summary>Прогон, прерванный обрывом шары, дочищается следующим: файл, оставшийся наверху,
+    /// переезжает, а уже лежащий внизу одноимённый НЕ затирается — удалять чужую копию эта операция
+    /// не вправе.</summary>
+    [Fact]
+    public void Fold_ResumesAfterInterruption_AndNeverOverwrites()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+        var inner = VersionLayout.FirmwareFolder(dir);
+        Directory.CreateDirectory(inner);
+        File.WriteAllText(Path.Combine(inner, "1.0.0004.0003.psl"), "уже перенесён коллегой");
+        Touch(dir, "второй.bin");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            renamed: null, shortcuts: null);
+
+        Assert.Equal("уже перенесён коллегой", File.ReadAllText(Path.Combine(inner, "1.0.0004.0003.psl")));
+        Assert.True(File.Exists(Path.Combine(inner, "второй.bin")));
+        // Свой одноимённый остался наверху и попадёт в следующий прогон.
+        Assert.True(File.Exists(Path.Combine(dir, "1.0.0004.0003.psl")));
+    }
+
+    /// <summary>Перестройка заводит у версии все пять папок, а не одну «Прошивка»: ровно этого от неё
+    /// и ждут — открыть папку версии в проводнике и увидеть, куда что класть. Пустая папка документа
+    /// при этом не прячет общий документ контроллера (см. VersionLayout.SlotBestReadFolder и
+    /// NewVersionLayoutWriteTests).</summary>
+    [Fact]
+    public void Fold_CreatesAllFiveVersionFolders()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            renamed: null, shortcuts: null);
+
+        Assert.True(VersionLayout.HasAllFolders(dir));
+        foreach (var slot in VersionLayout.SlotFolderNames)
+            Assert.True(Directory.Exists(VersionLayout.SlotFolder(dir, slot)), slot);
+    }
+
+    /// <summary>Файлы уже перенесены (или их удалили руками), но папок нет — прогон всё равно заводит
+    /// их. Иначе версия, у которой перестройку прервали на середине, осталась бы полуготовой навсегда:
+    /// файлы внизу, папок документов нет, и ни один следующий прогон её не увидит.</summary>
+    [Fact]
+    public void Fold_VersionWithoutFiles_StillGetsItsFolders()
+    {
+        using var root = new TempRoot();
+        var dir = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", "1.0.0004.0003");
+        Directory.CreateDirectory(dir);
+        var record = new FwVersionRecord { VersionRaw = "1.0.0004.0003", DiskPath = dir };
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true));
+        Assert.Single(plan.Ops);
+        Assert.Contains("папки версии", plan.Ops[0].Note);
+
+        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null);
+        Assert.True(VersionLayout.HasAllFolders(dir));
+        Assert.Equal("ok", plan.Ops[0].Status);
+
+        // И на этом всё: повторный прогон видеть тут больше нечего.
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)).Ops);
+    }
+
+    /// <summary>Папки версии на диске нет вовсе (запись пережила удаление папки) — перестройка её не
+    /// трогает и, главное, НЕ создаёт дерево папок там, где прошивки не было: иначе один прогон
+    /// насыпал бы на диск пустых «версий» по всем осиротевшим записям базы.</summary>
+    [Fact]
+    public void Fold_MissingVersionFolder_IsNotPlannedAndNothingIsCreated()
+    {
+        using var root = new TempRoot();
+        var dir = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", "1.0.0004.0003");
+        var record = new FwVersionRecord { VersionRaw = "1.0.0004.0003", DiskPath = dir };
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true));
+
+        Assert.Empty(plan.Ops);
+        Assert.False(Directory.Exists(dir));
+    }
+
+    // ── Этап 5: ОПЦ внутрь контроллера ───────────────────────────────────────
+
+    /// <summary>Папка уезжает в «ОПЦ» своего контроллера под именем заявки/SN, disk_path правится
+    /// колбэком и только ПОСЛЕ удачного переноса, а номер версии остаётся восстановимым — журнал
+    /// дописан до переименования.</summary>
+    [Fact]
+    public void Opc_MovesInsideController_WritesChangelogFirst_AndReportsRepoint()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312", "00042");
+        var repoints = new List<DiskLayoutMigrator.Op>();
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
+            renamed: null, shortcuts: null, repointed: repoints.Add);
+
+        var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312_SN00042");
+        Assert.True(Directory.Exists(moved));
+        Assert.False(Directory.Exists(dir));
+        Assert.True(File.Exists(Path.Combine(moved, "3.0.005.0777.psl")));
+
+        // Номер версии восстановим по журналу — имя папки им больше не является.
+        Assert.Equal("3.0.005.0777", OpcLayout.ResolveVersion(moved)?.Raw);
+
+        var repoint = Assert.Single(repoints);
+        Assert.Equal(7, repoint.FwVersionId);
+        Assert.Equal(moved, repoint.Target);
+    }
+
+    /// <summary>Существующий CHANGELOG.md операция не переписывает: там уже лежат описание и типы
+    /// пуска, и потерять их переносом папки нельзя.</summary>
+    [Fact]
+    public void Opc_ExistingChangelogIsNotOverwritten()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
+        ChangelogFile.Write(dir, FwVersionNumber.Parse("3.0.005.0777")!, new[] { "УПП" }, "правки коллеги", new[] { "тег" });
+        var before = File.ReadAllText(Path.Combine(dir, ChangelogFile.FileName));
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
+            renamed: null, shortcuts: null);
+
+        var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
+        Assert.Equal(before, File.ReadAllText(Path.Combine(moved, ChangelogFile.FileName)));
+    }
+
+    /// <summary>Две сборки под один шкаф дают одно имя папки — вторая уходит в Skipped с внятной
+    /// причиной, а не затирает первую.</summary>
+    [Fact]
+    public void Opc_TargetNameTaken_IsSkippedRatherThanOverwritten()
+    {
+        using var root = new TempRoot();
+        var (first, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "a.psl", "01312");
+        var (second, secondDir) = MakeLegacyOpc(root.Path, "3.0.005.0778", "b.psl", "01312");
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { first, second }, rename: false, opc: true));
+
+        Assert.Single(plan.Ops);
+        Assert.Contains(plan.Skipped, s => s.Contains("уже занято"));
+        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null);
+        // Вторая осталась на месте со своим файлом — ничего не потеряно.
+        Assert.True(File.Exists(Path.Combine(secondDir, "b.psl")));
+    }
+
+    [Fact]
+    public void Opc_SecondRunPlansNothing()
+    {
+        using var root = new TempRoot();
+        var (record, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true));
+        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null, repointed: op => record.DiskPath = op.Target);
+
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)).Ops);
+    }
+
+    /// <summary>Порядок этапов в одном прогоне: сначала «Прошивка\» внутри версии, потом переезд ОПЦ.
+    /// Наоборот было бы неверно — переехавшая папка перестала бы совпадать с disk_path, по которому
+    /// этап 4 ищет свои папки в этом же прогоне.</summary>
+    [Fact]
+    public void FoldAndOpc_InOneRun_FirmwareFolderTravelsWithTheMovedFolder()
+    {
+        using var root = new TempRoot();
+        var (record, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true, opc: true)),
+            renamed: null, shortcuts: null);
+
+        var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
+        Assert.True(File.Exists(Path.Combine(VersionLayout.FirmwareFolder(moved), "3.0.005.0777.psl")));
     }
 }

@@ -25,7 +25,13 @@ public static class InspectionCleanupService
     /// <paramref name="maxAgeMinutes"/> of 0 or less, or a missing/empty folder path, is a no-op —
     /// callers should still gate on ConfigService.InspectionAutoCleanupMinutes() themselves, this is
     /// just an extra safety net against ever wiping a folder with an accidentally-empty path.</summary>
-    public static InspectionCleanupResult Cleanup(string folder, int maxAgeMinutes, DateTime now)
+    /// <param name="ledger">Журнал «когда файл впервые увидели в папке»
+    /// (<see cref="InspectionSeenLedger"/>). Без него возраст считался по дате изменения файла, и
+    /// только что скопированный снаружи файл со старой датой сносило первым же тиком — жалоба «закинул
+    /// файл, он и 10 минут не пролежал, а его уже почистили». null — прежнее поведение (только дата
+    /// изменения); так зовут тесты, проверяющие саму пороговую логику.</param>
+    public static InspectionCleanupResult Cleanup(string folder, int maxAgeMinutes, DateTime now,
+        InspectionSeenLedger? ledger = null)
     {
         var deletedNames = new List<string>();
         var errors = new List<string>();
@@ -34,18 +40,35 @@ public static class InspectionCleanupService
             return new InspectionCleanupResult(0, deletedNames, errors);
 
         var threshold = now - TimeSpan.FromMinutes(maxAgeMinutes);
+        var seenNow = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var file in Directory.EnumerateFiles(folder))
         {
-            DateTime lastWrite;
-            try { lastWrite = File.GetLastWriteTime(file); }
+            seenNow.Add(file);
+
+            DateTime age;
+            try
+            {
+                // Позднейшее из «когда впервые увидели здесь» и «когда файл менялся»: первое защищает
+                // принесённый извне файл со старой датой, второе — файл, который переписали на месте
+                // (он снова свежий, и это правильно).
+                age = File.GetLastWriteTime(file);
+                if (ledger is not null)
+                {
+                    var firstSeen = ledger.FirstSeen(file, now);
+                    if (firstSeen > age) age = firstSeen;
+                }
+            }
             catch (Exception ex) { errors.Add($"{Path.GetFileName(file)}: {ex.Message}"); continue; }
 
-            if (lastWrite >= threshold) continue;
+            if (age >= threshold) continue;
 
             try
             {
                 File.Delete(file);
                 deletedNames.Add(Path.GetFileName(file));
+                ledger?.Forget(file);
+                seenNow.Remove(file);
             }
             catch (Exception ex)
             {
@@ -53,6 +76,11 @@ public static class InspectionCleanupService
             }
         }
 
+        if (ledger is not null)
+        {
+            ledger.Prune(seenNow);
+            ledger.Save();
+        }
         return new InspectionCleanupResult(deletedNames.Count, deletedNames, errors);
     }
 

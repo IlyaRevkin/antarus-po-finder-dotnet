@@ -72,10 +72,14 @@ public partial class DiskMigrationDialog : Window
             root,
             _services.Cfg.ThirdDiskPath(),
             _services.Cfg.ThirdDiskShortcuts(),
-            _services.Db.GetAllFwVersionsWithNames(),
+            // Вместе с архивными: снятая с показа версия — это по-прежнему папка на диске, и оставить
+            // её в старой раскладке значит оставить полперестройки недоделанной.
+            _services.Db.GetAllFwVersionsWithNames(includeArchived: true),
             new DiskLayoutMigrator.MigrationOptions(
                 RenameCheck.IsChecked == true,
-                InstructionsCheck.IsChecked == true && InstructionsCheck.IsEnabled));
+                InstructionsCheck.IsChecked == true && InstructionsCheck.IsEnabled,
+                FoldIntoVersionCheck.IsChecked == true,
+                OpcCheck.IsChecked == true));
 
         DiskLayoutMigrator.MigrationPlan plan;
         // Обход всех папок версий на сетевом диске — минуты; окно во время этого не должно висеть.
@@ -138,16 +142,37 @@ public partial class DiskMigrationDialog : Window
             // потоке интерфейса: соединение с базой у приложения одно, и писать в него из фонового
             // потока посреди обхода диска нельзя.
             var renames = new List<DiskLayoutMigrator.Op>();
+            var repoints = new List<DiskLayoutMigrator.Op>();
             var shortcuts = new ShortcutCreator();
 
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
-                await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op), shortcuts));
+                await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op), shortcuts,
+                    repointed: op => repoints.Add(op)));
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
             // (папку переименовали на диске); правим по каждому известному пути, см. Op.RecordPaths.
             foreach (var op in renames)
                 foreach (var dbPath in op.RecordPaths)
                     _services.Db.RenameFirmwareFileRecords(dbPath, op.OldName, op.NewName);
+
+            // Перенос ОПЦ — единственная операция, которая меняет путь версии. Правим строго ПОСЛЕ
+            // удачного переноса на диске (см. DiskLayoutMigrator.Apply): иначе прерванный обрывом шары
+            // прогон оставил бы записи, указывающие туда, куда папка так и не уехала.
+            foreach (var op in repoints)
+                if (op.FwVersionId > 0)
+                    _services.Db.RepointFwVersionDiskPath(op.FwVersionId, op.Target);
+
+            // Диск перестроен под «пять папок внутри версии» — с этого момента новые версии должны
+            // рождаться в той же раскладке, причём НА ВСЕХ машинах, а не только на этой. Настройка
+            // общая и уезжает синхронизацией (см. ConfigService.DiskLayoutV2); ставим её только по
+            // факту удавшихся операций, а не по одной галочке: неудачный прогон не должен переключать
+            // раскладку записи на диске, где ничего не переехало.
+            if (_plan.Ops.Any(o => o.Kind == DiskLayoutMigrator.OpKind.FoldIntoVersion && o.Status == "ok")
+                && !_services.Cfg.DiskLayoutV2())
+            {
+                _services.Cfg.SetDiskLayoutV2(true);
+                _host.PushCatalogChange("Диск перестроен: новые версии заводятся с папками «Прошивка», «Инструкция», «Карта ВВ», «Карта Modbus», «HMI»");
+            }
 
             if (FoldersCheck.IsChecked == true)
                 await CreateMissingFoldersAsync();
@@ -168,7 +193,7 @@ public partial class DiskMigrationDialog : Window
     private async Task CreateMissingFoldersAsync()
     {
         var root = _services.Cfg.RootPath();
-        var plan = _services.Hierarchy.PlanStructure(root);
+        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
         using (_host.BeginBusy("Проверка структуры папок…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
