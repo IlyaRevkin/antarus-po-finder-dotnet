@@ -15,7 +15,13 @@
              string — see that style's comment in Themes/Styles.xaml: a bare string here left active-
              tab text dark-on-blue in light theme, since the implicit TextBlock style outranks the
              Foreground NavButton's Tag="Active" trigger sets on the Button itself. -->
-        <StackPanel x:Name="TabBar" Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
+        <!-- Полоса вкладок ездит по горизонтали: в минимальном размере окна все вкладки в строку не
+             влезают, а до крайних («Подключение», «Пользователи») было не добраться вовсе — обрезались
+             без единого способа прокрутить. Колесо мыши над полосой крутит её же (см.
+             TabBar_PreviewMouseWheel), вертикальный скроллбар отключён — полоса всегда в одну строку. -->
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      x:Name="TabBarScroll" Margin="0,0,0,16" PreviewMouseWheel="TabBar_PreviewMouseWheel">
+        <StackPanel x:Name="TabBar" Orientation="Horizontal">
             <Button x:Name="TabBtnGeneral" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Общие" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -45,10 +51,16 @@
             <Button x:Name="TabBtnConnection" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Подключение" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- «Печать» — этикетки с QR на инструкцию и папка с шаблонами наклеек: всё, что уходит
+                 на принтер, в одном месте и доступно всем ролям (печатает как раз наладчик). -->
+            <Button x:Name="TabBtnPrinting" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Печать" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
                 <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
             </Button>
         </StackPanel>
+        </ScrollViewer>
 
         <!-- Раньше все 8 вкладок лежали внутри одного MainScrollViewer — на вкладках с большой
              таблицей (Прошивки/Резервация/Быстрый доступ/Пользователи) это означало, что в
@@ -97,13 +109,13 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ─── Доступ: пароли ролей + весь вход по AD — обе темы про то, кто и как
-                         попадает в приложение, поэтому идут одним блоком. Пароли доступа / полная
-                         настройка AD (домен, группы, способ проверки, URL) — орг-политика уровня
-                         приложения, а не что-то, что имеет смысл дать наладчику/программисту крутить у
-                         себя: скрыто для них целиком (см. SettingsView.ApplyRoleVisibility), виден
-                         только TTL повторного входа ниже. Смена самой роли — в диалоге в сайдбаре
-                         (RoleSwitchDialog), здесь больше не дублируется. -->
+                    <!-- ─── Доступ: только пароли ролей. Весь вход по AD (домен, группы, способ
+                         проверки, URL, требовать вход, срок повторного входа) переехал на вкладку
+                         «Подключение» — по прямой просьбе: это и есть настройка подключения к домену,
+                         в «Общих» она была не на месте и дублировала тамошний выбор способа входа.
+                         Пароли — орг-политика уровня приложения, наладчику/программисту не показываются
+                         (см. SettingsView.ApplyRoleVisibility). Смена самой роли — в диалоге в сайдбаре
+                         (RoleSwitchDialog), здесь не дублируется. -->
                     <TextBlock Text="ДОСТУП" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10"/>
                     <StackPanel x:Name="AdminRoleAndPasswordsSection">
                         <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
@@ -142,92 +154,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
-                            <StackPanel>
-                                <TextBlock Text="ВХОД ПО ЛОГИНУ/ПАРОЛЮ AD (ОПЦИОНАЛЬНО)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                                <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8">
-                                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}">
-                                        <Run Text="⚠ Весь блок AD ниже (домен, группы ролей, способ проверки, URL) — настройка ЭТОГО компьютера." FontWeight="SemiBold"/>
-                                        <Run Text=" Она НЕ синхронизируется по сети с другими машинами (в отличие от иерархии/прошивок/параметров) — администратору нужно один раз задать её на каждом ПК отдельно, «прилетит по сети само» не сработает."/>
-                                    </TextBlock>
-                                </Border>
-                                <TextBlock Text="В диалоге смены роли можно ввести домен, логин и пароль AD-учётки — приложение проверит их в домене и, если логин входит в одну из указанных ниже групп, войдёт в соответствующую роль без пароля роли. Не требует, чтобы Windows-сессия была именно под этой учёткой. Пусто у группы = для этой роли группа не используется — такой вход попадает в собственный список пользователей приложения (см. вкладку «Пользователи»), а не блокируется."
-                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="160"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"
-                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Администратор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8" ToolTip="Группа AD, дающая роль администратора — напр. AntarusAdmins. Пусто — группа для этой роли не используется."
-                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Программист:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"
-                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Наладчик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"
-                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
-                                </Grid>
-
-                                <TextBlock Text="Способ проверки пароля AD:" Margin="0,0,0,4"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <RadioButton x:Name="AdModeLdapRadio" GroupName="AdAuthMode" Content="LDAP (напрямую в домен)" Margin="0,0,16,0"
-                                                 Checked="AdSettings_Changed" ToolTip="Пароль проверяется прямо в контроллере домена — нужен доступ к домену из этой сети"/>
-                                    <RadioButton x:Name="AdModeHttpRadio" GroupName="AdAuthMode" Content="HTTP (через веб-сервер)" Margin="0,0,16,0"
-                                                 Checked="AdSettings_Changed" ToolTip="Пароль проверяется запросом к веб-серверу из поля ниже — работает там, где домен напрямую недоступен"/>
-                                    <RadioButton x:Name="AdModeBothRadio" GroupName="AdAuthMode" Content="Оба (LDAP, затем HTTP если домен недоступен)"
-                                                 Checked="AdSettings_Changed" ToolTip="Сначала домен, при неудаче — веб-сервер. Обычный выбор для ноутбуков вне офиса"/>
-                                </StackPanel>
-                                <TextBlock Text="URL веб-сервера для проверки пароля (способ HTTP):" Margin="0,0,0,4"/>
-                                <TextBox x:Name="AdHttpUrlInput" Height="34" Margin="0,0,0,4"
-                                         LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"
-                                         ToolTip="Например: https://disk.antarus.su/ — точный адрес и формат подтверждает IT компании."/>
-                                <TextBlock Text="Пусто = способ HTTP не сможет сработать, даже если выбран выше. Логин/пароль передаются в веб-сервер как введено (без разбиения на домен), через Negotiate/NTLM."
-                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-
-                                <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход по AD при запуске приложения" Margin="0,4,0,4"
-                                          Checked="AdSettings_Changed" Unchecked="AdSettings_Changed"/>
-                                <TextBlock Text="Пока не включено — приложение запускается как обычно, без запроса входа. Включив, при каждом запуске (если нет ещё действующего запомненного входа на этом компьютере) появится окно входа по AD; пароль администратора остаётся аварийным входом, чтобы не оказаться заблокированным при проблеме с доменом или на самой первой настройке системы."
-                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                                <!-- Кнопки «Сохранить группы и способ» больше нет: поля сохраняются по
-                                     уходу фокуса и по Enter, переключатели — сразу по выбору (см.
-                                     SettingsView.SaveAdSettings). -->
-                                <TextBlock Text="Изменения сохраняются сразу — отдельной кнопки нет."
-                                           Style="{StaticResource MutedText}" FontStyle="Italic" TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
-
-                    <!-- Единственная часть AD-блока, видимая наладчику/программисту тоже — их
-                         персональный срок "не переспрашивать" (per-machine, никогда не синхронизируется
-                         по сети, см. ConfigSyncService.SkipSettingsKeys — то же верно для всего AD-блока
-                         выше, так что "прилетает от администратора по сети" НЕ работает, донастраивать
-                         обязана каждая машина у себя). Отдельная кнопка сохранения — "Сохранить группы и
-                         способ" выше делает то же самое заодно, но она скрыта для этих ролей. -->
-                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
-                        <StackPanel>
-                            <TextBlock Text="СРОК ПОВТОРНОГО ВХОДА ПО AD" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Не переспрашивать по умолчанию, дней:" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                                <TextBox Grid.Column="1" x:Name="AdRequireLoginDaysInput" Height="34"
-                                         LostFocus="AdRequireLoginDays_LostFocus" KeyDown="AdRequireLoginDays_KeyDown"
-                                         ToolTip="Значение для тех, кто в окне входа оставит «как задано администратором» — каждый может там же выбрать другой срок или «всегда» лично для себя."/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
 
                     <!-- ─── Обновление приложения — путь/источник, автообновление и постоянно видимая
                          текущая версия (не только после нажатия "Проверить обновления"). Версия читается
@@ -238,7 +165,9 @@
                         <StackPanel>
                             <TextBlock Text="ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock x:Name="AppVersionText" Text="Текущая версия: —" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Если папка ниже не указана — обновления ищутся в публичном репозитории GitHub. Папка надёжнее: доступ к GitHub с рабочих машин регулярно режется, и тогда обновления перестают доезжать." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Text="Папка не указана — обновления ищутся на GitHub."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                       ToolTip="Папка надёжнее: доступ к GitHub с рабочих машин регулярно режется, и тогда обновления перестают доезжать."/>
                             <!-- Поле сохраняется само (при уходе фокуса и после выбора через «…») —
                                  отдельной кнопки «Сохранить» больше нет, о факте сохранения сообщает
                                  нижняя строка состояния. -->
@@ -303,9 +232,8 @@
                         <StackPanel>
                             <TextBlock Text="ПОИСК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <CheckBox x:Name="SearchAutoSyncCheck" Content="Автоматически подтягивать найденные прошивки в локальную копию" Margin="0,0,0,8"
-                                      Checked="SearchAutoSync_Changed" Unchecked="SearchAutoSync_Changed"/>
-                            <TextBlock Text="Найденные поиском версии, которых ещё нет на этом компьютере, копируются с диска сами — отдельную кнопку «Синхронизировать» на карточке жать не нужно (она осталась в меню «Ещё» на случай ошибки). За одну выдачу тянется не больше 10 версий, остальные — вручную."
-                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                      Checked="SearchAutoSync_Changed" Unchecked="SearchAutoSync_Changed"
+                                      ToolTip="Найденные версии, которых ещё нет на этом компьютере, копируются с диска сами — жать «Синхронизировать» на карточке не нужно (пункт остался в «Ещё» на случай ошибки). За одну выдачу тянется не больше 10 версий."/>
                             <!-- Ручной полный обход диска доступен всем, кто дошёл до Настроек (включая
                                  наладчика) — раньше кнопка была только в admin-вкладке «Иерархия», и
                                  наладчик, зайдя синхронизировать прошивки с диска, её не находил. Это
@@ -344,8 +272,8 @@
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="РАСКЛАДКА КЛАВИАТУРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <CheckBox x:Name="LayoutFallbackCheck" Content="Подсказывать, если запрос похож на набранный не в той раскладке клавиатуры" Margin="0,0,0,8" Checked="LayoutFallback_Changed" Unchecked="LayoutFallback_Changed"/>
-                            <TextBlock Text="Если запрос ничего не находит как введён, но находит после смены раскладки — поиск спросит один раз, это ли имелось в виду. Ответы запоминаются по точному тексту запроса: после нескольких одинаковых ответов подряд вопрос для этого запроса перестаёт появляться (он либо всегда подставляется, либо больше не пробуется)." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <CheckBox x:Name="LayoutFallbackCheck" Content="Подсказывать, если запрос похож на набранный не в той раскладке клавиатуры" Margin="0,0,0,8" Checked="LayoutFallback_Changed" Unchecked="LayoutFallback_Changed"
+                                      ToolTip="Ничего не нашлось как введено, но нашлось после смены раскладки — поиск спросит, это ли имелось в виду. Ответы запоминаются по точному тексту запроса."/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <TextBlock Text="Порог одинаковых ответов подряд:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <TextBox x:Name="LayoutFallbackThresholdInput" Width="60" Height="30" TextAlignment="Center" LostFocus="LayoutFallbackThreshold_Changed"/>
@@ -380,16 +308,14 @@
                                        Text="«По такому запросу обычно ставят эту версию» — статистика общая для всех машин: свои выборы уезжают на сетевой диск вместе с конфигом, чужие приезжают оттуда."/>
                             <CheckBox x:Name="UsageConfirmCheck" Margin="0,0,0,8"
                                       Content="Спрашивать «та ли это прошивка», прежде чем засчитать выбор"
-                                      Checked="UsageConfirm_Changed" Unchecked="UsageConfirm_Changed"/>
-                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
-                                       Text="Порог одинаковых ответов подряд — общий с раскладкой клавиатуры (поле выше). Ответив одинаково столько раз, программа перестанет спрашивать."/>
+                                      Checked="UsageConfirm_Changed" Unchecked="UsageConfirm_Changed"
+                                      ToolTip="Порог одинаковых ответов подряд — общий с раскладкой клавиатуры (поле в карточке выше): ответив одинаково столько раз, программа перестанет спрашивать."/>
                             <TextBlock x:Name="UsageStatsLabel" TextWrapping="Wrap" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <TextBlock Text="Порог влияния на ранжирование:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <TextBox x:Name="FwUsageThresholdInput" Width="60" Height="30" TextAlignment="Center" LostFocus="FwUsageThreshold_Changed"/>
+                                <TextBox x:Name="FwUsageThresholdInput" Width="60" Height="30" TextAlignment="Center" LostFocus="FwUsageThreshold_Changed"
+                                         ToolTip="Сколько раз версию должны выбрать по одному и тому же запросу, прежде чем частота начнёт поднимать её в выдаче. Выборы ниже порога видны в таблице, но на порядок не влияют — один случайный клик не поднимает версию наравне с той, которую ставят стабильно."/>
                             </StackPanel>
-                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
-                                       Text="Сколько раз версию должны выбрать по одному и тому же запросу, прежде чем эта частота начнёт поднимать её в выдаче. Выборы ниже порога видны в таблице, но на порядок выдачи не влияют — так один случайный клик не поднимает версию наравне с той, которую ставят стабильно."/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <TextBlock Text="Множитель популярности:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <TextBox x:Name="FwUsageMultiplierInput" Width="60" Height="30" TextAlignment="Center" LostFocus="FwUsageMultiplier_Changed"/>
@@ -442,8 +368,9 @@
                 <!-- ═══════════════════════════ ИЕРАРХИЯ ═══════════════════════════ -->
                 <StackPanel x:Name="HierarchyTab" Visibility="Collapsed">
                     <TextBlock Text="ТИПЫ ШКАФОВ И ПОДТИПЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Одна строка — один подтип. У типа шкафа без реального деления на подтипы одна строка с подтипом «—». Тип не может существовать без подтипа: удаление последнего подтипа удаляет и сам тип. Двойной клик по ячейке «Тип шкафа»/«Подтип» — переименовать, по «Префикс типа»/«Префикс подтипа» — изменить префикс."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <TextBlock Text="Одна строка — один подтип. Двойной клик по ячейке — переименовать или изменить префикс."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                               ToolTip="У типа шкафа без реального деления на подтипы одна строка с подтипом «—». Тип не может существовать без подтипа: удаление последнего подтипа удаляет и сам тип."/>
                     <!-- Короткие поля (префиксы — числа в одну-две цифры) сидят по содержимому, но с
                          MinWidth не уже собственного заголовка — иначе "Префикс типа"/"Префикс подтипа"
                          обрезаются. "Папка" — единственная звёздная колонка, забирает весь остаток. -->
@@ -570,19 +497,37 @@
                         </DockPanel>
                     </Grid>
 
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                         <Button Content="Пересоздать структуру диска" Margin="0,0,8,0" Click="RebuildHierarchy_Click"/>
                         <Button Content="Синхронизировать прошивки с диска" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SyncFwFromDisk_Click"/>
                         <Button Content="Сканировать неизвестные файлы" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ScanUnknown_Click"/>
                         <Button Content="Таблица версий (Excel)" Style="{StaticResource SecondaryButton}" Click="ExportVersionTable_Click"
                                 ToolTip="Сформировать таблицу нумерации версий (типы шкафов, подтипы, контроллеры — из текущих данных Иерархии) в отдельный Excel-файл."/>
                     </StackPanel>
+
+                    <!-- Разовая операция «привести уже накопленный диск к текущим правилам»: кнопки
+                         выше создают недостающие папки и подбирают новые прошивки, но НИЧЕГО не
+                         двигают и не переименовывают из того, что уже лежит. Поэтому смена правил
+                         (имя файла = имя папки версии, инструкции на третьем диске) действовала
+                         только для новых загрузок — старое оставалось как было. -->
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="ПЕРЕСТРОИТЬ УЖЕ НАКОПЛЕННОЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Приводит давно лежащее на диске к нынешним правилам. Сначала показывает план."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       ToolTip="Имя файла прошивки = имя папки версии; инструкции переезжают на третий диск, если он настроен."/>
+                            <Button Content="Перестроить структуру диска…" Style="{StaticResource SecondaryButton}"
+                                    HorizontalAlignment="Left" Click="DiskMigration_Click"
+                                    ToolTip="Запускать на одной машине и когда коллеги не заливают прошивки. Журнал операций сохраняется в «Конфиг» на диске."/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- ═══════════════════════════ МОДЕРАЦИЯ ═══════════════════════════ -->
                 <StackPanel x:Name="ModerationTab" Visibility="Collapsed">
-                    <TextBlock Text="Загруженные версии, ожидающие тегов/описания и подтверждения релиза (см. также «Модерация прошивок» в боковом меню). Откатанные и уже заменённые более свежей версией сюда не попадают."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <TextBlock Text="Версии, ожидающие тегов, описания и подтверждения релиза."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                               ToolTip="То же, что «Модерация прошивок» в боковом меню. Откатанные и уже заменённые более свежей версией сюда не попадают."/>
                     <TextBlock x:Name="ModerationCountText" Text="Версии без тегов"
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                     <DataGrid x:Name="ModGrid" Height="360" AutoGenerateColumns="False" Margin="0,0,0,10"
@@ -613,8 +558,9 @@
 
                 <!-- ═══════════════════════════ ТЕГИ ═══════════════════════════ -->
                 <StackPanel x:Name="TagsTab" Visibility="Collapsed">
-                    <TextBlock Text="Общий список тегов — доступен при загрузке прошивок и редактировании тегов в Поиске/Модерации/Прошивках. Двойной клик по тегу — переименовать, «×» — удалить (снимется со всех прошивок), «+» в конце — добавить."
-                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <TextBlock Text="Двойной клик по тегу — переименовать, «×» — удалить, «+» в конце — добавить."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                               ToolTip="Общий список: доступен при загрузке прошивок и правке тегов в Поиске, Модерации и Прошивках. Удаление снимает тег со всех прошивок."/>
                     <TextBox x:Name="TagsFilterInput" Height="34" Margin="0,0,0,10"
                              ToolTip="Фильтр по подстроке в названии тега…" TextChanged="TagsFilter_Changed"/>
                     <WrapPanel x:Name="TagsBubblesPanel"/>
@@ -651,8 +597,9 @@
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ПОДКЛЮЧЕНИЕ К ПЛК" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Сам Loader принимает параметры подключения только из своих настроек, поэтому выбранное здесь программа переносит туда перед каждой заливкой. Правятся только те поля, которые в настройках Loader уже есть; рядом с ними сохраняется резервная копия. «Как в Loader» — ничего не трогать вовсе."
-                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <TextBlock Text="Выбранное здесь переносится в настройки Loader перед каждой заливкой. «Как в Loader» — не трогать их вовсе."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       ToolTip="Сам Loader принимает параметры подключения только из своих настроек. Правятся только те поля, которые там уже есть; рядом сохраняется резервная копия."/>
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
@@ -715,10 +662,58 @@
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ВХОД: ЧЕМ ПОДТВЕРЖДАЕМ ЛИЧНОСТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Домен — прямой запрос к контроллеру домена. Веб-проверка — запрос к веб-адресу компании, работает там, где до домена не достучаться. Оба вместе — сначала домен, при недоступном домене веб-проверка. Корпоративный вход (Keycloak / OpenID Connect) — вход через браузер, пароль приложение при этом не видит вовсе."
-                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <ComboBox x:Name="AuthKindCombo" Height="34" Margin="0,0,0,10" SelectionChanged="AuthKind_Changed"
-                                      ToolTip="Что спрашивать при входе в приложение"/>
+                                      ToolTip="Домен — прямой запрос к контроллеру домена. Веб-проверка — запрос к веб-адресу компании, работает там, где до домена не достучаться. Оба вместе — сначала домен, при недоступном домене веб-проверка. Корпоративный вход (Keycloak / OpenID Connect) — вход через браузер, пароль приложение не видит вовсе."/>
+
+                            <!-- Домен, группы ролей, адрес веб-проверки и «требовать вход» — переехали
+                                 сюда из «Общих»: это настройка подключения к домену, и способ входа
+                                 (комбобокс выше) задаётся ровно тут же. Отдельных переключателей
+                                 «LDAP / HTTP / Оба» больше нет — они дублировали этот комбобокс
+                                 (тот же ключ ad_auth_mode), и два места для одной настройки путали. -->
+                            <StackPanel x:Name="AdSection" Margin="0,0,0,10">
+                                <TextBlock Text="Настройка ЭТОГО компьютера — по сети не разъезжается, задавать нужно на каждом ПК."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Домен:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="AdDomainInput" Height="34" Margin="0,0,0,8" ToolTip="напр. Elita"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Группа администратора:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="AdGroupAdminInput" Height="34" Margin="0,0,0,8"
+                                             ToolTip="Группа AD, дающая роль администратора — напр. AntarusAdmins. Пусто — группа для этой роли не используется, такой вход попадает в список «Пользователи»."
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Группа программиста:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AdGroupProgInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Группа наладчика:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="AdGroupNaladchikInput" Height="34" Margin="0,0,0,8"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Адрес веб-проверки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="4" Grid.Column="1" x:Name="AdHttpUrlInput" Height="34"
+                                             LostFocus="AdSettings_LostFocus" KeyDown="AdSettings_KeyDown"
+                                             ToolTip="Напр. https://disk.antarus.su/cloud — нужен способам «веб-проверка» и «домен, при недоступности — веб-проверка». Пусто — веб-проверка не сработает. Логин/пароль уходят как введены, через Negotiate/NTLM."/>
+                                </Grid>
+
+                                <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход при запуске приложения" Margin="0,0,0,8"
+                                          Checked="AdSettings_Changed" Unchecked="AdSettings_Changed"
+                                          ToolTip="Выключено — приложение стартует без запроса входа. Пароль администратора остаётся аварийным входом при проблемах с доменом."/>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Не переспрашивать, дней:" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox x:Name="AdRequireLoginDaysInput" Width="80" Height="34"
+                                             LostFocus="AdRequireLoginDays_LostFocus" KeyDown="AdRequireLoginDays_KeyDown"
+                                             ToolTip="Значение по умолчанию для тех, кто в окне входа оставит «как задано администратором»."/>
+                                </StackPanel>
+                            </StackPanel>
 
                             <StackPanel x:Name="OidcSection">
                                 <TextBlock Text="Параметры выдаёт ИТ, когда поднимет Keycloak (см. docs/keycloak-setup.md). Адрес — это адрес realm; клиент — идентификатор приложения в нём."
@@ -758,10 +753,10 @@
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ОБМЕН ДАННЫМИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Общий справочник, тикеты и решения модерации ездят файлом через сетевую папку — и пока это единственный работающий способ. Серверный обмен (HTTP + живые уведомления по WebSocket) описан планом, но самого сервера ещё нет и клиент к нему не написан: здесь можно заранее записать адрес и проверить кнопкой, отвечает ли он. Переключатель — задел на тот день, когда сервер поднимут; сегодня данные при любом его положении идут через папку."
+                            <TextBlock Text="Справочник, тикеты и решения модерации ездят через сетевую папку — пока это единственный работающий способ. Адрес сервера можно записать заранее."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <ComboBox x:Name="TransportCombo" Height="34" Margin="0,0,0,10" SelectionChanged="Transport_Changed"
-                                      ToolTip="Чем обмениваться общими данными"/>
+                                      ToolTip="Серверного обмена (HTTP + живые уведомления по WebSocket) ещё нет: сервер не поднят и клиент к нему не написан. Сегодня данные при любом положении переключателя идут через папку."/>
                             <StackPanel x:Name="ServerSection">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -781,13 +776,96 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}" x:Name="ConnectionCheckCard">
                         <StackPanel>
                             <TextBlock Text="ПРОВЕРКА ВСЕГО СРАЗУ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Диск, домен, веб-проверка, GitHub, папка обновлений — одним прогоном, с таймаутами и отчётом, который можно скопировать в письмо."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}"
                                     HorizontalAlignment="Left" Click="ShowConnectionStatus_Click"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ПЕЧАТЬ ═══════════════════════════ -->
+                <!-- Всё, что уходит на принтер: этикетка с QR на инструкцию и папка с шаблонами
+                     наклеек. Доступно всем ролям — печатает наладчик. -->
+                <StackPanel x:Name="PrintingTab" Visibility="Collapsed">
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ЭТИКЕТКА С QR НА ИНСТРУКЦИЮ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Печатается из карточки прошивки: «Ещё» → «QR и этикетка»."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                            <!-- Адрес и размер этикетки — общие для предприятия (уезжают на все машины
+                                 с конфигом), поэтому только администратору. Принтер ниже — наоборот,
+                                 настройка своей машины, её выбирает тот, кто печатает. -->
+                            <StackPanel x:Name="PrintingSharedSection">
+                                <TextBlock Text="Веб-адрес диска инструкций:" Margin="0,0,0,4"/>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" x:Name="InstructionBaseUrlInput" Height="34" Margin="0,0,8,0"
+                                             LostFocus="InstructionBaseUrl_LostFocus" KeyDown="PrintingField_KeyDown"
+                                             ToolTip="Напр. https://disk.antarus.su/instructions — корень, соответствующий корню диска инструкций. Пусто — в QR уйдёт сетевой путь к файлу."/>
+                                    <Button Grid.Column="1" Content="Проверить ссылку" Style="{StaticResource SecondaryButton}" Click="CheckInstructionUrl_Click"
+                                            ToolTip="Запросить собранный адрес и показать, что ответил сервер"/>
+                                </Grid>
+                                <TextBlock x:Name="InstructionUrlCheckText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Размер этикетки, мм:" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox Grid.Column="1" x:Name="LabelWidthInput" Width="80" Height="34"
+                                             LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Ширина"/>
+                                    <TextBlock Grid.Column="2" Text="×" VerticalAlignment="Center" Margin="8,0"/>
+                                    <TextBox Grid.Column="3" x:Name="LabelHeightInput" Width="80" Height="34"
+                                             LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Высота"/>
+                                </Grid>
+                            </StackPanel>
+
+                            <TextBlock Text="Принтер этикеток (на этом компьютере):" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="LabelPrinterCombo" Height="34" Margin="0,0,0,10" SelectionChanged="LabelPrinter_Changed"
+                                      ToolTip="«Принтер по умолчанию» — печатать на тот, что выбран в Windows. По сети настройка не разъезжается: у соседа принтер называется иначе."/>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Пробная печать" Style="{StaticResource SecondaryButton}" Click="TestPrintLabel_Click"
+                                        ToolTip="Напечатать образец этикетки выбранного размера — проверить поля и что принтер вообще тот"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="НАКЛЕЙКИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Готовые шаблоны на печать («Проверено ОТК», «Проверьте перед подключением»). Открываются кнопкой «Наклейки» в боковом меню."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <StackPanel x:Name="StickersFolderSection">
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" x:Name="StickersFolderInput" Height="34" Margin="0,0,8,0"
+                                             LostFocus="StickersFolder_LostFocus" KeyDown="PrintingField_KeyDown"
+                                             ToolTip="Пусто — Конфиг\Наклейки на общем диске. Можно указать путь относительно корня диска или абсолютный."/>
+                                    <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseStickersFolder_Click"
+                                            ToolTip="Выбрать папку — сохранится сразу"/>
+                                </Grid>
+                            </StackPanel>
+                            <TextBlock x:Name="StickersFolderStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Открыть наклейки" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenStickers_Click"/>
+                                <Button Content="Открыть папку" Style="{StaticResource SecondaryButton}" Click="OpenStickersFolder_Click"/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -808,7 +886,7 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Все загруженные прошивки — редактируйте теги, описание и тип пуска"
+            <TextBlock Grid.Row="0" Text="Все загруженные прошивки. Двойной клик по строке — открыть файл прошивки; теги, описание и тип пуска — кнопкой «Редактировать»."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <Grid Grid.Row="1" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
@@ -868,6 +946,8 @@
                 </DataGrid.RowStyle>
             </DataGrid>
             <StackPanel Grid.Row="5" Orientation="Horizontal">
+                <Button Content="Открыть файл" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenFirmwareFile_Click"
+                        ToolTip="Открыть сам файл прошивки — то же, что двойной клик по строке. Если файл определить не удалось, откроется папка версии."/>
                 <Button Content="Редактировать" Margin="0,0,8,0" Click="EditFirmware_Click"/>
                 <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
                 <Button x:Name="SetCurrentFirmwareBtn" Content="Сделать текущей" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SetCurrentFirmware_Click"
@@ -976,8 +1056,9 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Пользователи, вошедшие через «Войти по AD» в диалоге смены роли, когда логин не входит ни в одну настроенную AD-группу (см. вкладку «Общие» → «Вход по логину/паролю AD»). Первый вход с новым AD-логином автоматически получает роль «Наладчик» — здесь администратор может её изменить. Вход по AD-группе и вход по общим паролям ролей в этот список не попадают."
-                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <TextBlock Grid.Row="0" Text="Те, кто вошёл по AD, но не входит ни в одну настроенную группу (вкладка «Подключение»). Первый вход получает роль «Наладчик» — здесь её можно изменить."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                       ToolTip="Вход по AD-группе и вход по общим паролям ролей в этот список не попадают."/>
             <TextBox Grid.Row="1" x:Name="UsersFilterInput" Height="34" Margin="0,0,0,10"
                      ToolTip="Фильтр по AD-логину или роли…" TextChanged="UsersFilter_Changed"/>
             <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"

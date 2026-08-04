@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -195,6 +196,22 @@ public class ConfigService
         // last_whatsnew_shown_version, — это журнал обновлений именно ЭТОЙ установки, не общий
         // справочник (см. ConfigSyncService.SkipSettingsKeys).
         ["app_changelog_history"] = "[]",
+        // ── Печать этикеток с QR и наклеек ───────────────────────────────────────────────────
+        // Базовый веб-адрес диска инструкций: из него собирается ссылка в QR-коде на этикетке
+        // (LabelLinkBuilder). Пусто — QR несёт сетевой путь к файлу (\\сервер\шара\…), он тоже
+        // открывается с рабочего компьютера, но не с телефона. Синхронизируемый ключ: адрес один на
+        // всю компанию, в отличие от букв дисков.
+        ["instruction_base_url"] = "",
+        // Размер этикетки в миллиметрах — под конкретный рулон/лист этикеток предприятия.
+        ["label_width_mm"] = "97.5",
+        ["label_height_mm"] = "72",
+        // Принтер этикеток — per-machine (у каждой машины свои принтеры). Пусто — печать на принтер
+        // Windows по умолчанию.
+        ["label_printer"] = "",
+        // Папка с шаблонами наклеек («Проверено ОТК», «Проверьте перед подключением» и т.п.).
+        // Пусто — берётся Конфиг\Наклейки на общем диске (см. StickerTemplates.FolderFor): чтобы
+        // это заработало, настраивать ничего не нужно.
+        ["stickers_folder"] = "",
     };
 
     private readonly Database _db;
@@ -225,6 +242,38 @@ public class ConfigService
 
     public bool ThirdDiskShortcuts() => Get("third_disk_shortcuts").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetThirdDiskShortcuts(bool value) => Set("third_disk_shortcuts", value ? "true" : "false");
+
+    // ── Печать этикеток с QR и наклеек ───────────────────────────────────────────────────────
+
+    /// <summary>Базовый веб-адрес диска инструкций (без хвостового «/»). Пусто — ссылки в QR нет,
+    /// вместо неё в код уходит сетевой путь файла.</summary>
+    public string InstructionBaseUrl() => Get("instruction_base_url");
+    public void SetInstructionBaseUrl(string url) => Set("instruction_base_url", url.Trim().TrimEnd('/'));
+
+    public double LabelWidthMm() => ParseMm(Get("label_width_mm"), 97.5);
+    public void SetLabelWidthMm(double mm) => Set("label_width_mm", mm.ToString(CultureInfo.InvariantCulture));
+
+    public double LabelHeightMm() => ParseMm(Get("label_height_mm"), 72);
+    public void SetLabelHeightMm(double mm) => Set("label_height_mm", mm.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Имя принтера этикеток как его видит Windows. Пусто — принтер по умолчанию.</summary>
+    public string LabelPrinter() => Get("label_printer");
+    public void SetLabelPrinter(string name) => Set("label_printer", name.Trim());
+
+    /// <summary>Папка с шаблонами наклеек — как её задал администратор. Пусто = «по умолчанию»,
+    /// разворачивается в <c>&lt;диск&gt;\Конфиг\Наклейки</c> (см. StickerTemplates.FolderFor).</summary>
+    public string StickersFolder() => Get("stickers_folder");
+    public void SetStickersFolder(string path) => Set("stickers_folder", path.Trim());
+
+    /// <summary>Размер этикетки пишется через точку (InvariantCulture): 97,5 на машине с русской
+    /// локалью и 97.5 на английской — это одно и то же значение, и на чужой машине оно не должно
+    /// превращаться в 975. Читаем обе записи, пишем всегда через точку.</summary>
+    private static double ParseMm(string raw, double fallback)
+    {
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0) return v;
+        if (double.TryParse(raw.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out v) && v > 0) return v;
+        return fallback;
+    }
 
     /// <summary>Сетевая папка с релизными .exe приложения (см. AppUpdateService) — отдельная от root_path,
     /// т.к. обновление приложения логически не связано с диском прошивок.</summary>

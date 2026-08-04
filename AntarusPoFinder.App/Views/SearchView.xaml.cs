@@ -729,6 +729,7 @@ public partial class SearchView : UserControl
             card.EditInstructionRequested += (s, _) => EditInstruction(((FirmwareCard)s!).Result);
             card.OpenInstructionPdfRequested += (s, e) => { _ = OpenInstructionPdfAsync(((FirmwareCard)s!).Result); };
             card.PrintInstructionRequested += (s, e) => { _ = PrintInstructionAsync(((FirmwareCard)s!).Result); };
+            card.InstructionLabelRequested += (s, _) => ShowInstructionLabel(((FirmwareCard)s!).Result);
             card.PrintPassportRequested += (s, e) => { _ = PrintPassportAsync(((FirmwareCard)s!).Result.SubtypeId); };
             card.OpenPassportRequested += (s, _) => OpenPassport(((FirmwareCard)s!).Result.SubtypeId);
             card.OpenPassportFolderRequested += (s, _) => OpenPassportFolder(((FirmwareCard)s!).Result.SubtypeId);
@@ -2225,6 +2226,18 @@ public partial class SearchView : UserControl
     }
 
     private static void PrintFile(string path) => PrintableDocActions.Print(path);
+
+    /// <summary>«QR и этикетка» — наклейка со ссылкой на инструкцию. В QR уходит именно PDF, если он
+    /// есть: ссылку открывают телефоном, и docx на телефоне бесполезен. Пересборкой PDF из docx тут
+    /// НЕ занимаемся (в отличие от «Печать инструкции»): печать этикетки не должна на минуту
+    /// подвешивать оператора запуском Word — берём то, что на диске уже лежит.</summary>
+    private void ShowInstructionLabel(HierarchyResult result)
+    {
+        var doc = ResolveInstruction(result, CurrentDocRoots());
+        var file = doc.Pdf ?? doc.Newest ?? doc.Docx;
+        InstructionLabelWindow.ShowFor(Window.GetWindow(this), _services, _host,
+            result.Name, result.VersionRaw, file);
+    }
 
     private void ShowHistory(HierarchyResult result)
     {

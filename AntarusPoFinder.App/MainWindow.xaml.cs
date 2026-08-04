@@ -138,6 +138,11 @@ public partial class MainWindow : Window
 
     private void ShowOnboarding_Click(object sender, RoutedEventArgs e) => ShowOnboarding(markAsShown: false);
 
+    /// <summary>Наклейки открываются окном поверх текущей страницы: наладчик печатает наклейку, не
+    /// теряя из виду то, чем занимался (в отличие от навигации, которая сбрасывает страницу поиска).</summary>
+    private void Stickers_Click(object sender, RoutedEventArgs e) =>
+        StickersWindow.ShowFor(this, _services, _vm);
+
     /// <summary>Steps that dive into a page (Поиск/Загрузка ПО/Настройки) call _vm.Navigate + this
     /// window's own UpdateLayout inside their resolver — Navigate() only swaps ContentControl.
     /// Content, the actual measure/arrange for the new page's controls happens on the next layout

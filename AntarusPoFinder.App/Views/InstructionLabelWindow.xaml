@@ -1,0 +1,37 @@
+<Window x:Class="AntarusPoFinder.App.Views.InstructionLabelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="QR и этикетка"
+        Width="640" Height="560" MinWidth="480" MinHeight="420"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="HeaderText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,4"/>
+
+        <!-- Предпросмотр — тот же самый визуал, который уйдёт на принтер (см. LabelPrinter.BuildLabel):
+             отдельной «версии для экрана» нет, иначе напечатанное расходилось бы с показанным. -->
+        <Border Grid.Row="1" Background="{DynamicResource BgCardBrush}" CornerRadius="4" Padding="12" Margin="0,8,0,8">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <ContentControl x:Name="LabelHost" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </ScrollViewer>
+        </Border>
+
+        <TextBlock Grid.Row="2" x:Name="LinkText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="3" x:Name="PrinterText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Копировать ссылку" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CopyLink_Click"/>
+            <Button Content="Печать" Width="120" Margin="0,0,8,0" Click="Print_Click"/>
+            <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="100" IsCancel="True" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
