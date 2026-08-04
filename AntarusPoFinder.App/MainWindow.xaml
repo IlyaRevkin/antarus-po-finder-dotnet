@@ -564,13 +564,10 @@
                                         <Button x:Name="StickersNavButton" Content="Наклейки" Style="{StaticResource CompactNavButton}"
                                                 Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="Stickers_Click"
                                                 ToolTip="Шаблоны наклеек из общей папки — открыть или напечатать"/>
-                                        <!-- ЕДИНСТВЕННАЯ точка входа в формирование паспорта по бланку.
-                                             Раньше это же окно открывалось из четырёх мест под именем
-                                             «Паспорт по шаблону», отсюда и жалоба «по паспортам почему-то
-                                             2 кнопки, а не так как я просил». -->
+                                        <!-- ЕДИНСТВЕННАЯ точка входа в формирование паспорта по шаблону. -->
                                         <Button x:Name="PassportPrintNavButton" Content="Сформировать паспорт" Style="{StaticResource CompactNavButton}"
                                                 Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="PassportPrint_Click"
-                                                ToolTip="Вписать название шкафа в бланк паспорта, посмотреть готовый лист и напечатать"/>
+                                                ToolTip="Вписать название шкафа в шаблон паспорта, посмотреть готовый лист и напечатать"/>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

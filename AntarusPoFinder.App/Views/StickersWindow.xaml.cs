@@ -29,10 +29,6 @@ public partial class StickersWindow : Window
     {
         public string Path { get; init; } = "";
         public string Name => System.IO.Path.GetFileName(Path);
-
-        /// <summary>Подпапка внутри папки наклеек — «Раздел» в таблице; пусто для файлов, лежащих
-        /// прямо в корне.</summary>
-        public string Folder { get; init; } = "";
     }
 
     public StickersWindow(AppServices services, IAppHost host)
@@ -52,16 +48,7 @@ public partial class StickersWindow : Window
         var files = StickerTemplates.List(_folder);
 
         var selected = (FilesGrid.SelectedItem as Row)?.Path;
-        var rows = new List<Row>();
-        foreach (var f in files)
-        {
-            var sub = _folder is not null ? LabelLinkBuilder.RelativeTo(_folder, f) : null;
-            rows.Add(new Row
-            {
-                Path = f,
-                Folder = sub is not null ? (Path.GetDirectoryName(sub) ?? "") : "",
-            });
-        }
+        var rows = files.Select(f => new Row { Path = f }).ToList();
         FilesGrid.ItemsSource = rows;
         if (selected is not null)
             FilesGrid.SelectedItem = rows.FirstOrDefault(r => r.Path.Equals(selected, StringComparison.OrdinalIgnoreCase));
@@ -108,8 +95,7 @@ public partial class StickersWindow : Window
     }
 
     /// <summary>Загрузка шаблона — обычное копирование в общую папку, без записи в базу: у наклеек
-    /// её и нет. В подпапку выбранного «раздела», если строка выделена, — иначе разложенные по темам
-    /// шаблоны пришлось бы каждый раз перетаскивать руками в проводнике.</summary>
+    /// её и нет.</summary>
     private void Upload_Click(object sender, RoutedEventArgs e)
     {
         if (_folder is null)
@@ -127,8 +113,7 @@ public partial class StickersWindow : Window
         };
         if (dlg.ShowDialog() != true) return;
 
-        var section = (FilesGrid.SelectedItem as Row)?.Folder ?? "";
-        var target = section.Length > 0 ? Path.Combine(_folder, section) : _folder;
+        var target = _folder;
 
         var copied = 0;
         var errors = new List<string>();
@@ -163,9 +148,28 @@ public partial class StickersWindow : Window
                 : $"Загружено шаблонов: {copied} — они уже видны коллегам");
     }
 
-    private void Open_Click(object sender, RoutedEventArgs e)
+    /// <summary>Удаление файла из общей папки — на случай «загрузил не то». С подтверждением: файл
+    /// уедет у всех сразу, отменить это нельзя. Записи в базе нет, поэтому удаляется именно сам файл.</summary>
+    private void Delete_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedPath() is { } path) PrintableDocActions.Open(path);
+        if (SelectedPath() is not { } path) return;
+        var name = Path.GetFileName(path);
+        var reply = AppMessageBox.Show(
+            $"Удалить файл «{name}» из общей папки наклеек?\nОн исчезнет у всех машин. Отменить нельзя.",
+            "Удалить наклейку", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        try
+        {
+            File.Delete(path);
+            _host.ShowStatus($"Наклейка удалена: {name}");
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось удалить файл:\n{ex.Message}", "Наклейки",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        Refresh();
     }
 
     private void OpenFolder_Click(object sender, RoutedEventArgs e)
@@ -174,8 +178,6 @@ public partial class StickersWindow : Window
         try { Directory.CreateDirectory(_folder); } catch (Exception) { /* сеть недоступна — покажем как есть */ }
         PrintableDocActions.Open(_folder);
     }
-
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     public static void ShowFor(Window? owner, AppServices services, IAppHost host)
     {

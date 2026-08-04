@@ -580,33 +580,4 @@ public partial class Database
             .Select(x => x.File)
             .ToList();
     }
-
-    /// <summary>Поиск шаблонов паспортов — дословно та же схема, что у файлов параметров выше:
-    /// совпадение по типу/подтипу шкафа, названию и имени файла, теги весят вдвое. Отдельный метод, а
-    /// не расширение поиска прошивок: у шкафа без прошивки строки fw_versions нет вообще, и найтись
-    /// он может только так (см. Domain.PassportTemplate).</summary>
-    public List<PassportTemplate> SearchPassportsByTokens(IReadOnlyList<string> tokens, bool exactWord = false)
-    {
-        var qTokens = tokens.Where(t => !string.IsNullOrEmpty(t) && t.Length >= 2)
-            .Select(t => t.ToUpperInvariant()).ToArray();
-        if (qTokens.Length == 0) return new();
-
-        var passports = GetPassports();
-
-        int Score(PassportTemplate p)
-        {
-            var fields = new[] { p.GroupName, p.SubtypeName, p.FolderName, p.Name, p.Filename };
-            var tags = TagString.Parse(p.Tags);
-
-            int score = qTokens.Count(token => fields.Any(field => TokenMatches(token, field, exactWord)));
-            score += qTokens.Count(token => tags.Any(t => TokenMatches(token, t, exactWord))) * 2;
-            return score;
-        }
-
-        return passports.Select(p => (Passport: p, Score: Score(p)))
-            .Where(x => x.Score > 0)
-            .OrderByDescending(x => x.Score)
-            .Select(x => x.Passport)
-            .ToList();
-    }
 }

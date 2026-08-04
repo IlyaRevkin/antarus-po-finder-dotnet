@@ -29,7 +29,6 @@ public class SidebarSetupSectionTests
     public void TheSetupSectionHoldsExactlyTheItemsAskedFor()
     {
         Assert.Equal(NavSection.Setup, SectionOf("params"));
-        Assert.Equal(NavSection.Setup, SectionOf("passports"));
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
@@ -63,7 +62,6 @@ public class SidebarSetupSectionTests
         foreach (var item in items) item.IsVisible = allowed.Contains(item.PageId);
 
         Assert.Contains(items, i => i.PageId == "params" && i.ShowInSetupList);
-        Assert.Contains(items, i => i.PageId == "passports" && i.ShowInSetupList);
         // Программисту модерация не положена — пункта в секции нет, а не «есть, но серый».
         Assert.DoesNotContain(items, i => i.PageId == "newversions" && i.ShowInSetupList);
         Assert.DoesNotContain("newversions", RolesConfig.RoleAccess["programmer"]);

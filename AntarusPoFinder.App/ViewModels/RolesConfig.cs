@@ -11,14 +11,10 @@ public static class RolesConfig
         ("search", "Поиск", NavSection.Main),
         ("inspection", "Осмотр", NavSection.Main),
         ("upload", "Загрузка ПО", NavSection.Main),
-        // Секция «ДЛЯ НАЛАДЧИКА» — редкое, но именно рабочее: параметры ПЧ/УПП, паспорта шкафов и
-        // модерация прошивок. Раньше «Параметры» и «Модерация» стояли в основном списке наравне с
-        // Поиском, а «Паспорта» лежали в «ДОПОЛНИТЕЛЬНО» рядом с настройками и тикетами — Илья про
-        // это и написал: «наклейки и паспорта в том блоке не в тему». Наклейки и «Сформировать
-        // паспорт» — там же, но они не страницы, а окна, поэтому их кнопки прописаны прямо в
-        // MainWindow.xaml, а не здесь.
+        // Секция «ДЛЯ НАЛАДЧИКА» — редкое, но именно рабочее: параметры ПЧ/УПП и модерация прошивок.
+        // Наклейки и «Сформировать паспорт» — там же, но они не страницы, а окна, поэтому их кнопки
+        // прописаны прямо в MainWindow.xaml, а не здесь.
         ("params", "Параметры ПЧ/УПП", NavSection.Setup),
-        ("passports", "Паспорта шкафов", NavSection.Setup),
         ("newversions", "Модерация прошивок", NavSection.Setup),
         ("network", "Сетевые диски", NavSection.More),
         ("tickets", "Тикеты", NavSection.More),
@@ -35,12 +31,9 @@ public static class RolesConfig
     /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
-        // "passports" доступна всем ролям по той же причине, что "params": паспорт печатает наладчик,
-        // а заводит/правит шаблон обычно программист или администратор — запрет на страницу означал бы,
-        // что наладчик не может даже посмотреть, что за паспорт у шкафа.
-        ["naladchik"] = ["search", "inspection", "newversions", "params", "passports", "settings", "network", "tickets"],
-        ["programmer"] = ["search", "upload", "params", "passports", "settings", "network", "tickets"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "passports", "settings", "network", "tickets"],
+        ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
+        ["programmer"] = ["search", "upload", "params", "settings", "network", "tickets"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =

@@ -9,9 +9,8 @@
     <!-- Порядок на экране — порядок действий, ровно как просил Илья: «будет окно со строкой ввода
          названия шкафа, программа подставит название в загруженный ранее шаблон, даст проверить
          предпросмотром файла, и кнопки для редактирования или, если всё ок, для печати». Сначала
-         бланк и название, потом одна кнопка «Сформировать», и только после неё появляется блок с
-         готовым файлом и кнопками. Списка-таблицы с шестью кнопками, который был здесь раньше, нет:
-         из него было не видно, что за чем делать. -->
+         шаблон и название, потом одна кнопка «Сформировать», и только после неё появляется блок с
+         готовым файлом и кнопками. -->
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -24,14 +23,14 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,12"
-                   Text="Бланк паспорта берётся из общей папки (задаётся в Настройки → Печать). Впишите название шкафа — программа подставит его в копию бланка и покажет готовый лист."/>
+                   Text="Шаблон паспорта берётся из общей папки (задаётся в Настройки → Печать). Впишите название шкафа — программа подставит его в копию шаблона и покажет готовый лист."/>
 
         <Grid Grid.Row="1" Margin="0,0,0,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="120"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Бланк:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Grid.Column="0" Text="Шаблон:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox Grid.Column="1" x:Name="TemplateCombo" Height="32" DisplayMemberPath="Display"
                       SelectionChanged="Template_Changed"/>
         </Grid>
