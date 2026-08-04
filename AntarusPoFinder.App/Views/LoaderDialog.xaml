@@ -70,8 +70,18 @@
         <!-- Подготовка ПЛК применяется по ЗАПОМНЕННОЙ настройке (авто-старт ничего не спрашивает) —
              поэтому она обязана быть видна оператору отдельной строкой, а не только галкой внутри
              свёрнутого блока. -->
-        <TextBlock Grid.Row="4" x:Name="PreparationLabel" Style="{StaticResource MutedText}"
-                   TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+        <StackPanel Grid.Row="4">
+            <TextBlock x:Name="PreparationLabel" Style="{StaticResource MutedText}"
+                       TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+
+            <!-- Что делать руками после провала. Появляется вместе с кнопкой «Повторить попытку»:
+                 самая частая причина отказа Loader — не программа, а обвязка ПЛК (см. code-behind). -->
+            <Border x:Name="FailureHintBox" Style="{StaticResource CardBorder}" Margin="0,0,0,8"
+                    Visibility="Collapsed"
+                    BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1">
+                <TextBlock x:Name="FailureHintLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+            </Border>
+        </StackPanel>
 
         <StackPanel Grid.Row="5">
             <Expander x:Name="AdvancedExpander" Style="{StaticResource SectionExpander}" Margin="0,0,0,4">
@@ -137,6 +147,10 @@
                     </ContextMenu>
                 </Button.ContextMenu>
             </Button>
+            <!-- «Повторить попытку» стоит рядом с «Закрыть», а не в свёрнутом «ДОПОЛНИТЕЛЬНО»:
+                 после отказа Loader повтор — первое, что делают, и искать его под стрелочкой нельзя. -->
+            <Button x:Name="RetryBtn" Content="Повторить попытку" Style="{StaticResource PrimaryButton}"
+                    Margin="0,0,8,0" Visibility="Collapsed" Click="Restart_Click"/>
             <Button x:Name="StopBtn" Content="Остановить" Style="{StaticResource SecondaryButton}"
                     Click="Stop_Click"/>
             <Button x:Name="CloseBtn" Content="Закрыть" Style="{StaticResource SecondaryButton}"

@@ -125,10 +125,13 @@
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="HMI-проект:" VerticalAlignment="Center" TextWrapping="Wrap"
                            ToolTip="Файл или папка проекта HMI — ляжет в папку HMI контроллера как «{версия}_hmi»."/>
                 <TextBox Grid.Row="3" Grid.Column="1" x:Name="HmiInput" Height="30" Margin="0,0,4,4"/>
-                <Button Grid.Row="3" Grid.Column="2" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="HmiBrowseFile_Click" ToolTip="Выбрать файл">
+                <!-- Кнопки-иконки без подписи: имя нужно, чтобы живой прогон мог за них взяться
+                     (у безымянной иконки нет ни текста, ни AutomationId — искать её приходилось по
+                     координатам, и прогон её не находил). -->
+                <Button Grid.Row="3" Grid.Column="2" x:Name="HmiBrowseFileBtn" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="HmiBrowseFile_Click" ToolTip="Выбрать файл">
                     <Path Data="{StaticResource Icon.File}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
-                <Button Grid.Row="3" Grid.Column="3" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="HmiBrowseFolder_Click" ToolTip="Выбрать папку">
+                <Button Grid.Row="3" Grid.Column="3" x:Name="HmiBrowseFolderBtn" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="HmiBrowseFolder_Click" ToolTip="Выбрать папку">
                     <Path Data="{StaticResource Icon.Folder}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
                 <Button Grid.Row="3" Grid.Column="4" Style="{StaticResource IconButton}" Margin="2,0,0,4" Click="HmiClear_Click" ToolTip="Очистить">
