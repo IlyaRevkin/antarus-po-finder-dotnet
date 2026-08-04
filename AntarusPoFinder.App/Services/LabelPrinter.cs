@@ -42,103 +42,121 @@ public static class LabelPrinter
     /// <summary>Пункты типографские в единицы WPF (1 pt = 1/72 дюйма, DIU = 1/96).</summary>
     public static double PtToDiu(double pt) => pt * 96.0 / 72.0;
 
-    /// <summary>Сама этикетка: QR слева, подписи справа, ссылка под ними. Верстается на белом фоне и
-    /// чёрным текстом ЯВНО, без ресурсов темы: печатается она на бумагу, и в тёмной теме приложения
-    /// этикетка иначе ушла бы на принтер белым по чёрному.
+    /// <summary>Шрифт этикетки задаётся ЯВНО: визуал собирается вне окна, и наследовать ему шрифт
+    /// не от кого — а расчёт компоновки считает ширину символов именно для этой гарнитуры.</summary>
+    private static readonly FontFamily LabelFont = new("Segoe UI");
+
+    /// <summary>Сама этикетка. Верстается на белом фоне и чёрным текстом ЯВНО, без ресурсов темы:
+    /// печатается она на бумагу, и в тёмной теме приложения этикетка иначе ушла бы на принтер белым
+    /// по чёрному.
     ///
-    /// Всё, что задаёт вид, приходит одним <see cref="LabelLayout"/> — там же разобрано, почему поля
-    /// и сдвиг это разные настройки и почему без полей у любого размера «обрезался верх».
+    /// <b>Здесь ничего не решается.</b> Где что лежит и каким кеглем печатается — считает
+    /// <see cref="LabelPlanner"/> в Core; этот метод только раскладывает элементы по готовым
+    /// прямоугольникам. Раньше вёрстку делал WPF-Grid со звёздочными строками, а размер кода
+    /// считался отдельной формулой, которая про рамку, отступы и настоящую высоту блока ссылки не
+    /// знала — отсюда «увеличил QR, обрезался текст; убрал сдвиг, обрезан QR». Теперь расчёт один и
+    /// тот же и для предпросмотра, и для принтера, и он проверяется тестами без окна.
     ///
     /// <paramref name="holeText"/> — короткая подпись в окошке по центру кода (обычно «ИНСТ»); пусто
     /// — окна нет.</summary>
     public static FrameworkElement BuildLabel(LabelLayout layout, string qrContent,
-        string title, string subtitle, string caption, string holeText = "")
+        string title, string subtitle, string caption, string holeText = "") =>
+        BuildLabel(layout, qrContent, title, subtitle, caption, holeText, out _);
+
+    /// <summary>То же самое, но отдаёт и саму раскладку — окну предпросмотра нужны её предупреждения
+    /// («сторона QR уменьшена», «кегль ссылки уменьшен»): настройку мы не запрещаем, но и молчать о
+    /// том, что напечатается не ровно заказанное, не имеем права.</summary>
+    public static FrameworkElement BuildLabel(LabelLayout layout, string qrContent,
+        string title, string subtitle, string caption, string holeText, out LabelPlan plan)
     {
         var v = layout.Clamped();
-        var w = MmToDiu(v.WidthMm);
-        var h = MmToDiu(v.HeightMm);
-        var pad = MmToDiu(v.MarginMm);
-        var qrSide = MmToDiu(v.EffectiveQrMm());
+        plan = LabelPlanner.Plan(v, title, subtitle, caption);
 
-        var grid = new Grid { Background = Brushes.White };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        var code = BuildQrVisual(v, qrContent, qrSide, holeText);
-        code.VerticalAlignment = VerticalAlignment.Center;
-        code.HorizontalAlignment = HorizontalAlignment.Left;
-        Grid.SetRow(code, 0);
-        Grid.SetColumn(code, 0);
-        grid.Children.Add(code);
-
-        var texts = new StackPanel
+        var page = new Canvas
         {
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(MmToDiu(2.5), 0, 0, 0),
+            Width = MmToDiu(v.WidthMm),
+            Height = MmToDiu(v.HeightMm),
+            Background = Brushes.White,
+            // Страховка поверх расчёта: раскладка гарантирует, что всё внутри, но живой текст может
+            // оказаться чуть шире оценки — за край этикетки не должно уйти ничего и никогда.
+            ClipToBounds = true,
         };
-        texts.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontSize = PtToDiu(v.TitlePt),
-            FontWeight = FontWeights.Bold,
-            Foreground = Brushes.Black,
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = PtToDiu(v.TitlePt) * 1.15,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        });
-        if (!string.IsNullOrWhiteSpace(subtitle))
-            texts.Children.Add(new TextBlock
-            {
-                Text = subtitle,
-                FontSize = PtToDiu(v.TitlePt * 0.72),
-                Foreground = Brushes.Black,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, MmToDiu(1.2), 0, 0),
-            });
-        Grid.SetRow(texts, 0);
-        Grid.SetColumn(texts, 1);
-        grid.Children.Add(texts);
 
-        if (v.ShowLink && !string.IsNullOrWhiteSpace(caption))
+        if (plan.Frame is { } frame) AddFrame(page, frame);
+        if (!plan.Qr.IsEmpty) Place(page, BuildQrVisual(v, qrContent, MmToDiu(plan.Qr.W), holeText), plan.Qr);
+        if (plan.HasTitle) Place(page, BuildTexts(plan, title, subtitle), plan.Title);
+        if (plan.HasCaption) Place(page, BuildCaption(plan, caption), plan.Caption);
+
+        Layout(page, page.Width, page.Height);
+        return page;
+    }
+
+    /// <summary>Рамка идёт по границе печатной области, а не по краю этикетки: у самого края её
+    /// съедала непечатаемая кромка принтера. Обводка рисуется по центру контура, поэтому
+    /// прямоугольник ужимается на её толщину.</summary>
+    private static void AddFrame(Canvas page, LabelBox box)
+    {
+        var t = MmToDiu(LabelPlanner.FrameMm);
+        var rect = new System.Windows.Shapes.Rectangle
         {
-            var link = new TextBlock
-            {
-                Text = caption,
-                FontSize = PtToDiu(v.CaptionPt),
-                Foreground = Brushes.Black,
-                TextWrapping = TextWrapping.Wrap,
-                // Три строки — потолок: длинный адрес с кириллицей иначе съедает всю этикетку, а
-                // четвёртую строку всё равно уже не читают, для этого и есть сам код.
-                MaxHeight = PtToDiu(v.CaptionPt) * 3.6,
-                Margin = new Thickness(0, MmToDiu(1.5), 0, 0),
-            };
-            Grid.SetRow(link, 1);
-            Grid.SetColumn(link, 0);
-            Grid.SetColumnSpan(link, 2);
-            grid.Children.Add(link);
+            Width = Math.Max(0, MmToDiu(box.W) - t),
+            Height = Math.Max(0, MmToDiu(box.H) - t),
+            Stroke = Brushes.Black,
+            StrokeThickness = t,
+        };
+        Canvas.SetLeft(rect, MmToDiu(box.X) + t / 2);
+        Canvas.SetTop(rect, MmToDiu(box.Y) + t / 2);
+        page.Children.Add(rect);
+    }
+
+    /// <summary>Заголовок и подзаголовок в отведённом прямоугольнике. Кегль уже подобран расчётом;
+    /// Viewbox поверх него — вторая линия обороны: если настоящий текст всё-таки оказался выше
+    /// оценки, он ужмётся целиком, а не обрежется по нижней строке.</summary>
+    private static FrameworkElement BuildTexts(LabelPlan plan, string title, string subtitle)
+    {
+        var stack = new StackPanel { Width = MmToDiu(plan.Title.W) };
+        if (!string.IsNullOrWhiteSpace(title)) stack.Children.Add(Text(title, plan.TitlePt, bold: true));
+        if (!string.IsNullOrWhiteSpace(subtitle))
+        {
+            var sub = Text(subtitle, plan.SubtitlePt, bold: false);
+            sub.Margin = new Thickness(0, MmToDiu(LabelPlanner.CaptionGapMm), 0, 0);
+            stack.Children.Add(sub);
         }
 
-        var content = new Border
-        {
-            Background = Brushes.White,
-            BorderBrush = Brushes.Black,
-            BorderThickness = new Thickness(v.ShowFrame ? 0.7 : 0),
-            Padding = new Thickness(pad),
-            Child = grid,
-            // Поле + калибровочный сдвиг: поле одинаково со всех сторон, сдвиг двигает всю рамку
-            // целиком, не меняя её размера (справа/снизу вычитается ровно столько, сколько
-            // прибавлено слева/сверху).
-            Margin = new Thickness(
-                MmToDiu(v.OffsetXMm), MmToDiu(v.OffsetYMm),
-                -MmToDiu(v.OffsetXMm), -MmToDiu(v.OffsetYMm)),
-        };
+        return new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = stack };
+    }
 
-        var page = new Grid { Width = w, Height = h, Background = Brushes.White };
-        page.Children.Add(content);
-        Layout(page, w, h);
-        return page;
+    /// <summary>Ссылка под кодом. Здесь Viewbox не годится: ужатый адрес на 4 пт всё равно не
+    /// прочитать, поэтому лишнее честно отсекается многоточием — расчёт об этом предупреждает.</summary>
+    private static FrameworkElement BuildCaption(LabelPlan plan, string caption)
+    {
+        var text = Text(caption, plan.CaptionPt, bold: false);
+        text.TextTrimming = TextTrimming.CharacterEllipsis;
+        return new Border { Child = text, ClipToBounds = true };
+    }
+
+    private static TextBlock Text(string value, double pt, bool bold) => new()
+    {
+        Text = value,
+        FontFamily = LabelFont,
+        FontSize = PtToDiu(pt),
+        FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
+        Foreground = Brushes.Black,
+        TextWrapping = TextWrapping.Wrap,
+        // Межстрочный интервал фиксируется тем же коэффициентом, по которому считалась высота блока
+        // в LabelPlanner: иначе расчёт и отрисовка разъедутся ровно на разницу интервалов.
+        LineHeight = PtToDiu(pt) * 1.25,
+        LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+    };
+
+    /// <summary>Поставить элемент точно в прямоугольник раскладки (миллиметры → единицы WPF).</summary>
+    private static void Place(Canvas page, FrameworkElement element, LabelBox box)
+    {
+        element.Width = MmToDiu(box.W);
+        element.Height = MmToDiu(box.H);
+        Canvas.SetLeft(element, MmToDiu(box.X));
+        Canvas.SetTop(element, MmToDiu(box.Y));
+        page.Children.Add(element);
     }
 
     /// <summary>Код внутри этикетки: рисованный (см. <see cref="QrArt"/>) или обычная растровая
