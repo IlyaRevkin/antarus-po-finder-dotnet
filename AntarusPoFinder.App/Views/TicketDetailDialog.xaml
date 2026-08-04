@@ -2,15 +2,19 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
-        Title="Тикет" Width="580" Height="560" MinWidth="420" MinHeight="360"
+        Title="Тикет" Width="620" Height="680" MinWidth="420" MinHeight="360"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
+    <!-- Длинный тикет читался плохо не из-за самого скролла, а из-за раскладки: окно было ниже, а
+         строка вложений занимала фиксированные 130 пикселей ДАЖЕ когда вложений нет — на текст
+         оставалась узкая полоска. Теперь блок вложений целиком в Auto-строке и при их отсутствии
+         сжимается в одну подпись, а весь свободный ход отдан тексту. -->
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="130"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -22,16 +26,25 @@
         <!-- Full text, wrapped and scrollable — the grid row itself only shows a trimmed single
              line (see TicketsView.xaml), this is where the whole thing is actually readable. -->
         <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,12">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <TextBlock x:Name="BodyText" TextWrapping="Wrap"/>
-            </ScrollViewer>
+            <!-- TextBox вместо TextBlock: текст тикета теперь можно выделить и скопировать (раньше
+                 приходилось переписывать руками), а колесо/PageUp/PageDown/Ctrl+End работают без
+                 предварительного клика — у TextBox есть свой ScrollViewer и он принимает фокус.
+                 IsReadOnly + прозрачный фон, чтобы это по-прежнему читалось как текст, а не поле
+                 ввода. Focus ставится в конструкторе окна — см. TicketDetailDialog.xaml.cs. -->
+            <TextBox x:Name="BodyText" TextWrapping="Wrap" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                     BorderThickness="0" Padding="0" Background="Transparent"
+                     Foreground="{DynamicResource TextBrush}"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                     SpellCheck.IsEnabled="False"/>
         </Border>
 
         <TextBlock Grid.Row="2" Text="ВЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
         <Grid Grid.Row="3" Margin="0,0,0,12">
             <TextBlock x:Name="NoAttachmentsText" Text="Нет вложений" Style="{StaticResource MutedText}"
                        HorizontalAlignment="Left" VerticalAlignment="Top"/>
-            <ListBox x:Name="AttachmentsList" Visibility="Collapsed" MouseDoubleClick="AttachmentsList_MouseDoubleClick"/>
+            <!-- MaxHeight, а не фиксированная высота: пара вложений занимает две строки, длинный
+                 список упирается в потолок и дальше прокручивается сам. -->
+            <ListBox x:Name="AttachmentsList" MaxHeight="130" Visibility="Collapsed" MouseDoubleClick="AttachmentsList_MouseDoubleClick"/>
         </Grid>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">

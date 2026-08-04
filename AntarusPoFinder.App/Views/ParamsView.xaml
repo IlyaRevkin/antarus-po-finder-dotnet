@@ -140,6 +140,11 @@
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="ShowAllButton" Content="Все загруженные" Click="ShowAllButton_Click"
                                 ToolTip="Развернуть таблицу всех загруженных файлов параметров"/>
+                        <!-- «Открыть файл» рядом с «Открыть папку»: до этого файл параметров с этой
+                             страницы открыть было нельзя вообще — только дойти до его папки в
+                             проводнике. То же действие висит и на двойном клике по строке. -->
+                        <Button x:Name="OpenFileBtn" Content="Открыть файл" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenFile_Click" Visibility="Collapsed"
+                                ToolTip="Открыть выбранный файл параметров программой по умолчанию — то же, что двойной клик по строке"/>
                         <Button x:Name="OpenFolderBtn" Content="Открыть папку" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenFolder_Click" Visibility="Collapsed"
                                 ToolTip="Открыть в проводнике папку, где лежит выбранный файл"/>
                         <Button x:Name="EditTagsBtn" Content="Теги" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="EditTags_Click" Visibility="Collapsed"
@@ -151,6 +156,12 @@
                                 ToolTip="Изменить набор подтипов шкафов, которым подходит этот файл"/>
                         <Button x:Name="DeleteRowBtn" Content="Удалить запись" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="DeleteRow_Click" Visibility="Collapsed"
                                 ToolTip="Убрать файл из базы. Сам файл на диске остаётся"/>
+                        <!-- Раньше чистка двойников делалась ровно один раз на машину и молча, при
+                             первом открытии страницы: если после этого дубликаты появлялись снова
+                             (перезалили с машины со старой версией, сработала облачная синхра диска),
+                             запустить её было нечем. -->
+                        <Button x:Name="TidyBtn" Content="Прибраться в папках" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="Tidy_Click" Visibility="Collapsed"
+                                ToolTip="Перенести прежние редакции в подпапку «Прежние редакции», убрать точные копии-двойники и показать записи, за которыми на диске уже нет файла. Ничего, что отличается от актуального файла, не удаляется."/>
                         <TextBlock x:Name="CountLabel" Text="Записей: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     </StackPanel>
 
@@ -172,7 +183,8 @@
                         </StackPanel>
 
                         <DataGrid Grid.Row="1" x:Name="FilesGrid" SelectionMode="Single" SelectionUnit="FullRow"
-                                  Height="320" AutoGenerateColumns="False" IsReadOnly="True">
+                                  Height="320" AutoGenerateColumns="False" IsReadOnly="True"
+                                  MouseDoubleClick="FilesGrid_MouseDoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Файл" Binding="{Binding Filename}" Width="*"/>
                                 <DataGridTextColumn Header="Группа / Подтип" Binding="{Binding GroupSubtypeDisplay}" Width="160"/>

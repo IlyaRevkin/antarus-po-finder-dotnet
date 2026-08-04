@@ -31,7 +31,12 @@ public static class ParamFileDuplicateCleanup
 {
     public record Result(List<string> Removed, List<string> Skipped)
     {
-        public bool Any => Removed.Count > 0 || Skipped.Count > 0;
+        /// <summary>Прежние редакции, убранные из рабочей папки в подпапку «Прежние редакции».
+        /// Это НЕ удаление — файлы целы, просто перестали мозолить глаза рядом с актуальным
+        /// (см. ParamFileUploadService.ArchiveFolderName).</summary>
+        public List<string> Tidied { get; init; } = new();
+
+        public bool Any => Removed.Count > 0 || Skipped.Count > 0 || Tidied.Count > 0;
     }
 
     /// <summary>Ключ разовой чистки в settings — чтобы полный проход по всем записям делался один
@@ -40,23 +45,28 @@ public static class ParamFileDuplicateCleanup
 
     /// <summary>Чистка одной папки: рядом с <paramref name="filename"/> ищутся файлы-двойники с
     /// скобочным суффиксом и удаляются, если побайтово равны оригиналу.</summary>
-    public static Result CleanFolder(string folder, string filename)
+    /// <param name="tidyArchives">Переносить ли прежние редакции в подпапку (см.
+    /// <see cref="TidyArchives"/>). Выключается только при повторном проходе по ТОЙ ЖЕ папке в
+    /// <see cref="CleanFolders"/> — переносить там уже нечего.</param>
+    public static Result CleanFolder(string folder, string filename, bool tidyArchives = true)
     {
         var removed = new List<string>();
         var skipped = new List<string>();
-        if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(filename)) return new Result(removed, skipped);
+        var tidied = tidyArchives ? TidyArchives(folder, skipped) : new List<string>();
+        if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(filename))
+            return new Result(removed, skipped) { Tidied = tidied };
 
         string original;
         try
         {
-            if (!Directory.Exists(folder)) return new Result(removed, skipped);
+            if (!Directory.Exists(folder)) return new Result(removed, skipped) { Tidied = tidied };
             original = Path.Combine(folder, filename);
-            if (!File.Exists(original)) return new Result(removed, skipped);
+            if (!File.Exists(original)) return new Result(removed, skipped) { Tidied = tidied };
         }
         catch (Exception ex)
         {
             skipped.Add($"{folder}: {ex.Message}");
-            return new Result(removed, skipped);
+            return new Result(removed, skipped) { Tidied = tidied };
         }
 
         byte[] originalHash;
@@ -69,7 +79,7 @@ public static class ParamFileDuplicateCleanup
         catch (Exception ex)
         {
             skipped.Add($"{original}: {ex.Message}");
-            return new Result(removed, skipped);
+            return new Result(removed, skipped) { Tidied = tidied };
         }
 
         foreach (var candidate in FindSuffixedSiblings(folder, filename, skipped))
@@ -95,7 +105,51 @@ public static class ParamFileDuplicateCleanup
             }
         }
 
-        return new Result(removed, skipped);
+        return new Result(removed, skipped) { Tidied = tidied };
+    }
+
+    /// <summary>Переносит прежние редакции «имя (до ГГГГ-ММ-ДД).ext», лежащие ПРЯМО в рабочей папке
+    /// (так их клали версии до появления подпапки), в «Прежние редакции». Ничего не удаляет и не
+    /// перезаписывает: занятое имя в подпапке = файл там уже есть, такой оставляем на месте и пишем
+    /// в Skipped, чтобы человек разобрался сам.
+    ///
+    /// Именно эта россыпь и читалась как «дубликаты файлов параметров»: после трёх перезаливок в
+    /// папке подтипа лежало четыре почти одинаковых файла.</summary>
+    public static List<string> TidyArchives(string folder, List<string> skipped)
+    {
+        var moved = new List<string>();
+        if (string.IsNullOrWhiteSpace(folder)) return moved;
+        try
+        {
+            if (!Directory.Exists(folder)) return moved;
+            var archiveDir = Path.Combine(folder, ParamFileUploadService.ArchiveFolderName);
+            foreach (var path in Directory.EnumerateFiles(folder))
+            {
+                var name = Path.GetFileName(path);
+                if (!ParamFileUploadService.IsArchivedPreviousName(name)) continue;
+                var target = Path.Combine(archiveDir, name);
+                try
+                {
+                    if (File.Exists(target))
+                    {
+                        skipped.Add($"{path}: в «{ParamFileUploadService.ArchiveFolderName}» уже есть файл с таким именем — оставлен на месте");
+                        continue;
+                    }
+                    Directory.CreateDirectory(archiveDir);
+                    File.Move(path, target);
+                    moved.Add(target);
+                }
+                catch (Exception ex)
+                {
+                    skipped.Add($"{path}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            skipped.Add($"{folder}: {ex.Message}");
+        }
+        return moved;
     }
 
     /// <summary>Файлы «{имя без расширения} (…){расширение}» в той же папке. Сохранённые прежние
@@ -202,14 +256,20 @@ public static class ParamFileDuplicateCleanup
     {
         var removed = new List<string>();
         var skipped = new List<string>();
+        var tidied = new List<string>();
+        // Одна папка может стоять за несколькими записями (основной подтип + дополнительные) —
+        // перенос редакций в ней достаточно сделать один раз, иначе второй проход только добавит
+        // в Skipped ложные «файл с таким именем уже есть».
+        var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (folder, filename) in targets)
         {
-            var result = CleanFolder(folder, filename);
+            var result = CleanFolder(folder, filename, tidyArchives: seenFolders.Add(folder));
             removed.AddRange(result.Removed);
             skipped.AddRange(result.Skipped);
+            tidied.AddRange(result.Tidied);
         }
         if (removed.Count > 0) RemoveDanglingShortcuts(paramsRoot, removed.Select(Path.GetFileName)!, skipped);
-        return new Result(removed, skipped);
+        return new Result(removed, skipped) { Tidied = tidied };
     }
 
     /// <summary>Архивирует записи, стоявшие за удалёнными двойниками. Сверка по ПОЛНОМУ пути

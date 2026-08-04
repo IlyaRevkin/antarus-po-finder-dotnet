@@ -47,7 +47,11 @@
         <!-- List — "Текст" is trimmed to one line here (a several-thousand-character ticket would
              otherwise dominate the whole grid); double-click a row (or select + "Подробнее") for the
              full text and any attachments, see TicketDetailDialog. -->
+        <!-- ScrollUnit=Pixel — прокрутка по пикселям вместо прыжков через целую строку (виртуализация
+             при этом остаётся включённой, в отличие от CanContentScroll=False). На списке с длинными
+             тикетами построчные прыжки читались как рывки. -->
         <DataGrid Grid.Row="3" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
+                  VirtualizingPanel.ScrollUnit="Pixel"
                   IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Тип" Binding="{Binding TypeLabel}" Width="90"/>
