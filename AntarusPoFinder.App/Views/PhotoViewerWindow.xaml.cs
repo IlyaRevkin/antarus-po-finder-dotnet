@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -12,6 +13,9 @@ namespace AntarusPoFinder.App.Views;
 /// <summary>Встроенный просмотрщик для пасхалки на номере версии — своё окно, а не системный
 /// просмотрщик: работает без файловых ассоциаций и всегда открывается одинаково.
 ///
+/// Показывает не один файл, а ВСЮ общую папку лентой: что положил коллега, видно всем, листается
+/// стрелками. Раньше окно открывало ровно одну запомненную запись, и у каждой машины она была своя.
+///
 /// Умеет три вида содержимого (см. <see cref="EasterEggPhoto.MediaKind"/>):
 /// <list type="bullet">
 /// <item><b>картинка</b> — один кадр в Image;</item>
@@ -20,8 +24,8 @@ namespace AntarusPoFinder.App.Views;
 /// <item><b>видео</b> — MediaElement (кодеки берутся системные), с зацикливанием.</item>
 /// </list>
 ///
-/// Загрузка обёрнута в try/catch: битый/неверный файл не должен ронять приложение — тогда окно просто
-/// не открывается, и вызывающий предлагает выбрать другой.</summary>
+/// Загрузка обёрнута в try/catch: битый/неверный файл не должен ронять приложение — такой файл
+/// просто пропускается и лента едет к следующему.</summary>
 public partial class PhotoViewerWindow : Window
 {
     /// <summary>Кадры GIF и задержки к ним. Держим готовыми (Freeze) — перелистывание не должно
@@ -31,13 +35,47 @@ public partial class PhotoViewerWindow : Window
     private DispatcherTimer? _gifTimer;
     private int _frameIndex;
 
+    /// <summary>Лента файлов и место в ней. Порядок задаёт вызывающий (EasterEggPhoto.List) — он же
+    /// одинаков на всех машинах.</summary>
+    private IReadOnlyList<string> _files = Array.Empty<string>();
+    private int _index;
+
+    /// <summary>Показываемый сейчас файл — видео (его надо запустить, когда окно появится).</summary>
+    private bool _pendingVideo;
+
     private PhotoViewerWindow()
     {
         InitializeComponent();
+        // Play() до показа окна WPF игнорирует — запускаем, когда элемент уже в дереве. Подписка
+        // одна на всё время жизни окна: при перелистывании Loaded больше не сработает.
+        Loaded += (_, _) => StartVideoIfPending();
         Closed += (_, _) => StopEverything();
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void Prev_Click(object sender, RoutedEventArgs e) => Step(-1);
+
+    private void Next_Click(object sender, RoutedEventArgs e) => Step(+1);
+
+    /// <summary>Стрелки и пробел листают ленту. Esc закрывает штатно (кнопка IsCancel).</summary>
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Left:
+            case Key.PageUp:
+                Step(-1);
+                e.Handled = true;
+                break;
+            case Key.Right:
+            case Key.PageDown:
+            case Key.Space:
+                Step(+1);
+                e.Handled = true;
+                break;
+        }
+    }
 
     /// <summary>Видео зациклено: пасхалка — это «посмотреть», а не «включить один раз и смотреть на
     /// чёрный прямоугольник».</summary>
@@ -54,41 +92,38 @@ public partial class PhotoViewerWindow : Window
         }
     }
 
-    /// <summary>Кодека для этого файла в системе нет. Молчим и закрываемся: пасхалка не то место, где
-    /// показывают диагностику мультимедиа.</summary>
-    private void Video_MediaFailed(object sender, ExceptionRoutedEventArgs e) => Close();
+    /// <summary>Кодека для этого файла в системе нет. Молчим: в ленте это просто «не показалось»,
+    /// листать остальное по-прежнему можно. Один файл в ленте — закрываемся, показывать нечего.</summary>
+    private void Video_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        if (_files.Count <= 1) Close();
+        else Step(+1);
+    }
 
     private void StopEverything()
     {
         _gifTimer?.Stop();
         _gifTimer = null;
+        _frames.Clear();
+        _frameIndex = 0;
+        _pendingVideo = false;
         try { Video.Stop(); Video.Source = null; }
         catch (Exception) { }
     }
 
-    /// <summary>Показывает файл из <paramref name="path"/> модальным окном. Возвращает true, если окно
-    /// удалось открыть; false — если файла нет, расширение незнакомое или содержимое не читается
-    /// (тихо, без сообщений об ошибке).</summary>
-    public static bool TryShow(Window? owner, string? path)
+    /// <summary>Показывает ленту <paramref name="files"/>, начиная с <paramref name="startIndex"/>.
+    /// Возвращает true, если окно удалось открыть; false — если показать нечего (пустая лента или ни
+    /// один файл не читается). Тихо, без сообщений об ошибке.</summary>
+    public static bool TryShow(Window? owner, IReadOnlyList<string>? files, int startIndex = 0)
     {
-        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (files is null || files.Count == 0) return false;
         try
         {
-            if (!File.Exists(path)) return false;
+            var window = new PhotoViewerWindow { Owner = owner, _files = files };
+            var start = startIndex >= 0 && startIndex < files.Count ? startIndex : 0;
 
-            var window = new PhotoViewerWindow { Owner = owner };
-            var kind = EasterEggPhoto.KindOf(path);
-
-            var ready = kind switch
-            {
-                EasterEggPhoto.MediaKind.Video => window.ShowVideo(path),
-                EasterEggPhoto.MediaKind.AnimatedImage => window.ShowAnimation(path) || window.ShowStill(path),
-                EasterEggPhoto.MediaKind.Image => window.ShowStill(path),
-                // Незнакомое расширение — не приговор: файл мог прийти без него или с чужим. Пробуем
-                // прочитать как картинку, и только если и это не вышло, сдаёмся.
-                _ => window.ShowStill(path),
-            };
-            if (!ready) return false;
+            // Ни один файл не открылся — окно не показываем вовсе.
+            if (!window.ShowFrom(start, +1)) return false;
 
             window.ShowDialog();
             return true;
@@ -97,6 +132,81 @@ public partial class PhotoViewerWindow : Window
         {
             return false;
         }
+    }
+
+    /// <summary>Один файл — частный случай ленты из одного элемента.</summary>
+    public static bool TryShow(Window? owner, string? path) =>
+        string.IsNullOrWhiteSpace(path) ? false : TryShow(owner, new[] { path! });
+
+    /// <summary>Перелистнуть на <paramref name="step"/> с учётом закольцовки; битые файлы по дороге
+    /// пропускаются. Показать не удалось ничего — оставляем на экране то, что было.</summary>
+    private void Step(int step)
+    {
+        if (_files.Count < 2) return;
+        ShowFrom(Wrap(_index + step), step);
+    }
+
+    /// <summary>Ищет ближайший показываемый файл начиная с <paramref name="index"/> в сторону
+    /// <paramref name="step"/>. false — не открылся ни один.</summary>
+    private bool ShowFrom(int index, int step)
+    {
+        for (var tried = 0; tried < _files.Count; tried++)
+        {
+            var candidate = Wrap(index + step * tried);
+            if (!Load(_files[candidate])) continue;
+
+            _index = candidate;
+            UpdateChrome();
+            return true;
+        }
+        return false;
+    }
+
+    private int Wrap(int index)
+    {
+        var count = _files.Count;
+        return ((index % count) + count) % count;
+    }
+
+    /// <summary>Готовит окно к следующему файлу и показывает его. Всё состояние предыдущего (кадры
+    /// гифки, таймер, проигрыватель) снимается ЗДЕСЬ — иначе гифка продолжала бы перелистываться
+    /// поверх следующей картинки, а звук видео играть после перелистывания.</summary>
+    private bool Load(string path)
+    {
+        StopEverything();
+        Photo.Source = null;
+        Photo.Visibility = Visibility.Collapsed;
+        Video.Visibility = Visibility.Collapsed;
+
+        try
+        {
+            if (!File.Exists(path)) return false;
+
+            return EasterEggPhoto.KindOf(path) switch
+            {
+                EasterEggPhoto.MediaKind.Video => ShowVideo(path),
+                EasterEggPhoto.MediaKind.AnimatedImage => ShowAnimation(path) || ShowStill(path),
+                EasterEggPhoto.MediaKind.Image => ShowStill(path),
+                // Незнакомое расширение — не приговор: файл мог прийти без него или с чужим. Пробуем
+                // прочитать как картинку, и только если и это не вышло, сдаёмся.
+                _ => ShowStill(path),
+            };
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Счётчик и стрелки. Лента из одного файла — ни того, ни другого: листать нечего.</summary>
+    private void UpdateChrome()
+    {
+        var many = _files.Count > 1;
+        var visibility = many ? Visibility.Visible : Visibility.Collapsed;
+        PrevButton.Visibility = visibility;
+        NextButton.Visibility = visibility;
+        Counter.Visibility = visibility;
+        if (many) Counter.Text = $"{_index + 1} / {_files.Count}";
     }
 
     private bool ShowStill(string path)
@@ -157,6 +267,8 @@ public partial class PhotoViewerWindow : Window
         _gifTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = _frames[0].Delay };
         _gifTimer.Tick += (_, _) =>
         {
+            // Таймер мог пережить перелистывание на другой файл — тогда кадров уже нет.
+            if (_frames.Count == 0) return;
             _frameIndex = (_frameIndex + 1) % _frames.Count;
             Photo.Source = _frames[_frameIndex].Frame;
             _gifTimer!.Interval = _frames[_frameIndex].Delay;
@@ -190,17 +302,23 @@ public partial class PhotoViewerWindow : Window
         {
             Video.Visibility = Visibility.Visible;
             Video.Source = new Uri(path);
-            // Play() до показа окна WPF игнорирует — запускаем, когда элемент уже в дереве.
-            Loaded += (_, _) =>
-            {
-                try { Video.Play(); }
-                catch (Exception) { Close(); }
-            };
+            _pendingVideo = true;
+            StartVideoIfPending();
             return true;
         }
         catch (Exception)
         {
             return false;
         }
+    }
+
+    /// <summary>Запускает проигрывание, когда окно уже показано. До показа Play() бесполезен, поэтому
+    /// первый файл ждёт Loaded, а перелистнутые запускаются сразу.</summary>
+    private void StartVideoIfPending()
+    {
+        if (!_pendingVideo || !IsLoaded) return;
+        _pendingVideo = false;
+        try { Video.Play(); }
+        catch (Exception) { }
     }
 }

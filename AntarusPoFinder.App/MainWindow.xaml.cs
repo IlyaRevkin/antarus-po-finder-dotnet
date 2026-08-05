@@ -351,17 +351,17 @@ public partial class MainWindow : Window
     }
 
     // ── Пасхалка на номере версии ────────────────────────────────────────────
-    // Двенадцать быстрых кликов подряд по номеру версии открывают общую фотографию во встроенном
-    // окне; те же двенадцать с зажатым Ctrl — задают/меняют её (файл копируется в общую папку на
-    // диске и путь запоминается, синхронизируясь между машинами). Тихо: никаких подсказок и
-    // уведомлений. Вся логика счётчика — в EasterEggClickCounter (проверена тестами без WPF).
+    // Двенадцать быстрых кликов подряд по номеру версии открывают общую папку лентой во встроенном
+    // окне; те же двенадцать с зажатым Ctrl — добавляют в неё файл (копия ложится на диск). Тихо:
+    // никаких подсказок и уведомлений. Вся логика счётчика — в EasterEggClickCounter (проверена
+    // тестами без WPF).
     private void SidebarVersionText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
         switch (_versionClicks.Click(System.DateTime.UtcNow, ctrl))
         {
             case EasterEggAction.Set:
-                // «Задать/сменить» — только выбрать и положить файл, без показа (см. требование).
+                // «Добавить» — только выбрать и положить файл, без показа (см. требование).
                 ImportEasterPhoto();
                 break;
             case EasterEggAction.Open:
@@ -370,26 +370,24 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Открыть фотографию-пасхалку. Уже задана и читается — показываем. Ещё нет — предлагаем
-    /// выбрать (тот же выбор, что по Ctrl), сохраняем и сразу показываем. Всё тихо: диск недоступен
-    /// или файл битый — просто ничего не происходит.</summary>
+    /// <summary>Открыть пасхалку — ВСЮ общую папку лентой, а не одну запомненную запись: что положил
+    /// коллега, открывается и у остальных (см. EasterEggPhoto). Папка пуста — предлагаем добавить
+    /// файл (тот же выбор, что по Ctrl) и сразу показываем ленту с ним. Всё тихо: диск недоступен или
+    /// файлы битые — просто ничего не происходит.</summary>
     private void OpenEasterPhoto()
     {
-        var existing = EasterEggPhoto.Resolve(_services.Cfg.RootPath(), _services.Cfg.EasterPhotoPath());
-        if (existing is not null && PhotoViewerWindow.TryShow(this, existing))
+        if (PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(_services.Cfg.RootPath())))
             return;
 
-        if (ImportEasterPhoto())
-        {
-            var justSet = EasterEggPhoto.Resolve(_services.Cfg.RootPath(), _services.Cfg.EasterPhotoPath());
-            PhotoViewerWindow.TryShow(this, justSet);
-        }
+        if (ImportEasterPhoto() is not null)
+            PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(_services.Cfg.RootPath()));
     }
 
-    /// <summary>Выбор картинки → копия в общую папку на диске → запоминание машинно-независимого пути.
-    /// Возвращает true, если файл выбран и успешно сохранён. Отмена диалога, недоступный диск или
-    /// ошибка копирования — false, тихо, без сообщений.</summary>
-    private bool ImportEasterPhoto()
+    /// <summary>Выбор картинки → копия в общую папку на диске. Возвращает машинно-независимый путь
+    /// копии, если файл выбран и успешно скопирован. Отмена диалога, недоступный диск или ошибка
+    /// копирования — null, тихо, без сообщений. Ничего не запоминается: показывается вся папка, и
+    /// «какой именно файл показывать» — не настройка (именно она и расходилась между машинами).</summary>
+    private string? ImportEasterPhoto()
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
@@ -398,13 +396,9 @@ public partial class MainWindow : Window
             // диалоге то, что окно не откроет, невозможно по построению.
             Filter = EasterEggPhoto.DialogFilter(),
         };
-        if (dlg.ShowDialog() != true) return false;
+        if (dlg.ShowDialog() != true) return null;
 
-        var portable = EasterEggPhoto.Import(_services.Cfg.RootPath(), dlg.FileName);
-        if (portable is null) return false;
-
-        _services.Cfg.SetEasterPhotoPath(portable);
-        return true;
+        return EasterEggPhoto.Import(_services.Cfg.RootPath(), dlg.FileName);
     }
 
     private void GitHubLink_RequestNavigate(object sender, RequestNavigateEventArgs e)
