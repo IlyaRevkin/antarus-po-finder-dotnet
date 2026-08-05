@@ -5,7 +5,8 @@
         Title="Antarus"
         Width="820" Height="620" MinWidth="320" MinHeight="240"
         Background="{DynamicResource BgBrush}"
-        WindowStartupLocation="CenterOwner">
+        WindowStartupLocation="CenterOwner"
+        PreviewKeyDown="Window_PreviewKeyDown">
     <Grid>
         <!-- Uniform: содержимое вписывается в окно с сохранением пропорций и масштабируется вместе с
              ним, без искажений и без обрезки. Картинка и видео — два разных элемента: показывается
@@ -20,5 +21,20 @@
                 Width="32" Height="32" FontSize="14"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6"
                 ToolTip="Закрыть (Esc)"/>
+
+        <!-- Перелистывание. Прячется целиком, когда файл в папке один: стрелки «в никуда» только
+             сбивают с толку (см. UpdateChrome). -->
+        <Button x:Name="PrevButton" Content="‹" Click="Prev_Click"
+                Width="40" Height="56" FontSize="24" Visibility="Collapsed"
+                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="6,0"
+                ToolTip="Предыдущее (←)"/>
+        <Button x:Name="NextButton" Content="›" Click="Next_Click"
+                Width="40" Height="56" FontSize="24" Visibility="Collapsed"
+                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="6,0"
+                ToolTip="Следующее (→)"/>
+        <TextBlock x:Name="Counter" Visibility="Collapsed"
+                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"
+                   Padding="10,4" FontSize="13" Opacity="0.85"
+                   Foreground="{DynamicResource FgBrush}"/>
     </Grid>
 </Window>
