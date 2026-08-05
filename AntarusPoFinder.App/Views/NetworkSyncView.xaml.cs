@@ -91,9 +91,6 @@ public partial class NetworkSyncView : UserControl
     {
         RootPathInput.Text = _services.Cfg.RootPath();
         SecondDiskInput.Text = _services.Cfg.SecondDiskPath();
-        ThirdDiskInput.Text = _services.Cfg.ThirdDiskPath();
-        InstructionDuplicateCheck.IsChecked = _services.Cfg.DuplicateInstructionOnFirstDisk();
-        RefreshThirdDiskStatus();
         LoadS3();
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
 
@@ -158,67 +155,6 @@ public partial class NetworkSyncView : UserControl
 
         _services.Cfg.SetSecondDiskPath(path);
         _host.ShowStatus("Путь второго диска сохранён", category: NotificationCategory.Sync);
-    }
-
-    // ── Третий диск (только инструкции) ───────────────────────────────────────
-    // Раскладка на нём зеркальна первому диску и нигде не хранится — путь считается заменой
-    // префикса (InstructionDiskResolver), поэтому настройка ровно одна: корень.
-
-    private void BrowseThirdDisk_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Третий диск (инструкции)" };
-        if (dlg.ShowDialog() != true) return;
-        ThirdDiskInput.Text = dlg.FolderName;
-        SaveThirdDiskPath();
-    }
-
-    private void ThirdDisk_LostFocus(object sender, RoutedEventArgs e) => SaveThirdDiskPath();
-
-    private void ThirdDisk_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter) SaveThirdDiskPath();
-    }
-
-    private void SaveThirdDiskPath()
-    {
-        var path = ThirdDiskInput.Text.Trim();
-        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.ThirdDiskPath()))
-        {
-            RefreshThirdDiskStatus();
-            return;
-        }
-
-        _services.Cfg.SetThirdDiskPath(path);
-        _host.ShowStatus("Путь третьего диска сохранён", category: NotificationCategory.Sync);
-        RefreshThirdDiskStatus();
-    }
-
-    private void InstructionDuplicate_Click(object sender, RoutedEventArgs e)
-    {
-        var on = InstructionDuplicateCheck.IsChecked == true;
-        _services.Cfg.SetDuplicateInstructionOnFirstDisk(on);
-        _host.ShowStatus(on
-            ? "Копия инструкции будет ложиться рядом с прошивкой"
-            : "Инструкция будет лежать только на третьем диске", category: NotificationCategory.Sync);
-    }
-
-    /// <summary>Строка под полем: настроен ли третий диск и доступен ли он ПРЯМО СЕЙЧАС. Именно
-    /// недоступность — самый вероятный сюрприз (диск не подключён у этой машины), и молчать о ней
-    /// нельзя: инструкции в этом случае молча лягут на первый диск.</summary>
-    private void RefreshThirdDiskStatus()
-    {
-        var path = _services.Cfg.ThirdDiskPath();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            ThirdDiskStatus.Text = "Не настроен — инструкции лежат на первом диске.";
-            return;
-        }
-        bool exists;
-        try { exists = Directory.Exists(path); }
-        catch (Exception) { exists = false; }
-        ThirdDiskStatus.Text = exists
-            ? "Диск доступен — новые инструкции будут ложиться сюда."
-            : "Диск сейчас недоступен — до его появления инструкции будут ложиться на первый диск.";
     }
 
     // ── Хранилище на хостинге (S3) ────────────────────────────────────────────

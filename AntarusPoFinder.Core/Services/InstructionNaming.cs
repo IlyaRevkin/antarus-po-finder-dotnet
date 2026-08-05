@@ -14,8 +14,8 @@ namespace AntarusPoFinder.Core.Services;
 ///
 /// <b>Что НЕ переименовывается никогда:</b>
 /// <list type="bullet">
-/// <item><description>ярлыки .lnk — это указатель на уехавший на третий диск файл, а не документ
-/// (см. <see cref="InstructionDiskResolver"/>);</description></item>
+/// <item><description>ярлыки .lnk — это указатель на документ (пережиток прежних версий), а не сам
+/// документ;</description></item>
 /// <item><description>заглушка «инструкция в разработке» — у неё своё имя и свой смысл
 /// (см. <see cref="InstructionStub"/>);</description></item>
 /// <item><description>папки — инструкция иногда лежит папкой со сканами, и переименование папки

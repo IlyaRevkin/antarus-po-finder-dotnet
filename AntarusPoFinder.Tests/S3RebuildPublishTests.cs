@@ -48,7 +48,7 @@ public class S3RebuildPublishTests
         var folder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
         var publisher = new RecordingPublisher();
 
-        var created = InstructionStub.EnsureForVersion(folder, first.Path, thirdRoot: null,
+        var created = InstructionStub.EnsureForVersion(folder, first.Path,
             "2.1.0042.0001", new FakeStubWriter(), warnings: null, publisher);
 
         Assert.Equal(1, created);
@@ -65,7 +65,7 @@ public class S3RebuildPublishTests
         using var first = new TempRoot();
         var folder = Path.Combine(first.Path, "ПО", "Инструкция");
 
-        var created = InstructionStub.EnsureForVersion(folder, first.Path, thirdRoot: null,
+        var created = InstructionStub.EnsureForVersion(folder, first.Path,
             "2.1.0042.0001", new FakeStubWriter(), warnings: null, publisher: null);
 
         Assert.Equal(1, created);
@@ -95,9 +95,9 @@ public class S3RebuildPublishTests
         // Собрать файлы в «Прошивка\» (создаёт и папку «Инструкция») + привести инструкции к правилам
         // (заглушка там, где документа нет).
         var options = new DiskLayoutMigrator.MigrationOptions(
-            RenameFirmwareFiles: false, MoveInstructionsToThirdDisk: false,
+            RenameFirmwareFiles: false,
             FoldFilesIntoVersion: true, MoveOpcIntoController: false, FixInstructions: true);
-        var input = new DiskLayoutMigrator.MigrationInput(root.Path, null, false, new[] { record }, options);
+        var input = new DiskLayoutMigrator.MigrationInput(root.Path, new[] { record }, options);
 
         var plan = DiskLayoutMigrator.Plan(input);
         var publisher = new RecordingPublisher();
@@ -131,9 +131,9 @@ public class S3RebuildPublishTests
         };
 
         var options = new DiskLayoutMigrator.MigrationOptions(
-            RenameFirmwareFiles: false, MoveInstructionsToThirdDisk: false,
+            RenameFirmwareFiles: false,
             FoldFilesIntoVersion: true, MoveOpcIntoController: false, FixInstructions: true);
-        var input = new DiskLayoutMigrator.MigrationInput(root.Path, null, false, new[] { record }, options);
+        var input = new DiskLayoutMigrator.MigrationInput(root.Path, new[] { record }, options);
 
         var plan = DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(input), renamed: null,
             stubs: new FakeStubWriter(), publisher: null, firstRoot: root.Path);

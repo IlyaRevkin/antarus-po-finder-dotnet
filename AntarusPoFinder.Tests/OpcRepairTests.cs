@@ -9,14 +9,10 @@ using Xunit;
 
 namespace AntarusPoFinder.Tests;
 
-/// <summary>Две вещи, которые обязаны работать НА КАЖДОЙ машине отдельно, а не приезжать
-/// синхронизацией (docs/hierarchy-rework-plan.md, этапы 3 и 5):
-///
-/// • <b>структура на третьем диске</b> — раньше папки там появлялись только в момент, когда туда
-///   впервые клали файл, отсюда жалоба «на третьем структура не создалась»;
-/// • <b>починка путей ОПЦ</b> — перенос ОПЦ внутрь контроллера единственный меняет disk_path, а он у
-///   совпавшей записи импортом конфига не обновляется никогда.</summary>
-public class OpcRepairAndThirdDiskStructureTests : IDisposable
+/// <summary>Починка путей ОПЦ — то, что обязано работать НА КАЖДОЙ машине отдельно, а не приезжать
+/// синхронизацией (docs/hierarchy-rework-plan.md, этап 5): перенос ОПЦ внутрь контроллера
+/// единственный меняет disk_path, а он у совпавшей записи импортом конфига не обновляется никогда.</summary>
+public class OpcRepairTests : IDisposable
 {
     private readonly TempDb _dbFile = new();
     private readonly TempRoot _tempRoot = new();
@@ -24,7 +20,7 @@ public class OpcRepairAndThirdDiskStructureTests : IDisposable
     private readonly HierarchyService _hierarchy;
     private string Root => _tempRoot.Path;
 
-    public OpcRepairAndThirdDiskStructureTests()
+    public OpcRepairTests()
     {
         _db = new Database(_dbFile.Path);
         _hierarchy = new HierarchyService(_db);
@@ -35,37 +31,6 @@ public class OpcRepairAndThirdDiskStructureTests : IDisposable
         _db.Dispose();
         _dbFile.Dispose();
         _tempRoot.Dispose();
-    }
-
-    // ── Третий диск: зеркало папок «Инструкция» ──────────────────────────────
-
-    /// <summary>План структуры зеркалит на третий диск ТОЛЬКО папки «Инструкция»: больше он ни подо
-    /// что не заведён, и тащить туда пустое дерево контроллеров целиком незачем.</summary>
-    [Fact]
-    public void PlanStructure_MirrorsOnlyInstructionFoldersOntoThirdDisk()
-    {
-        using var third = new TempRoot();
-
-        var withoutThird = _hierarchy.PlanStructure(Root);
-        var withThird = _hierarchy.PlanStructure(Root, third.Path);
-
-        var mirrored = withThird.Folders.Where(f => f.StartsWith(third.Path, StringComparison.OrdinalIgnoreCase)).ToList();
-        Assert.NotEmpty(mirrored);
-        Assert.All(mirrored, f => Assert.Equal(HierarchyFolders.Instructions, Path.GetFileName(f)));
-        // Первый диск от появления третьего не меняется ни на одну папку.
-        Assert.Equal(withoutThird.Folders.Count, withThird.Folders.Count - mirrored.Count);
-
-        // И они действительно создаются, а не только планируются.
-        HierarchyService.ApplyStructurePlan(withThird);
-        Assert.All(mirrored, f => Assert.True(Directory.Exists(f), f));
-    }
-
-    /// <summary>Третий диск не настроен — план ровно прежний, ни одной лишней папки.</summary>
-    [Fact]
-    public void PlanStructure_WithoutThirdDisk_IsUnchanged()
-    {
-        Assert.Equal(_hierarchy.PlanStructure(Root).Folders, _hierarchy.PlanStructure(Root, "").Folders);
-        Assert.Equal(_hierarchy.PlanStructure(Root).Folders, _hierarchy.PlanStructure(Root, null).Folders);
     }
 
     /// <summary>Папка «ОПЦ» теперь планируется внутри контроллера, а прежняя, на уровне подтипа,

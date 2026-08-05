@@ -52,9 +52,6 @@ public partial class DiskMigrationDialog : Window
         InitializeComponent();
         _services = services;
         _host = host;
-        InstructionsCheck.IsEnabled = !string.IsNullOrWhiteSpace(services.Cfg.ThirdDiskPath());
-        if (!InstructionsCheck.IsEnabled)
-            InstructionsCheck.ToolTip = "Третий диск (инструкции) не настроен — Настройки → Сетевые диски.";
     }
 
     // ── План ────────────────────────────────────────────────────────────────
@@ -70,14 +67,11 @@ public partial class DiskMigrationDialog : Window
 
         var input = new DiskLayoutMigrator.MigrationInput(
             root,
-            _services.Cfg.ThirdDiskPath(),
-            _services.Cfg.DuplicateInstructionOnFirstDisk(),
             // Вместе с архивными: снятая с показа версия — это по-прежнему папка на диске, и оставить
             // её в старой раскладке значит оставить полперестройки недоделанной.
             _services.Db.GetAllFwVersionsWithNames(includeArchived: true),
             new DiskLayoutMigrator.MigrationOptions(
                 RenameCheck.IsChecked == true,
-                InstructionsCheck.IsChecked == true && InstructionsCheck.IsEnabled,
                 FoldIntoVersionCheck.IsChecked == true,
                 OpcCheck.IsChecked == true,
                 InstructionNamingCheck.IsChecked == true));
@@ -200,7 +194,7 @@ public partial class DiskMigrationDialog : Window
     private async Task CreateMissingFoldersAsync()
     {
         var root = _services.Cfg.RootPath();
-        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
+        var plan = _services.Hierarchy.PlanStructure(root);
         EnsureStructureResult result;
         // Заглушка кладётся вместе с созданием папок: пустая папка «Инструкция» неотличима от
         // «инструкцию потеряли», а версия для общей папки контроллера не нужна — заглушка одна на
