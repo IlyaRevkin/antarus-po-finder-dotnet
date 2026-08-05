@@ -55,6 +55,37 @@ public sealed record LabelLayout
     /// четверти кода, а вырез под подпись занимает заметно меньше.</summary>
     public bool FancyQr { get; init; } = true;
 
+    /// <summary>Строка над кодом, объясняющая, ЗАЧЕМ этот QR.
+    ///
+    /// <b>Зачем настройка.</b> На шкафу наклеек несколько (паспорт, ОТК, инструкция), и без подписи
+    /// заказчик видит «просто QR с названием установки и непонятными цифрами» — дословная жалоба. Одна
+    /// строка снимает вопрос ещё до того, как человек достанет телефон. Текст правится, а не зашит:
+    /// у одних шкафов это «Инструкция для заказчика», у других — «Руководство по эксплуатации» или
+    /// имя заказчика, и переписывать программу ради этого никто не должен.</summary>
+    public string HeadlineText { get; init; } = DefaultHeadline;
+
+    /// <summary>Печатать ли строку <see cref="HeadlineText"/>. Отдельно от пустого текста: выключить
+    /// подпись на мелкой наклейке и стереть заготовленный текст — разные намерения.</summary>
+    public bool ShowHeadline { get; init; } = true;
+
+    /// <summary>Подпись в окошке по центру фирменного кода. Коротко — плашка маленькая, и длинная
+    /// строка в ней просто выродится в нечитаемый кегль (см. QrArt.FitFontSize). Пусто — окна нет
+    /// вовсе, код рисуется сплошным.</summary>
+    public string HoleText { get; init; } = DefaultHoleText;
+
+    public const string DefaultHeadline = "Инструкция для заказчика";
+    public const string DefaultHoleText = "ИНСТ";
+
+    /// <summary>Столько знаков в подписи центра ещё читается на плашке в 20 % стороны кода; дальше
+    /// кегль падает ниже различимого на 203 dpi.</summary>
+    public const int MaxHoleTextLength = 6;
+
+    /// <summary>Текст подписи над кодом с учётом галочки — то, что реально пойдёт на этикетку.</summary>
+    public string EffectiveHeadline() => ShowHeadline ? (HeadlineText ?? "").Trim() : "";
+
+    /// <summary>Подпись центра с учётом фирменного вида: у обычной растровой матрицы окна нет.</summary>
+    public string EffectiveHoleText() => FancyQr ? (HoleText ?? "").Trim() : "";
+
     // ── Границы разумного ────────────────────────────────────────────────────
 
     /// <summary>Приводит значения к рабочему диапазону. Нужна и при чтении настроек (там могло
@@ -74,7 +105,22 @@ public sealed record LabelLayout
             QrMm = QrMm <= 0 ? 0 : Clamp(QrMm, 10, Math.Min(w, h)),
             TitlePt = Clamp(TitlePt, 6, 48),
             CaptionPt = Clamp(CaptionPt, 5, 24),
+            HeadlineText = Trim(HeadlineText, 60),
+            // Длинная подпись в центре не «ужимается», а вырождается: плашка не растёт (её площадь
+            // ограничена тем, что вытягивает коррекция ошибок), поэтому лишнее отсекается здесь, а не
+            // превращается в нечитаемую строку на печати.
+            HoleText = Trim(HoleText, MaxHoleTextLength),
         };
+    }
+
+    /// <summary>Строка настройки: без краевых пробелов, без переводов строки (этикетка верстает
+    /// перенос сама) и не длиннее разумного. Значение могло приехать синхронизацией с чужой машины,
+    /// поэтому чистится там же, где и числа.</summary>
+    private static string Trim(string? value, int max)
+    {
+        var v = (value ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+        while (v.Contains("  ", StringComparison.Ordinal)) v = v.Replace("  ", " ", StringComparison.Ordinal);
+        return v.Length <= max ? v : v[..max].TrimEnd();
     }
 
     /// <summary>Сторона QR в миллиметрах с учётом «0 = сам».
@@ -104,6 +150,9 @@ public sealed record LabelLayout
         ShowLink = cfg.LabelFlag("label_show_link", true),
         ShowFrame = cfg.LabelFlag("label_show_frame", true),
         FancyQr = cfg.LabelFlag("label_fancy_qr", true),
+        HeadlineText = cfg.LabelText("label_headline", DefaultHeadline),
+        ShowHeadline = cfg.LabelFlag("label_show_headline", true),
+        HoleText = cfg.LabelText("label_hole_text", DefaultHoleText),
     }.Clamped();
 
     public void SaveTo(ConfigService cfg)
@@ -120,6 +169,9 @@ public sealed record LabelLayout
         cfg.SetLabelFlag("label_show_link", v.ShowLink);
         cfg.SetLabelFlag("label_show_frame", v.ShowFrame);
         cfg.SetLabelFlag("label_fancy_qr", v.FancyQr);
+        cfg.SetLabelText("label_headline", v.HeadlineText);
+        cfg.SetLabelFlag("label_show_headline", v.ShowHeadline);
+        cfg.SetLabelText("label_hole_text", v.HoleText);
     }
 
     public string SizeCaption() =>

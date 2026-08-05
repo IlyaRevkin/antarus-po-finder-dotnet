@@ -1089,6 +1089,11 @@ public partial class Database
         //    on-disk cleanup, the same as SettingsView.DeleteFirmware_Click does for a direct local
         //    delete — so the deletion actually reaches every other machine, not just the one it
         //    started on.
+        // Отметки «этот тег с этой записи сняли/навесили» — оба набора читаются ОДИН раз на весь
+        // импорт: перебираются тысячи строк, и ходить за состоянием в таблицу на каждую было бы
+        // квадратично (см. Database.FlatLists.RecordRowTagChange о том, зачем эти отметки вообще).
+        var rowTags = new RowTagMerger(this, data.FlatListState);
+
         foreach (var fv in data.FwVersions)
         {
             var subId = ResolveId("equipment_subtypes", fv.SubtypeSyncId, subtypeSyncToId, "name", fv.SubtypeName, fv.GroupName);
@@ -1209,18 +1214,13 @@ public partial class Database
                 var newLaunchTypes = IsBlankLaunchTypes(localLaunchTypes) && !IsBlankLaunchTypes(fv.LaunchTypes)
                     ? fv.LaunchTypes : localLaunchTypes;
 
-                // Теги — объединение, а не Backfill: тег («точное название шкафа») почти всегда
-                // добавляют УЖЕ существующей, давно разошедшейся по машинам прошивке, а раньше строка
-                // tags писалась только при первичном INSERT — на уже совпавшей записи её не трогали
-                // вовсе, и добавленный тег к коллегам не доезжал (поиск по нему ничего не находил).
-                // Объединяем множества (без учёта регистра, порядок локальных сохраняем, новые в конец),
-                // чтобы добавленный где угодно тег доехал везде и ни одна машина не теряла своих.
-                // Удаление тега при этом не распространяется — та же аддитивная логика, что и у всей
-                // остальной синхронизации fw_versions (отсутствие ≠ «удалить»).
-                var localTagList = Services.TagString.Parse(localTags);
-                var haveTags = new HashSet<string>(localTagList, StringComparer.OrdinalIgnoreCase);
-                var addedTags = Services.TagString.Parse(fv.Tags).Where(t => haveTags.Add(t)).ToList();
-                var newTags = addedTags.Count == 0 ? localTags : Services.TagString.Join(localTagList.Concat(addedTags));
+                // Теги — объединение с учётом отметок о снятии (RowTagMerger). Голое объединение
+                // множеств, которое было здесь раньше, решало нужную половину задачи — тег вешают на
+                // давно разошедшуюся по машинам прошивку, и без объединения он к коллегам не доезжал, —
+                // но не имело обратного хода: снятый тег возвращался с первой же машины, которая о
+                // снятии ещё не знала, и ехал обратно к тому, кто снял. Теперь снятие — такое же
+                // событие с отметкой времени, как и добавление, и выигрывает более позднее.
+                var newTags = rowTags.Merge(existingRow.SyncId, fv.SyncId, localTags, fv.Tags, apply);
 
                 var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
                                     newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
@@ -1364,6 +1364,7 @@ public partial class Database
         // иначе две входящие строки с одинаковым натуральным ключом (такое бывает у снимка со старой
         // версии, где тройка не была уникальной) обе усыновили бы одну и ту же локальную строку.
         var claimed = new HashSet<int>();
+        var rowTags = new RowTagMerger(this, data.FlatListState);
 
         foreach (var pf in data.ParamFiles)
         {
@@ -1429,12 +1430,10 @@ public partial class Database
                 newDescription = pf.Description;
             var newUploadDate = incomingNewer ? pf.UploadDate : local.UploadDate;
 
-            // Теги — объединение, а не замена: тег почти всегда навешивают уже разошедшейся по
-            // машинам записи, и ни одна машина не должна терять свои (дословно как у fw_versions).
-            var localTagList = Services.TagString.Parse(local.Tags);
-            var haveTags = new HashSet<string>(localTagList, StringComparer.OrdinalIgnoreCase);
-            var addedTags = Services.TagString.Parse(pf.Tags).Where(t => haveTags.Add(t)).ToList();
-            var newTags = addedTags.Count == 0 ? local.Tags : Services.TagString.Join(localTagList.Concat(addedTags));
+            // Теги — объединение с учётом отметок о снятии, дословно как у fw_versions (см.
+            // RowTagMerger): добавленный где угодно тег доезжает везде, а снятый больше не
+            // воскресает с машины, которая о снятии ещё не знает.
+            var newTags = rowTags.Merge(local.SyncId, pf.SyncId, local.Tags, pf.Tags, apply);
 
             if (newDescription == local.Description && newUploadDate == local.UploadDate && newTags == local.Tags)
                 continue;
@@ -1442,7 +1441,12 @@ public partial class Database
             counts.ParamFilesUpdated++;
             if (!apply) continue;
             UpdateParamFileUpload(localId, local.DiskPath, newDescription, newUploadDate);
-            if (newTags != local.Tags) UpdateParamFileTags(localId, newTags);
+            // Отметки о снятии/навешивании уже расставлены самим слиянием — здесь нужна ТОЛЬКО запись
+            // строки тегов, иначе UpdateParamFileTags поставил бы поверх свежие «сейчас» и чужое
+            // решение поехало бы обратно как наше собственное, только что принятое.
+            if (newTags != local.Tags)
+                ExecuteNonQuery("UPDATE param_files SET tags=@t WHERE id=@id",
+                    cmd => { cmd.Parameters.AddWithValue("@t", newTags); cmd.Parameters.AddWithValue("@id", localId); });
         }
 
         // ── Эталонная синхронизация: записи параметров, которых в ПОЛНОМ снимке отправителя нет

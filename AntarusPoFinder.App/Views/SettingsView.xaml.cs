@@ -1317,6 +1317,11 @@ public partial class SettingsView : UserControl
             LabelWidthInput.Text = _services.Cfg.LabelWidthMm().ToString("0.##", CultureInfo.CurrentCulture);
             LabelHeightInput.Text = _services.Cfg.LabelHeightMm().ToString("0.##", CultureInfo.CurrentCulture);
 
+            var labelLayout = LabelLayout.FromConfig(_services.Cfg);
+            LabelHeadlineInput.Text = labelLayout.HeadlineText;
+            LabelShowHeadlineCheck.IsChecked = labelLayout.ShowHeadline;
+            LabelHoleTextInput.Text = labelLayout.HoleText;
+
             // Список принтеров перечитывается на каждый заход: принтер могли добавить, пока
             // программа открыта. Сохранённое имя добавляем в список, даже если такого принтера
             // сейчас нет (сеть/принтер отвалились) — иначе выбор молча сбросился бы на «по умолчанию».
@@ -1366,7 +1371,49 @@ public partial class SettingsView : UserControl
         if (e.Key != Key.Enter) return;
         if (sender == InstructionBaseUrlInput) InstructionBaseUrl_LostFocus(sender, e);
         else if (sender == LabelWidthInput || sender == LabelHeightInput) LabelSize_LostFocus(sender, e);
+        else if (sender == LabelHeadlineInput) LabelHeadline_LostFocus(sender, e);
+        else if (sender == LabelHoleTextInput) LabelHoleText_LostFocus(sender, e);
         else if (sender == StickersFolderInput) StickersFolder_LostFocus(sender, e);
+    }
+
+    /// <summary>Подпись назначения. Пустое поле — ЗНАЧЕНИЕ («подписи не надо»), а не «настройку не
+    /// трогали»: поэтому оно и сохраняется как пустая строка, а не откатывается к умолчанию (см.
+    /// ConfigService.LabelText / Database.HasSetting — без этого различия стёртая подпись
+    /// возвращалась бы обратно при каждом чтении).</summary>
+    private void LabelHeadline_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var current = LabelLayout.FromConfig(_services.Cfg);
+        var value = (LabelHeadlineInput.Text ?? "").Trim();
+        if (string.Equals(value, current.HeadlineText, StringComparison.Ordinal)) return;
+
+        (current with { HeadlineText = value }).SaveTo(_services.Cfg);
+        LabelHeadlineInput.Text = LabelLayout.FromConfig(_services.Cfg).HeadlineText;
+        _host.ShowStatus(value.Length == 0
+            ? "Подпись назначения на этикетке очищена"
+            : $"Подпись назначения на этикетке: {value}");
+    }
+
+    private void LabelShowHeadline_Click(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var show = LabelShowHeadlineCheck.IsChecked == true;
+        (LabelLayout.FromConfig(_services.Cfg) with { ShowHeadline = show }).SaveTo(_services.Cfg);
+        _host.ShowStatus(show ? "Подпись назначения печатается" : "Подпись назначения выключена");
+    }
+
+    private void LabelHoleText_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_printingTabFilling) return;
+        var current = LabelLayout.FromConfig(_services.Cfg);
+        var value = (LabelHoleTextInput.Text ?? "").Trim();
+        if (string.Equals(value, current.HoleText, StringComparison.Ordinal)) return;
+
+        (current with { HoleText = value }).SaveTo(_services.Cfg);
+        LabelHoleTextInput.Text = LabelLayout.FromConfig(_services.Cfg).HoleText;
+        _host.ShowStatus(value.Length == 0
+            ? "Код печатается без окошка в центре"
+            : $"Подпись в центре кода: {value}");
     }
 
     private void InstructionBaseUrl_LostFocus(object sender, RoutedEventArgs e)
@@ -1453,7 +1500,9 @@ public partial class SettingsView : UserControl
         var label = LabelPrinter.BuildLabel(layout, "https://example.org/проверка", "Пробная этикетка",
             $"{layout.SizeCaption()} мм, поля {layout.MarginMm:0.##} мм",
             "Если что-то срезано по краю — увеличьте поля или подвиньте макет: кнопка «QR инструкции» на карточке версии.",
-            "ТЕСТ");
+            // Подпись в центре кода берётся настоящая, а не «ТЕСТ»: образец должен показывать ровно ту
+            // этикетку, которая пойдёт на шкаф, вместе с подписью назначения над кодом.
+            layout.EffectiveHoleText());
         var outcome = LabelPrinter.Print(label, _services.Cfg.LabelPrinter(), "Пробная этикетка");
         _host.ShowStatus(outcome.Message);
         if (!outcome.Ok)

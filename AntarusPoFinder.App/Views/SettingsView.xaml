@@ -842,6 +842,24 @@
                                     <TextBox Grid.Column="3" x:Name="LabelHeightInput" Width="80" Height="34"
                                              LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Высота"/>
                                 </Grid>
+
+                                <!-- Подпись назначения. На шкафу наклеек несколько (паспорт, ОТК,
+                                     инструкция), и без строки-пояснения заказчик видит «просто QR,
+                                     название установки и непонятные цифры». Текст общий для
+                                     предприятия, поэтому здесь, у администратора; разово его можно
+                                     поправить и в самом окне «QR инструкции». -->
+                                <TextBlock Text="Подпись назначения на этикетке:" Margin="0,0,0,4"/>
+                                <TextBox x:Name="LabelHeadlineInput" Height="34" Margin="0,0,0,4" MaxLength="60"
+                                         LostFocus="LabelHeadline_LostFocus" KeyDown="PrintingField_KeyDown"
+                                         ToolTip="Строка над кодом: «Инструкция по эксплуатации — наведите камеру». Пусто — строки не будет."/>
+                                <CheckBox x:Name="LabelShowHeadlineCheck" Content="Печатать подпись назначения"
+                                          Margin="0,0,0,10" Click="LabelShowHeadline_Click"/>
+
+                                <TextBlock Text="Подпись в центре фирменного кода (до 6 знаков):" Margin="0,0,0,4"/>
+                                <TextBox x:Name="LabelHoleTextInput" Width="120" HorizontalAlignment="Left" Height="34"
+                                         Margin="0,0,0,10" MaxLength="6"
+                                         LostFocus="LabelHoleText_LostFocus" KeyDown="PrintingField_KeyDown"
+                                         ToolTip="Например «ИНСТ». Пусто — код печатается сплошным, без окошка."/>
                             </StackPanel>
 
                             <TextBlock Text="Принтер этикеток (на этом компьютере):" Margin="0,0,0,4"/>

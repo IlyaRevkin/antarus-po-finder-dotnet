@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
@@ -71,6 +72,7 @@ public static class LabelPrinter
     {
         var v = layout.Clamped();
         plan = LabelPlanner.Plan(v, title, subtitle, caption);
+        plan = WarnAboutModuleSize(plan, qrContent);
 
         var page = new Canvas
         {
@@ -84,11 +86,47 @@ public static class LabelPrinter
 
         if (plan.Frame is { } frame) AddFrame(page, frame);
         if (!plan.Qr.IsEmpty) Place(page, BuildQrVisual(v, qrContent, MmToDiu(plan.Qr.W), holeText), plan.Qr);
+        if (plan.HasHeadline) Place(page, BuildHeadline(plan, v.EffectiveHeadline()), plan.Headline);
         if (plan.HasTitle) Place(page, BuildTexts(plan, title, subtitle), plan.Title);
         if (plan.HasCaption) Place(page, BuildCaption(plan, caption), plan.Caption);
 
         Layout(page, page.Width, page.Height);
         return page;
+    }
+
+    /// <summary>Проверка «возьмёт ли это обычная камера», которую может сделать только App: число
+    /// модулей знает лишь тот, кто уже закодировал ссылку, а QRCoder живёт здесь, а не в Core.
+    /// Молчать нельзя: код на 20 мм с длинной ссылкой выглядит в предпросмотре нормально, а
+    /// телефоном не берётся — ровно та жалоба, из-за которой наклейку и переделывали.</summary>
+    private static LabelPlan WarnAboutModuleSize(LabelPlan plan, string qrContent)
+    {
+        if (plan.Qr.IsEmpty || string.IsNullOrEmpty(qrContent)) return plan;
+
+        int modules;
+        try { modules = QrArt.ModuleCountWithQuietZone(qrContent); }
+        catch (Exception) { return plan; }
+
+        if (LabelPlanner.ModulesAreReadable(plan.Qr.W, modules, out var moduleMm)) return plan;
+
+        var text = $"Клетка кода — {moduleMm:0.00} мм при нужных {LabelPlanner.MinModuleMm:0.0} мм: телефон, скорее всего, " +
+                   "его не возьмёт. Увеличьте наклейку или сторону QR, либо сократите ссылку " +
+                   "(Настройки → Печать, веб-адрес диска инструкций).";
+        return plan with { Warnings = plan.Warnings.Concat(new[] { text }).ToList() };
+    }
+
+    /// <summary>Подпись назначения («Инструкция для заказчика»). Полужирная и во всю ширину — её
+    /// задача объяснить наклейку с одного взгляда, до того как человек полезет за телефоном.</summary>
+    private static FrameworkElement BuildHeadline(LabelPlan plan, string text)
+    {
+        var block = Text(text, plan.HeadlinePt, bold: true);
+        block.TextAlignment = TextAlignment.Center;
+        block.TextTrimming = TextTrimming.CharacterEllipsis;
+        return new Viewbox
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.DownOnly,
+            Child = new StackPanel { Width = MmToDiu(plan.Headline.W), Children = { block } },
+        };
     }
 
     /// <summary>Рамка идёт по границе печатной области, а не по краю этикетки: у самого края её

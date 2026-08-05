@@ -189,4 +189,83 @@ public class EasterEggTests
         Assert.Null(EasterEggPhoto.Import(null, "c:\\где-то\\ф.png"));
         Assert.Null(EasterEggPhoto.Import("", "c:\\где-то\\ф.png"));
     }
+
+    // ── Гифки и видео ─────────────────────────────────────────────────────────
+
+    /// <summary>Пасхалка перестала быть только «фотографией»: гифку и видео показывать надо ИНАЧЕ
+    /// (перелистывание кадров и проигрыватель против одного кадра), поэтому вид содержимого решает
+    /// одно место — по нему же собирается фильтр диалога выбора файла.</summary>
+    [Theory]
+    [InlineData("кот.png", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.JPG", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.jpeg", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.bmp", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.webp", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.tiff", EasterEggPhoto.MediaKind.Image)]
+    [InlineData("кот.gif", EasterEggPhoto.MediaKind.AnimatedImage)]
+    [InlineData("кот.GIF", EasterEggPhoto.MediaKind.AnimatedImage)]
+    [InlineData("кот.mp4", EasterEggPhoto.MediaKind.Video)]
+    [InlineData("кот.MOV", EasterEggPhoto.MediaKind.Video)]
+    [InlineData("кот.avi", EasterEggPhoto.MediaKind.Video)]
+    [InlineData("кот.mkv", EasterEggPhoto.MediaKind.Video)]
+    [InlineData("кот.webm", EasterEggPhoto.MediaKind.Video)]
+    [InlineData("кот.txt", EasterEggPhoto.MediaKind.Unknown)]
+    [InlineData("кот", EasterEggPhoto.MediaKind.Unknown)]
+    [InlineData("", EasterEggPhoto.MediaKind.Unknown)]
+    public void KindOf_TellsPictureFromAnimationFromVideo(string name, EasterEggPhoto.MediaKind expected) =>
+        Assert.Equal(expected, EasterEggPhoto.KindOf(name));
+
+    /// <summary>GIF — отдельный вид, а не «просто картинка»: WPF сам его не анимирует, показывает
+    /// только первый кадр, и без своего перелистывания «гифка» выглядела мёртвой картинкой.</summary>
+    [Fact]
+    public void Gif_IsNotTreatedAsAPlainStillImage() =>
+        Assert.NotEqual(EasterEggPhoto.KindOf("кот.gif"), EasterEggPhoto.KindOf("кот.png"));
+
+    [Fact]
+    public void KindOf_SurvivesGarbagePaths()
+    {
+        Assert.Equal(EasterEggPhoto.MediaKind.Unknown, EasterEggPhoto.KindOf(null));
+        Assert.Equal(EasterEggPhoto.MediaKind.Unknown, EasterEggPhoto.KindOf("   "));
+    }
+
+    /// <summary>Фильтр диалога выбора файла собирается из тех же списков, что и KindOf: выбрать через
+    /// диалог то, что окно показать не сможет, невозможно по построению.</summary>
+    [Fact]
+    public void DialogFilter_OffersExactlyWhatTheViewerCanShow()
+    {
+        var filter = EasterEggPhoto.DialogFilter();
+
+        foreach (var ext in new[] { "*.png", "*.jpg", "*.gif", "*.mp4", "*.mov", "*.webm" })
+            Assert.Contains(ext, filter);
+
+        // Фильтр WinAPI — пары «подпись|маски», значит частей всегда чётное число.
+        Assert.Equal(0, filter.Split('|').Length % 2);
+        // «Все файлы» остаются последней строкой: файл мог прийти с чужим расширением.
+        Assert.EndsWith("*.*", filter);
+    }
+
+    /// <summary>Хранение не зависит от вида содержимого: видео так же копируется на общий диск и
+    /// разворачивается у коллеги от его собственного корня.</summary>
+    [Fact]
+    public void Import_WorksForVideoTheSameWayAsForAPhoto()
+    {
+        var disk = Path.Combine(Path.GetTempPath(), "egg_disk_" + Guid.NewGuid().ToString("N"));
+        var src = Path.Combine(Path.GetTempPath(), "egg_src_" + Guid.NewGuid().ToString("N") + ".mp4");
+        try
+        {
+            Directory.CreateDirectory(disk);
+            File.WriteAllBytes(src, new byte[] { 0, 0, 0, 24 });
+
+            var portable = EasterEggPhoto.Import(disk, src);
+
+            Assert.Equal(Path.Combine(EasterEggPhoto.Subfolder, Path.GetFileName(src)), portable);
+            Assert.True(File.Exists(Path.Combine(disk, portable!)));
+            Assert.Equal(EasterEggPhoto.MediaKind.Video, EasterEggPhoto.KindOf(portable));
+        }
+        finally
+        {
+            try { Directory.Delete(disk, true); } catch { }
+            try { File.Delete(src); } catch { }
+        }
+    }
 }

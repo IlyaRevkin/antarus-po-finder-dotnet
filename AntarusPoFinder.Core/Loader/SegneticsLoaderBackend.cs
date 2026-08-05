@@ -10,38 +10,122 @@ using System.Threading.Tasks;
 
 namespace AntarusPoFinder.Core.Loader;
 
-/// <summary>Находит Automation API Segnetics Loader. Пустая настройка означает встроенную копию
-/// в <c>&lt;папка Searcher&gt;\Loader</c>. Настройка может указывать каталог Loader, GUI exe или
-/// непосредственно Automation exe.</summary>
+/// <summary>Находит Automation API Segnetics Loader. Настройка может указывать каталог Loader, GUI exe
+/// или непосредственно Automation exe.
+///
+/// <b>Ненастроенный путь — не ошибка.</b> Раньше «Загрузить в ПЛК» на машине, где путь в настройках не
+/// задан (или задан неверно — переставили Loader, сменилась буква диска), заканчивалось красным
+/// «Segnetics Loader Automation не найден» и на этом всё: наладчик у шкафа должен был сначала пойти в
+/// настройки. Теперь путей ищется НЕСКОЛЬКО (см. <see cref="Candidates"/>) и берётся первый живой —
+/// прежде всего встроенная копия, которую ставит наш же установщик рядом с программой. Ошибка остаётся
+/// только для случая, когда Loader не нашёлся вообще нигде, и в ней перечислено, где искали.</summary>
 public static class SegneticsLoaderResolver
 {
     public const string AutomationExeName = "SegneticsLoader.Automation.exe";
     public const string GuiExeName = "SegneticsLoader.exe";
     public const string BundledSubfolder = "Loader";
 
+    /// <summary>Встроенная копия — папка <c>Loader</c> рядом с самой программой (её кладёт MSI, см.
+    /// installer/Package.wxs, SegneticsLoaderFeature).</summary>
     public static string DefaultBundledPath =>
         Path.Combine(AppContext.BaseDirectory, BundledSubfolder, AutomationExeName);
 
-    public static string? Resolve(string? configuredPath)
+    /// <summary>Куда MSI ставит программу: <c>%LOCALAPPDATA%\Programs\AntarusPoFinder</c>. Нужен
+    /// портативному exe — запущенный из «Загрузок», рядом с собой встроенного Loader он не имеет, а
+    /// установленная копия на машине обычно есть.</summary>
+    private static string InstalledAppFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", "AntarusPoFinder");
+
+    /// <summary>Все места, где имеет смысл искать Automation, в порядке предпочтения. Пустые/битые
+    /// элементы отсеиваются, повторы убираются — список идёт и в поиск, и в текст ошибки.</summary>
+    public static IReadOnlyList<string> Candidates(string? configuredPath) =>
+        CandidatesFrom(configuredPath, DefaultFallbacks());
+
+    /// <summary>То же самое, но с ЯВНЫМ списком запасных мест. Отдельный вход нужен проверкам: иначе
+    /// результат зависел бы от того, стоит ли на конкретной машине Segnetics Loader своим
+    /// установщиком, и один и тот же тест был бы зелёным у одного и красным у другого.</summary>
+    public static IReadOnlyList<string> CandidatesFrom(string? configuredPath, IEnumerable<string>? fallbacks)
     {
-        var candidate = CandidatePath(configuredPath);
-        return candidate is not null && File.Exists(candidate) ? candidate : null;
+        var list = new List<string>();
+        void Add(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            if (!list.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase))) list.Add(path);
+        }
+
+        Add(FromConfigured(configuredPath));
+        foreach (var path in fallbacks ?? Array.Empty<string>()) Add(path);
+        return list;
     }
 
-    public static string? CandidatePath(string? configuredPath)
+    /// <summary>Запасные места в порядке предпочтения: наша встроенная копия рядом с программой,
+    /// та же копия у установленной версии (нужна портативному exe из «Загрузок») и, последней
+    /// надеждой, обычная установка самого Segnetics Loader своим установщиком.</summary>
+    private static IEnumerable<string> DefaultFallbacks()
+    {
+        yield return DefaultBundledPath;
+        yield return Path.Combine(InstalledAppFolder, BundledSubfolder, AutomationExeName);
+
+        foreach (var programs in new[]
+                 {
+                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                 })
+        {
+            if (string.IsNullOrEmpty(programs)) continue;
+            yield return Path.Combine(programs, "Segnetics", "SegneticsLoader", AutomationExeName);
+            yield return Path.Combine(programs, "SegneticsLoader", AutomationExeName);
+        }
+    }
+
+    public static string? Resolve(string? configuredPath) => FirstExisting(Candidates(configuredPath));
+
+    /// <summary>Первый существующий файл из списка. Недоступная сетевая шара в настройке — не повод
+    /// падать: просто идём дальше по списку.</summary>
+    public static string? FirstExisting(IEnumerable<string> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            try { if (File.Exists(candidate)) return candidate; }
+            catch (Exception) { }
+        }
+        return null;
+    }
+
+    /// <summary>Взят ли запасной путь вместо заданного в настройках. Нужен только для строки в журнале
+    /// операции: наладчик обязан видеть, что грузит встроенным Loader, а не тем, который прописан.</summary>
+    public static bool UsesFallback(string? configuredPath, string resolved) =>
+        FromConfigured(configuredPath) is { } wanted &&
+        !string.Equals(wanted, resolved, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Первый кандидат — то, что человек ИМЕЛ В ВИДУ. Сохранено под прежним именем: на него
+    /// опираются тексты ошибок и тесты.</summary>
+    public static string? CandidatePath(string? configuredPath) => Candidates(configuredPath).FirstOrDefault();
+
+    /// <summary>Путь, вытекающий ИЗ НАСТРОЙКИ. null — настройка пуста или указывает на что-то, что
+    /// Loader-ом быть не может.</summary>
+    public static string? FromConfigured(string? configuredPath)
     {
         var configured = configuredPath?.Trim().Trim('"');
-        if (string.IsNullOrEmpty(configured)) return DefaultBundledPath;
+        if (string.IsNullOrEmpty(configured)) return null;
 
-        if (Directory.Exists(configured) || string.IsNullOrEmpty(Path.GetExtension(configured)))
-            return Path.Combine(configured, AutomationExeName);
+        try
+        {
+            if (Directory.Exists(configured) || string.IsNullOrEmpty(Path.GetExtension(configured)))
+                return Path.Combine(configured, AutomationExeName);
 
-        var fileName = Path.GetFileName(configured);
-        if (string.Equals(fileName, AutomationExeName, StringComparison.OrdinalIgnoreCase))
-            return configured;
+            var fileName = Path.GetFileName(configured);
+            if (string.Equals(fileName, AutomationExeName, StringComparison.OrdinalIgnoreCase))
+                return configured;
 
-        if (string.Equals(fileName, GuiExeName, StringComparison.OrdinalIgnoreCase))
-            return Path.Combine(Path.GetDirectoryName(configured) ?? "", AutomationExeName);
+            if (string.Equals(fileName, GuiExeName, StringComparison.OrdinalIgnoreCase))
+                return Path.Combine(Path.GetDirectoryName(configured) ?? "", AutomationExeName);
+        }
+        catch (Exception)
+        {
+            // Мусор в настройке (недопустимые символы в пути) — тот же случай, что «указано не то».
+        }
 
         return null;
     }

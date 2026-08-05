@@ -329,6 +329,13 @@ public class ConfigService
 
     public void SetLabelFlag(string key, bool value) => Set(key, value ? "true" : "false");
 
+    /// <summary>Текстовая настройка макета этикетки (подпись над кодом, подпись в центре кода).
+    /// Пустая строка в базе — это ЗНАЧЕНИЕ («подписи нет»), а не «настройка не задана»: отличаем их
+    /// по самому факту наличия ключа, иначе стёртую подпись возвращал бы обратно запасной текст.</summary>
+    public string LabelText(string key, string fallback) => _db.HasSetting(key) ? Get(key) : fallback;
+
+    public void SetLabelText(string key, string value) => Set(key, (value ?? "").Trim());
+
     /// <summary>Имя принтера этикеток как его видит Windows. Пусто — принтер по умолчанию.</summary>
     public string LabelPrinter() => Get("label_printer");
     public void SetLabelPrinter(string name) => Set("label_printer", name.Trim());

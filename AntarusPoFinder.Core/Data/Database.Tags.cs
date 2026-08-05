@@ -61,26 +61,34 @@ public partial class Database
 
     private void ReplaceTagInColumn(string table, string oldName, string? newName)
     {
-        var updates = new List<(int Id, string Tags)>();
-        using (var reader = ExecuteReader($"SELECT id, tags FROM {table} WHERE tags IS NOT NULL AND tags != ''"))
+        var updates = new List<(int Id, string? SyncId, string OldTags, string Tags)>();
+        using (var reader = ExecuteReader($"SELECT id, sync_id, tags FROM {table} WHERE tags IS NOT NULL AND tags != ''"))
         {
             while (reader.Read())
             {
                 var id = reader.GetInt32(0);
+                var syncId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var raw = reader.GetString(2);
                 // По целым тегам, а не по словам строки: тег «шкаф управления пожарными насосами»
                 // — это ОДИН тег, и переименование/удаление обязано трогать его целиком (см. TagList).
-                var words = Services.TagString.Parse(reader.GetString(1));
+                var words = Services.TagString.Parse(raw);
                 if (!words.Any(w => w.Equals(oldName, StringComparison.OrdinalIgnoreCase))) continue;
 
                 var newWords = newName is null
                     ? words.Where(w => !w.Equals(oldName, StringComparison.OrdinalIgnoreCase))
                     : words.Select(w => w.Equals(oldName, StringComparison.OrdinalIgnoreCase) ? newName : w);
-                updates.Add((id, Services.TagString.Join(newWords)));
+                updates.Add((id, syncId, raw, Services.TagString.Join(newWords)));
             }
         }
 
-        foreach (var (id, tags) in updates)
+        foreach (var (id, syncId, oldTags, tags) in updates)
+        {
+            // Удаление/переименование тега В СПРАВОЧНИКЕ вычищает его и из самих записей — а значит,
+            // это такое же снятие тега со строки, как правка карточки, и без отметки оно откатилось бы
+            // назад при первой же синхронизации с машиной, которая ещё держит старый набор.
+            RecordRowTagChange(syncId, oldTags, tags);
             ExecuteNonQuery($"UPDATE {table} SET tags = @t WHERE id = @id",
                 cmd => { cmd.Parameters.AddWithValue("@t", tags); cmd.Parameters.AddWithValue("@id", id); });
+        }
     }
 }

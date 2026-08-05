@@ -97,8 +97,9 @@ public class LabelAndStickersTests
         Assert.True(plan.Qr.W / now > plan.Qr.W / before);
     }
 
-    /// <summary>Сторона матрицы БЕЗ тихой зоны — ровно то, что рисует QrArt на этикетке (он вырезает
-    /// вложенные QRCoder-ом 4 модуля поля с каждой стороны и отдаёт их полю самой наклейки).</summary>
+    /// <summary>Сторона матрицы БЕЗ тихой зоны — сам код, по которому и считается его версия. На
+    /// этикетке QrArt рисует его вместе с вложенными QRCoder-ом четырьмя модулями поля с каждой
+    /// стороны (тихая зона входит в визуал кода — см. QrReadabilityAndHeadlineTests).</summary>
     private static int QrModules(string content) =>
         AntarusPoFinder.App.Services.QrArt.Encode(content).ModuleMatrix.Count - 8;
 

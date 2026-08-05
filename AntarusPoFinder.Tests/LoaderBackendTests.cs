@@ -31,27 +31,85 @@ public class LoaderBackendTests
         Assert.Equal(automation, SegneticsLoaderResolver.Resolve(root.Path));
     }
 
+    /// <summary>Мусор в настройке (указан не тот exe) — не приговор: путь из настройки просто не
+    /// попадает в список, и работа идёт запасной копией. Раньше здесь была ошибка «не найден», и
+    /// наладчик у шкафа сначала шёл в настройки — ровно та жалоба, из-за которой поиск и
+    /// расширили.</summary>
     [Fact]
-    public void Resolver_DoesNotReplaceInvalidConfiguredPathWithBundledCopy()
+    public void Resolver_IgnoresUnusableConfiguredPath_AndFallsBackToBundledCopy()
     {
         using var root = new TempRoot();
         var unsupported = Path.Combine(root.Path, "another.exe");
+        var bundled = Path.Combine(root.Path, "Loader", SegneticsLoaderResolver.AutomationExeName);
         File.WriteAllText(unsupported, "MZ");
+        Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
+        File.WriteAllText(bundled, "MZ");
 
-        Assert.Null(SegneticsLoaderResolver.Resolve(unsupported));
-        Assert.Null(SegneticsLoaderResolver.CandidatePath(unsupported));
+        // Настройка отброшена целиком: подставлять «another.exe» вместо Loader нельзя.
+        Assert.Null(SegneticsLoaderResolver.FromConfigured(unsupported));
+        var candidates = SegneticsLoaderResolver.CandidatesFrom(unsupported, new[] { bundled });
+        Assert.Equal(new[] { bundled }, candidates.ToArray());
+        Assert.Equal(bundled, SegneticsLoaderResolver.FirstExisting(candidates));
     }
 
+    /// <summary>Путь настройки идёт ПЕРВЫМ — запасные копии не должны перебивать сознательный выбор
+    /// администратора, пока он рабочий.</summary>
     [Fact]
-    public void Resolver_ReportsAutomationInsideMissingConfiguredDirectory()
+    public void Resolver_PrefersConfiguredPath_OverBundledCopy()
+    {
+        using var root = new TempRoot();
+        var configuredDir = Path.Combine(root.Path, "свой-loader");
+        var configured = Path.Combine(configuredDir, SegneticsLoaderResolver.AutomationExeName);
+        var bundled = Path.Combine(root.Path, "Loader", SegneticsLoaderResolver.AutomationExeName);
+        Directory.CreateDirectory(configuredDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
+        File.WriteAllText(configured, "MZ");
+        File.WriteAllText(bundled, "MZ");
+
+        var candidates = SegneticsLoaderResolver.CandidatesFrom(configuredDir, new[] { bundled });
+
+        Assert.Equal(new[] { configured, bundled }, candidates.ToArray());
+        Assert.Equal(configured, SegneticsLoaderResolver.FirstExisting(candidates));
+        Assert.False(SegneticsLoaderResolver.UsesFallback(configuredDir, configured));
+    }
+
+    /// <summary>Настроенной папки на машине больше нет (переставили Loader, сменилась буква диска) —
+    /// берётся встроенная копия, и вызывающий может об этом сказать в журнале операции.</summary>
+    [Fact]
+    public void Resolver_MissingConfiguredDirectory_UsesFallback_AndSaysSo()
     {
         using var root = new TempRoot();
         var missingDirectory = Path.Combine(root.Path, "moved-loader");
+        var bundled = Path.Combine(root.Path, "Loader", SegneticsLoaderResolver.AutomationExeName);
+        Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
+        File.WriteAllText(bundled, "MZ");
 
-        Assert.Equal(
-            Path.Combine(missingDirectory, SegneticsLoaderResolver.AutomationExeName),
-            SegneticsLoaderResolver.CandidatePath(missingDirectory));
-        Assert.Null(SegneticsLoaderResolver.Resolve(missingDirectory));
+        // То, что человек имел в виду, по-прежнему первое в списке — на нём строится текст ошибки.
+        var wanted = Path.Combine(missingDirectory, SegneticsLoaderResolver.AutomationExeName);
+        var candidates = SegneticsLoaderResolver.CandidatesFrom(missingDirectory, new[] { bundled });
+        Assert.Equal(new[] { wanted, bundled }, candidates.ToArray());
+
+        var resolved = SegneticsLoaderResolver.FirstExisting(candidates);
+        Assert.Equal(bundled, resolved);
+        Assert.True(SegneticsLoaderResolver.UsesFallback(missingDirectory, resolved!));
+    }
+
+    /// <summary>Пустая настройка — это НЕ ошибка: первым же кандидатом идёт встроенная копия рядом с
+    /// программой, и именно её берёт «Загрузить в ПЛК» на машине, где путь никто не задавал.</summary>
+    [Fact]
+    public void Resolver_EmptyConfiguration_LooksForBundledCopyFirst()
+    {
+        Assert.Null(SegneticsLoaderResolver.FromConfigured(""));
+        Assert.Null(SegneticsLoaderResolver.FromConfigured(null));
+
+        Assert.Equal(SegneticsLoaderResolver.DefaultBundledPath, SegneticsLoaderResolver.CandidatePath(null));
+        Assert.Equal(SegneticsLoaderResolver.DefaultBundledPath, SegneticsLoaderResolver.CandidatePath("   "));
+
+        // Установленная копия и обычная установка Loader — тоже в списке, после встроенной.
+        var all = SegneticsLoaderResolver.Candidates(null);
+        Assert.Equal(SegneticsLoaderResolver.DefaultBundledPath, all[0]);
+        Assert.True(all.Count > 1, "запасные пути потерялись — «не найден» вернётся к наладчику");
+        Assert.All(all, p => Assert.EndsWith(SegneticsLoaderResolver.AutomationExeName, p));
     }
 
     [Fact]
@@ -60,12 +118,24 @@ public class LoaderBackendTests
         using var root = new TempRoot();
         var missing = Path.Combine(root.Path, SegneticsLoaderResolver.AutomationExeName);
 
+        // На машине, где Segnetics Loader реально установлен, проверять нечего: фабрика обязана
+        // вернуть рабочий backend, а не ошибку (в этом и смысл запасных путей).
+        if (SegneticsLoaderResolver.Resolve(missing) is not null)
+        {
+            Assert.True(FirmwareLoaderFactory.Create(missing).IsAvailable);
+            return;
+        }
+
         var backend = FirmwareLoaderFactory.Create(missing);
 
         Assert.False(backend.IsAvailable);
         Assert.Equal("Segnetics Loader Automation", backend.Name);
         Assert.Null(backend.DisplayVersion);
+        // В тексте ошибки перечислено, ГДЕ искали: «не найден» без единого пути наладчику ничего
+        // не объясняет.
         Assert.Contains("не найден", backend.UnavailableReason!);
+        Assert.Contains(missing, backend.UnavailableReason!);
+        Assert.Contains(SegneticsLoaderResolver.DefaultBundledPath, backend.UnavailableReason!);
     }
 
     [Theory]
