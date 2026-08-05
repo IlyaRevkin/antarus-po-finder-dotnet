@@ -570,7 +570,7 @@ public static class FirmwareUploadService
             // документ, — наклейку с QR можно печатать и клеить уже сейчас. Настоящей инструкцией
             // она не считается ни одним резолвером, поэтому «инструкция ✓» на карточке не загорится.
             InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath, request.ThirdDiskPath,
-                plan.Version.Raw, stubs, warnings);
+                plan.Version.Raw, stubs, warnings, request.InstructionPublisher);
         }
         string modbusStored = "";
         if (!string.IsNullOrEmpty(request.ModbusMapSourcePath))

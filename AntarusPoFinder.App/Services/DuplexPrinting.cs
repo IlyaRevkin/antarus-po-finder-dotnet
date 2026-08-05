@@ -10,16 +10,19 @@ using AntarusPoFinder.Core.Services;
 namespace AntarusPoFinder.App.Services;
 
 /// <param name="PrinterName">Куда ушло задание; null — принтер определить не удалось.</param>
-/// <param name="DuplexApplied">Удалось ли проставить двустороннюю печать с переворотом относительно
-/// короткого края. false — печать всё равно состоялась, но настройками принтера как есть.</param>
+/// <param name="DuplexApplied">Удалось ли проставить нужный режим печати (буклет для паспорта либо
+/// обычная двусторонняя для инструкции). false — печать всё равно состоялась, но настройками принтера
+/// как есть.</param>
 public readonly record struct DuplexPrintOutcome(string? PrinterName, bool DuplexApplied);
 
-/// <summary>Печать документа с двусторонней печатью и переворотом относительно КОРОТКОГО края.
+/// <summary>Печать документа в одном из двух режимов (см. <see cref="PrintTicketXml"/>): паспорт —
+/// буклетом (две страницы на лист, переворот по короткому краю), инструкция — обычным листом с
+/// двусторонней печатью (переворот по длинному краю).
 ///
-/// Просьба Ильи по паспорту дословно: «важно, чтобы при печати настройки не сбивались: печатать с
-/// двух сторон, разворачивать относительно короткого края». Отправка файла ассоциацией («напечатать
-/// этот PDF») никаких настроек не несёт — печатается тем, что стоит у принтера сейчас, и каждый раз
-/// приходилось лезть в настройки печати руками.
+/// Просьба Ильи дословно: «для паспорта мне нужно как буклет печатать, разворачивая относительно
+/// короткого края, а инструкцию просто как лист с двусторонней печатью». Отправка файла ассоциацией
+/// («напечатать этот PDF») никаких настроек не несёт — печатается тем, что стоит у принтера сейчас, и
+/// каждый раз приходилось лезть в настройки печати руками.
 ///
 /// Как это делается: PDF мы не рисуем сами (его печатает Word/просмотрщик через ассоциацию), поэтому
 /// задать параметры «своему» заданию напрямую нельзя — их неоткуда взять. Зато можно выставить их у
@@ -48,18 +51,36 @@ public static class DuplexPrinting
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    /// <summary>Печатает файл, выставив очереди двустороннюю печать с переворотом относительно
-    /// короткого края. Печать состоится в любом случае: не вышло с настройками — уйдёт как есть,
-    /// вызывающий скажет об этом человеку.</summary>
-    public static DuplexPrintOutcome PrintTwoSidedShortEdge(string path)
+    /// <summary>ПАСПОРТ: печать буклетом (две страницы на лист, переворот по короткому краю). Печать
+    /// состоится в любом случае: не вышло с настройками — уйдёт как есть, вызывающий скажет человеку.</summary>
+    public static DuplexPrintOutcome PrintPassportBooklet(string path) =>
+        PrintWith(path, PrintTicketXml.ApplyPassportBooklet, IsPassportBooklet);
+
+    /// <summary>ИНСТРУКЦИЯ: обычный лист с двусторонней печатью (переворот по длинному краю, одна
+    /// страница на лист). Как и у паспорта, печать идёт в любом случае.</summary>
+    public static DuplexPrintOutcome PrintInstructionDuplex(string path) =>
+        PrintWith(path, PrintTicketXml.ApplyInstructionDuplex, IsInstructionDuplex);
+
+    /// <summary>Буклет паспорта уже выставлен: короткий край И две страницы на лист.</summary>
+    private static bool IsPassportBooklet(string? ticket) =>
+        PrintTicketXml.DuplexOption(ticket) == PrintTicketXml.TwoSidedShortEdge
+        && PrintTicketXml.PagesPerSheet(ticket) == 2;
+
+    /// <summary>Режим инструкции уже выставлен: длинный край И одна страница на лист.</summary>
+    private static bool IsInstructionDuplex(string? ticket) =>
+        PrintTicketXml.DuplexOption(ticket) == PrintTicketXml.TwoSidedLongEdge
+        && PrintTicketXml.PagesPerSheet(ticket) == 1;
+
+    private static DuplexPrintOutcome PrintWith(string path, Func<string?, string> transform,
+        Func<string?, bool> alreadyApplied)
     {
-        var outcome = Apply();
+        var outcome = Apply(transform, alreadyApplied);
         PrintableDocActions.Print(path);
         if (outcome.DuplexApplied && outcome.PrinterName is { } queue) RestoreWhenDone(queue);
         return outcome;
     }
 
-    private static DuplexPrintOutcome Apply()
+    private static DuplexPrintOutcome Apply(Func<string?, string> transform, Func<string?, bool> alreadyApplied)
     {
         try
         {
@@ -70,11 +91,11 @@ public static class DuplexPrinting
             var current = ReadTicket(queue);
             // Уже стоит нужный режим (человек выставил сам или прошлое задание не успело вернуть) —
             // ничего не меняем и, главное, не запоминаем «прежнее» состояние: иначе возврат записал бы
-            // наш же тикет как чужой и после следующей печати всё осталось бы двусторонним навсегда.
-            if (PrintTicketXml.DuplexOption(current) == PrintTicketXml.TwoSidedShortEdge)
+            // наш же тикет как чужой и после следующей печати всё осталось бы в этом режиме навсегда.
+            if (alreadyApplied(current))
                 return new DuplexPrintOutcome(queue.FullName, true);
 
-            if (!WriteTicket(queue, PrintTicketXml.ApplyTwoSidedShortEdge(current)))
+            if (!WriteTicket(queue, transform(current)))
                 return new DuplexPrintOutcome(queue.FullName, false);
 
             if (current is not null) Pending[queue.FullName] = current;

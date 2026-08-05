@@ -26,7 +26,7 @@ namespace AntarusPoFinder.App.Views;
 ///
 /// Две вещи, которые тут важнее всего и легко потерять:
 ///   • длинное название не должно ломать вёрстку (см. <see cref="DocxNameFit"/>);
-///   • печать идёт с двух сторон с переворотом относительно короткого края (см.
+///   • печать идёт буклетом — две страницы на лист, переворот относительно короткого края (см.
 ///     <see cref="DuplexPrinting"/>) — иначе настройки каждый раз приходилось выставлять руками.</summary>
 public partial class PassportPrintWindow : Window
 {
@@ -243,12 +243,12 @@ public partial class PassportPrintWindow : Window
         }
 
         var outcome = _services.Cfg.PassportDuplexShortEdge()
-            ? DuplexPrinting.PrintTwoSidedShortEdge(built.Printable)
+            ? DuplexPrinting.PrintPassportBooklet(built.Printable)
             : PrintAsIs(built.Printable);
 
         _host.ShowStatus(outcome.DuplexApplied
-            ? $"Паспорт отправлен на печать (двусторонняя, разворот по короткому краю): {built.Row.Name}"
-            : $"Паспорт отправлен на печать: {built.Row.Name} — двустороннюю печать выставить не удалось, проверьте настройки принтера");
+            ? $"Паспорт отправлен на печать (буклет: две страницы на лист, переворот по короткому краю): {built.Row.Name}"
+            : $"Паспорт отправлен на печать: {built.Row.Name} — режим буклета выставить не удалось, проверьте настройки принтера");
     }
 
     private static DuplexPrintOutcome PrintAsIs(string path)

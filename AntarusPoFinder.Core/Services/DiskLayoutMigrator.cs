@@ -484,9 +484,17 @@ public static class DiskLayoutMigrator
     /// что правится другой столбец и другим методом БД.</param>
     /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке». null — операции
     /// заглушек просто пропускаются.</param>
+    /// <param name="publisher">Кто выкладывает инструкции на хостинг. Задан вместе с
+    /// <paramref name="firstRoot"/> — после перестройки инструкции и заглушки, легшие на первый диск,
+    /// уходят на хостинг под теми же ключами, что и при обычной загрузке (иначе после перестройки QR
+    /// вёл бы на старые адреса, а заглушек на хостинге не было бы вовсе). null — хостинг не настроен,
+    /// выкладка просто не делается.</param>
+    /// <param name="firstRoot">Корень первого диска — от него считается ключ объекта на хостинге
+    /// (см. <see cref="InstructionPublisher"/>). Нужен только вместе с <paramref name="publisher"/>.</param>
     public static MigrationPlan Apply(MigrationPlan plan, Action<Op>? renamed,
         Action<int, int>? progress = null, Action<Op>? repointed = null,
-        IInstructionStubWriter? stubs = null)
+        IInstructionStubWriter? stubs = null, IInstructionPublisher? publisher = null,
+        string? firstRoot = null)
     {
         var total = plan.Ops.Count;
         var done = 0;
@@ -542,7 +550,57 @@ public static class DiskLayoutMigrator
             progress?.Invoke(++done, total);
         }
 
+        // Выкладка на хостинг — ПОСЛЕ всех операций на диске: к этому моменту инструкции уже
+        // переехали/переименовались, и в папках лежит их конечное состояние. Best-effort, как и вся
+        // выкладка (см. InstructionPublisher): неудача уходит в журнал операции, а не валит перестройку.
+        if (publisher is not null && !string.IsNullOrEmpty(firstRoot))
+            PublishRebuiltInstructions(plan, publisher, firstRoot!);
+
         return plan;
+    }
+
+    /// <summary>Выкладывает на хостинг инструкции и заглушки, легшие при перестройке на ПЕРВЫЙ диск.
+    /// Работает по ПАПКАМ, а не по отдельным файлам: так и ключ считается ровно от раскладки на диске
+    /// (см. <see cref="S3Settings.KeyFor"/>), и переименованные в этом же прогоне файлы уходят под
+    /// своими конечными именами, и каждая папка выкладывается один раз, чем бы её ни затронули
+    /// (копия документа, приведение имён или заглушка). Только папки на первом диске: их зеркала на
+    /// третьем — те же файлы под теми же ключами, второй раз лить незачем.</summary>
+    private static void PublishRebuiltInstructions(MigrationPlan plan, IInstructionPublisher publisher, string firstRoot)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var op in plan.Ops)
+        {
+            if (op.Status != "ok") continue;
+
+            var folder = op.Kind switch
+            {
+                OpKind.InstructionCopy => Path.GetDirectoryName(op.Target),
+                OpKind.RenameInstruction => op.Source,
+                OpKind.PlaceInstructionStub => op.Source,
+                _ => null,
+            };
+            if (string.IsNullOrEmpty(folder) || !IsUnderRoot(folder!, firstRoot)) continue;
+
+            var norm = SafeFullPath(folder!)?.TrimEnd(Path.DirectorySeparatorChar) ?? folder!;
+            if (!seen.Add(norm)) continue;
+
+            var warnings = new List<string>();
+            var url = publisher.Publish(folder!, folder!, firstRoot, warnings);
+            if (warnings.Count > 0) op.Note += " · хостинг: " + string.Join("; ", warnings);
+            else if (url is not null) op.Note += " · выложено на хостинг";
+        }
+    }
+
+    /// <summary>Путь лежит внутри корня первого диска. Сравнение по нормализованным полным путям —
+    /// без него зеркало на третьем диске приняли бы за папку первого.</summary>
+    private static bool IsUnderRoot(string path, string root)
+    {
+        var full = SafeFullPath(path);
+        var rootFull = SafeFullPath(root)?.TrimEnd(Path.DirectorySeparatorChar);
+        if (full is null || string.IsNullOrEmpty(rootFull)) return false;
+        return full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(full.TrimEnd(Path.DirectorySeparatorChar), rootFull, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Переименование внутри одной папки. Отдельно разобран случай «различие только в
@@ -789,5 +847,11 @@ public static class DiskLayoutMigrator
         if (string.IsNullOrWhiteSpace(path)) return false;
         try { return Directory.Exists(path); }
         catch (Exception) { return false; }
+    }
+
+    private static string? SafeFullPath(string path)
+    {
+        try { return Path.GetFullPath(path); }
+        catch (Exception) { return null; }
     }
 }

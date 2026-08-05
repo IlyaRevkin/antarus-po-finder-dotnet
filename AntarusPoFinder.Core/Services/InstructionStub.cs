@@ -254,9 +254,18 @@ public static class InstructionStub
 
     /// <summary>Заглушка и в папку на первом диске, и в её зеркало на третьем — «во все места, где
     /// инструкцию ищут». Третий диск не настроен или недоступен — просто одна папка, как раньше.
-    /// Возвращает число созданных файлов.</summary>
+    /// Возвращает число созданных файлов.
+    ///
+    /// <paramref name="publisher"/> задан — заглушка ТАКЖЕ уходит на хостинг (см.
+    /// <see cref="IInstructionPublisher"/>): наклейку с QR печатают и клеят на шкаф ДО того, как
+    /// инструкцию дописали, и по постоянной ссылке должно открываться хотя бы «в разработке», иначе
+    /// постоянство ссылки не работает. Выкладывается заглушка, лежащая на ПЕРВОМ диске (ключ объекта
+    /// считается от пути на первом диске — единственного одинакового у всех машин); её зеркало на
+    /// третьем — тот же самый файл под тем же ключом, второй раз лить незачем. null (по умолчанию) —
+    /// хостинг не настроен либо вызывающему не нужен, всё работает как раньше.</summary>
     public static int EnsureForVersion(string? folderOnFirstDisk, string? firstRoot, string? thirdRoot,
-        string? versionRaw, IInstructionStubWriter? writer, List<string>? warnings = null)
+        string? versionRaw, IInstructionStubWriter? writer, List<string>? warnings = null,
+        IInstructionPublisher? publisher = null)
     {
         var places = Places(folderOnFirstDisk, firstRoot, thirdRoot);
 
@@ -273,6 +282,16 @@ public static class InstructionStub
         foreach (var folder in places)
             if (EnsureIn(folder, versionRaw, writer, warnings))
                 created++;
+
+        // Выкладываем заглушку с ПЕРВОГО диска — и только что созданную, и уже лежавшую (постоянство
+        // ссылки важно и тогда, когда заглушка была там и до этого вызова).
+        if (publisher is not null && !string.IsNullOrWhiteSpace(folderOnFirstDisk))
+        {
+            var stub = ExistingIn(folderOnFirstDisk);
+            if (stub is not null)
+                publisher.Publish(stub, stub, firstRoot ?? "", warnings ?? new List<string>());
+        }
+
         return created;
     }
 

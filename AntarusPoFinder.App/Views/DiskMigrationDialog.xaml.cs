@@ -145,9 +145,16 @@ public partial class DiskMigrationDialog : Window
             var renames = new List<DiskLayoutMigrator.Op>();
             var repoints = new List<DiskLayoutMigrator.Op>();
 
+            // Инструкции и заглушки, легшие при перестройке на первый диск, уходят на хостинг под теми
+            // же ключами, что и при обычной загрузке — иначе после перестройки QR вёл бы в никуда, а
+            // заглушек «в разработке» на хостинге не появилось бы вовсе. Хостинг не настроен (ключей
+            // нет) — For() вернёт null, и выкладка просто не делается.
+            var publisher = InstructionPublisher.For(_services.Cfg.S3());
+            var firstRoot = _services.Cfg.RootPath();
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
                 await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op),
-                    repointed: op => repoints.Add(op), stubs: new InstructionStubWriter()));
+                    repointed: op => repoints.Add(op), stubs: new InstructionStubWriter(),
+                    publisher: publisher, firstRoot: firstRoot));
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
             // (папку переименовали на диске); правим по каждому известному пути, см. Op.RecordPaths.
