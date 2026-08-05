@@ -77,6 +77,20 @@
                         <TextBox x:Name="CaptionPtInput" Width="80" TextChanged="Layout_Changed"/>
                     </StackPanel>
 
+                    <!-- Подпись назначения. Дословная жалоба: «на этикетке нигде не написано, что
+                         это инструкция для заказчика — просто QR, название установки и непонятные
+                         цифры». Текст правится здесь и в Настройки → Печать, потому что у разных
+                         шкафов он разный («Инструкция для заказчика», «Руководство по эксплуатации»). -->
+                    <CheckBox x:Name="ShowHeadlineCheck" Content="Подпись назначения" Margin="0,0,0,4" Click="Layout_Changed"
+                              ToolTip="Строка над кодом, объясняющая, что это за наклейка и зачем её сканировать."/>
+                    <TextBox x:Name="HeadlineInput" Margin="0,2,0,8" TextChanged="Layout_Changed" MaxLength="60"
+                             ToolTip="Например: «Инструкция по эксплуатации — наведите камеру». Не длиннее двух строк на этикетке."/>
+
+                    <TextBlock Text="Подпись в центре кода" Style="{StaticResource MutedText}"
+                               ToolTip="До шести знаков — плашка в центре кода маленькая. Пусто — кода без окошка."/>
+                    <TextBox x:Name="HoleTextInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8"
+                             TextChanged="Layout_Changed" MaxLength="6"/>
+
                     <CheckBox x:Name="ShowLinkCheck" Content="Печатать ссылку текстом" Margin="0,0,0,4" Click="Layout_Changed"
                               ToolTip="Запасной путь, когда телефон код не берёт. На узкой этикетке можно выключить."/>
                     <CheckBox x:Name="ShowFrameCheck" Content="Рамка по краю" Margin="0,0,0,4" Click="Layout_Changed"/>

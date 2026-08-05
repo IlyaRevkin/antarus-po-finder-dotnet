@@ -44,6 +44,12 @@ public sealed record LabelPlan
 
     public LabelBox Qr { get; init; }
 
+    /// <summary>Подпись назначения («Инструкция для заказчика»). Пустой прямоугольник — подписи нет.
+    /// Отдельным блоком, а не частью заголовка: она объясняет НАЗНАЧЕНИЕ наклейки и должна читаться
+    /// первой, а заголовок с версией — это уже «что именно». Место берётся у текста, а не у кода
+    /// (см. LabelPlanner.Plan): наклейку делают ради того, чтобы код взяла камера.</summary>
+    public LabelBox Headline { get; init; }
+
     /// <summary>Блок «заголовок + подзаголовок». Пустой прямоугольник — текста нет вовсе.</summary>
     public LabelBox Title { get; init; }
 
@@ -53,6 +59,7 @@ public sealed record LabelPlan
     public double TitlePt { get; init; }
     public double SubtitlePt { get; init; }
     public double CaptionPt { get; init; }
+    public double HeadlinePt { get; init; }
     public int CaptionLines { get; init; }
 
     /// <summary>Текст ушёл ПОД код, а не вправо от него: на узкой этикетке рядом с кодом ему просто
@@ -66,12 +73,13 @@ public sealed record LabelPlan
 
     public bool HasTitle => !Title.IsEmpty;
     public bool HasCaption => !Caption.IsEmpty;
+    public bool HasHeadline => !Headline.IsEmpty;
     public string WarningText => string.Join("\n", Warnings);
 
     /// <summary>Главный инвариант: ничего не торчит за печатную область. Проверяется тестами на
     /// переборе настроек — именно его нарушение и давало «QR обрезан, текст улетел».</summary>
     public bool FitsInsideBand() =>
-        Qr.Inside(Band) && Title.Inside(Band) && Caption.Inside(Band) &&
+        Qr.Inside(Band) && Title.Inside(Band) && Caption.Inside(Band) && Headline.Inside(Band) &&
         (Frame is not { } f || f.Inside(Page));
 }
 
@@ -122,6 +130,24 @@ public static class LabelPlanner
     /// нижнего предела (~13 мм) и читался плохо. На крупных размерах (97.5×72) разницы нет — там
     /// ссылка и так укладывается в свои две-три строки задолго до предела доли.</summary>
     public const double CaptionShareMax = 0.3;
+
+    /// <summary>Доля ОБЛАСТИ ТЕКСТА под подпись назначения («Инструкция для заказчика»): не больше
+    /// трети того места, что и так отведено под заголовок. У кода она не забирает ничего (см. Plan),
+    /// но и заголовок с версией задавить не должна — подпись из двух строк уже прочитана.</summary>
+    public const double HeadlineShareMax = 0.34;
+
+    public const int MaxHeadlineLines = 2;
+
+    /// <summary>Кегль подписи назначения относительно заголовка. Чуть мельче названия установки:
+    /// она поясняющая, а не главная.</summary>
+    public const double HeadlinePtFactor = 0.8;
+
+    /// <summary>Сторона одного модуля кода, ниже которой обычная телефонная камера начинает
+    /// промахиваться. На термопринтере 203 dpi точка — 0.125 мм, и на модуль надо минимум три
+    /// точки; 0.4 мм — это те же три точки с запасом на разброс печати. Проверяется отдельно от
+    /// <see cref="MinQrMm"/>: код на 20 мм читается прекрасно, пока в нём 25 модулей, и не читается
+    /// вовсе, когда в него зашили длинную ссылку и модулей стало 57.</summary>
+    public const double MinModuleMm = 0.4;
 
     /// <summary>Ширина «среднего» символа в долях кегля. Segoe UI кириллицей даёт около половины
     /// кегля, жирное начертание — чуть больше. Оценка нужна только чтобы заранее отвести место;
@@ -259,12 +285,42 @@ public static class LabelPlanner
 
         var (captionBox, captionPt, captionLines) = PlanCaption(v, inner, caption, warnings);
 
-        var upper = captionBox.IsEmpty
+        var belowCaption = captionBox.IsEmpty
             ? inner
             : new LabelBox(inner.X, inner.Y, inner.W, Math.Max(0, inner.H - captionBox.H - CaptionGapMm));
 
         var hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(subtitle);
-        var (qr, textArea, stacked) = PlanQrAndText(v, upper, hasText, warnings);
+
+        // ГЛАВНОЕ ПРАВИЛО подписи назначения: она НЕ отнимает место у кода. Наклейку делают ради
+        // того, чтобы код взяла камера телефона, а полоса во всю ширину сверху съедала высоту как
+        // раз у него (на 97.5×72 сторона падала с 55 до 44 мм, на 40×30 — с 15.6 до 12.1, то есть к
+        // самому пределу читаемости). Поэтому подпись садится ПЕРВОЙ СТРОКОЙ в область текста — в
+        // колонку рядом с кодом или в блок под ним, — а свою полосу берёт только там, где текста
+        // нет вовсе и отнимать не у кого.
+        LabelBox qr, textArea, headlineBox = default;
+        bool stacked;
+        var headlinePt = HeadlinePtFor(v);
+
+        if (hasText)
+        {
+            (qr, textArea, stacked) = PlanQrAndText(v, belowCaption, hasText, warnings);
+            if (!textArea.IsEmpty)
+            {
+                (headlineBox, headlinePt) = PlanHeadline(v, textArea, warnings);
+                if (!headlineBox.IsEmpty)
+                    textArea = new LabelBox(textArea.X, textArea.Y + headlineBox.H + CaptionGapMm, textArea.W,
+                        Math.Max(0, textArea.H - headlineBox.H - CaptionGapMm));
+            }
+        }
+        else
+        {
+            (headlineBox, headlinePt) = PlanHeadline(v, belowCaption, warnings);
+            var forCode = headlineBox.IsEmpty
+                ? belowCaption
+                : new LabelBox(belowCaption.X, belowCaption.Y + headlineBox.H + CaptionGapMm, belowCaption.W,
+                    Math.Max(0, belowCaption.H - headlineBox.H - CaptionGapMm));
+            (qr, textArea, stacked) = PlanQrAndText(v, forCode, hasText, warnings);
+        }
 
         var (titleBox, titlePt) = PlanTitle(v, textArea, title, subtitle, warnings);
 
@@ -274,15 +330,63 @@ public static class LabelPlanner
             Band = band,
             Frame = frame,
             Qr = qr,
+            Headline = headlineBox,
             Title = titleBox,
             Caption = captionBox,
             TitlePt = titlePt,
             SubtitlePt = SubtitlePtFor(titlePt),
             CaptionPt = captionPt,
+            HeadlinePt = headlinePt,
             CaptionLines = captionLines,
             Stacked = stacked,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>Сколько модулей в коде помещается на миллиметр — по этому числу и решается, возьмёт
+    /// ли код обычная камера. Отдельная функция, потому что число модулей знает только тот, кто уже
+    /// закодировал ссылку (Core про QRCoder не знает), а предупреждение выдавать надо здесь.</summary>
+    public static bool ModulesAreReadable(double qrSideMm, int modules, out double moduleMm)
+    {
+        moduleMm = modules <= 0 ? 0 : qrSideMm / modules;
+        return modules <= 0 || moduleMm >= MinModuleMm - 0.0001;
+    }
+
+    /// <summary>Кегль подписи назначения — чуть мельче заголовка: она поясняющая, а не главная.</summary>
+    private static double HeadlinePtFor(LabelLayout v) => Math.Max(MinTitlePt, v.TitlePt * HeadlinePtFactor);
+
+    /// <summary>Подпись назначения наклейки — первой строкой в отведённой ей области (см. Plan: это
+    /// область ТЕКСТА, а не полоса, отрезанная у кода). Пустой текст — блока нет вовсе; длинная
+    /// строка сначала ужимается кеглем, а если и это не помогает, честно предупреждаем и отдаём ей
+    /// не больше <see cref="HeadlineShareMax"/> высоты области.</summary>
+    private static (LabelBox Box, double Pt) PlanHeadline(LabelLayout v, LabelBox area, List<string> warnings)
+    {
+        var text = v.EffectiveHeadline();
+        var pt = HeadlinePtFor(v);
+        if (area.IsEmpty || text.Length == 0) return (default, pt);
+
+        var budget = area.H * HeadlineShareMax;
+        var lines = EstimateLines(text, area.W, pt, CharWidthBold);
+        while (pt > MinTitlePt && (lines > MaxHeadlineLines || lines * LineHeightMm(pt) > budget))
+        {
+            pt = Math.Max(MinTitlePt, pt - 0.5);
+            lines = EstimateLines(text, area.W, pt, CharWidthBold);
+        }
+
+        var allowed = Math.Min(MaxHeadlineLines, Math.Max(1, (int)Math.Floor(budget / LineHeightMm(pt))));
+        var shown = Math.Min(lines, allowed);
+        var height = shown * LineHeightMm(pt);
+
+        if (height + CaptionGapMm >= area.H)
+        {
+            warnings.Add("Подпись назначения не помещается — она не напечатается. Увеличьте этикетку или снимите галочку «Подпись назначения».");
+            return (default, pt);
+        }
+
+        if (shown < lines)
+            warnings.Add("Подпись назначения длиннее двух строк — на этикетке поместится только её начало. Сократите текст.");
+
+        return (new LabelBox(area.X, area.Y, area.W, height), pt);
     }
 
     /// <summary>Печатная область. Сдвиг здесь не просто двигает содержимое (так и уезжал текст за

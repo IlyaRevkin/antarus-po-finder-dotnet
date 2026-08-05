@@ -73,6 +73,12 @@ public partial class Database
     public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null,
         string? hmiExecutableHint = null, string? executableHint = null)
     {
+        // Снятие тега обязано пережить синхронизацию: без явной отметки об удалении тег вернулся бы с
+        // первой машины, которая о снятии ещё не знает (см. Database.FlatLists.RecordRowTagChange —
+        // жалоба «удаляю теги, а они снова появляются»). Отметку ставим ДО записи, пока в базе ещё
+        // лежит прежний набор.
+        if (tags is not null) RecordFwTagChange(versionId, tags);
+
         var sets = new List<string>();
         var values = new List<(string, object)>();
         if (description is not null) { sets.Add("description=@description"); values.Add(("@description", description)); }
@@ -88,6 +94,25 @@ public partial class Database
                 cmd.Parameters.AddWithValue(name, value);
             cmd.Parameters.AddWithValue("@id", versionId);
         });
+    }
+
+    /// <summary>Отметить снятые/добавленные теги одной прошивки. Читает прежний набор и sync_id прямо
+    /// перед записью нового — вызывать после UPDATE поздно, прежнего набора уже не будет.</summary>
+    private void RecordFwTagChange(int versionId, string newTags)
+    {
+        string? syncId = null;
+        var oldTags = "";
+        using (var reader = ExecuteReader("SELECT sync_id, tags FROM fw_versions WHERE id=@id",
+                   cmd => cmd.Parameters.AddWithValue("@id", versionId)))
+        {
+            if (reader.Read())
+            {
+                syncId = reader.IsDBNull(0) ? null : reader.GetString(0);
+                oldTags = reader.IsDBNull(1) ? "" : reader.GetString(1);
+            }
+        }
+
+        RecordRowTagChange(syncId, oldTags, newTags);
     }
 
     /// <summary>Файл прошивки переименовали прямо на диске (разовая операция «Перестроить структуру

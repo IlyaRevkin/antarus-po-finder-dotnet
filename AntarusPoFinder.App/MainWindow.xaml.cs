@@ -393,8 +393,10 @@ public partial class MainWindow : Window
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Выберите изображение",
-            Filter = "Изображения (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|Все файлы (*.*)|*.*",
+            Title = "Выберите картинку, гифку или видео",
+            // Список форматов берётся из Core — там же, где решается, чем файл показывать: выбрать в
+            // диалоге то, что окно не откроет, невозможно по построению.
+            Filter = EasterEggPhoto.DialogFilter(),
         };
         if (dlg.ShowDialog() != true) return false;
 

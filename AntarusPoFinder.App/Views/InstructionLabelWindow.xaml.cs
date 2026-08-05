@@ -77,6 +77,9 @@ public partial class InstructionLabelWindow : Window
             ShowLinkCheck.IsChecked = v.ShowLink;
             ShowFrameCheck.IsChecked = v.ShowFrame;
             FancyQrCheck.IsChecked = v.FancyQr;
+            ShowHeadlineCheck.IsChecked = v.ShowHeadline;
+            HeadlineInput.Text = v.HeadlineText;
+            HoleTextInput.Text = v.HoleText;
         }
         finally
         {
@@ -108,6 +111,11 @@ public partial class InstructionLabelWindow : Window
         ShowLink = ShowLinkCheck.IsChecked == true,
         ShowFrame = ShowFrameCheck.IsChecked == true,
         FancyQr = FancyQrCheck.IsChecked == true,
+        ShowHeadline = ShowHeadlineCheck.IsChecked == true,
+        // Текст читается СЫРЫМ, без Clamped-обрезки на каждое нажатие клавиши: иначе набор длинной
+        // подписи обрубался бы прямо под пальцами. Приведение к рабочему виду делает Clamped ниже.
+        HeadlineText = HeadlineInput.Text ?? "",
+        HoleText = HoleTextInput.Text ?? "",
     }.Clamped();
 
     private void Layout_Changed(object sender, RoutedEventArgs e)
@@ -152,7 +160,7 @@ public partial class InstructionLabelWindow : Window
     private FrameworkElement BuildLabel() => BuildLabel(out _);
 
     private FrameworkElement BuildLabel(out LabelPlan plan) =>
-        LabelPrinter.BuildLabel(_layout, _qrContent, _title, _subtitle, _qrContent, "ИНСТ", out plan);
+        LabelPrinter.BuildLabel(_layout, _qrContent, _title, _subtitle, _qrContent, _layout.EffectiveHoleText(), out plan);
 
     // ── Содержимое кода ──────────────────────────────────────────────────────
 

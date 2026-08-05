@@ -201,9 +201,26 @@ public partial class Database
 
     /// <summary>Updates the tags of a param file — tags are shared with fw_versions via the same
     /// `tags` table (see Database.Tags.cs), just stored per-entity as a space-separated string.</summary>
-    public void UpdateParamFileTags(int fileId, string tags) =>
+    public void UpdateParamFileTags(int fileId, string tags)
+    {
+        // Та же отметка о снятии тега, что и у прошивок (см. Database.FlatLists.RecordRowTagChange):
+        // без неё снятый тег вернулся бы с чужой машины. Читаем прежний набор ДО записи нового.
+        string? syncId = null;
+        var oldTags = "";
+        using (var reader = ExecuteReader("SELECT sync_id, tags FROM param_files WHERE id=@id",
+                   cmd => cmd.Parameters.AddWithValue("@id", fileId)))
+        {
+            if (reader.Read())
+            {
+                syncId = reader.IsDBNull(0) ? null : reader.GetString(0);
+                oldTags = reader.IsDBNull(1) ? "" : reader.GetString(1);
+            }
+        }
+        RecordRowTagChange(syncId, oldTags, tags);
+
         ExecuteNonQuery("UPDATE param_files SET tags=@t WHERE id=@id",
             cmd => { cmd.Parameters.AddWithValue("@t", tags); cmd.Parameters.AddWithValue("@id", fileId); });
+    }
 
     // ── Allowed Upload Extensions ─────────────────────────────────────────────
 

@@ -54,11 +54,16 @@ public partial class LoaderDialog : Window
     /// <summary>Пути, по которым реально сохранён собранный .lfs.</summary>
     public IReadOnlyList<string> PublishedLfs { get; private set; } = Array.Empty<string>();
 
-    public LoaderDialog(ConfigService cfg, LoaderJob job)
+    /// <summary>Ответ на вопрос «форматировать ли ПЛК», заданный ДО открытия этого окна (см.
+    /// <see cref="PlcPreparationDialog"/>). null — вопрос не задавали (сборка LFS).</summary>
+    private readonly PlcPreparationAnswer? _preparation;
+
+    public LoaderDialog(ConfigService cfg, LoaderJob job, PlcPreparationAnswer? preparation = null)
     {
         InitializeComponent();
         _cfg = cfg;
         _job = job;
+        _preparation = preparation;
         _isBuild = job.Operation == LoaderOperation.Build;
         _backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
 
@@ -74,7 +79,11 @@ public partial class LoaderDialog : Window
             ? $"Сборка LFS из PSL: {job.VersionName}"
             : $"Загрузка в ПЛК: {job.VersionName}";
 
-        PrepareControllerCheck.IsChecked = cfg.LoaderFormatAndUpdateDefault();
+        // Галочка теперь ПОКАЗЫВАЕТ уже принятое решение (и позволяет передумать перед повтором), а
+        // не принимает его молча за наладчика: вопрос задан отдельным окном до открытия этого.
+        PrepareControllerCheck.IsChecked = _preparation is { } answer
+            ? PlcPreparation.FormatFor(answer)
+            : cfg.LoaderFormatAndUpdateDefault();
         // Подготовка ПЛК относится только к заливке: сборка к контроллеру не подключается вообще.
         if (_isBuild) PrepareControllerCheck.Visibility = Visibility.Collapsed;
 
@@ -92,6 +101,16 @@ public partial class LoaderDialog : Window
             ShowUnavailable();
             return;
         }
+
+        if (_preparation is { } chosen) AppendLog(PlcPreparation.LogLine(chosen));
+
+        // Взяли не тот Loader, что прописан в настройках (или настройки нет вовсе) — наладчик обязан
+        // видеть, чем именно грузит. Раньше это была ошибка «Loader не найден»; теперь — строка в
+        // журнале и рабочая загрузка встроенной копией.
+        if (SegneticsLoaderResolver.Resolve(cfg.LoaderExePath()) is { } resolvedExe &&
+            SegneticsLoaderResolver.UsesFallback(cfg.LoaderExePath(), resolvedExe))
+            AppendLog($"Указанный в настройках Loader недоступен — работаем встроенным: {resolvedExe}",
+                LoaderLogLevel.Warning);
 
         AppendLog(_isBuild
             ? "Исходник будет скопирован в локальную рабочую область; на диск уедет только готовый LFS."
@@ -132,7 +151,19 @@ public partial class LoaderDialog : Window
     private static bool Run(Window? owner, ConfigService cfg, LoaderJob job)
     {
         if (!EnsureAvailable(owner, cfg)) return false;
-        var dialog = new LoaderDialog(cfg, job) { Owner = owner };
+
+        // Вопрос про форматирование — ДО открытия окна операции: окно стартует загрузку само, и
+        // спрашивать внутри него было бы уже поздно (см. PlcPreparation).
+        PlcPreparationAnswer? preparation = null;
+        if (PlcPreparation.ShouldAsk(job.Operation))
+        {
+            var answer = PlcPreparationDialog.Ask(owner, job.VersionName, cfg.LoaderFormatAndUpdateDefault());
+            if (PlcPreparation.IsCancelled(answer)) return false;
+            preparation = answer;
+            cfg.SetLoaderFormatAndUpdateDefault(PlcPreparation.FormatFor(answer));
+        }
+
+        var dialog = new LoaderDialog(cfg, job, preparation) { Owner = owner };
         dialog.ShowDialog();
         return dialog.Succeeded;
     }

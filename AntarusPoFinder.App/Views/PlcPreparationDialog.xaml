@@ -1,0 +1,40 @@
+<Window x:Class="AntarusPoFinder.App.Views.PlcPreparationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Подготовка контроллера"
+        SizeToContent="Height" Width="520" ResizeMode="NoResize"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <!-- Вопрос задаётся ДО запуска загрузки: форматирование стирает проект в контроллере и
+         перешивает ядро, и решать это за наладчика по прошлому выбору нельзя. Кнопки подписаны
+         действиями, а не «Да/Нет»: по «Да» непонятно, что именно случится.
+
+         Заголовок окна — «Подготовка контроллера», а не «Загрузка в ПЛК»: так называется само окно
+         операции, которое откроется следом, и два окна с одинаковым именем путают и человека в
+         панели задач, и живой прогон, который ищет окна по заголовку. -->
+
+    <StackPanel Margin="20">
+        <TextBlock x:Name="QuestionText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <Border Background="{DynamicResource BgCardBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,14">
+            <StackPanel>
+                <TextBlock TextWrapping="Wrap" Margin="0,0,0,6"
+                           Text="Форматирование стирает проект в контроллере и обновляет ядро. Нужно, когда ПЛК новый, когда в нём лежит чужой проект или когда прежняя прошивка ведёт себя странно."/>
+                <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}"
+                           Text="Без форматирования проект просто заменяется — быстрее и не трогает ядро. Если сомневаетесь, выбирайте этот вариант."/>
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="RememberedText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="FormatBtn" Content="Форматировать и обновить ядро" MinWidth="230" Margin="0,0,8,0"
+                    Click="Format_Click"/>
+            <Button x:Name="KeepBtn" Content="Без форматирования" MinWidth="170" Margin="0,0,8,0"
+                    Style="{StaticResource SecondaryButton}" Click="Keep_Click"/>
+            <Button Content="Отмена" MinWidth="90" IsCancel="True" Style="{StaticResource SecondaryButton}"
+                    Click="Cancel_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

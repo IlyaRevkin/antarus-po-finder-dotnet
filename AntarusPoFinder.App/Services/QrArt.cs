@@ -30,28 +30,42 @@ public static class QrArt
     /// помещается — уменьшается подпись (см. <see cref="FitFontSize"/>), а не плашка.</summary>
     public const double CenterHoleRatio = 0.20;
 
-    /// <summary>Тихая зона, которую QRCoder уже вложил в матрицу. Она обязательна для считывания, но
-    /// мы отводим под неё поле самой этикетки, а не пиксели кода — иначе на маленькой наклейке треть
-    /// стороны ушла бы под пустоту.</summary>
-    private const int QuietModules = 4;
+    /// <summary>Тихая зона в модулях — по стандарту ISO/IEC 18004 не меньше четырёх с каждой стороны.
+    ///
+    /// <b>Раньше её здесь ВЫРЕЗАЛИ</b> («под неё отводится поле самой этикетки»), и это и была главная
+    /// причина жалобы «фирменный QR телефоном не считывается». Поле этикетки тихой зоной не работает:
+    /// сразу за кодом идёт рамка наклейки (ShowFrame) или название установки в соседней колонке в 2.5 мм
+    /// — сканер видит тёмное вплотную к коду и не находит его границ. Теперь пустая рамка входит В САМ
+    /// визуал кода: что бы ни стояло рядом на этикетке, четыре модуля белого вокруг есть всегда.</summary>
+    public const int QuietModules = 4;
+
+    /// <summary>Скругление углового маркера в модулях. Оно чисто внешнее: сканер ищет маркер по
+    /// соотношению толщин на разрезе через центр, а скругление углов его не меняет — проверено
+    /// декодером на 0, 0.8 и 1.6 модуля (QrDecoderTests).</summary>
+    public const double FinderCornerRadius = 1.6;
 
     public static QRCodeData Encode(string content) =>
         new QRCodeGenerator().CreateQrCode(string.IsNullOrEmpty(content) ? " " : content,
             QRCodeGenerator.ECCLevel.Q);
+
+    /// <summary>Сколько клеток укладывается по стороне визуала — данные ПЛЮС тихая зона с обеих
+    /// сторон. Именно это число делит сторону наклейки на модули, поэтому по нему и проверяется, не
+    /// стал ли модуль мельче различимого (см. LabelPlanner.MinModuleMm).</summary>
+    public static int ModuleCountWithQuietZone(string content) => Encode(content).ModuleMatrix.Count;
 
     /// <summary>Визуал кода стороной <paramref name="side"/> (в единицах WPF). <paramref name="hole"/>
     /// — что написать в окошке по центру; пустая строка — окна нет вовсе.</summary>
     public static FrameworkElement Build(string content, double side, string hole)
     {
         var matrix = Encode(content).ModuleMatrix;
-        var modules = matrix.Count - 2 * QuietModules;
-        if (modules <= 0) modules = matrix.Count;
-        var step = side / modules;
+        var total = matrix.Count;                    // данные + тихая зона с обеих сторон
+        var modules = total - 2 * QuietModules;      // только сам код
+        if (modules <= 0) { modules = total; }
+        var step = side / total;
 
         var dots = new GeometryGroup { FillRule = FillRule.Nonzero };
         var holeFrom = modules * (0.5 - CenterHoleRatio / 2);
         var holeTo = modules * (0.5 + CenterHoleRatio / 2);
-        var inset = step * 0.08;
 
         for (var y = 0; y < modules; y++)
         {
@@ -62,10 +76,13 @@ public static class QrArt
                 if (IsFinder(x, y, modules)) continue;
                 if (hole.Length > 0 && x + 1 > holeFrom && x < holeTo && y + 1 > holeFrom && y < holeTo) continue;
 
-                // Модуль чуть меньше клетки — между точками остаётся воздух, из-за которого код и
-                // выглядит «точечным», а не сплошной кашей.
-                var rect = new Rect(x * step + inset, y * step + inset, step - 2 * inset, step - 2 * inset);
-                dots.Children.Add(new RectangleGeometry(rect, rect.Width / 2.6, rect.Height / 2.6));
+                // Клетка рисуется ЦЕЛИКОМ, без воздуха по краям. Прежний зазор в 8 % стороны делал код
+                // «точечным», но он же и разрывал связные тёмные области: на 203 dpi каждая точка
+                // теряла по краю по печатной точке, соседние модули переставали смыкаться, и сканеру
+                // доставалась россыпь пятен вместо кода. Фирменный вид держится скруглением углов —
+                // соседние клетки при этом сливаются в скруглённые дорожки, как в любом «rounded QR».
+                var rect = new Rect((x + QuietModules) * step, (y + QuietModules) * step, step, step);
+                dots.Children.Add(new RectangleGeometry(rect, step * 0.25, step * 0.25));
             }
         }
 
@@ -73,9 +90,11 @@ public static class QrArt
         canvas.Children.Add(new Path { Data = dots, Fill = Brushes.Black });
 
         foreach (var (fx, fy) in new[] { (0, 0), (modules - 7, 0), (0, modules - 7) })
-            canvas.Children.Add(Finder(fx * step, fy * step, step));
+            canvas.Children.Add(Finder((fx + QuietModules) * step, (fy + QuietModules) * step, step));
 
-        if (hole.Length > 0) AddHole(canvas, side, step, hole);
+        // Плашка считается от стороны САМОГО КОДА, а не от визуала с тихой зоной: доля выреза
+        // ограничена тем, что восстанавливает коррекция ошибок, и она про модули кода.
+        if (hole.Length > 0) AddHole(canvas, side, modules * step, step, hole);
         return canvas;
     }
 
@@ -84,34 +103,41 @@ public static class QrArt
         (x < 7 && y < 7) || (x >= modules - 7 && y < 7) || (x < 7 && y >= modules - 7);
 
     /// <summary>Угловой маркер: рамка 7×7 толщиной в модуль и залитый квадрат 3×3 внутри. Скругление
-    /// только по контуру — положение и толщина в точности как у обычного кода.</summary>
+    /// только по контуру — положение и толщина в точности как у обычного кода.
+    ///
+    /// <b>Здесь и был главный баг «фирменный QR не читается телефоном».</b> Рамка задавалась
+    /// прямоугольником 6×6 со сдвигом на полмодуля — «обводка рисуется по центру контура, иначе маркер
+    /// вылезет за свои 7 модулей». Для <see cref="Rectangle"/> это неверно: WPF-фигура и так вписывает
+    /// обводку ВНУТРЬ своих Width/Height (контур ужимается на половину толщины сам). В итоге маркер
+    /// выходил шириной не 7 модулей, а 6, да ещё съезжал на полмодуля: горизонтальный разрез через его
+    /// центр давал 1 : 0.5 : 3 : 0.5 : 1 вместо канонического 1 : 1 : 3 : 1 : 1. По этому соотношению
+    /// сканер маркеры и ищет — не найдя их, он не видит кода ВООБЩЕ, сколько ни наводи камеру. Проверено
+    /// настоящим декодером: QrDecoderTests, старая геометрия не читается ни в одном варианте.</summary>
     private static FrameworkElement Finder(double left, double top, double step)
     {
         var group = new Canvas { Width = 7 * step, Height = 7 * step };
         Canvas.SetLeft(group, left);
         Canvas.SetTop(group, top);
 
-        // Обводка рисуется по центру контура, поэтому прямоугольник ужимается на половину толщины с
-        // каждой стороны — иначе маркер вылез бы за свои 7 модулей.
+        // Ровно 7 модулей на сторону: обводку толщиной в модуль Rectangle укладывает внутрь этих 7,
+        // оставляя белое кольцо и 3×3 по центру — то самое соотношение 1 : 1 : 3 : 1 : 1.
         var outer = new Rectangle
         {
-            Width = 6 * step,
-            Height = 6 * step,
-            RadiusX = step * 1.6,
-            RadiusY = step * 1.6,
+            Width = 7 * step,
+            Height = 7 * step,
+            RadiusX = step * FinderCornerRadius,
+            RadiusY = step * FinderCornerRadius,
             Stroke = Brushes.Black,
             StrokeThickness = step,
         };
-        Canvas.SetLeft(outer, step / 2);
-        Canvas.SetTop(outer, step / 2);
         group.Children.Add(outer);
 
         var inner = new Rectangle
         {
             Width = 3 * step,
             Height = 3 * step,
-            RadiusX = step * 0.8,
-            RadiusY = step * 0.8,
+            RadiusX = step * FinderCornerRadius / 2,
+            RadiusY = step * FinderCornerRadius / 2,
             Fill = Brushes.Black,
         };
         Canvas.SetLeft(inner, 2 * step);
@@ -171,9 +197,9 @@ public static class QrArt
         return (plate, border, new Size(free, free));
     }
 
-    private static void AddHole(Canvas canvas, double side, double step, string text)
+    private static void AddHole(Canvas canvas, double side, double codeSide, double step, string text)
     {
-        var (size, border, inner) = HoleGeometry(side, step);
+        var (size, border, inner) = HoleGeometry(codeSide, step);
 
         var box = new Border
         {

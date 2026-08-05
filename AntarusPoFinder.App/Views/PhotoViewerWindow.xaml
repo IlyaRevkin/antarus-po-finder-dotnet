@@ -7,11 +7,15 @@
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
     <Grid>
-        <!-- Uniform: картинка вписывается в окно с сохранением пропорций и масштабируется вместе с
-             ним, без искажений и без обрезки. -->
-        <Image x:Name="Photo" Stretch="Uniform" Margin="12"/>
+        <!-- Uniform: содержимое вписывается в окно с сохранением пропорций и масштабируется вместе с
+             ним, без искажений и без обрезки. Картинка и видео — два разных элемента: показывается
+             всегда ровно один, второй скрыт (см. PhotoViewerWindow.xaml.cs). -->
+        <Image x:Name="Photo" Stretch="Uniform" Margin="12" Visibility="Collapsed"/>
+        <MediaElement x:Name="Video" Stretch="Uniform" Margin="12" Visibility="Collapsed"
+                      LoadedBehavior="Manual" UnloadedBehavior="Stop"
+                      MediaEnded="Video_MediaEnded" MediaFailed="Video_MediaFailed"/>
 
-        <!-- Крестик поверх картинки; Esc закрывает тем же обработчиком (IsCancel). -->
+        <!-- Крестик поверх содержимого; Esc закрывает тем же обработчиком (IsCancel). -->
         <Button Content="✕" Click="Close_Click" IsCancel="True"
                 Width="32" Height="32" FontSize="14"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6"

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,11 +14,14 @@ public static class FirmwareLoaderFactory
         var resolved = SegneticsLoaderResolver.Resolve(configuredPath);
         if (resolved is not null) return new SegneticsLoaderBackend(resolved);
 
-        var candidate = SegneticsLoaderResolver.CandidatePath(configuredPath);
-        var reason = candidate is null
-            ? "В настройках указан неподдерживаемый путь к Segnetics Loader. Укажите папку Loader, " +
-              "SegneticsLoader.exe или SegneticsLoader.Automation.exe."
-            : $"Segnetics Loader Automation не найден: {candidate}";
+        // Не нашлось НИГДЕ — только тогда это ошибка. Перечисляем, где искали: «не найден» без
+        // единого пути ничего наладчику не объясняет, а «укажите путь в настройках» вводит в
+        // заблуждение, когда путь как раз указан, просто по нему уже ничего нет.
+        var searched = SegneticsLoaderResolver.Candidates(configuredPath);
+        var reason = "Segnetics Loader Automation не найден. Искали:\n" +
+                     string.Join("\n", searched.Select(p => "• " + p)) +
+                     "\n\nПереустановите программу (встроенный Loader ставится вместе с ней) или укажите " +
+                     "путь к Loader в «Настройки → Лоадер».";
         return new UnavailableFirmwareLoaderBackend(reason);
     }
 }
