@@ -527,7 +527,10 @@ public partial class EditFirmwareDialog : Window
         {
             RootPath = _services.Cfg.RootPath(),
             ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
-            ThirdDiskShortcuts = _services.Cfg.ThirdDiskShortcuts(),
+            DuplicateInstructionOnFirstDisk = _services.Cfg.DuplicateInstructionOnFirstDisk(),
+            // Доложенная позже инструкция обязана лечь туда же, куда легла бы приложенная сразу, —
+            // в том числе и на хостинг (см. FirmwareAttachmentsRequest).
+            InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),
             GroupName = _names.Value.GroupName,
             SubtypeName = _names.Value.SubtypeName,
             ControllerName = _names.Value.ControllerName,

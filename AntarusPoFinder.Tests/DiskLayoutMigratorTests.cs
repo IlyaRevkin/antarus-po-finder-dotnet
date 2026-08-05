@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,16 +16,6 @@ namespace AntarusPoFinder.Tests;
 /// диск.</summary>
 public class DiskLayoutMigratorTests
 {
-    private sealed class RecordingShortcuts : IShortcutCreator
-    {
-        public List<(string Link, string Target)> Created { get; } = new();
-        public void Create(string shortcutPath, string targetPath, string description)
-        {
-            Created.Add((shortcutPath, targetPath));
-            File.WriteAllText(shortcutPath, "lnk");
-        }
-    }
-
     private static string Touch(string folder, string name)
     {
         Directory.CreateDirectory(folder);
@@ -53,9 +43,9 @@ public class DiskLayoutMigratorTests
     }
 
     private static DiskLayoutMigrator.MigrationInput Input(string root, string? third,
-        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool instructions = false, bool shortcuts = false,
+        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool instructions = false, bool duplicate = false,
         bool fold = false, bool opc = false) =>
-        new(root, third, shortcuts, versions, new DiskLayoutMigrator.MigrationOptions(rename, instructions, fold, opc));
+        new(root, third, duplicate, versions, new DiskLayoutMigrator.MigrationOptions(rename, instructions, fold, opc));
 
     /// <summary>ОПЦ-версия в ПРЕЖНЕЙ раскладке: общая папка «ОПЦ» на уровне подтипа, имя папки —
     /// строка версии. Именно её и переносит этап 5.</summary>
@@ -107,7 +97,7 @@ public class DiskLayoutMigratorTests
         var renames = new List<DiskLayoutMigrator.Op>();
 
         DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })),
-            renames.Add, shortcuts: null);
+            renames.Add);
 
         Assert.True(File.Exists(Path.Combine(dir, "1.0.0004.0003.psl")));
         // Колбэк отдаёт ровно то, чем правятся filename/executable_hint у всех записей этой папки.
@@ -129,7 +119,7 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.PSL");
 
         DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         var name = Path.GetFileName(Directory.EnumerateFiles(dir).Single());
         Assert.Equal("1.0.0004.0003.psl", name);
@@ -212,7 +202,7 @@ public class DiskLayoutMigratorTests
     // ── Переезд инструкций на третий диск ────────────────────────────────────
 
     [Fact]
-    public void Instructions_MoveToThirdDisk_WithShortcutLeftBehind()
+    public void Instructions_MoveToThirdDisk_WithACopyLeftBehind()
     {
         using var root = new TempRoot();
         using var third = new TempRoot();
@@ -220,21 +210,28 @@ public class DiskLayoutMigratorTests
         Touch(instrFolder, "инструкция.pdf");
         Touch(instrFolder, "старая.pdf.lnk");   // ярлык — не документ, его не переносим
 
-        var shortcuts = new RecordingShortcuts();
         var plan = DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, third.Path, Array.Empty<FwVersionRecord>(),
-                rename: false, instructions: true, shortcuts: true)),
-            renamed: null, shortcuts);
+                rename: false, instructions: true, duplicate: true)),
+            renamed: null);
 
         var moved = Path.Combine(third.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Instructions, "инструкция.pdf");
         Assert.True(File.Exists(moved));
-        Assert.False(File.Exists(Path.Combine(instrFolder, "инструкция.pdf")));
-        Assert.Equal(Path.Combine(instrFolder, "инструкция.pdf.lnk"), Assert.Single(shortcuts.Created).Link);
+        // На первом диске остался НАСТОЯЩИЙ документ, а не ярлык на него.
+        var copy = Path.Combine(instrFolder, "инструкция.pdf");
+        Assert.True(File.Exists(copy));
+        Assert.False(File.Exists(copy + ".lnk"));
         Assert.All(plan.Ops, op => Assert.Equal("ok", op.Status));
 
-        // Повторный прогон: переносить больше нечего (ярлык документом не считается).
-        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, third.Path, Array.Empty<FwVersionRecord>(),
-            rename: false, instructions: true, shortcuts: true)).Ops);
+        // Повторный прогон: копия рядом с прошивкой — не повод унести её на третий диск ещё раз,
+        // там уже лежит файл с тем же именем (MoveFile чужое не затирает).
+        var again = DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, third.Path, Array.Empty<FwVersionRecord>(),
+                rename: false, instructions: true, duplicate: true)),
+            renamed: null);
+        Assert.True(File.Exists(moved));
+        Assert.True(File.Exists(copy));
+        Assert.DoesNotContain(again.Ops, op => op.Status == "error");
     }
 
     [Fact]
@@ -265,7 +262,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         var inner = VersionLayout.FirmwareFolder(dir);
         Assert.True(File.Exists(Path.Combine(inner, "1.0.0004.0003.psl")));
@@ -284,7 +281,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)).Ops);
         Assert.Single(Directory.EnumerateFiles(VersionLayout.FirmwareFolder(dir)));
@@ -305,7 +302,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         Assert.Equal("уже перенесён коллегой", File.ReadAllText(Path.Combine(inner, "1.0.0004.0003.psl")));
         Assert.True(File.Exists(Path.Combine(inner, "второй.bin")));
@@ -325,7 +322,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         Assert.True(VersionLayout.HasAllFolders(dir));
         foreach (var slot in VersionLayout.SlotFolderNames)
@@ -347,7 +344,7 @@ public class DiskLayoutMigratorTests
         Assert.Single(plan.Ops);
         Assert.Contains("папки версии", plan.Ops[0].Note);
 
-        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null);
+        DiskLayoutMigrator.Apply(plan, renamed: null);
         Assert.True(VersionLayout.HasAllFolders(dir));
         Assert.Equal("ok", plan.Ops[0].Status);
 
@@ -385,7 +382,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
-            renamed: null, shortcuts: null, repointed: repoints.Add);
+            renamed: null, repointed: repoints.Add);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312_SN00042");
         Assert.True(Directory.Exists(moved));
@@ -412,7 +409,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
         Assert.Equal(before, File.ReadAllText(Path.Combine(moved, ChangelogFile.FileName)));
@@ -431,7 +428,7 @@ public class DiskLayoutMigratorTests
 
         Assert.Single(plan.Ops);
         Assert.Contains(plan.Skipped, s => s.Contains("уже занято"));
-        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null);
+        DiskLayoutMigrator.Apply(plan, renamed: null);
         // Вторая осталась на месте со своим файлом — ничего не потеряно.
         Assert.True(File.Exists(Path.Combine(secondDir, "b.psl")));
     }
@@ -443,7 +440,7 @@ public class DiskLayoutMigratorTests
         var (record, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
 
         var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true));
-        DiskLayoutMigrator.Apply(plan, renamed: null, shortcuts: null, repointed: op => record.DiskPath = op.Target);
+        DiskLayoutMigrator.Apply(plan, renamed: null, repointed: op => record.DiskPath = op.Target);
 
         Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)).Ops);
     }
@@ -459,7 +456,7 @@ public class DiskLayoutMigratorTests
 
         DiskLayoutMigrator.Apply(
             DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true, opc: true)),
-            renamed: null, shortcuts: null);
+            renamed: null);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
         Assert.True(File.Exists(Path.Combine(VersionLayout.FirmwareFolder(moved), "3.0.005.0777.psl")));

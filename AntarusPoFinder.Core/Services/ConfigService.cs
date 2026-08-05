@@ -50,9 +50,32 @@ public class ConfigService
         // Третий диск — только под инструкции (docs/hierarchy-rework-plan.md, Этап 3). Пусто = не
         // настроен, тогда инструкции читаются и пишутся на первом диске, как раньше.
         ["third_disk_path"] = "",
-        // Класть ли на первый диск ярлык .lnk на инструкцию, уехавшую на третий: коллега со старым
-        // клиентом иначе увидит пустую папку «Инструкция» и решит, что инструкции нет вовсе.
-        ["third_disk_shortcuts"] = "true",
+        // Дублировать ли инструкцию, уехавшую на третий диск, настоящей КОПИЕЙ рядом с прошивкой.
+        // Ключ новый: прежний third_disk_shortcuts означал «положить ярлык .lnk» и больше не
+        // читается никем (остаётся в базе безвредным мусором — ровно как easter_photo ниже).
+        // Почему копия, а не ярлык, — см. InstructionStorage: ярлык мёртв на чужой машине, на флешке
+        // и на хостинге, а путь в БД при нём указывал на несуществующий файл.
+        ["instruction_duplicate_on_first_disk"] = "true",
+        // ── Хранилище на хостинге (S3) ───────────────────────────────────────────────────────
+        // Реквизиты от Ивана Герасимова (05.08.2026). Адрес/бакет/регион заполнены сразу, ключей на
+        // тот момент ещё не было — они вписываются в Настройки, когда придёт файл secrets, и до тех
+        // пор выкладка молча не делается (см. S3Settings.CanPublish). Регион у Timeweb — ru-1.
+        ["s3_endpoint"] = "https://s3.twcstorage.ru",
+        ["s3_bucket"] = "amperus",
+        ["s3_region"] = "ru-1",
+        // Префикс внутри бакета. Пусто — раскладка бакета совпадает с раскладкой диска один в один;
+        // выданный Иваном Path «/amperus» совпадает с именем бакета и отдельным префиксом НЕ
+        // является (иначе ключи вышли бы вида amperus/amperus/…).
+        ["s3_prefix"] = "",
+        // Ключи доступа. Пусто = не выданы. Хранятся как пароли: не уезжают в общий конфиг
+        // (ConfigSyncService.SkipSettingsKeys) и лежат зашифрованными — это доступ на ЗАПИСЬ во весь
+        // бакет, а не настройка.
+        ["s3_access_key"] = "",
+        ["s3_secret_key"] = "",
+        // Выключатель выкладки отдельно от ключей: приостановить выкладку, не стирая реквизиты.
+        // Включён по умолчанию — без ключей он всё равно ничего не делает, зато в день, когда ключи
+        // впишут, не придётся вспоминать про вторую галочку.
+        ["s3_publish"] = "true",
         // «Диск перестроен под новую раскладку» (docs/hierarchy-rework-plan.md, этап 4): у версии
         // есть свои «Прошивка» и четыре папки документов. Ставится САМА, когда человек выполнил
         // перестройку диска (DiskMigrationDialog), и синхронизируется — это свойство ОБЩЕГО ДИСКА, а
@@ -279,8 +302,86 @@ public class ConfigService
     public string ThirdDiskPath() => Get("third_disk_path");
     public void SetThirdDiskPath(string path) => Set("third_disk_path", path.Trim());
 
-    public bool ThirdDiskShortcuts() => Get("third_disk_shortcuts").Equals("true", StringComparison.OrdinalIgnoreCase);
-    public void SetThirdDiskShortcuts(bool value) => Set("third_disk_shortcuts", value ? "true" : "false");
+    /// <summary>Дублировать ли инструкцию, уехавшую на третий диск, настоящей копией рядом с
+    /// прошивкой (см. InstructionStorage). Заменяет прежнюю настройку «класть ярлык».</summary>
+    public bool DuplicateInstructionOnFirstDisk() =>
+        Get("instruction_duplicate_on_first_disk").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetDuplicateInstructionOnFirstDisk(bool value) =>
+        Set("instruction_duplicate_on_first_disk", value ? "true" : "false");
+
+    // ── Хранилище на хостинге (S3) ───────────────────────────────────────────────────────────
+
+    public string S3Endpoint() => Get("s3_endpoint");
+    public void SetS3Endpoint(string url) => Set("s3_endpoint", url.Trim().TrimEnd('/'));
+
+    public string S3Bucket() => Get("s3_bucket");
+    public void SetS3Bucket(string bucket) => Set("s3_bucket", bucket.Trim().Trim('/'));
+
+    public string S3Region() => Get("s3_region");
+    public void SetS3Region(string region) => Set("s3_region", region.Trim());
+
+    public string S3Prefix() => Get("s3_prefix");
+    public void SetS3Prefix(string prefix) => Set("s3_prefix", prefix.Trim().Trim('/'));
+
+    public string S3AccessKey() => Get("s3_access_key");
+    public void SetS3AccessKey(string key) => Set("s3_access_key", key.Trim());
+
+    /// <summary>Secret Access Key. Хранится зашифрованным тем же способом, что и общий конфиг на
+    /// сетевой шаре (<see cref="ConfigFileCrypto"/>), и по той же причине: чтобы значение не читалось
+    /// глазами у того, кто открыл файл базы. Это защита от случайного взгляда, а НЕ от того, у кого
+    /// есть сам exe — ключ шифрования лежит внутри программы (осознанный компромисс, разобранный в
+    /// комментарии ConfigFileCrypto). Настоящая защита здесь другая: ключ не уезжает в общий конфиг
+    /// (ConfigSyncService.SkipSettingsKeys), поэтому он есть только на тех машинах, где его вписали.
+    ///
+    /// Значения, сохранённые до появления шифрования (или вписанные в базу руками), читаются как
+    /// есть — иначе однажды вписанный ключ перестал бы работать после обновления программы.</summary>
+    public string S3SecretKey()
+    {
+        var stored = Get("s3_secret_key");
+        if (string.IsNullOrEmpty(stored)) return "";
+        if (!stored.StartsWith(EncryptedPrefix, StringComparison.Ordinal)) return stored;
+
+        try
+        {
+            var data = Convert.FromBase64String(stored[EncryptedPrefix.Length..]);
+            return ConfigFileCrypto.TryDecrypt(data) ?? "";
+        }
+        catch (FormatException)
+        {
+            // Строка испорчена — вести себя надо как при незаданном ключе (выкладка выключится и
+            // скажет «не заданы ключи доступа»), а не падать при каждом обращении к настройкам.
+            return "";
+        }
+    }
+
+    public void SetS3SecretKey(string secret)
+    {
+        var value = (secret ?? "").Trim();
+        Set("s3_secret_key", value.Length == 0
+            ? ""
+            : EncryptedPrefix + Convert.ToBase64String(ConfigFileCrypto.Encrypt(value)));
+    }
+
+    /// <summary>Метка «дальше зашифрованное значение» — по ней же отличается ключ, вписанный в базу
+    /// руками до появления шифрования.</summary>
+    private const string EncryptedPrefix = "enc:";
+
+    public bool S3Publish() => Get("s3_publish").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetS3Publish(bool value) => Set("s3_publish", value ? "true" : "false");
+
+    /// <summary>Все реквизиты хостинга одним значением — единственное место, которое их собирает,
+    /// чтобы «настроен ли хостинг» считалось одинаково и в настройках, и на пути загрузки версии.
+    /// Веб-адрес берётся из уже существующей настройки печати этикеток (instruction_base_url): это
+    /// один и тот же адрес — тот, что уходит в QR-код и по которому файл открывается с телефона.</summary>
+    public S3Settings S3() => new(
+        Endpoint: S3Endpoint(),
+        Bucket: S3Bucket(),
+        Region: S3Region(),
+        Prefix: S3Prefix(),
+        AccessKey: S3AccessKey(),
+        SecretKey: S3SecretKey(),
+        WebUrl: InstructionBaseUrl(),
+        Enabled: S3Publish());
 
     /// <summary>Диск уже перестроен под раскладку «пять папок внутри версии» (этап 4). Пока false,
     /// новая версия рождается ровно так же, как рождалась всегда — файл прошивки в корне папки

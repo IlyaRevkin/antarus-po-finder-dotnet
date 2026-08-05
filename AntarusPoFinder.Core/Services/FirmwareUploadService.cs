@@ -66,8 +66,14 @@ public class FirmwareUploadRequest
     /// Пусто/недоступен — инструкция ложится на первый диск, как раньше. См. InstructionStorage.</summary>
     public string ThirdDiskPath { get; set; } = "";
 
-    /// <summary>Класть ли на первом диске ярлык на уехавшую инструкцию (ConfigService.ThirdDiskShortcuts()).</summary>
-    public bool ThirdDiskShortcuts { get; set; } = true;
+    /// <summary>Дублировать ли уехавшую на третий диск инструкцию настоящей копией рядом с прошивкой
+    /// (ConfigService.DuplicateInstructionOnFirstDisk()). Раньше вместо копии клался ярлык — почему
+    /// от него отказались, см. InstructionStorage.</summary>
+    public bool DuplicateInstructionOnFirstDisk { get; set; } = true;
+
+    /// <summary>Кто выкладывает копию инструкции на хостинг (S3), если он настроен. null — не
+    /// настроен или вызывающему не нужен: выкладки не происходит, всё остальное как прежде.</summary>
+    public IInstructionPublisher? InstructionPublisher { get; set; }
 
     /// <summary>Диск перестроен под новую раскладку (ConfigService.DiskLayoutV2()) — новая версия
     /// заводится с пятью своими папками, файл прошивки ложится в «Прошивка», а карты/инструкция/HMI —
@@ -551,8 +557,8 @@ public static class FirmwareUploadService
             try
             {
                 instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
-                    request.RootPath, request.ThirdDiskPath, request.ThirdDiskShortcuts, shortcuts, warnings,
-                    plan.Version.Raw).StoredPath;
+                    request.RootPath, request.ThirdDiskPath, request.DuplicateInstructionOnFirstDisk, warnings,
+                    plan.Version.Raw, request.InstructionPublisher).StoredPath;
             }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }

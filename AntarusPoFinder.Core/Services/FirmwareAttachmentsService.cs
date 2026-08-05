@@ -15,11 +15,13 @@ public class FirmwareAttachmentsRequest
 {
     public string RootPath { get; set; } = "";
 
-    /// <summary>Корень третьего диска (только инструкции) и надо ли класть ярлык на первом — те же
-    /// настройки, что и при загрузке новой версии, чтобы доложенная инструкция ложилась туда же,
-    /// куда легла бы приложенная сразу. См. InstructionStorage.</summary>
+    /// <summary>Корень третьего диска (только инструкции), надо ли дублировать её копией рядом с
+    /// прошивкой и кто выкладывает её на хостинг — те же настройки, что и при загрузке новой версии,
+    /// чтобы доложенная инструкция ложилась туда же, куда легла бы приложенная сразу. См.
+    /// InstructionStorage.</summary>
     public string ThirdDiskPath { get; set; } = "";
-    public bool ThirdDiskShortcuts { get; set; } = true;
+    public bool DuplicateInstructionOnFirstDisk { get; set; } = true;
+    public IInstructionPublisher? InstructionPublisher { get; set; }
 
     public string GroupName { get; set; } = "";
     public string SubtypeName { get; set; } = "";
@@ -188,13 +190,14 @@ public static class FirmwareAttachmentsService
             () => SlotFolder(HierarchyFolders.IoMap), applied, warnings);
         string? modbus = Resolve("Карта modbus", request.ModbusMapSourcePath, record.ModbusMapPath,
             () => SlotFolder(HierarchyFolders.Modbus), applied, warnings);
-        // Инструкция копируется не тем же Resolve, что «карты»: у неё есть свой диск (третий) и
-        // ярлык-заглушка на первом — вся эта развилка живёт в InstructionStorage, здесь только
-        // подставляется способ копирования.
+        // Инструкция копируется не тем же Resolve, что «карты»: у неё есть свой диск (третий),
+        // копия рядом с прошивкой и выкладка на хостинг — вся эта развилка живёт в
+        // InstructionStorage, здесь только подставляется способ копирования.
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
             () => SlotFolder(HierarchyFolders.Instructions), applied, warnings,
             copy: (src, folder) => InstructionStorage.Copy(src, folder, root, request.ThirdDiskPath,
-                request.ThirdDiskShortcuts, shortcuts, warnings, record.VersionRaw).StoredPath);
+                request.DuplicateInstructionOnFirstDisk, warnings, record.VersionRaw,
+                request.InstructionPublisher).StoredPath);
 
         // Ссылку на инструкцию убрали — папка снова остаётся без документа, и вместо пустоты в ней
         // должна лежать заглушка (см. InstructionStub). Ровно тот же случай, что и загрузка версии

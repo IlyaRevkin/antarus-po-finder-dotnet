@@ -56,8 +56,9 @@ public static class DiskLayoutMigrator
         /// <summary>Перенести файл инструкции на третий диск.</summary>
         MoveInstruction,
 
-        /// <summary>Положить на первом диске ярлык на уехавшую инструкцию.</summary>
-        InstructionShortcut,
+        /// <summary>Положить на первом диске КОПИЮ уехавшей инструкции — настоящий документ рядом с
+        /// прошивкой, а не ярлык на него (см. InstructionStorage: почему отказались от .lnk).</summary>
+        InstructionCopy,
 
         /// <summary>Этап 4: собрать файлы прошивки в подпапку «Прошивка» внутри папки версии. Имя
         /// самой папки версии не меняется — значит disk_path остаётся валидным у всех коллег.</summary>
@@ -145,7 +146,9 @@ public static class DiskLayoutMigrator
     public sealed record MigrationInput(
         string Root,
         string? ThirdRoot,
-        bool CreateShortcuts,
+        /// <summary>Класть ли рядом с прошивкой копию инструкции, уехавшей на третий диск (прежде
+        /// здесь клался ярлык — см. InstructionStorage, почему от него отказались).</summary>
+        bool DuplicateOnFirstDisk,
         IReadOnlyList<FwVersionRecord> Versions,
         MigrationOptions Options);
 
@@ -444,7 +447,9 @@ public static class DiskLayoutMigrator
 
             foreach (var file in TopLevelFiles(folder))
             {
-                // Ярлык — не документ: он и остаётся на первом диске указателем на уехавший файл.
+                // Ярлык — не документ. Раньше такие оставались на первом диске указателями на
+                // уехавший файл; теперь их место занимает копия документа, а сами ярлыки убираются
+                // при её укладке (см. OpKind.InstructionCopy).
                 if (DocFileResolver.IsShortcut(file)) continue;
 
                 var target = Path.Combine(mirror, Path.GetFileName(file));
@@ -455,13 +460,13 @@ public static class DiskLayoutMigrator
                     Target = target,
                     Note = Path.GetFileName(file),
                 });
-                if (input.CreateShortcuts)
+                if (input.DuplicateOnFirstDisk)
                     ops.Add(new Op
                     {
-                        Kind = OpKind.InstructionShortcut,
+                        Kind = OpKind.InstructionCopy,
                         Source = target,
-                        Target = Path.Combine(folder, Path.GetFileName(file) + ".lnk"),
-                        Note = "чтобы у коллеги со старым клиентом папка не выглядела пустой",
+                        Target = Path.Combine(folder, Path.GetFileName(file)),
+                        Note = "копия рядом с прошивкой — папка версии остаётся самодостаточной",
                     });
             }
         }
@@ -473,7 +478,6 @@ public static class DiskLayoutMigrator
     /// filename/executable_hint у всех записей этой папки (Op.RecordPaths, Op.OldName, Op.NewName).
     /// Отдельным колбэком, потому что Core-слой миграции про базу ничего не знает и работать должен
     /// и в тестах без неё.</param>
-    /// <param name="shortcuts">Чем создавать .lnk. null — ярлыки просто не создаются.</param>
     /// <param name="progress">Сколько операций выполнено — для индикатора; зовётся из рабочего потока.</param>
     /// <param name="repointed">Зовётся после КАЖДОГО удавшегося переноса ОПЦ — вызывающий переписывает
     /// disk_path записи (Op.FwVersionId, Op.Target). Отдельно от <paramref name="renamed"/>, потому
@@ -481,7 +485,7 @@ public static class DiskLayoutMigrator
     /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке». null — операции
     /// заглушек просто пропускаются.</param>
     public static MigrationPlan Apply(MigrationPlan plan, Action<Op>? renamed,
-        IShortcutCreator? shortcuts, Action<int, int>? progress = null, Action<Op>? repointed = null,
+        Action<int, int>? progress = null, Action<Op>? repointed = null,
         IInstructionStubWriter? stubs = null)
     {
         var total = plan.Ops.Count;
@@ -502,10 +506,12 @@ public static class DiskLayoutMigrator
                         op.Status = MoveFile(op.Source, op.Target) ? "ok" : "skip";
                         break;
 
-                    case OpKind.InstructionShortcut:
-                        if (shortcuts is null || !File.Exists(op.Source)) { op.Status = "skip"; break; }
+                    case OpKind.InstructionCopy:
+                        if (!File.Exists(op.Source)) { op.Status = "skip"; break; }
                         Directory.CreateDirectory(Path.GetDirectoryName(op.Target)!);
-                        shortcuts.Create(op.Target, op.Source, "Инструкция лежит на диске инструкций");
+                        File.Copy(op.Source, op.Target, overwrite: true);
+                        // Ярлык, оставшийся от прежних перестроек, рядом с копией уже не нужен.
+                        DeleteIfExists(op.Target + ".lnk");
                         op.Status = "ok";
                         break;
 
@@ -519,7 +525,7 @@ public static class DiskLayoutMigrator
                         break;
 
                     case OpKind.RenameInstruction:
-                        op.Status = RenameInstructionsIn(op, shortcuts) ? "ok" : "skip";
+                        op.Status = RenameInstructionsIn(op) ? "ok" : "skip";
                         break;
 
                     case OpKind.PlaceInstructionStub:
@@ -614,7 +620,7 @@ public static class DiskLayoutMigrator
     /// оказался бы устаревшим. Идемпотентно — уже канонические имена не трогаются, повторный прогон
     /// не делает ничего. Op.Note дополняется тем, что реально переименовали: журнал операции должен
     /// отвечать «что именно поменяли», а не только «в какой папке».</summary>
-    private static bool RenameInstructionsIn(Op op, IShortcutCreator? shortcuts)
+    private static bool RenameInstructionsIn(Op op)
     {
         if (!SafeDirExists(op.Source)) return false;
 
@@ -630,7 +636,7 @@ public static class DiskLayoutMigrator
             if (string.Equals(after, file, StringComparison.Ordinal)) continue;
 
             renamed.Add($"{Path.GetFileName(file)} → {Path.GetFileName(after)}");
-            if (RepointShortcut(op.PairedFolder, file, after, shortcuts)) renamed.Add("ярлык переложен");
+            if (RenameDuplicate(op.PairedFolder, file, after)) renamed.Add("копия рядом с прошивкой переименована");
         }
 
         if (removedStub) renamed.Add("убрана заглушка «в разработке» — документ приложили");
@@ -639,37 +645,40 @@ public static class DiskLayoutMigrator
         return true;
     }
 
-    /// <summary>Переложить ярлык на первом диске вслед за переименованием файла на третьем. Без
-    /// этого один и тот же прогон сам себе ломает результат: инструкции уносятся на третий диск
-    /// (<see cref="OpKind.MoveInstruction"/>) и на первом остаётся «имя файла + .lnk», а следом
-    /// приведение имён переименовывает уже уехавший файл — и ярлык, положенный минуту назад,
-    /// указывает в никуда.
+    /// <summary>Переименовать копию на первом диске вслед за переименованием документа на третьем.
+    /// Без этого один и тот же прогон сам себе ломает результат: инструкции уносятся на третий диск
+    /// (<see cref="OpKind.MoveInstruction"/>), рядом с прошивкой остаётся копия под прежним именем, а
+    /// следом приведение имён переименовывает уже уехавший файл — и путь, записанный в БД (он
+    /// считается заменой корня, см. InstructionStorage), указывает на копию, которой под этим именем
+    /// больше нет.
     ///
-    /// Не вышло создать новый ярлык (нечем — <paramref name="shortcuts"/> = null в тестах, папка
-    /// недоступна) — старый всё равно удаляем: битый указатель хуже, чем его отсутствие, а сам
-    /// документ на месте и читается напрямую с третьего диска.</summary>
-    private static bool RepointShortcut(string pairedFolder, string oldFile, string newFile, IShortcutCreator? shortcuts)
+    /// Копии рядом нет — ничего не делаем: значит третьего диска у этой машины не было и документ
+    /// всё это время лежал на первом, его уже переименовали как основной.</summary>
+    private static bool RenameDuplicate(string pairedFolder, string oldFile, string newFile)
     {
         if (string.IsNullOrWhiteSpace(pairedFolder) || !SafeDirExists(pairedFolder)) return false;
 
-        var oldLink = Path.Combine(pairedFolder, Path.GetFileName(oldFile) + ".lnk");
-        if (!File.Exists(oldLink)) return false;
+        var oldCopy = Path.Combine(pairedFolder, Path.GetFileName(oldFile));
+        var newCopy = Path.Combine(pairedFolder, Path.GetFileName(newFile));
+        // Ярлык от прежних версий программы рядом с документом смысла не имеет — убираем заодно,
+        // независимо от того, есть ли сама копия.
+        DeleteIfExists(oldCopy + ".lnk");
 
-        try { File.Delete(oldLink); }
-        catch (Exception) { return false; }
+        if (!File.Exists(oldCopy)) return false;
+        // Одноимённый файл в цели (повторный прогон, копия уже переименована) — не затираем чужое:
+        // документ на месте под нужным именем, а лишний старый файл уйдёт следующим прогоном.
+        if (File.Exists(newCopy) && !string.Equals(oldCopy, newCopy, StringComparison.OrdinalIgnoreCase))
+            return false;
 
-        if (shortcuts is null) return true;
-        try
-        {
-            shortcuts.Create(Path.Combine(pairedFolder, Path.GetFileName(newFile) + ".lnk"), newFile,
-                "Инструкция лежит на диске инструкций");
-        }
-        catch (Exception)
-        {
-            // Ярлык — удобство для коллеги со старым клиентом, а не условие работы: не создался,
-            // значит папка на первом диске просто пустая, как и была бы без третьего диска вовсе.
-        }
-        return true;
+        return RenameFile(oldCopy, newCopy);
+    }
+
+    /// <summary>Удалить файл, если он есть. Неудача молча проглатывается: всюду, где это зовётся,
+    /// речь про уборку ярлыка-пережитка рядом с уже положенным документом — документ важнее.</summary>
+    private static void DeleteIfExists(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception) { /* косметика */ }
     }
 
     /// <summary>Этап 5 на диске: перенести папку ОПЦ-версии в «ОПЦ» её контроллера под именем

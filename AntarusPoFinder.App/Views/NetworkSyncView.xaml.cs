@@ -92,8 +92,9 @@ public partial class NetworkSyncView : UserControl
         RootPathInput.Text = _services.Cfg.RootPath();
         SecondDiskInput.Text = _services.Cfg.SecondDiskPath();
         ThirdDiskInput.Text = _services.Cfg.ThirdDiskPath();
-        ThirdDiskShortcutsCheck.IsChecked = _services.Cfg.ThirdDiskShortcuts();
+        InstructionDuplicateCheck.IsChecked = _services.Cfg.DuplicateInstructionOnFirstDisk();
         RefreshThirdDiskStatus();
+        LoadS3();
         InspectionFolderInput.Text = _services.Cfg.Get("inspection_folder");
 
         PushIntervalInput.Text = _services.Cfg.ConfigPushIntervalMin().ToString();
@@ -192,10 +193,13 @@ public partial class NetworkSyncView : UserControl
         RefreshThirdDiskStatus();
     }
 
-    private void ThirdDiskShortcuts_Click(object sender, RoutedEventArgs e)
+    private void InstructionDuplicate_Click(object sender, RoutedEventArgs e)
     {
-        _services.Cfg.SetThirdDiskShortcuts(ThirdDiskShortcutsCheck.IsChecked == true);
-        _host.ShowStatus("Настройка ярлыков сохранена", category: NotificationCategory.Sync);
+        var on = InstructionDuplicateCheck.IsChecked == true;
+        _services.Cfg.SetDuplicateInstructionOnFirstDisk(on);
+        _host.ShowStatus(on
+            ? "Копия инструкции будет ложиться рядом с прошивкой"
+            : "Инструкция будет лежать только на третьем диске", category: NotificationCategory.Sync);
     }
 
     /// <summary>Строка под полем: настроен ли третий диск и доступен ли он ПРЯМО СЕЙЧАС. Именно
@@ -215,6 +219,125 @@ public partial class NetworkSyncView : UserControl
         ThirdDiskStatus.Text = exists
             ? "Диск доступен — новые инструкции будут ложиться сюда."
             : "Диск сейчас недоступен — до его появления инструкции будут ложиться на первый диск.";
+    }
+
+    // ── Хранилище на хостинге (S3) ────────────────────────────────────────────
+    // Реквизиты хранилища выданы отдельно от ключей (ключи обещаны файлом secrets позже), поэтому
+    // страница обязана быть работоспособной с пустыми ключами: адрес заполнен, вписать ключи можно
+    // в любой день, ничего не переустанавливая. Сохранение — по уходу фокуса и по Enter, как у путей
+    // выше: отдельной кнопки «Сохранить» на этой странице нет нигде, и заводить её только здесь
+    // значило бы, что часть полей сохраняется сама, а часть нет.
+
+    private void LoadS3()
+    {
+        S3EndpointInput.Text = _services.Cfg.S3Endpoint();
+        S3BucketInput.Text = _services.Cfg.S3Bucket();
+        S3RegionInput.Text = _services.Cfg.S3Region();
+        S3PrefixInput.Text = _services.Cfg.S3Prefix();
+        S3AccessKeyInput.Text = _services.Cfg.S3AccessKey();
+        S3SecretKeyInput.Password = _services.Cfg.S3SecretKey();
+        S3PublishCheck.IsChecked = _services.Cfg.S3Publish();
+        RefreshS3Status();
+    }
+
+    private void S3Field_LostFocus(object sender, RoutedEventArgs e) => SaveS3Fields();
+
+    private void S3Field_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        SaveS3Fields();
+        SaveS3Secret();
+    }
+
+    private void S3Secret_LostFocus(object sender, RoutedEventArgs e) => SaveS3Secret();
+
+    private void SaveS3Fields()
+    {
+        var changed =
+            Save(S3EndpointInput.Text, _services.Cfg.S3Endpoint(), _services.Cfg.SetS3Endpoint) |
+            Save(S3BucketInput.Text, _services.Cfg.S3Bucket(), _services.Cfg.SetS3Bucket) |
+            Save(S3RegionInput.Text, _services.Cfg.S3Region(), _services.Cfg.SetS3Region) |
+            Save(S3PrefixInput.Text, _services.Cfg.S3Prefix(), _services.Cfg.SetS3Prefix) |
+            Save(S3AccessKeyInput.Text, _services.Cfg.S3AccessKey(), _services.Cfg.SetS3AccessKey);
+
+        if (!changed) return;
+        _host.ShowStatus("Реквизиты хранилища сохранены", category: NotificationCategory.Sync);
+        RefreshS3Status();
+
+        static bool Save(string typed, string current, Action<string> set)
+        {
+            var value = typed.Trim();
+            if (string.Equals(value, current, StringComparison.Ordinal)) return false;
+            set(value);
+            return true;
+        }
+    }
+
+    /// <summary>Secret Access Key сохраняется отдельно от остальных полей: он лежит зашифрованным, и
+    /// сравнить «изменилось ли» можно только с расшифрованным значением, а не с текстом в базе.</summary>
+    private void SaveS3Secret()
+    {
+        var typed = S3SecretKeyInput.Password.Trim();
+        if (string.Equals(typed, _services.Cfg.S3SecretKey(), StringComparison.Ordinal)) return;
+        _services.Cfg.SetS3SecretKey(typed);
+        _host.ShowStatus("Ключ доступа к хранилищу сохранён", category: NotificationCategory.Sync);
+        RefreshS3Status();
+    }
+
+    private void S3Publish_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetS3Publish(S3PublishCheck.IsChecked == true);
+        RefreshS3Status();
+    }
+
+    /// <summary>Строка под кнопкой: в каком состоянии выкладка ПРЯМО СЕЙЧАС. Главный случай, ради
+    /// которого она есть, — «адрес есть, ключей нет»: это не поломка, а ожидание файла secrets, и
+    /// человек должен видеть именно это, а не «ничего не настроено».</summary>
+    private void RefreshS3Status()
+    {
+        var s3 = _services.Cfg.S3();
+        S3CheckButton.IsEnabled = s3.HasAddress && s3.HasCredentials;
+
+        if (!s3.HasAddress)
+        {
+            S3Status.Text = "Не настроено — укажите адрес хранилища и бакет.";
+            return;
+        }
+        if (!s3.HasCredentials)
+        {
+            S3Status.Text = "Осталось вписать ключи доступа — до этого инструкции на хостинг не выкладываются.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(s3.WebUrl))
+        {
+            S3Status.Text = "Ключи есть, но не задан веб-адрес диска инструкций " +
+                            "(Настройки → Печать) — без него в QR-код нечего положить.";
+            return;
+        }
+        S3Status.Text = s3.Enabled
+            ? "Настроено — копия инструкции уходит на хостинг при загрузке версии."
+            : "Реквизиты заполнены, но выкладка выключена галочкой выше.";
+    }
+
+    private async void S3Check_Click(object sender, RoutedEventArgs e)
+    {
+        SaveS3Fields();
+        SaveS3Secret();
+
+        var s3 = _services.Cfg.S3();
+        S3CheckButton.IsEnabled = false;
+        S3Status.Text = "Проверяем…";
+        try
+        {
+            var result = await new Core.Services.S3Client().CheckAsync(s3);
+            S3Status.Text = result.Ok
+                ? "Доступ есть — хранилище отвечает, ключи подходят. Право на запись проверится первой выложенной инструкцией."
+                : $"Не получилось: {result.Error}";
+        }
+        finally
+        {
+            S3CheckButton.IsEnabled = true;
+        }
     }
 
     private void BrowseInspectionFolder_Click(object sender, RoutedEventArgs e)

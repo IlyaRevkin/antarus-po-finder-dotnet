@@ -9,7 +9,7 @@ namespace AntarusPoFinder.Core.Services;
 /// существующей — ОДНО место на оба пути (FirmwareUploadService и FirmwareAttachmentsService),
 /// чтобы «доложенная» инструкция оказывалась ровно там же, где и приложенная сразу.
 ///
-/// Смысл третьего диска — см. <see cref="InstructionDiskResolver"/>. Здесь важны два следствия:
+/// Смысл третьего диска — см. <see cref="InstructionDiskResolver"/>. Здесь важны три следствия:
 ///
 /// 1. **В базу пишется путь на ПЕРВОМ диске, даже когда файл уехал на третий.** Путь из
 ///    <c>fw_versions.instructions_path</c> разъезжается по машинам синхронизацией, а буква третьего
@@ -17,33 +17,51 @@ namespace AntarusPoFinder.Core.Services;
 ///    третий диск подключён под другой буквой или не подключён вовсе. Читающая сторона сама
 ///    считает зеркало от своих настроек (<see cref="InstructionDiskResolver.PreferredReadFolder"/>),
 ///    поэтому первого диска в записи достаточно.
-/// 2. **На первом диске остаётся ярлык .lnk** (если включено): коллега со старым клиентом, который
-///    про третий диск не знает, иначе увидит пустую папку «Инструкция» и решит, что инструкции нет.
-///    Ярлык — не документ: оба резолвера документов его пропускают (DocFileResolver.IsShortcut).
+/// 2. **На первом диске рядом с прошивкой лежит НАСТОЯЩАЯ КОПИЯ инструкции, а не ярлык.** Раньше
+///    здесь создавался <c>.lnk</c>, и это оказалось неверным решением сразу с двух сторон. С точки
+///    зрения человека: ярлык — это не документ, а обещание документа. Он ведёт на букву диска,
+///    которой у коллеги может не быть; скопированный на флешку, он превращается в мёртвый файл; на
+///    хостинге он бессмыслен вовсе (прямое требование Ивана Герасимова от 05.08.2026 — «делать
+///    копию на вебдиск, а не просто ярлык»). С точки зрения программы: путь, записанный в БД,
+///    указывал на файл, которого на первом диске не существует, — и любая проверка «а инструкция-то
+///    на месте?» вынуждена была знать про третий диск. Теперь запись в БД честная: по этому пути
+///    действительно лежит документ. Инструкция дублируется, а не переезжает: тяжёлое хранилище на
+///    третьем диске остаётся, копия рядом с прошивкой — это цена за то, чтобы папка версии была
+///    самодостаточной.
+/// 3. **Та же копия уходит на хостинг** (<see cref="IInstructionPublisher"/>), если он настроен, —
+///    третьим экземпляром того же файла, по адресу, который повторяет путь на диске. Именно он
+///    открывается по QR-коду с телефона.
 ///
 /// Недоступный/ненастроенный третий диск — не ошибка: файл просто ложится на первый, как до
-/// появления этой возможности.</summary>
+/// появления этой возможности. Ненастроенный хостинг — тоже: выкладка молча не делается.</summary>
 public static class InstructionStorage
 {
     /// <summary>Что и куда положили. <paramref name="StoredPath"/> — то, что надо записать в БД
-    /// (всегда на первом диске, см. комментарий класса); пусто — не положили ничего.</summary>
-    public sealed record Placement(string StoredPath, string? ActualPath, bool WentToThirdDisk);
+    /// (всегда на первом диске, см. комментарий класса); пусто — не положили ничего.
+    /// <paramref name="PublishedUrl"/> — адрес выложенной на хостинг копии или null, если хостинг не
+    /// настроен либо выкладка не удалась (тогда причина уже лежит в warnings).</summary>
+    public sealed record Placement(string StoredPath, string? ActualPath, bool WentToThirdDisk,
+        string? PublishedUrl = null);
 
     /// <summary>Копирует инструкцию в папку «Инструкция» этого контроллера — на третий диск, если он
     /// настроен и доступен, иначе на первый. Бросает те же исключения, что и обычное копирование:
     /// вызывающий уже оборачивает их в предупреждение и загрузку из-за инструкции не отменяет.
     ///
-    /// <paramref name="shortcuts"/> = null (тесты, консольные пути) — ярлык просто не создаётся.
-    /// Неудача самого ярлыка тоже не фатальна: файл уже лёг, поэтому она уходит в
+    /// <paramref name="duplicateOnFirstDisk"/> — класть ли рядом с прошивкой вторую копию, когда
+    /// сам файл уехал на третий диск (см. п. 2 в комментарии класса). Неудача этой копии не
+    /// фатальна: документ уже лежит на третьем диске и уже доступен — поэтому она уходит в
     /// <paramref name="warnings"/>, а не наверх исключением.
     ///
     /// <paramref name="versionRaw"/> — строка версии, к которой инструкцию прикладывают. Задана —
     /// положенный файл сразу получает каноническое имя «инструкция_&lt;версия&gt;.&lt;расширение&gt;»
     /// (см. <see cref="InstructionNaming"/>): имя проверяется и правится в момент укладки, а не
-    /// когда-нибудь потом перестройкой диска. Пусто — имя источника сохраняется, как было раньше.</summary>
+    /// когда-нибудь потом перестройкой диска. Пусто — имя источника сохраняется, как было раньше.
+    ///
+    /// <paramref name="publisher"/> = null — хостинг не настроен (или вызывающему он не нужен):
+    /// выкладки просто не происходит, всё остальное работает как прежде.</summary>
     public static Placement Copy(string sourcePath, string instructionFolderOnFirstDisk,
-        string firstRoot, string? thirdRoot, bool createShortcut, IShortcutCreator? shortcuts,
-        List<string> warnings, string versionRaw = "")
+        string firstRoot, string? thirdRoot, bool duplicateOnFirstDisk,
+        List<string> warnings, string versionRaw = "", IInstructionPublisher? publisher = null)
     {
         var target = InstructionDiskResolver.PreferredWriteFolder(firstRoot, thirdRoot, instructionFolderOnFirstDisk);
         if (string.IsNullOrEmpty(target)) return new Placement("", null, false);
@@ -69,10 +87,12 @@ public static class InstructionStorage
             ? BackToFirstDisk(actual, firstRoot, thirdRoot, instructionFolderOnFirstDisk)
             : actual;
 
-        if (wentToThird && createShortcut)
-            TryCreateShortcut(instructionFolderOnFirstDisk, actual, shortcuts, warnings);
+        if (wentToThird && duplicateOnFirstDisk)
+            TryDuplicateOnFirstDisk(instructionFolderOnFirstDisk, actual, warnings);
 
-        return new Placement(stored, actual, wentToThird);
+        var published = publisher?.Publish(actual, stored, firstRoot, warnings);
+
+        return new Placement(stored, actual, wentToThird, published);
     }
 
     /// <summary>Положить инструкцию в папку СРАЗУ под каноническим именем
@@ -129,25 +149,46 @@ public static class InstructionStorage
         return Path.Combine(instructionFolderOnFirstDisk, full[prefix.Length..]);
     }
 
-    /// <summary>Ярлык на уехавший файл — рядом с тем местом, где раньше лежал сам файл. Имя ярлыка =
-    /// имя файла + .lnk, поэтому перезаливка инструкции ярлык обновляет, а не плодит второй.</summary>
-    private static void TryCreateShortcut(string folderOnFirstDisk, string actualPath,
-        IShortcutCreator? shortcuts, List<string> warnings)
+    /// <summary>Вторая копия документа — рядом с прошивкой, под тем же именем, что и на третьем
+    /// диске. Имя то же не для красоты: путь в БД считается заменой корня (см.
+    /// <see cref="BackToFirstDisk"/>), и стоит именам разойтись, как запись начнёт указывать в
+    /// пустоту. Перезаливка инструкции копию обновляет (overwrite), а не плодит вторую.
+    ///
+    /// Заодно убираем ярлык, оставшийся от прежних версий программы: раньше здесь лежал
+    /// <c>&lt;имя&gt;.lnk</c>, и, не удалив его, мы получили бы папку, где рядом с документом лежит
+    /// ярлык на этот же документ.</summary>
+    private static void TryDuplicateOnFirstDisk(string folderOnFirstDisk, string actualPath,
+        List<string> warnings)
     {
-        if (shortcuts is null) return;
         try
         {
             Directory.CreateDirectory(folderOnFirstDisk);
             var name = Directory.Exists(actualPath)
                 ? new DirectoryInfo(actualPath.TrimEnd(Path.DirectorySeparatorChar)).Name
                 : Path.GetFileName(actualPath);
-            var linkPath = Path.Combine(folderOnFirstDisk, name + ".lnk");
-            shortcuts.Create(linkPath, actualPath, "Инструкция лежит на диске инструкций");
+
+            if (Directory.Exists(actualPath))
+                FileSystemHelpers.CopyFileOrFolderShallow(actualPath, Path.Combine(folderOnFirstDisk, name));
+            else
+                File.Copy(actualPath, Path.Combine(folderOnFirstDisk, name), overwrite: true);
+
+            RemoveStaleShortcut(folderOnFirstDisk, name);
         }
         catch (Exception ex)
         {
-            warnings.Add($"Инструкция: файл положен на третий диск, но ярлык на первом не создан — {ex.Message}");
+            warnings.Add($"Инструкция: файл положен на третий диск, но копию рядом с прошивкой " +
+                         $"сделать не удалось — {ex.Message}");
         }
+    }
+
+    /// <summary>Ярлык от прежних версий программы (<c>&lt;имя файла&gt;.lnk</c>) рядом с положенной
+    /// копией. Удаляем только этот, ровно по имени — чужие ярлыки, которые кто-то мог положить в
+    /// папку руками, не трогаем.</summary>
+    private static void RemoveStaleShortcut(string folderOnFirstDisk, string name)
+    {
+        var stale = Path.Combine(folderOnFirstDisk, name + ".lnk");
+        try { if (File.Exists(stale)) File.Delete(stale); }
+        catch (Exception) { /* не удалось — это лишь косметика, документ уже на месте */ }
     }
 
     private static string? SafeFullPath(string path)
