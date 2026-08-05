@@ -33,7 +33,10 @@ public record HierarchyNames(
 
 /// <summary>Полный список папок, которые должны существовать на диске, плюс снимок имён для
 /// последующего разбора «неизвестного». Считается по БД, применяется без неё.</summary>
-public record StructurePlan(string Root, List<string> Folders, HierarchyNames Names);
+/// <param name="ThirdRoot">Корень диска инструкций, если он был известен планировщику. Нужен только
+/// заглушкам: по нему считается папка-двойник, чтобы «Инструкция в разработке» не легла на первый
+/// диск рядом с документом, который лежит на третьем (см. InstructionStub.DocumentExists).</param>
+public record StructurePlan(string Root, List<string> Folders, HierarchyNames Names, string? ThirdRoot = null);
 
 /// <summary>Одна папка контроллера, которую нужно просмотреть на предмет новых версий, вместе с уже
 /// известными БД номерами версий для этой пары подтип/контроллер.</summary>
@@ -667,7 +670,8 @@ public class HierarchyService
 
     // ── Ensure structure ──────────────────────────────────────────────────────
 
-    public EnsureStructureResult EnsureStructure(string root) => ApplyStructurePlan(PlanStructure(root));
+    public EnsureStructureResult EnsureStructure(string root, IInstructionStubWriter? stubs = null) =>
+        ApplyStructurePlan(PlanStructure(root), stubs);
 
     /// <summary>БД-фаза: какие папки должны быть на диске. Ни одного обращения к файловой системе —
     /// её можно вызывать на потоке UI, даже когда сам диск не отвечает.
@@ -737,12 +741,16 @@ public class HierarchyService
                          .ToList())
                 folders.Add(mirror!);
 
-        return new StructurePlan(root, folders, SnapshotNames());
+        return new StructurePlan(root, folders, SnapshotNames(), thirdRoot);
     }
 
     /// <summary>Дисковая фаза: создаёт недостающие папки и уносит нераспознанное в «Неизвестное».
     /// В БД не ходит вообще — безопасно выполнять в фоновом потоке.</summary>
-    public static EnsureStructureResult ApplyStructurePlan(StructurePlan plan)
+    /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке». Задан — в каждую папку
+    /// «Инструкция» (и на первом диске, и в зеркале на третьем, они обе есть в плане), где нет
+    /// настоящего документа, кладётся заглушка: пустая папка неотличима от «инструкцию потеряли».
+    /// null — папки просто создаются пустыми, как было раньше. См. InstructionStub.</param>
+    public static EnsureStructureResult ApplyStructurePlan(StructurePlan plan, IInstructionStubWriter? stubs = null)
     {
         var errors = new List<string>();
         int created = 0;
@@ -751,9 +759,16 @@ public class HierarchyService
         {
             try
             {
-                if (Directory.Exists(path)) continue;
-                Directory.CreateDirectory(path);
-                created++;
+                if (!Directory.Exists(path))
+                {
+                    Directory.CreateDirectory(path);
+                    created++;
+                }
+
+                // Версии у этих папок нет (общая папка «Инструкция» контроллера принадлежит всем его
+                // версиям сразу), поэтому заглушка ложится под общим именем — см. InstructionStub.
+                if (stubs is not null && string.Equals(Path.GetFileName(path), HierarchyFolders.Instructions, StringComparison.Ordinal))
+                    InstructionStub.EnsureIn(path, versionRaw: null, stubs, warnings: null, pairedFolder: PairedInstructionFolder(plan, path));
             }
             catch (Exception e)
             {
@@ -765,6 +780,16 @@ public class HierarchyService
 
         return new EnsureStructureResult(errors.Count == 0, created, errors, movedCount);
     }
+
+    /// <summary>Папка «Инструкция» на ДРУГОМ диске — та же самая, только с другим корнем. Замена
+    /// префикса симметрична, поэтому обе стороны считает один и тот же InstructionDiskResolver.Mirror:
+    /// для папки первого диска подходит первый вызов, для папки третьего — второй (корни местами).
+    /// null — третий диск не настроен либо путь не лежит ни под одним из корней.</summary>
+    private static string? PairedInstructionFolder(StructurePlan plan, string instructionFolder) =>
+        string.IsNullOrWhiteSpace(plan.ThirdRoot)
+            ? null
+            : InstructionDiskResolver.Mirror(plan.Root, plan.ThirdRoot, instructionFolder)
+              ?? InstructionDiskResolver.Mirror(plan.ThirdRoot, plan.Root, instructionFolder);
 
     // ── Collect / scan unknown files ─────────────────────────────────────────
 

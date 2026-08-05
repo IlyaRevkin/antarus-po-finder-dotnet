@@ -66,6 +66,16 @@ public static class DiskLayoutMigrator
         /// <summary>Этап 5: перенести ОПЦ-версию из общей «ОПЦ» подтипа в «ОПЦ» её контроллера,
         /// переименовав папку в номер заявки/SN. Единственная операция, меняющая disk_path.</summary>
         MoveOpc,
+
+        /// <summary>Привести имена файлов в папке «Инструкция» версии к «инструкция_&lt;версия&gt;»
+        /// (см. InstructionNaming). Операция ПАПОЧНАЯ, а не пофайловая: файлы перечисляются в момент
+        /// выполнения, а не планирования, — иначе перенос инструкций на третий диск, идущий в том же
+        /// прогоне, увёл бы файл из-под уже посчитанного пути.</summary>
+        RenameInstruction,
+
+        /// <summary>Положить в папку «Инструкция» заглушку «Инструкция в разработке», если
+        /// настоящего документа там нет (см. InstructionStub).</summary>
+        PlaceInstructionStub,
     }
 
     public sealed class Op
@@ -74,8 +84,10 @@ public static class DiskLayoutMigrator
         public string Source { get; init; } = "";
         public string Target { get; init; } = "";
 
-        /// <summary>Человеческое пояснение — что это за файл и почему операция нужна.</summary>
-        public string Note { get; init; } = "";
+        /// <summary>Человеческое пояснение — что это за файл и почему операция нужна. Изменяемое:
+        /// папочные операции (переименование инструкций) узнают, что именно они сделали, только в
+        /// момент выполнения, и дописывают это сюда — журнал должен отвечать «что поменяли».</summary>
+        public string Note { get; set; } = "";
 
         /// <summary>Папка версии (для переименования) — та, что реально найдена на диске.</summary>
         public string VersionDir { get; init; } = "";
@@ -99,20 +111,34 @@ public static class DiskLayoutMigrator
         /// (только <see cref="OpKind.MoveOpc"/>). 0 — правка БД этой операции не нужна.</summary>
         public int FwVersionId { get; init; }
 
+        /// <summary>Строка версии, к которой относится папка (нужна операциям по инструкции: имя
+        /// файла строится от неё). У ОПЦ имя папки версией не является, поэтому берётся из записи.</summary>
+        public string VersionRaw { get; init; } = "";
+
+        /// <summary>Та же папка «Инструкция», но на другом диске (зеркало на третьем для папки
+        /// первого и наоборот). Нужна операциям по инструкции: документ лежит на ОДНОМ из дисков, и
+        /// решать «класть ли заглушку» или «куда переложить ярлык» по одной папке нельзя.
+        /// Пусто — двойника нет (третий диск не настроен или недоступен).</summary>
+        public string PairedFolder { get; init; } = "";
+
         public string KindLabel => Kind switch
         {
             OpKind.RenameFirmware => "Переименовать прошивку",
             OpKind.MoveInstruction => "Инструкция → третий диск",
             OpKind.FoldIntoVersion => "Файлы прошивки → «Прошивка»",
             OpKind.MoveOpc => "ОПЦ → внутрь контроллера",
+            OpKind.RenameInstruction => "Переименовать инструкцию",
+            OpKind.PlaceInstructionStub => "Заглушка «в разработке»",
             _ => "Ярлык на инструкцию",
         };
     }
 
     /// <param name="FoldFilesIntoVersion">Этап 4: собрать файлы прошивки в подпапку «Прошивка».</param>
     /// <param name="MoveOpcIntoController">Этап 5: перенести ОПЦ внутрь контроллера.</param>
+    /// <param name="FixInstructions">Привести инструкции версий к правилам: имя файла
+    /// «инструкция_&lt;версия&gt;» и заглушка «Инструкция в разработке» там, где документа нет.</param>
     public sealed record MigrationOptions(bool RenameFirmwareFiles, bool MoveInstructionsToThirdDisk,
-        bool FoldFilesIntoVersion = false, bool MoveOpcIntoController = false);
+        bool FoldFilesIntoVersion = false, bool MoveOpcIntoController = false, bool FixInstructions = false);
 
     /// <summary>Вход планировщика. Версии берутся из БД (та же выборка, что и вкладка «Прошивки»):
     /// именно они задают, где папка версии и какое у файла должно быть каноническое имя.</summary>
@@ -146,8 +172,76 @@ public static class DiskLayoutMigrator
             PlanOpcMoves(input, ops, skipped);
         if (input.Options.MoveInstructionsToThirdDisk)
             PlanInstructionMoves(input, ops, skipped);
+        // Имена инструкций и заглушки — ПОСЛЕДНИМИ и намеренно: переезд на третий диск выше уносит
+        // файлы из папок первого диска, и обе операции по инструкции обязаны увидеть уже конечную
+        // картину. Обе перечисляют файлы в момент выполнения, поэтому порядок здесь и решает.
+        if (input.Options.FixInstructions)
+            PlanInstructionNaming(input, ops, skipped);
 
         return new MigrationPlan(ops, skipped);
+    }
+
+    // ── Инструкции: каноническое имя файла и заглушка ───────────────────────
+
+    /// <summary>Две операции на каждую папку «Инструкция», ПРИНАДЛЕЖАЩУЮ версии: привести имена
+    /// файлов к «инструкция_&lt;версия&gt;.&lt;расширение&gt;» и положить заглушку, если документа нет.
+    /// Плюс то же самое для зеркала этой папки на третьем диске.
+    ///
+    /// <b>Почему только папки внутри версии.</b> Общая папка «Инструкция» контроллера (старая
+    /// раскладка) принадлежит ВСЕМ его версиям сразу — какой из них приписать лежащий там файл,
+    /// неизвестно, и переименование в «инструкция_2.1.0042.0001…» было бы выдумкой, а не приведением
+    /// к правилам. Такие папки попадают в Skipped, а заглушки в них кладёт создание структуры
+    /// (HierarchyService.ApplyStructurePlan) — там версия и не нужна.</summary>
+    private static void PlanInstructionNaming(MigrationInput input, List<Op> ops, List<string> skipped)
+    {
+        var newLayoutSeen = false;
+
+        foreach (var (dir, first, _) in VersionDirs(input))
+        {
+            // Своя папка «Инструкция» есть только у версии, которую уже перестроили (или перестроят
+            // в этом же прогоне галочкой «Собрать файлы прошивок…»).
+            if (!VersionLayout.IsNewLayout(dir) && !input.Options.FoldFilesIntoVersion) continue;
+            newLayoutSeen = true;
+
+            var folder = VersionLayout.SlotFolder(dir, HierarchyFolders.Instructions);
+            var mirror = SafeDirExists(input.ThirdRoot)
+                ? InstructionDiskResolver.Mirror(input.Root, input.ThirdRoot, folder)
+                : null;
+
+            var places = mirror is null ? new[] { folder } : new[] { folder, mirror };
+            foreach (var place in places)
+            {
+                // Двойник этой папки на другом диске: по нему решается, есть ли документ вообще (см.
+                // InstructionStub.DocumentExists) и куда переложить ярлык после переименования.
+                var paired = places.FirstOrDefault(p => !string.Equals(p, place, StringComparison.OrdinalIgnoreCase)) ?? "";
+
+                ops.Add(new Op
+                {
+                    Kind = OpKind.RenameInstruction,
+                    Source = place,
+                    Target = place,
+                    VersionDir = dir,
+                    VersionRaw = first.VersionRaw,
+                    PairedFolder = paired,
+                    Note = $"{first.VersionRaw}: имя файла → «{InstructionNaming.Prefix}{first.VersionRaw}»",
+                });
+                ops.Add(new Op
+                {
+                    Kind = OpKind.PlaceInstructionStub,
+                    Source = place,
+                    Target = InstructionStub.PathFor(place, first.VersionRaw),
+                    VersionDir = dir,
+                    VersionRaw = first.VersionRaw,
+                    PairedFolder = paired,
+                    Note = $"{first.VersionRaw}: {InstructionStub.Text}, если документа нет",
+                });
+            }
+        }
+
+        if (!newLayoutSeen)
+            skipped.Add("Своих папок «Инструкция» у версий пока нет — имена файлов правятся только там, " +
+                        "где инструкция принадлежит конкретной версии. Общие папки контроллера получат " +
+                        "заглушки при создании недостающих папок структуры.");
     }
 
     // ── Этап 4: файлы прошивки внутрь «Прошивка\» ───────────────────────────
@@ -384,8 +478,11 @@ public static class DiskLayoutMigrator
     /// <param name="repointed">Зовётся после КАЖДОГО удавшегося переноса ОПЦ — вызывающий переписывает
     /// disk_path записи (Op.FwVersionId, Op.Target). Отдельно от <paramref name="renamed"/>, потому
     /// что правится другой столбец и другим методом БД.</param>
+    /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке». null — операции
+    /// заглушек просто пропускаются.</param>
     public static MigrationPlan Apply(MigrationPlan plan, Action<Op>? renamed,
-        IShortcutCreator? shortcuts, Action<int, int>? progress = null, Action<Op>? repointed = null)
+        IShortcutCreator? shortcuts, Action<int, int>? progress = null, Action<Op>? repointed = null,
+        IInstructionStubWriter? stubs = null)
     {
         var total = plan.Ops.Count;
         var done = 0;
@@ -419,6 +516,15 @@ public static class DiskLayoutMigrator
                     case OpKind.MoveOpc:
                         op.Status = MoveOpcFolder(op.Source, op.Target) ? "ok" : "skip";
                         if (op.Status == "ok") repointed?.Invoke(op);
+                        break;
+
+                    case OpKind.RenameInstruction:
+                        op.Status = RenameInstructionsIn(op, shortcuts) ? "ok" : "skip";
+                        break;
+
+                    case OpKind.PlaceInstructionStub:
+                        op.Status = InstructionStub.EnsureIn(op.Source, op.VersionRaw, stubs,
+                            warnings: null, pairedFolder: op.PairedFolder) ? "ok" : "skip";
                         break;
                 }
             }
@@ -500,6 +606,70 @@ public static class DiskLayoutMigrator
             moved++;
         }
         return moved > 0 || createdFolders > 0;
+    }
+
+    /// <summary>Привести имена файлов в одной папке «Инструкция» к каноническим. Файлы перечисляются
+    /// ЗДЕСЬ, а не при планировании: до этой операции в том же прогоне могли отработать перенос
+    /// инструкций на третий диск и сборка файлов внутрь версии, и посчитанный заранее список путей
+    /// оказался бы устаревшим. Идемпотентно — уже канонические имена не трогаются, повторный прогон
+    /// не делает ничего. Op.Note дополняется тем, что реально переименовали: журнал операции должен
+    /// отвечать «что именно поменяли», а не только «в какой папке».</summary>
+    private static bool RenameInstructionsIn(Op op, IShortcutCreator? shortcuts)
+    {
+        if (!SafeDirExists(op.Source)) return false;
+
+        // Настоящий документ в папке появился — заглушка уходит первой: имя у неё то же самое
+        // каноническое, и пока она лежит, документу под него не встать (см. InstructionStub).
+        var removedStub = InstructionStub.HasRealInstruction(op.Source) && InstructionStub.RemoveFrom(op.Source) > 0;
+
+        var renamed = new List<string>();
+        foreach (var file in TopLevelFiles(op.Source))
+        {
+            if (InstructionNaming.CanonicalNameFor(file, op.VersionRaw) is null) continue;
+            var after = InstructionNaming.EnsureCanonicalName(file, op.VersionRaw);
+            if (string.Equals(after, file, StringComparison.Ordinal)) continue;
+
+            renamed.Add($"{Path.GetFileName(file)} → {Path.GetFileName(after)}");
+            if (RepointShortcut(op.PairedFolder, file, after, shortcuts)) renamed.Add("ярлык переложен");
+        }
+
+        if (removedStub) renamed.Add("убрана заглушка «в разработке» — документ приложили");
+        if (renamed.Count == 0) return false;
+        op.Note = string.Join(", ", renamed);
+        return true;
+    }
+
+    /// <summary>Переложить ярлык на первом диске вслед за переименованием файла на третьем. Без
+    /// этого один и тот же прогон сам себе ломает результат: инструкции уносятся на третий диск
+    /// (<see cref="OpKind.MoveInstruction"/>) и на первом остаётся «имя файла + .lnk», а следом
+    /// приведение имён переименовывает уже уехавший файл — и ярлык, положенный минуту назад,
+    /// указывает в никуда.
+    ///
+    /// Не вышло создать новый ярлык (нечем — <paramref name="shortcuts"/> = null в тестах, папка
+    /// недоступна) — старый всё равно удаляем: битый указатель хуже, чем его отсутствие, а сам
+    /// документ на месте и читается напрямую с третьего диска.</summary>
+    private static bool RepointShortcut(string pairedFolder, string oldFile, string newFile, IShortcutCreator? shortcuts)
+    {
+        if (string.IsNullOrWhiteSpace(pairedFolder) || !SafeDirExists(pairedFolder)) return false;
+
+        var oldLink = Path.Combine(pairedFolder, Path.GetFileName(oldFile) + ".lnk");
+        if (!File.Exists(oldLink)) return false;
+
+        try { File.Delete(oldLink); }
+        catch (Exception) { return false; }
+
+        if (shortcuts is null) return true;
+        try
+        {
+            shortcuts.Create(Path.Combine(pairedFolder, Path.GetFileName(newFile) + ".lnk"), newFile,
+                "Инструкция лежит на диске инструкций");
+        }
+        catch (Exception)
+        {
+            // Ярлык — удобство для коллеги со старым клиентом, а не условие работы: не создался,
+            // значит папка на первом диске просто пустая, как и была бы без третьего диска вовсе.
+        }
+        return true;
     }
 
     /// <summary>Этап 5 на диске: перенести папку ОПЦ-версии в «ОПЦ» её контроллера под именем

@@ -39,13 +39,20 @@ public static class DocFileResolver
     private static string? StoredCandidate(string? storedPath)
     {
         if (string.IsNullOrEmpty(storedPath)) return null;
-        if (File.Exists(storedPath)) return IsShortcut(storedPath) ? null : storedPath;
+        if (File.Exists(storedPath)) return IsNotADocument(storedPath) ? null : storedPath;
         return Directory.Exists(storedPath) ? LatestFileIn(storedPath) : null;
     }
 
     /// <summary>Ярлык Windows — не документ. Общая проверка для обоих резолверов документации.</summary>
     public static bool IsShortcut(string path) =>
         string.Equals(Path.GetExtension(path), ".lnk", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Файл, который документом не считается ни при каких условиях: ярлык на уехавшую на
+    /// третий диск инструкцию и заглушка «Инструкция в разработке». Заглушка — принципиально: её
+    /// смысл в том, чтобы человек в проводнике видел «документа ещё нет», и если бы программа
+    /// считала её документом, признак «инструкция ✓» на карточке, печать и ссылка в QR начали бы
+    /// врать (см. <see cref="InstructionStub"/>).</summary>
+    public static bool IsNotADocument(string path) => IsShortcut(path) || InstructionStub.IsStub(path);
 
     /// <summary>Недоступный файл (шара отвалилась между обходом и сравнением) считается самым старым —
     /// сравнение не должно падать из-за одного пути.</summary>
@@ -64,17 +71,18 @@ public static class DocFileResolver
     /// <summary>Самый свежий по времени изменения файл во всём дереве папки, или null — папка пуста,
     /// не существует или недоступна (отвалившаяся сетевая шара — это «нечего открыть», не ошибка).
     ///
-    /// Ярлыки .lnk пропускаются: с появлением третьего диска инструкций на первом остаётся ярлык на
-    /// уехавший файл (для коллег со старым клиентом, см. InstructionDiskResolver), и он — самый
-    /// свежий файл в папке. Открыть его тоже можно, но тогда «последний актуальный документ» вечно
-    /// оказывался бы ярлыком, а не самим документом.</summary>
+    /// Ярлыки .lnk и заглушки пропускаются: с появлением третьего диска инструкций на первом остаётся
+    /// ярлык на уехавший файл (для коллег со старым клиентом, см. InstructionDiskResolver), и он —
+    /// самый свежий файл в папке. Открыть его тоже можно, но тогда «последний актуальный документ»
+    /// вечно оказывался бы ярлыком, а не самим документом. С заглушкой то же самое, только хуже: она
+    /// как раз и означает «документа ещё нет» (см. <see cref="IsNotADocument"/>).</summary>
     public static string? LatestFileIn(string? folder, string? excludeSubfolder = null)
     {
         if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
         try
         {
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-                .Where(f => !IsShortcut(f) && !IsUnder(folder, f, excludeSubfolder))
+                .Where(f => !IsNotADocument(f) && !IsUnder(folder, f, excludeSubfolder))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }

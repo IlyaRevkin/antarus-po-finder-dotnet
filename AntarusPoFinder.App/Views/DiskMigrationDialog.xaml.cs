@@ -79,7 +79,8 @@ public partial class DiskMigrationDialog : Window
                 RenameCheck.IsChecked == true,
                 InstructionsCheck.IsChecked == true && InstructionsCheck.IsEnabled,
                 FoldIntoVersionCheck.IsChecked == true,
-                OpcCheck.IsChecked == true));
+                OpcCheck.IsChecked == true,
+                InstructionNamingCheck.IsChecked == true));
 
         DiskLayoutMigrator.MigrationPlan plan;
         // Обход всех папок версий на сетевом диске — минуты; окно во время этого не должно висеть.
@@ -147,7 +148,7 @@ public partial class DiskMigrationDialog : Window
 
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
                 await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op), shortcuts,
-                    repointed: op => repoints.Add(op)));
+                    repointed: op => repoints.Add(op), stubs: new InstructionStubWriter()));
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
             // (папку переименовали на диске); правим по каждому известному пути, см. Op.RecordPaths.
@@ -195,8 +196,12 @@ public partial class DiskMigrationDialog : Window
         var root = _services.Cfg.RootPath();
         var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
+        // Заглушка кладётся вместе с созданием папок: пустая папка «Инструкция» неотличима от
+        // «инструкцию потеряли», а версия для общей папки контроллера не нужна — заглушка одна на
+        // папку (см. InstructionStub).
+        var stubs = InstructionNamingCheck.IsChecked == true ? new InstructionStubWriter() : null;
         using (_host.BeginBusy("Проверка структуры папок…"))
-            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
+            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
         if (result.CreatedCount > 0)
             _host.ShowStatus($"Создано папок: {result.CreatedCount}", category: NotificationCategory.Sync);
     }

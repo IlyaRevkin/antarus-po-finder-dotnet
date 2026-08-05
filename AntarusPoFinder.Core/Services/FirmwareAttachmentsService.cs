@@ -162,8 +162,11 @@ public static class FirmwareAttachmentsService
 
     /// <param name="shortcuts">Нужен только инструкции, уехавшей на третий диск (см.
     /// InstructionStorage): на первом остаётся ярлык. null — ярлык не создаётся.</param>
+    /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке», если ссылку на
+    /// инструкцию убрали (см. InstructionStub). null — заглушка не кладётся.</param>
     public static FirmwareAttachmentsResult Apply(Database db, HierarchyService hierarchy,
-        FwVersionRecord record, FirmwareAttachmentsRequest request, IShortcutCreator? shortcuts = null)
+        FwVersionRecord record, FirmwareAttachmentsRequest request, IShortcutCreator? shortcuts = null,
+        IInstructionStubWriter? stubs = null)
     {
         var applied = new List<string>();
         var warnings = new List<string>();
@@ -191,7 +194,14 @@ public static class FirmwareAttachmentsService
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
             () => SlotFolder(HierarchyFolders.Instructions), applied, warnings,
             copy: (src, folder) => InstructionStorage.Copy(src, folder, root, request.ThirdDiskPath,
-                request.ThirdDiskShortcuts, shortcuts, warnings).StoredPath);
+                request.ThirdDiskShortcuts, shortcuts, warnings, record.VersionRaw).StoredPath);
+
+        // Ссылку на инструкцию убрали — папка снова остаётся без документа, и вместо пустоты в ней
+        // должна лежать заглушка (см. InstructionStub). Ровно тот же случай, что и загрузка версии
+        // без инструкции, поэтому и обрабатывается одинаково.
+        if (instr is not null && instr.Length == 0)
+            InstructionStub.EnsureForVersion(SlotFolder(HierarchyFolders.Instructions), root,
+                request.ThirdDiskPath, record.VersionRaw, stubs, warnings);
 
         string? hmi = null;
         if (request.HmiSourcePath is not null && !PathsEqual(request.HmiSourcePath, record.HmiPath))

@@ -776,7 +776,7 @@ public partial class SearchView : UserControl
 
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
         bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
-        bool HasModbus,
+        bool HasInstructionStub, bool HasModbus,
         string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
@@ -817,6 +817,11 @@ public partial class SearchView : UserControl
         var hasInstructions = instr.HasAny;
         var hasInstrDocx = instr.Docx is not null;
         var hasInstrPrintable = instr.CanPrint;
+        // Заглушка «Инструкция в разработке» документом не считается, но путь у неё тот же, по
+        // которому ляжет настоящий документ, — от этого зависит только кнопка «QR инструкции»
+        // (см. FirmwareCardFlags.HasInstructionStub). Ищем, лишь когда документа нет: иначе это
+        // лишний обход папки на сетевом диске у каждой карточки.
+        var hasInstrStub = !hasInstructions && InstructionStub.ExistingIn(InstructionFolder(result, roots)) is not null;
         var hasModbus = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus") is not null;
         // Расширение того файла, который реально откроет «Открыть прошивку ПЛК» — считается тем же
         // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
@@ -826,7 +831,7 @@ public partial class SearchView : UserControl
         // Только когда панель вообще есть — иначе это лишний обход папок ради подписи несуществующей кнопки.
         var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result)) : null;
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasModbus, plcExt, hmiExt, networkAlive);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -954,6 +959,7 @@ public partial class SearchView : UserControl
                 HasInstructions = scan.HasInstructions,
                 HasInstructionDocx = scan.HasInstructionDocx,
                 HasInstructionPrintable = scan.HasInstructionPrintable,
+                HasInstructionStub = scan.HasInstructionStub,
                 HasModbus = scan.HasModbus,
                 PlcOpenExtension = scan.PlcOpenExtension,
                 HmiOpenExtension = scan.HmiOpenExtension,
@@ -2165,8 +2171,12 @@ public partial class SearchView : UserControl
     /// подвешивать оператора запуском Word — берём то, что на диске уже лежит.</summary>
     private void ShowInstructionLabel(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result, CurrentDocRoots());
-        var file = doc.Pdf ?? doc.Newest ?? doc.Docx;
+        var roots = CurrentDocRoots();
+        var doc = ResolveInstruction(result, roots);
+        // Документа ещё нет — берём заглушку: она лежит ровно по тому пути, по которому потом ляжет
+        // настоящая инструкция, поэтому напечатанный сейчас QR не придётся переклеивать
+        // (см. InstructionStub).
+        var file = doc.Pdf ?? doc.Newest ?? doc.Docx ?? InstructionStub.ExistingIn(InstructionFolder(result, roots));
         InstructionLabelWindow.ShowFor(Window.GetWindow(this), _services, _host,
             result.Name, result.VersionRaw, file);
     }

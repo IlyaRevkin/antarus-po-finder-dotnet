@@ -35,17 +35,32 @@ public static class InstructionStorage
     ///
     /// <paramref name="shortcuts"/> = null (тесты, консольные пути) — ярлык просто не создаётся.
     /// Неудача самого ярлыка тоже не фатальна: файл уже лёг, поэтому она уходит в
-    /// <paramref name="warnings"/>, а не наверх исключением.</summary>
+    /// <paramref name="warnings"/>, а не наверх исключением.
+    ///
+    /// <paramref name="versionRaw"/> — строка версии, к которой инструкцию прикладывают. Задана —
+    /// положенный файл сразу получает каноническое имя «инструкция_&lt;версия&gt;.&lt;расширение&gt;»
+    /// (см. <see cref="InstructionNaming"/>): имя проверяется и правится в момент укладки, а не
+    /// когда-нибудь потом перестройкой диска. Пусто — имя источника сохраняется, как было раньше.</summary>
     public static Placement Copy(string sourcePath, string instructionFolderOnFirstDisk,
         string firstRoot, string? thirdRoot, bool createShortcut, IShortcutCreator? shortcuts,
-        List<string> warnings)
+        List<string> warnings, string versionRaw = "")
     {
         var target = InstructionDiskResolver.PreferredWriteFolder(firstRoot, thirdRoot, instructionFolderOnFirstDisk);
         if (string.IsNullOrEmpty(target)) return new Placement("", null, false);
 
         var wentToThird = !PathsEqual(target, instructionFolderOnFirstDisk);
-        var actual = FileSystemHelpers.CopyFileOrFolderShallow(sourcePath, target);
+        var actual = CopyIntoFolder(sourcePath, target, versionRaw);
         if (string.IsNullOrEmpty(actual)) return new Placement("", null, false);
+
+        // Настоящая инструкция легла — заглушке рядом с ней делать нечего, причём ни на одном из
+        // дисков: иначе рядом с документом вечно лежал бы файл, утверждающий, что документа нет.
+        // Убирать её надо ДО переименования: имя у заглушки то же самое каноническое, и пока она
+        // лежит, настоящий документ не смог бы под ним встать (см. InstructionStub).
+        InstructionStub.RemoveForVersion(instructionFolderOnFirstDisk, firstRoot, thirdRoot);
+
+        // Имя проверяется и правится ровно здесь — в единственном месте, через которое инструкция
+        // попадает на диск и при загрузке версии, и при догрузке к уже существующей.
+        actual = InstructionNaming.EnsureCanonicalName(actual, versionRaw);
 
         // В БД — путь на первом диске: тот же файл, только с корнем первого диска. Для копирования
         // папки CopyFileOrFolderShallow возвращает саму папку назначения, поэтому обратное
@@ -58,6 +73,38 @@ public static class InstructionStorage
             TryCreateShortcut(instructionFolderOnFirstDisk, actual, shortcuts, warnings);
 
         return new Placement(stored, actual, wentToThird);
+    }
+
+    /// <summary>Положить инструкцию в папку СРАЗУ под каноническим именем
+    /// «инструкция_&lt;версия&gt;.&lt;расширение&gt;» (см. <see cref="InstructionNaming"/>), а не под
+    /// именем источника с переименованием следом.
+    ///
+    /// Разница видна ровно в одном случае — в ПЕРЕЗАЛИВКЕ, и она принципиальная. Копия под именем
+    /// источника («Инструкция по эксплуатации v2.pdf») легла бы РЯДОМ, а каноническое имя осталось бы
+    /// занято прошлой редакцией: переименовать поверх чужого файла
+    /// <see cref="InstructionNaming.EnsureCanonicalName"/> не даст, и это правило верное — при
+    /// перестройке диска затирать чужие документы нельзя. Итог был бы худший из возможных: по
+    /// напечатанному и наклеенному QR открывалась бы СТАРАЯ инструкция, а новая лежала бы рядом
+    /// незамеченной. Копирование сразу по каноническому пути делает то, чего от перезаливки и ждут:
+    /// по постоянному адресу лежит текущая редакция.
+    ///
+    /// Инструкция ПАПКОЙ (сканы постранично) кладётся как раньше: переименовывать папку нельзя —
+    /// её путь записан у коллег в <c>fw_versions.instructions_path</c>.</summary>
+    private static string CopyIntoFolder(string sourcePath, string targetFolder, string versionRaw)
+    {
+        if (File.Exists(sourcePath) && !string.IsNullOrWhiteSpace(versionRaw))
+        {
+            var name = InstructionNaming.BuildFileName(versionRaw, Path.GetExtension(sourcePath));
+            if (name.Length > 0)
+            {
+                Directory.CreateDirectory(targetFolder);
+                var dest = Path.Combine(targetFolder, name);
+                if (!PathsEqual(SafeFullPath(sourcePath) ?? sourcePath, SafeFullPath(dest) ?? dest))
+                    File.Copy(sourcePath, dest, overwrite: true);
+                return dest;
+            }
+        }
+        return FileSystemHelpers.CopyFileOrFolderShallow(sourcePath, targetFolder);
     }
 
     /// <summary>Обратное отображение «путь на третьем диске → как он выглядел бы на первом». Считаем

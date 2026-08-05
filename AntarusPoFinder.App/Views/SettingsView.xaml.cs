@@ -2644,8 +2644,11 @@ public partial class SettingsView : UserControl
         // блок про двухфазные операции): окно во время этого больше не «висит».
         var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
+        // Заглушка «Инструкция в разработке» — там же, где создаются папки: см. InstructionStub и
+        // ту же связку в MainWindowViewModel.EnsureHierarchyAsync.
+        var stubs = new Services.InstructionStubWriter();
         using (_host.BeginBusy("Проверка структуры диска…"))
-            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
+            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
         if (result.Errors.Count > 0)
             AppMessageBox.Show(string.Join("\n", result.Errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
         else
@@ -2770,6 +2773,12 @@ public partial class SettingsView : UserControl
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
+        // Заглушки здесь СОЗНАТЕЛЬНО не кладутся, хотя папки «Инструкция» создаются и тут. Эта
+        // достройка идёт на потоке интерфейса (её зовут прямо из обработчиков правки справочника), а
+        // заглушка требует обойти содержимое каждой папки на сетевом диске — окно настроек начало бы
+        // подвисать на ровном месте. Папки, созданные здесь, получат заглушки при следующем запуске
+        // (MainWindowViewModel.EnsureHierarchyAsync) или по кнопке «Пересоздать структуру диска» —
+        // обе операции идут в фоне. См. InstructionStub.
         var result = _services.Hierarchy.EnsureStructure(root);
         if (result.CreatedCount > 0)
             _host.ShowStatus($"Папки на диске обновлены: +{result.CreatedCount}", category: NotificationCategory.Sync);

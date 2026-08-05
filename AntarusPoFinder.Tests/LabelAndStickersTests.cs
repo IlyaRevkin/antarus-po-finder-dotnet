@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using AntarusPoFinder.Tests.TestHelpers;
@@ -22,22 +23,93 @@ public class LabelAndStickersTests
     // ── Ссылка в QR ──────────────────────────────────────────────────────────
 
     [Fact]
-    public void BuildUrl_EscapesCyrillicAndSpacesPerSegment()
+    public void BuildUrl_KeepsCyrillicReadable_AndEscapesOnlySpaces()
     {
         var root = Path.Combine(Path.GetTempPath(), "disk");
-        var file = Path.Combine(root, "ПО", "ПЖ ПИ", "SMH5", "1.0.0004.0003", "инструкция.pdf");
+        var file = Path.Combine(root, "ПО", "ПЖ ПИ", "SMH5", "1.0.0004.0003", "инструкция_1.0.0004.0003.pdf");
 
         var url = LabelLinkBuilder.BuildUrl("https://disk.antarus.su/instructions/", root, file);
 
-        // Разделители остались слешами, а имена папок ушли закодированными — иначе «ПЖ ПИ» дало бы
-        // битую ссылку, а экранирование строки целиком съело бы сами слеши.
+        // Разделители остались слешами, а кириллица — кириллицей: процентное кодирование раздувало
+        // каждую букву до шести символов, ссылка под кодом становилась лапшой, а QR — втрое плотнее.
         Assert.NotNull(url);
         Assert.StartsWith("https://disk.antarus.su/instructions/", url);
         Assert.Equal(5, url!["https://disk.antarus.su/instructions/".Length..].Split('/').Length);
+        Assert.Contains("/ПО/", url);
+        Assert.EndsWith("/1.0.0004.0003/инструкция_1.0.0004.0003.pdf", url);
+        // Пробел всё равно кодируется — иначе адрес разваливается при вставке в браузер.
         Assert.DoesNotContain(" ", url);
-        Assert.Contains("%D0%9F%D0%96%20%D0%9F%D0%98", url);   // «ПЖ ПИ»
-        Assert.EndsWith("/1.0.0004.0003/%D0%B8%D0%BD%D1%81%D1%82%D1%80%D1%83%D0%BA%D1%86%D0%B8%D1%8F.pdf", url);
+        Assert.Contains("ПЖ%20ПИ", url);
     }
+
+    [Fact]
+    public void BuildUrl_CyrillicLinkIsMuchShorterThanPercentEncodedOne()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "disk");
+        var file = Path.Combine(root, "ПО", "НГР", "КНС", "SMH5", "2.1.0042.0001.20260422_1348",
+            "Инструкция", "инструкция_2.1.0042.0001.20260422_1348.pdf");
+
+        var url = LabelLinkBuilder.BuildUrl("https://disk.antarus.su/i/", root, file)!;
+        var old = "https://disk.antarus.su/i/" + string.Join("/", LabelLinkBuilder.RelativeTo(root, file)!
+            .Split(Path.DirectorySeparatorChar).Select(Uri.EscapeDataString));
+
+        // Ровно та причина, по которой ссылка «получалась ОЧЕНЬ длинной»: прежний вариант почти вдвое
+        // длиннее, и весь этот излишек — служебные «%D0».
+        Assert.True(url.Length * 2 < old.Length * 3, $"новая {url.Length}, прежняя {old.Length}");
+        Assert.DoesNotContain("%D0", url);
+    }
+
+    /// <summary>Длина ссылки — не эстетика, а физика кода. Байты уходят в QR как есть (кириллица —
+    /// байтовый режим UTF-8, два байта на букву), а процентное кодирование раздувало каждую букву до
+    /// ШЕСТИ байт. От объёма зависит версия кода, от версии — число модулей, а от него — размер
+    /// модуля на бумаге: чем он мельче, тем хуже наклейку берёт камера телефона. Поэтому здесь
+    /// меряется не строка, а сам код и то, каким он выйдет из принтера.
+    ///
+    /// Числа приколочены намеренно (как <c>Qr.W = 54.96</c> в соседнем тесте): если раскладка или
+    /// правила экранирования поедут, это должно быть видно сразу, а не по жалобе «код не читается».</summary>
+    [Fact]
+    public void TheCyrillicLink_MakesTheQrSparser_AndTheModuleBiggerOnPaper()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "disk");
+        var file = Path.Combine(root, "ПО", "НГР", "КНС", "SMH5", "2.1.0042.0001.20260422_1348",
+            "Инструкция", "инструкция_2.1.0042.0001.20260422_1348.pdf");
+        const string baseUrl = "https://disk.antarus.su/instructions";
+
+        var url = LabelLinkBuilder.BuildUrl(baseUrl, root, file)!;
+        var escaped = baseUrl + "/" + string.Join("/", LabelLinkBuilder.RelativeTo(root, file)!
+            .Split(Path.DirectorySeparatorChar).Select(Uri.EscapeDataString));
+
+        var now = QrModules(url);
+        var before = QrModules(escaped);
+
+        // 162 байта против 274 — это версия кода 11 против версии 13, то есть 61 модуль против 69
+        // (сторона матрицы = 21 + 4 × (версия − 1)).
+        Assert.Equal(162, System.Text.Encoding.UTF8.GetByteCount(url));
+        Assert.Equal(274, System.Text.Encoding.UTF8.GetByteCount(escaped));
+        Assert.Equal(61, now);
+        Assert.Equal(69, before);
+
+        // На обычной наклейке 97.5×72 модуль стал заметно крупнее — а это и есть «берёт телефон».
+        var plan = LabelPlanner.Plan(new LabelLayout(), "ЩУН-3", "2.1.0042.0001.20260422_1348", url);
+        Assert.True(plan.FitsInsideBand(), plan.WarningText);
+        Assert.True(plan.Qr.W / now >= 0.8,
+            $"модуль {plan.Qr.W / now:0.###} мм при стороне кода {plan.Qr.W:0.##} мм и {now} модулях");
+        Assert.True(plan.Qr.W / now > plan.Qr.W / before);
+    }
+
+    /// <summary>Сторона матрицы БЕЗ тихой зоны — ровно то, что рисует QrArt на этикетке (он вырезает
+    /// вложенные QRCoder-ом 4 модуля поля с каждой стороны и отдаёт их полю самой наклейки).</summary>
+    private static int QrModules(string content) =>
+        AntarusPoFinder.App.Services.QrArt.Encode(content).ModuleMatrix.Count - 8;
+
+    [Theory]
+    [InlineData("Карта ВВ", "Карта%20ВВ")]
+    [InlineData("100%", "100%25")]
+    [InlineData("что#где?когда", "что%23где%3Fкогда")]
+    [InlineData("2.1.0042.0001", "2.1.0042.0001")]
+    [InlineData("(01312)_SN00042", "(01312)_SN00042")]
+    public void EscapeSegment_EncodesOnlyWhatBreaksTheAddress(string segment, string expected) =>
+        Assert.Equal(expected, LabelLinkBuilder.EscapeSegment(segment));
 
     [Fact]
     public void BuildUrl_NoBaseOrFileOutsideRoot_ReturnsNull()
