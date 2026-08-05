@@ -172,10 +172,9 @@ public static class InstructionStub
         }
     }
 
-    /// <summary>В папке лежит ярлык .lnk — документ есть, просто уехал на третий диск и на первом от
-    /// него остался указатель (см. <see cref="InstructionStorage"/>). Заглушке здесь не место:
-    /// «Инструкция в разработке» рядом с ярлыком на готовый документ — прямая ложь, причём та самая,
-    /// от которой заглушка и должна избавлять.</summary>
+    /// <summary>В папке лежит ярлык .lnk — документ есть, на него лишь указывает ярлык (пережиток
+    /// прежних версий программы). Заглушке здесь не место: «Инструкция в разработке» рядом с ярлыком
+    /// на готовый документ — прямая ложь, причём та самая, от которой заглушка и должна избавлять.</summary>
     public static bool PointsElsewhere(string? folder)
     {
         if (string.IsNullOrWhiteSpace(folder)) return false;
@@ -191,15 +190,10 @@ public static class InstructionStub
         }
     }
 
-    /// <summary>Документ для этого места уже существует: он лежит в самой папке, в ПАРНОЙ к ней
-    /// (зеркало на третьем диске или, наоборот, оригинал на первом) или на него указывает ярлык.
-    ///
-    /// Парную папку смотреть обязательно. Инструкция физически лежит на ОДНОМ из двух дисков, и
-    /// «пусто на первом» само по себе не значит «документа нет»: без этой проверки перестройка
-    /// диска, только что унёсшая инструкции на третий диск, тут же положила бы рядом с ними
-    /// заглушку «в разработке» на первом.</summary>
-    public static bool DocumentExists(params string?[] folders) =>
-        folders.Any(f => HasRealInstruction(f) || PointsElsewhere(f));
+    /// <summary>Документ для этого места уже существует: он лежит в самой папке или на него указывает
+    /// ярлык-пережиток.</summary>
+    public static bool DocumentExists(string? folder) =>
+        HasRealInstruction(folder) || PointsElsewhere(folder);
 
     // ── Создание и уборка ────────────────────────────────────────────────────
 
@@ -208,15 +202,12 @@ public static class InstructionStub
     /// оставшуюся заглушку (самолечение для папок, куда инструкцию положили руками, мимо программы).
     ///
     /// Возвращает true, только когда файл действительно создан.</summary>
-    /// <param name="pairedFolder">Папка-двойник на другом диске (зеркало на третьем или оригинал на
-    /// первом), если она известна вызывающему. Документ в ней — такой же повод НЕ класть заглушку,
-    /// как документ в самой папке: см. <see cref="DocumentExists"/>.</param>
     public static bool EnsureIn(string? folder, string? versionRaw, IInstructionStubWriter? writer,
-        List<string>? warnings = null, string? pairedFolder = null)
+        List<string>? warnings = null)
     {
         if (string.IsNullOrWhiteSpace(folder)) return false;
 
-        if (DocumentExists(folder, pairedFolder))
+        if (DocumentExists(folder))
         {
             RemoveFrom(folder);
             return false;
@@ -252,40 +243,31 @@ public static class InstructionStub
         fs.Write(bytes, 0, bytes.Length);
     }
 
-    /// <summary>Заглушка и в папку на первом диске, и в её зеркало на третьем — «во все места, где
-    /// инструкцию ищут». Третий диск не настроен или недоступен — просто одна папка, как раньше.
-    /// Возвращает число созданных файлов.
+    /// <summary>Заглушка в папку «Инструкция» версии на первом диске. Возвращает число созданных
+    /// файлов (0 или 1).
     ///
     /// <paramref name="publisher"/> задан — заглушка ТАКЖЕ уходит на хостинг (см.
     /// <see cref="IInstructionPublisher"/>): наклейку с QR печатают и клеят на шкаф ДО того, как
     /// инструкцию дописали, и по постоянной ссылке должно открываться хотя бы «в разработке», иначе
-    /// постоянство ссылки не работает. Выкладывается заглушка, лежащая на ПЕРВОМ диске (ключ объекта
-    /// считается от пути на первом диске — единственного одинакового у всех машин); её зеркало на
-    /// третьем — тот же самый файл под тем же ключом, второй раз лить незачем. null (по умолчанию) —
-    /// хостинг не настроен либо вызывающему не нужен, всё работает как раньше.</summary>
-    public static int EnsureForVersion(string? folderOnFirstDisk, string? firstRoot, string? thirdRoot,
+    /// постоянство ссылки не работает. Ключ объекта считается от пути на первом диске. null (по
+    /// умолчанию) — хостинг не настроен либо вызывающему не нужен, всё работает как раньше.</summary>
+    public static int EnsureForVersion(string? folderOnFirstDisk, string? firstRoot,
         string? versionRaw, IInstructionStubWriter? writer, List<string>? warnings = null,
         IInstructionPublisher? publisher = null)
     {
-        var places = Places(folderOnFirstDisk, firstRoot, thirdRoot);
+        if (string.IsNullOrWhiteSpace(folderOnFirstDisk)) return 0;
 
-        // Решение одно на обе папки, а не по каждой отдельно: документ лежит ровно на ОДНОМ из
-        // дисков, и «на моём диске его нет» не повод объявлять его несуществующим — иначе рядом с
-        // готовой инструкцией на третьем диске появлялась бы заглушка на первом.
-        if (DocumentExists(places.Cast<string?>().ToArray()))
+        if (DocumentExists(folderOnFirstDisk))
         {
-            foreach (var folder in places) RemoveFrom(folder);
+            RemoveFrom(folderOnFirstDisk);
             return 0;
         }
 
-        var created = 0;
-        foreach (var folder in places)
-            if (EnsureIn(folder, versionRaw, writer, warnings))
-                created++;
+        var created = EnsureIn(folderOnFirstDisk, versionRaw, writer, warnings) ? 1 : 0;
 
-        // Выкладываем заглушку с ПЕРВОГО диска — и только что созданную, и уже лежавшую (постоянство
-        // ссылки важно и тогда, когда заглушка была там и до этого вызова).
-        if (publisher is not null && !string.IsNullOrWhiteSpace(folderOnFirstDisk))
+        // Выкладываем заглушку — и только что созданную, и уже лежавшую (постоянство ссылки важно и
+        // тогда, когда заглушка была там и до этого вызова).
+        if (publisher is not null)
         {
             var stub = ExistingIn(folderOnFirstDisk);
             if (stub is not null)
@@ -326,31 +308,4 @@ public static class InstructionStub
         return removed;
     }
 
-    /// <summary>То же для обоих дисков сразу — парная к <see cref="EnsureForVersion"/>.</summary>
-    public static int RemoveForVersion(string? folderOnFirstDisk, string? firstRoot, string? thirdRoot) =>
-        Places(folderOnFirstDisk, firstRoot, thirdRoot).Sum(RemoveFrom);
-
-    /// <summary>Папка на первом диске и её зеркало на третьем — без повторов и без null. Зеркало
-    /// добавляется только при доступном корне третьего диска: заводить дерево папок на отключённой
-    /// букве — верный способ насоздавать мусора в корне системного диска.</summary>
-    private static List<string> Places(string? folderOnFirstDisk, string? firstRoot, string? thirdRoot)
-    {
-        var places = new List<string>(2);
-        if (!string.IsNullOrWhiteSpace(folderOnFirstDisk)) places.Add(folderOnFirstDisk!);
-
-        var mirror = SafeDirExists(thirdRoot) ? InstructionDiskResolver.Mirror(firstRoot, thirdRoot, folderOnFirstDisk) : null;
-        if (mirror is not null &&
-            !places.Any(p => string.Equals(p.TrimEnd(Path.DirectorySeparatorChar), mirror.TrimEnd(Path.DirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase)))
-            places.Add(mirror);
-
-        return places;
-    }
-
-    private static bool SafeDirExists(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        try { return Directory.Exists(path); }
-        catch (Exception) { return false; }
-    }
 }

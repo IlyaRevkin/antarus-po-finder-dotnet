@@ -328,9 +328,6 @@ public class S3PublishingTests
         Assert.DoesNotContain("s3_secret_key", skipped);
         Assert.DoesNotContain("s3_endpoint", skipped);
         Assert.DoesNotContain("s3_bucket", skipped);
-        // «Дублировать ли копией рядом с прошивкой» — тоже общая политика: разъехавшись по машинам,
-        // она дала бы диск, где половина папок с документом, а половина пустая.
-        Assert.DoesNotContain("instruction_duplicate_on_first_disk", skipped);
     }
 
     /// <summary>Round-trip: администратор на машине A вписывает ключи хостинга, и после экспорта/приёма
@@ -387,14 +384,13 @@ public class S3PublishingTests
 
     // ── Связка с укладкой на диск ─────────────────────────────────────────────
 
-    /// <summary>Полный путь укладки: документ ложится на третий диск, копия — рядом с прошивкой,
-    /// третий экземпляр уходит на хостинг. Ровно то, о чём просил Иван: «дублируем информацию, а не
+    /// <summary>Полный путь укладки: документ ложится рядом с прошивкой на первом диске, второй
+    /// экземпляр уходит на хостинг. Ровно то, о чём просил Иван: «дублируем информацию, а не
     /// ярлыками занимаемся».</summary>
     [Fact]
-    public void Copy_PlacesTheDocumentOnBothDisks_AndPublishesIt()
+    public void Copy_PlacesTheDocumentNextToFirmware_AndPublishesIt()
     {
         using var first = new TempRoot();
-        using var third = new TempRoot();
         using var source = new TempRoot();
 
         var src = Path.Combine(source.Path, "исходник.pdf");
@@ -404,16 +400,15 @@ public class S3PublishingTests
         var storage = new FakeStorage();
         var warnings = new List<string>();
 
-        var placement = InstructionStorage.Copy(src, folder, first.Path, third.Path,
-            duplicateOnFirstDisk: true, warnings, "2.1.0042.0001", PublisherOver(storage));
+        var placement = InstructionStorage.Copy(src, folder, first.Path, warnings,
+            "2.1.0042.0001", PublisherOver(storage));
 
         Assert.Empty(warnings);
-        Assert.True(placement.WentToThirdDisk);
-        Assert.True(File.Exists(placement.ActualPath));                       // третий диск
-        Assert.True(File.Exists(placement.StoredPath));                       // копия рядом с прошивкой
+        Assert.True(File.Exists(placement.ActualPath));                       // рядом с прошивкой
+        Assert.True(File.Exists(placement.StoredPath));
         Assert.Single(storage.Puts);                                          // хостинг
         Assert.StartsWith("https://fs.elitacompany.ru/", placement.PublishedUrl);
-        // Имя каноническое на всех трёх экземплярах — по нему же строится ссылка под QR-кодом.
+        // Имя каноническое на обоих экземплярах — по нему же строится ссылка под QR-кодом.
         Assert.EndsWith("инструкция_2.1.0042.0001.pdf", placement.StoredPath);
         Assert.EndsWith("/инструкция_2.1.0042.0001.pdf", placement.PublishedUrl);
     }
@@ -431,8 +426,8 @@ public class S3PublishingTests
         var folder = Path.Combine(first.Path, "ПО", "Инструкция");
         var warnings = new List<string>();
 
-        var placement = InstructionStorage.Copy(src, folder, first.Path, thirdRoot: "",
-            duplicateOnFirstDisk: true, warnings, "2.1.0042.0001", publisher: null);
+        var placement = InstructionStorage.Copy(src, folder, first.Path, warnings,
+            "2.1.0042.0001", publisher: null);
 
         Assert.True(File.Exists(placement.StoredPath));
         Assert.Null(placement.PublishedUrl);
@@ -453,8 +448,8 @@ public class S3PublishingTests
         var warnings = new List<string>();
 
         var storage = new FakeStorage(HttpStatusCode.ServiceUnavailable);
-        var placement = InstructionStorage.Copy(src, folder, first.Path, thirdRoot: "",
-            duplicateOnFirstDisk: true, warnings, "2.1.0042.0001", PublisherOver(storage));
+        var placement = InstructionStorage.Copy(src, folder, first.Path, warnings,
+            "2.1.0042.0001", PublisherOver(storage));
 
         Assert.True(File.Exists(placement.StoredPath));
         Assert.Null(placement.PublishedUrl);

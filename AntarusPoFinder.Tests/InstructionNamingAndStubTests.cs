@@ -147,24 +147,21 @@ public class InstructionNamingAndStubTests : IDisposable
     }
 
     [Fact]
-    public void Copy_GivesTheFileItsCanonicalName_OnWhicheverDiskItLands()
+    public void Copy_GivesTheFileItsCanonicalName_NextToFirmware()
     {
-        using var third = new TempRoot();
         using var source = new TempRoot();
 
         var folder = Path.Combine(Root, "ПО", "ПЖ", "SMH5", "Инструкция");
         var src = Touch(source.Path, "Инструкция по эксплуатации.docx");
         var warnings = new List<string>();
 
-        var placement = InstructionStorage.Copy(src, folder, Root, third.Path,
-            duplicateOnFirstDisk: false, warnings, Version);
+        var placement = InstructionStorage.Copy(src, folder, Root, warnings, Version);
 
         var expected = $"инструкция_{Version}.docx";
-        Assert.True(placement.WentToThirdDisk);
         Assert.Equal(expected, Path.GetFileName(placement.ActualPath));
         Assert.Equal(expected, Path.GetFileName(placement.StoredPath));
         Assert.True(File.Exists(placement.ActualPath));
-        // Путь для БД по-прежнему считается от ПЕРВОГО диска — иначе буква третьего разъехалась бы.
+        // Файл лежит рядом с прошивкой, на первом диске.
         Assert.StartsWith(Root, placement.StoredPath, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(warnings);
     }
@@ -179,9 +176,9 @@ public class InstructionNamingAndStubTests : IDisposable
         var folder = Path.Combine(Root, "Инструкция");
 
         InstructionStorage.Copy(Touch(source.Path, "Инструкция ред.1.pdf", "первая редакция"), folder, Root,
-            thirdRoot: "", duplicateOnFirstDisk: false, new List<string>(), Version);
+            new List<string>(), Version);
         var placement = InstructionStorage.Copy(Touch(source.Path, "Инструкция ред.2.pdf", "вторая редакция"),
-            folder, Root, thirdRoot: "", duplicateOnFirstDisk: false, new List<string>(), Version);
+            folder, Root, new List<string>(), Version);
 
         var canonical = Path.Combine(folder, $"инструкция_{Version}.pdf");
         Assert.Equal(canonical, placement.StoredPath);
@@ -197,8 +194,7 @@ public class InstructionNamingAndStubTests : IDisposable
         var folder = Path.Combine(Root, "Инструкция");
         var src = Touch(source.Path, "скан.pdf");
 
-        var placement = InstructionStorage.Copy(src, folder, Root, thirdRoot: "",
-            duplicateOnFirstDisk: false, new List<string>());
+        var placement = InstructionStorage.Copy(src, folder, Root, new List<string>());
 
         Assert.Equal("скан.pdf", Path.GetFileName(placement.StoredPath));
     }
@@ -245,7 +241,7 @@ public class InstructionNamingAndStubTests : IDisposable
 
         // Инструкцию дописали и приложили — под ЛЮБЫМ именем.
         InstructionStorage.Copy(Touch(source.Path, "Инструкция по эксплуатации.pdf"), folder, Root,
-            thirdRoot: "", duplicateOnFirstDisk: false, new List<string>(), Version);
+            new List<string>(), Version);
 
         // Тот же самый путь, но теперь это настоящий документ: QR, напечатанный вчера, открывает его.
         Assert.True(File.Exists(linkTarget!));
@@ -312,110 +308,55 @@ public class InstructionNamingAndStubTests : IDisposable
     }
 
     [Fact]
-    public void EnsureForVersion_PutsTheStubOnBothDisks()
+    public void EnsureForVersion_PutsTheStubNextToFirmware()
     {
-        using var third = new TempRoot();
         var writer = new FakeStubWriter();
         var folder = Path.Combine(Root, "ПО", "ПЖ", "SMH5", "Инструкция");
 
-        var created = InstructionStub.EnsureForVersion(folder, Root, third.Path, Version, writer);
+        var created = InstructionStub.EnsureForVersion(folder, Root, Version, writer);
 
-        Assert.Equal(2, created);
+        Assert.Equal(1, created);
         Assert.True(File.Exists(InstructionStub.PathFor(folder, Version)));
-        Assert.True(File.Exists(InstructionStub.PathFor(
-            Path.Combine(third.Path, "ПО", "ПЖ", "SMH5", "Инструкция"), Version)));
     }
 
     [Fact]
-    public void EnsureForVersion_UnreachableThirdDisk_TouchesOnlyTheFirstOne()
+    public void Copy_RemovesTheStub_WhenTheRealDocumentArrives()
     {
-        var writer = new FakeStubWriter();
-        var missingThird = Path.Combine(Path.GetTempPath(), "нет-такого-диска-" + Guid.NewGuid().ToString("N"));
-        var folder = Path.Combine(Root, "Инструкция");
-
-        Assert.Equal(1, InstructionStub.EnsureForVersion(folder, Root, missingThird, Version, writer));
-        Assert.False(Directory.Exists(missingThird));
-    }
-
-    [Fact]
-    public void Copy_RemovesTheStubFromBothDisks_WhenTheRealDocumentArrives()
-    {
-        using var third = new TempRoot();
         using var source = new TempRoot();
         var writer = new FakeStubWriter();
 
         var folder = Path.Combine(Root, "ПО", "ПЖ", "SMH5", "Инструкция");
-        var mirror = Path.Combine(third.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
-        InstructionStub.EnsureForVersion(folder, Root, third.Path, Version, writer);
+        InstructionStub.EnsureForVersion(folder, Root, Version, writer);
 
-        InstructionStorage.Copy(Touch(source.Path, "готовая.pdf"), folder, Root, third.Path,
-            duplicateOnFirstDisk: true, new List<string>(), Version);
+        InstructionStorage.Copy(Touch(source.Path, "готовая.pdf"), folder, Root, new List<string>(), Version);
 
-        // На обоих дисках под каноническим именем лежит настоящий документ, а не заглушка.
-        var landed = Path.Combine(mirror, $"инструкция_{Version}.pdf");
-        Assert.True(File.Exists(landed));
-        Assert.False(InstructionStub.IsStub(landed));
-        Assert.Null(InstructionStub.ExistingIn(mirror));
-        Assert.Null(InstructionStub.ExistingIn(folder));
-
+        // Под каноническим именем рядом с прошивкой лежит настоящий документ, а не заглушка.
         var copy = Path.Combine(folder, $"инструкция_{Version}.pdf");
         Assert.True(File.Exists(copy));
         Assert.False(InstructionStub.IsStub(copy));
+        Assert.Null(InstructionStub.ExistingIn(folder));
     }
 
-    /// <summary>Инструкция лежит на ОДНОМ из двух дисков — значит «пусто у меня» не повод объявлять
-    /// её несуществующей. Иначе перестройка, только что унёсшая документы на третий диск, тут же
-    /// клала бы на первый заглушку «в разработке» рядом с ярлыком на готовый документ.</summary>
+    /// <summary>В папке лежит ярлык-пережиток на документ — заглушке «в разработке» рядом с ним не
+    /// место: это прямая ложь.</summary>
     [Fact]
-    public void EnsureForVersion_PlacesNothing_WhenTheDocumentLivesOnTheOtherDisk()
+    public void EnsureForVersion_PlacesNothing_WhenAShortcutPointsToTheDocument()
     {
-        using var third = new TempRoot();
         var writer = new FakeStubWriter();
-
         var folder = Path.Combine(Root, "ПО", "ПЖ", "SMH5", "Инструкция");
-        var mirror = Path.Combine(third.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
-        Touch(mirror, $"инструкция_{Version}.pdf");            // документ уехал на третий диск,
-        Touch(folder, $"инструкция_{Version}.pdf.lnk", "lnk"); // на первом остался указатель на него
+        Touch(folder, $"инструкция_{Version}.pdf.lnk", "lnk"); // указатель на документ
 
-        Assert.Equal(0, InstructionStub.EnsureForVersion(folder, Root, third.Path, Version, writer));
+        Assert.Equal(0, InstructionStub.EnsureForVersion(folder, Root, Version, writer));
         Assert.Empty(writer.Written);
         Assert.Null(InstructionStub.ExistingIn(folder));
-        Assert.Null(InstructionStub.ExistingIn(mirror));
-
-        // И ярлыка достаточно самого по себе: третий диск отключили — заглушке в папке с указателем
-        // на документ по-прежнему не место.
         Assert.False(InstructionStub.EnsureIn(folder, Version, writer));
     }
 
-    /// <summary>То же самое для создания структуры: папку-двойника считает сам план (он знает оба
-    /// корня), иначе заглушка легла бы на первый диск поверх работающей инструкции с третьего.</summary>
     [Fact]
-    public void ApplyStructurePlan_SkipsTheFolderWhoseDocumentIsOnTheThirdDisk()
+    public void ApplyStructurePlan_FillsEveryInstructionFolder()
     {
-        using var third = new TempRoot();
         var writer = new FakeStubWriter();
-        var plan = _hierarchy.PlanStructure(Root, third.Path);
-
-        var onFirst = plan.Folders.First(f =>
-            string.Equals(Path.GetFileName(f), HierarchyFolders.Instructions, StringComparison.Ordinal)
-            && f.StartsWith(Root, StringComparison.OrdinalIgnoreCase));
-        var onThird = InstructionDiskResolver.Mirror(Root, third.Path, onFirst)!;
-        Touch(onThird, "инструкция готовая.pdf");
-
-        HierarchyService.ApplyStructurePlan(plan, writer);
-
-        Assert.Null(InstructionStub.ExistingIn(onFirst));
-        Assert.Null(InstructionStub.ExistingIn(onThird));
-        // Остальные папки заглушки при этом получили — отказ точечный, а не «сломалось всё».
-        Assert.NotEmpty(writer.Written);
-    }
-
-    [Fact]
-    public void ApplyStructurePlan_FillsEveryInstructionFolder_OnBothDisks()
-    {
-        using var third = new TempRoot();
-        var writer = new FakeStubWriter();
-        var plan = _hierarchy.PlanStructure(Root, third.Path);
+        var plan = _hierarchy.PlanStructure(Root);
 
         HierarchyService.ApplyStructurePlan(plan, writer);
 
@@ -423,7 +364,6 @@ public class InstructionNamingAndStubTests : IDisposable
             .Where(f => string.Equals(Path.GetFileName(f), HierarchyFolders.Instructions, StringComparison.Ordinal))
             .ToList();
         Assert.NotEmpty(instructionFolders);
-        Assert.Contains(instructionFolders, f => f.StartsWith(third.Path, StringComparison.OrdinalIgnoreCase));
         Assert.All(instructionFolders, f => Assert.True(File.Exists(Path.Combine(f, InstructionStub.GenericFileName)), f));
 
         // Без писателя заглушек поведение ровно прежнее — папки создаются пустыми.
@@ -457,8 +397,6 @@ public class InstructionNamingAndStubTests : IDisposable
     [Fact]
     public void Migrator_RenamesInstructionsInsideVersionFolders_AndPlacesStubs()
     {
-        using var third = new TempRoot();
-
         var versionDir = Path.Combine(Root, "ПО", "ПЖ", "SMH5", Version);
         VersionLayout.EnsureFolders(versionDir);
         var ownInstructions = VersionLayout.SlotFolder(versionDir, HierarchyFolders.Instructions);
@@ -468,70 +406,30 @@ public class InstructionNamingAndStubTests : IDisposable
         var emptyVersionDir = Path.Combine(Root, "ПО", "ПЖ", "SMH5", "2.1.0042.0002");
         VersionLayout.EnsureFolders(emptyVersionDir);
 
-        var input = new DiskLayoutMigrator.MigrationInput(Root, third.Path, DuplicateOnFirstDisk: false,
+        var input = new DiskLayoutMigrator.MigrationInput(Root,
             new List<FwVersionRecord>
             {
                 new() { VersionRaw = Version, DiskPath = versionDir },
                 new() { VersionRaw = "2.1.0042.0002", DiskPath = emptyVersionDir },
             },
-            new DiskLayoutMigrator.MigrationOptions(RenameFirmwareFiles: false,
-                MoveInstructionsToThirdDisk: false, FixInstructions: true));
+            new DiskLayoutMigrator.MigrationOptions(RenameFirmwareFiles: false, FixInstructions: true));
 
         var writer = new FakeStubWriter();
         var plan = DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(input), null, stubs: writer);
 
         Assert.True(File.Exists(Path.Combine(ownInstructions, $"инструкция_{Version}.pdf")));
         Assert.False(File.Exists(Path.Combine(ownInstructions, "Инструкция по эксплуатации.pdf")));
-        // У версии с документом заглушки нет, у пустой — есть, причём и в зеркале на третьем диске,
-        // и под именем СВОЕЙ версии: ссылка на неё уже такая же, как будет у готового документа.
+        // У версии с документом заглушки нет, у пустой — есть, под именем СВОЕЙ версии: ссылка на неё
+        // уже такая же, как будет у готового документа.
         Assert.Null(InstructionStub.ExistingIn(ownInstructions));
         Assert.True(File.Exists(InstructionStub.PathFor(
             VersionLayout.SlotFolder(emptyVersionDir, HierarchyFolders.Instructions), "2.1.0042.0002")));
-        Assert.True(File.Exists(InstructionStub.PathFor(Path.Combine(third.Path, "ПО", "ПЖ", "SMH5",
-            "2.1.0042.0002", HierarchyFolders.Instructions), "2.1.0042.0002")));
 
         Assert.Contains(plan.Ops, o => o.Kind == DiskLayoutMigrator.OpKind.RenameInstruction && o.Status == "ok");
 
         // Повторный прогон не делает ничего — идемпотентность, на которой стоит вся перестройка.
         var again = DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(input), null, stubs: writer);
         Assert.DoesNotContain(again.Ops, o => o.Status == "ok");
-    }
-
-    /// <summary>Переезд на третий диск и приведение имён идут ОДНИМ прогоном, и прогон не должен
-    /// ломать сам себя: копия рядом с прошивкой кладётся под старым именем файла, а следом файл
-    /// переименовывается — значит и копию надо переименовать, иначе путь из БД (он считается заменой
-    /// корня) указывает на файл, которого под этим именем на первом диске уже нет.</summary>
-    [Fact]
-    public void Migrator_MovingToTheThirdDiskAndRenaming_RenamesTheCopyToo()
-    {
-        using var third = new TempRoot();
-
-        var versionDir = Path.Combine(Root, "ПО", "ПЖ", "SMH5", Version);
-        VersionLayout.EnsureFolders(versionDir);
-        var ownInstructions = VersionLayout.SlotFolder(versionDir, HierarchyFolders.Instructions);
-        Touch(ownInstructions, "Инструкция по эксплуатации.pdf");
-        // Ярлык от прежних перестроек — его место занимает копия, и остаться рядом с ней он не должен.
-        Touch(ownInstructions, "Инструкция по эксплуатации.pdf.lnk", "lnk");
-
-        var input = new DiskLayoutMigrator.MigrationInput(Root, third.Path, DuplicateOnFirstDisk: true,
-            new List<FwVersionRecord> { new() { VersionRaw = Version, DiskPath = versionDir } },
-            new DiskLayoutMigrator.MigrationOptions(RenameFirmwareFiles: false,
-                MoveInstructionsToThirdDisk: true, FixInstructions: true));
-
-        DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(input), null, stubs: new FakeStubWriter());
-
-        var landed = Path.Combine(third.Path, "ПО", "ПЖ", "SMH5", Version, HierarchyFolders.Instructions,
-            $"инструкция_{Version}.pdf");
-        Assert.True(File.Exists(landed));
-
-        // Рядом с прошивкой — тот же документ под тем же каноническим именем, и ни одного ярлыка.
-        var copy = Path.Combine(ownInstructions, $"инструкция_{Version}.pdf");
-        Assert.True(File.Exists(copy));
-        Assert.Empty(Directory.GetFiles(ownInstructions, "*.lnk"));
-        Assert.Single(Directory.GetFiles(ownInstructions));
-
-        // Заглушке рядом с готовым документом не место.
-        Assert.Null(InstructionStub.ExistingIn(ownInstructions));
     }
 
     /// <summary>Галочка снята — ни одной операции по инструкциям, поведение ровно прежнее.</summary>
@@ -541,9 +439,9 @@ public class InstructionNamingAndStubTests : IDisposable
         var versionDir = Path.Combine(Root, "ПО", "ПЖ", "SMH5", Version);
         VersionLayout.EnsureFolders(versionDir);
 
-        var input = new DiskLayoutMigrator.MigrationInput(Root, "", DuplicateOnFirstDisk: false,
+        var input = new DiskLayoutMigrator.MigrationInput(Root,
             new List<FwVersionRecord> { new() { VersionRaw = Version, DiskPath = versionDir } },
-            new DiskLayoutMigrator.MigrationOptions(RenameFirmwareFiles: false, MoveInstructionsToThirdDisk: false));
+            new DiskLayoutMigrator.MigrationOptions(RenameFirmwareFiles: false));
 
         var plan = DiskLayoutMigrator.Plan(input);
 

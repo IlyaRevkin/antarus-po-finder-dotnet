@@ -38,24 +38,6 @@
                         ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
 
-            <TextBlock Text="ТРЕТИЙ ДИСК (ИНСТРУКЦИИ)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-            <TextBlock Text="Необязательный. Пусто или недоступен — инструкции остаются на первом диске."
-                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-            <Grid Margin="0,0,0,6">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBox Grid.Column="0" x:Name="ThirdDiskInput" Height="34" Margin="0,0,8,0"
-                         LostFocus="ThirdDisk_LostFocus" KeyDown="ThirdDisk_KeyDown"
-                         ToolTip="Отдельный диск только под инструкции: они самые тяжёлые и нужны в том числе с телефона. Структура папок повторяет первый диск — программа считает путь сама, вручную ничего раскладывать не нужно."/>
-                <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseThirdDisk_Click"
-                        ToolTip="Выбрать папку — сохранится сразу"/>
-            </Grid>
-            <CheckBox x:Name="InstructionDuplicateCheck" Content="Класть рядом с прошивкой копию инструкции, уехавшей на третий диск"
-                      Margin="0,0,0,4" Click="InstructionDuplicate_Click"
-                      ToolTip="Настоящий документ, а не ярлык: папка версии на первом диске остаётся самодостаточной — её можно скопировать на флешку или открыть с машины, где третий диск не подключён. Раньше здесь клался .lnk, который на чужой машине вёл в никуда."/>
-            <TextBlock x:Name="ThirdDiskStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
             <!-- Хранилище на хостинге. Ключей на 05.08.2026 ещё нет — карточка сделана так, чтобы их
                  можно было вписать в любой момент позже, без обновления программы: пустые ключи это

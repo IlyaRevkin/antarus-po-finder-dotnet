@@ -164,23 +164,18 @@ public partial class InstructionLabelWindow : Window
 
     // ── Содержимое кода ──────────────────────────────────────────────────────
 
-    /// <summary>Что зашить в QR и как это объяснить человеку. Ссылка считается от того диска, на
-    /// котором файл реально лежит: инструкции могут быть уведены на третий диск, и относительный путь
-    /// надо брать от ЕГО корня, иначе адрес соберётся с чужим хвостом.</summary>
+    /// <summary>Что зашить в QR и как это объяснить человеку. Ссылка считается от корня диска
+    /// прошивок: относительный путь файла инструкции надо брать от него, иначе адрес соберётся с
+    /// чужим хвостом.</summary>
     private static (string Content, string Explanation) ResolveQrContent(AppServices services, string? file)
     {
         if (string.IsNullOrWhiteSpace(file))
             return ("", "Файл инструкции не найден — печатать нечего.");
 
         var baseUrl = services.Cfg.InstructionBaseUrl();
-        var third = services.Cfg.ThirdDiskPath();
         var root = services.Cfg.RootPath();
 
-        var diskRoot = !string.IsNullOrWhiteSpace(third) && LabelLinkBuilder.RelativeTo(third, file) is not null
-            ? third
-            : root;
-
-        if (LabelLinkBuilder.BuildUrl(baseUrl, diskRoot, file) is { } url)
+        if (LabelLinkBuilder.BuildUrl(baseUrl, root, file) is { } url)
             return (url, $"В QR: {url}");
 
         var unc = NetworkPathHelper.TryResolveUnc(file) ?? file;

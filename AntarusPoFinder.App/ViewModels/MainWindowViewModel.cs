@@ -1619,12 +1619,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         // План — по БД (быстро, здесь), создание папок на сетевом диске — в фоне. Сотни CreateDirectory
         // по медленной шаре и были одной из тех «программа не отвечает при запуске» пауз.
-        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
+        var plan = _services.Hierarchy.PlanStructure(root);
         EnsureStructureResult result;
         // Это главная точка, где папки «Инструкция» вообще появляются на диске (проверка структуры
         // идёт при каждом запуске), поэтому и заглушка «Инструкция в разработке» кладётся здесь:
-        // пустая папка неотличима от «инструкцию потеряли». Настоящий документ не затирается, а
-        // документ, лежащий в зеркале на третьем диске, план учитывает сам — см. InstructionStub.
+        // пустая папка неотличима от «инструкцию потеряли». Настоящий документ не затирается — см.
+        // InstructionStub.
         var stubs = new Services.InstructionStubWriter();
         using (Busy.Begin("Проверка структуры диска…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
