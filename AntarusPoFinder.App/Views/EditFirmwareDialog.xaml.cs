@@ -526,8 +526,6 @@ public partial class EditFirmwareDialog : Window
         var request = new FirmwareAttachmentsRequest
         {
             RootPath = _services.Cfg.RootPath(),
-            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
-            DuplicateInstructionOnFirstDisk = _services.Cfg.DuplicateInstructionOnFirstDisk(),
             // Доложенная позже инструкция обязана лечь туда же, куда легла бы приложенная сразу, —
             // в том числе и на хостинг (см. FirmwareAttachmentsRequest).
             InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),

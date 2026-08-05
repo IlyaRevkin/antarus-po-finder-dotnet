@@ -2691,7 +2691,7 @@ public partial class SettingsView : UserControl
         }
         // План по БД здесь, создание сотен папок на сетевом диске — в фоне (см. HierarchyService,
         // блок про двухфазные операции): окно во время этого больше не «висит».
-        var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
+        var plan = _services.Hierarchy.PlanStructure(root);
         EnsureStructureResult result;
         // Заглушка «Инструкция в разработке» — там же, где создаются папки: см. InstructionStub и
         // ту же связку в MainWindowViewModel.EnsureHierarchyAsync.

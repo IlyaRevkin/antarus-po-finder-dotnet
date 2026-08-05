@@ -1146,8 +1146,6 @@ public partial class UploadView : UserControl
             CabinetSnRaw = CabinetSnInput.Text,
             Reservation = GetSelectedReservation(),
             RootPath = _services.Cfg.RootPath(),
-            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
-            DuplicateInstructionOnFirstDisk = _services.Cfg.DuplicateInstructionOnFirstDisk(),
             // Копия инструкции на хостинге — та самая, которую открывает QR-код с наклейки. null,
             // пока не вписаны ключи доступа: загрузка версии от этого не меняется вовсе.
             InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),

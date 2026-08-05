@@ -62,15 +62,6 @@ public class FirmwareUploadRequest
     /// this once outside the service so a stale/misconfigured path fails the same way it always has.</summary>
     public string RootPath { get; set; } = "";
 
-    /// <summary>Корень третьего диска — только под инструкции (ConfigService.ThirdDiskPath()).
-    /// Пусто/недоступен — инструкция ложится на первый диск, как раньше. См. InstructionStorage.</summary>
-    public string ThirdDiskPath { get; set; } = "";
-
-    /// <summary>Дублировать ли уехавшую на третий диск инструкцию настоящей копией рядом с прошивкой
-    /// (ConfigService.DuplicateInstructionOnFirstDisk()). Раньше вместо копии клался ярлык — почему
-    /// от него отказались, см. InstructionStorage.</summary>
-    public bool DuplicateInstructionOnFirstDisk { get; set; } = true;
-
     /// <summary>Кто выкладывает копию инструкции на хостинг (S3), если он настроен. null — не
     /// настроен или вызывающему не нужен: выкладки не происходит, всё остальное как прежде.</summary>
     public IInstructionPublisher? InstructionPublisher { get; set; }
@@ -551,25 +542,23 @@ public static class FirmwareUploadService
         string instrStored = "";
         if (!string.IsNullOrEmpty(request.InstructionsSourcePath))
         {
-            // Единственное вложение, у которого есть свой диск: инструкции самые тяжёлые и нужны с
-            // телефона, поэтому уезжают на третий диск, если он настроен (см. InstructionStorage).
-            // В БД при этом всё равно пишется путь на первом — он и разъезжается по машинам.
+            // Инструкция ложится рядом с прошивкой на первом диске и, если хостинг настроен, вторым
+            // экземпляром уходит на хостинг (см. InstructionStorage).
             try
             {
                 instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
-                    request.RootPath, request.ThirdDiskPath, request.DuplicateInstructionOnFirstDisk, warnings,
-                    plan.Version.Raw, request.InstructionPublisher).StoredPath;
+                    request.RootPath, warnings, plan.Version.Raw, request.InstructionPublisher).StoredPath;
             }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
         if (string.IsNullOrEmpty(instrStored))
         {
             // Инструкции к версии нет — кладём заглушку, чтобы папка «Инструкция» не выглядела
-            // потерянной: и на первом диске, и в зеркале на третьем (см. InstructionStub). Имя у неё
-            // то же каноническое «инструкция_<версия>.pdf», под которым потом ляжет настоящий
-            // документ, — наклейку с QR можно печатать и клеить уже сейчас. Настоящей инструкцией
-            // она не считается ни одним резолвером, поэтому «инструкция ✓» на карточке не загорится.
-            InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath, request.ThirdDiskPath,
+            // потерянной (см. InstructionStub). Имя у неё то же каноническое «инструкция_<версия>.pdf»,
+            // под которым потом ляжет настоящий документ, — наклейку с QR можно печатать и клеить уже
+            // сейчас. Настоящей инструкцией она не считается ни одним резолвером, поэтому «инструкция ✓»
+            // на карточке не загорится.
+            InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath,
                 plan.Version.Raw, stubs, warnings, request.InstructionPublisher);
         }
         string modbusStored = "";

@@ -866,19 +866,17 @@ public partial class SearchView : UserControl
     private static string? ResolveDocFile(HierarchyResult result, string? storedPath, string sharedFolderName) =>
         DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, sharedFolderName));
 
-    /// <summary>Корни дисков, от которых зависит поиск инструкции: первый (прошивки) и третий
-    /// (только инструкции, см. InstructionDiskResolver). Читаются из настроек на потоке интерфейса и
-    /// передаются в фоновый обход параметром — лезть за ними в базу из фонового потока нельзя
-    /// (соединение SQLite одно на приложение и не потокобезопасно).</summary>
-    private readonly record struct DocRoots(string First, string Third);
+    /// <summary>Корень диска прошивок, от которого зависит поиск инструкции. Читается из настроек на
+    /// потоке интерфейса и передаётся в фоновый обход параметром — лезть за ним в базу из фонового
+    /// потока нельзя (соединение SQLite одно на приложение и не потокобезопасно).</summary>
+    private readonly record struct DocRoots(string First);
 
-    private DocRoots CurrentDocRoots() => new(_services.Cfg.RootPath(), _services.Cfg.ThirdDiskPath());
+    private DocRoots CurrentDocRoots() => new(_services.Cfg.RootPath());
 
-    /// <summary>Папка, из которой читается инструкция: зеркало на третьем диске, если оно там есть,
-    /// иначе общая папка «Инструкция» рядом с папкой контроллера на первом.</summary>
+    /// <summary>Папка, из которой читается инструкция: общая папка «Инструкция» рядом с папкой
+    /// контроллера на первом диске.</summary>
     private static string? InstructionFolder(HierarchyResult result, DocRoots roots) =>
-        InstructionDiskResolver.PreferredReadFolder(roots.First, roots.Third,
-            FindSiblingFolder(result, "Инструкция"));
+        FindSiblingFolder(result, "Инструкция");
 
     /// <summary>docx/pdf инструкции этой версии (см. InstructionDocResolver). Ходит на диск — из
     /// фонового обхода или по клику, не в отрисовке.</summary>
@@ -1894,7 +1892,6 @@ public partial class SearchView : UserControl
         var request = new FirmwareAttachmentsRequest
         {
             RootPath = root,
-            ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
             GroupName = names.Value.GroupName,
             SubtypeName = names.Value.SubtypeName,
             ControllerName = names.Value.ControllerName,

@@ -12,8 +12,7 @@ namespace AntarusPoFinder.Tests;
 /// <summary>Разовая перестройка уже накопленного диска. Свойства, без которых её нельзя выпускать
 /// (docs/hierarchy-rework-plan.md, 4.1), и проверяются здесь: сухой прогон ничего не меняет,
 /// повторный прогон не делает ничего, переименование не трогает многофайловые папки (там имя файла
-/// привязано к executable_hint у коллег), а переезд инструкций идёт только на настроенный третий
-/// диск.</summary>
+/// привязано к executable_hint у коллег).</summary>
 public class DiskLayoutMigratorTests
 {
     private static string Touch(string folder, string name)
@@ -42,10 +41,9 @@ public class DiskLayoutMigratorTests
         }, dir);
     }
 
-    private static DiskLayoutMigrator.MigrationInput Input(string root, string? third,
-        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool instructions = false, bool duplicate = false,
-        bool fold = false, bool opc = false) =>
-        new(root, third, duplicate, versions, new DiskLayoutMigrator.MigrationOptions(rename, instructions, fold, opc));
+    private static DiskLayoutMigrator.MigrationInput Input(string root,
+        IReadOnlyList<FwVersionRecord> versions, bool rename = true, bool fold = false, bool opc = false) =>
+        new(root, versions, new DiskLayoutMigrator.MigrationOptions(rename, fold, opc));
 
     /// <summary>ОПЦ-версия в ПРЕЖНЕЙ раскладке: общая папка «ОПЦ» на уровне подтипа, имя папки —
     /// строка версии. Именно её и переносит этап 5.</summary>
@@ -79,7 +77,7 @@ public class DiskLayoutMigratorTests
         using var root = new TempRoot();
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003.20260101_1200", "1.0.0004.0003_20260101_1200.PSL");
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
 
         var op = Assert.Single(plan.Ops);
         Assert.Equal(DiskLayoutMigrator.OpKind.RenameFirmware, op.Kind);
@@ -96,7 +94,7 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003_старое.psl");
         var renames = new List<DiskLayoutMigrator.Op>();
 
-        DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })),
+        DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record })),
             renames.Add);
 
         Assert.True(File.Exists(Path.Combine(dir, "1.0.0004.0003.psl")));
@@ -107,7 +105,7 @@ public class DiskLayoutMigratorTests
         Assert.Equal(new[] { dir }, rename.RecordPaths);
 
         // Второй прогон видит уже переименованное и не делает ничего.
-        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })).Ops);
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record })).Ops);
     }
 
     [Fact]
@@ -118,7 +116,7 @@ public class DiskLayoutMigratorTests
         // прямой File.Move на них падает «файл уже существует».
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.PSL");
 
-        DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })),
+        DiskLayoutMigrator.Apply(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record })),
             renamed: null);
 
         var name = Path.GetFileName(Directory.EnumerateFiles(dir).Single());
@@ -132,7 +130,7 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "ПРОЕКТ.PSL", executableHint: "ПРОЕКТ.PSL");
         Touch(dir, "ресурсы.bin");
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
 
         // Имя файла в такой папке — единственный носитель подсказки «чем открывать», а она у коллег
         // при импорте конфига не обновляется: переименуем — сломаем им «Открыть прошивку ПЛК».
@@ -148,7 +146,7 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.PSL");
         Touch(dir, "CHANGELOG.md");   // пишется самой программой — файлом прошивки не считается
 
-        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })).Ops);
+        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record })).Ops);
 
         Assert.Equal(Path.Combine(dir, "1.0.0004.0003.psl"), op.Target);
     }
@@ -159,7 +157,7 @@ public class DiskLayoutMigratorTests
         using var root = new TempRoot();
         var (record, dir) = MakeVersion(root.Path, "1.0.0036.0001", "старое.psl", requestNum: "01312", cabinetSn: "00042");
 
-        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record })).Ops);
+        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record })).Ops);
 
         // Заявка и SN живут ТОЛЬКО в имени файла (ParseOpcMarkers) — потерять их переименованием нельзя.
         Assert.Equal(Path.Combine(dir, "1.0.0036.0001_(01312)_SN00042.psl"), op.Target);
@@ -173,7 +171,7 @@ public class DiskLayoutMigratorTests
         // Конфигурации одного шкафа делят папку версии — операций должно остаться столько же, сколько файлов.
         var second = new FwVersionRecord { VersionRaw = first.VersionRaw, DiskPath = dir, Filename = first.Filename };
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { first, second }));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { first, second }));
 
         Assert.Single(plan.Ops);
     }
@@ -193,58 +191,10 @@ public class DiskLayoutMigratorTests
             Filename = actual.Filename,
         };
 
-        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { actual, stale })).Ops);
+        var op = Assert.Single(DiskLayoutMigrator.Plan(Input(root.Path, new[] { actual, stale })).Ops);
 
         Assert.Equal(dir, op.VersionDir);
         Assert.Equal(new[] { dir, stale.DiskPath }, op.RecordPaths);
-    }
-
-    // ── Переезд инструкций на третий диск ────────────────────────────────────
-
-    [Fact]
-    public void Instructions_MoveToThirdDisk_WithACopyLeftBehind()
-    {
-        using var root = new TempRoot();
-        using var third = new TempRoot();
-        var instrFolder = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Instructions);
-        Touch(instrFolder, "инструкция.pdf");
-        Touch(instrFolder, "старая.pdf.lnk");   // ярлык — не документ, его не переносим
-
-        var plan = DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, third.Path, Array.Empty<FwVersionRecord>(),
-                rename: false, instructions: true, duplicate: true)),
-            renamed: null);
-
-        var moved = Path.Combine(third.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Instructions, "инструкция.pdf");
-        Assert.True(File.Exists(moved));
-        // На первом диске остался НАСТОЯЩИЙ документ, а не ярлык на него.
-        var copy = Path.Combine(instrFolder, "инструкция.pdf");
-        Assert.True(File.Exists(copy));
-        Assert.False(File.Exists(copy + ".lnk"));
-        Assert.All(plan.Ops, op => Assert.Equal("ok", op.Status));
-
-        // Повторный прогон: копия рядом с прошивкой — не повод унести её на третий диск ещё раз,
-        // там уже лежит файл с тем же именем (MoveFile чужое не затирает).
-        var again = DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, third.Path, Array.Empty<FwVersionRecord>(),
-                rename: false, instructions: true, duplicate: true)),
-            renamed: null);
-        Assert.True(File.Exists(moved));
-        Assert.True(File.Exists(copy));
-        Assert.DoesNotContain(again.Ops, op => op.Status == "error");
-    }
-
-    [Fact]
-    public void Instructions_ThirdDiskNotConfigured_NothingPlannedButReasonReported()
-    {
-        using var root = new TempRoot();
-        Touch(Path.Combine(root.Path, "ПО", "ПЖ", HierarchyFolders.Instructions), "инструкция.pdf");
-
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, "", Array.Empty<FwVersionRecord>(),
-            rename: false, instructions: true));
-
-        Assert.Empty(plan.Ops);
-        Assert.Contains(plan.Skipped, s => s.Contains("Третий диск не настроен"));
     }
 
     // ── Этап 4: файлы прошивки внутрь «Прошивка\» ────────────────────────────
@@ -261,7 +211,7 @@ public class DiskLayoutMigratorTests
         Touch(dir, ChangelogFile.FileName);
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
             renamed: null);
 
         var inner = VersionLayout.FirmwareFolder(dir);
@@ -280,10 +230,10 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
             renamed: null);
 
-        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)).Ops);
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)).Ops);
         Assert.Single(Directory.EnumerateFiles(VersionLayout.FirmwareFolder(dir)));
     }
 
@@ -301,7 +251,7 @@ public class DiskLayoutMigratorTests
         Touch(dir, "второй.bin");
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
             renamed: null);
 
         Assert.Equal("уже перенесён коллегой", File.ReadAllText(Path.Combine(inner, "1.0.0004.0003.psl")));
@@ -321,7 +271,7 @@ public class DiskLayoutMigratorTests
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
             renamed: null);
 
         Assert.True(VersionLayout.HasAllFolders(dir));
@@ -340,7 +290,7 @@ public class DiskLayoutMigratorTests
         Directory.CreateDirectory(dir);
         var record = new FwVersionRecord { VersionRaw = "1.0.0004.0003", DiskPath = dir };
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true));
         Assert.Single(plan.Ops);
         Assert.Contains("папки версии", plan.Ops[0].Note);
 
@@ -349,7 +299,7 @@ public class DiskLayoutMigratorTests
         Assert.Equal("ok", plan.Ops[0].Status);
 
         // И на этом всё: повторный прогон видеть тут больше нечего.
-        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true)).Ops);
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)).Ops);
     }
 
     /// <summary>Папки версии на диске нет вовсе (запись пережила удаление папки) — перестройка её не
@@ -362,7 +312,7 @@ public class DiskLayoutMigratorTests
         var dir = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", "1.0.0004.0003");
         var record = new FwVersionRecord { VersionRaw = "1.0.0004.0003", DiskPath = dir };
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true));
 
         Assert.Empty(plan.Ops);
         Assert.False(Directory.Exists(dir));
@@ -381,7 +331,7 @@ public class DiskLayoutMigratorTests
         var repoints = new List<DiskLayoutMigrator.Op>();
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, opc: true)),
             renamed: null, repointed: repoints.Add);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312_SN00042");
@@ -408,7 +358,7 @@ public class DiskLayoutMigratorTests
         var before = File.ReadAllText(Path.Combine(dir, ChangelogFile.FileName));
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, opc: true)),
             renamed: null);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
@@ -424,7 +374,7 @@ public class DiskLayoutMigratorTests
         var (first, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "a.psl", "01312");
         var (second, secondDir) = MakeLegacyOpc(root.Path, "3.0.005.0778", "b.psl", "01312");
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { first, second }, rename: false, opc: true));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { first, second }, rename: false, opc: true));
 
         Assert.Single(plan.Ops);
         Assert.Contains(plan.Skipped, s => s.Contains("уже занято"));
@@ -439,10 +389,10 @@ public class DiskLayoutMigratorTests
         using var root = new TempRoot();
         var (record, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
 
-        var plan = DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true));
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, opc: true));
         DiskLayoutMigrator.Apply(plan, renamed: null, repointed: op => record.DiskPath = op.Target);
 
-        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, opc: true)).Ops);
+        Assert.Empty(DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, opc: true)).Ops);
     }
 
     /// <summary>Порядок этапов в одном прогоне: сначала «Прошивка\» внутри версии, потом переезд ОПЦ.
@@ -455,7 +405,7 @@ public class DiskLayoutMigratorTests
         var (record, _) = MakeLegacyOpc(root.Path, "3.0.005.0777", "3.0.005.0777.psl", "01312");
 
         DiskLayoutMigrator.Apply(
-            DiskLayoutMigrator.Plan(Input(root.Path, null, new[] { record }, rename: false, fold: true, opc: true)),
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true, opc: true)),
             renamed: null);
 
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
