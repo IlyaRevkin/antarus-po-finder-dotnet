@@ -47,15 +47,6 @@ public class ConfigService
     {
         ["root_path"] = @"Z:\Software\Antarus Finder",
         ["second_disk_path"] = "",
-        // Третий диск — только под инструкции (docs/hierarchy-rework-plan.md, Этап 3). Пусто = не
-        // настроен, тогда инструкции читаются и пишутся на первом диске, как раньше.
-        ["third_disk_path"] = "",
-        // Дублировать ли инструкцию, уехавшую на третий диск, настоящей КОПИЕЙ рядом с прошивкой.
-        // Ключ новый: прежний third_disk_shortcuts означал «положить ярлык .lnk» и больше не
-        // читается никем (остаётся в базе безвредным мусором — ровно как easter_photo ниже).
-        // Почему копия, а не ярлык, — см. InstructionStorage: ярлык мёртв на чужой машине, на флешке
-        // и на хостинге, а путь в БД при нём указывал на несуществующий файл.
-        ["instruction_duplicate_on_first_disk"] = "true",
         // ── Хранилище на хостинге (S3) ───────────────────────────────────────────────────────
         // Реквизиты от Ивана Герасимова (05.08.2026). Адрес/бакет/регион заполнены сразу, ключей на
         // тот момент ещё не было — они вписываются в Настройки, когда придёт файл secrets, и до тех
@@ -295,19 +286,6 @@ public class ConfigService
 
     public string SecondDiskPath() => Get("second_disk_path");
     public void SetSecondDiskPath(string path) => Set("second_disk_path", path);
-
-    /// <summary>Корень третьего диска — только под инструкции. Структура на нём ЗЕРКАЛЬНАЯ первому
-    /// диску (см. InstructionDiskResolver), поэтому отдельного справочника путей не нужно. Пусто —
-    /// диск не настроен, всё работает как раньше на первом.</summary>
-    public string ThirdDiskPath() => Get("third_disk_path");
-    public void SetThirdDiskPath(string path) => Set("third_disk_path", path.Trim());
-
-    /// <summary>Дублировать ли инструкцию, уехавшую на третий диск, настоящей копией рядом с
-    /// прошивкой (см. InstructionStorage). Заменяет прежнюю настройку «класть ярлык».</summary>
-    public bool DuplicateInstructionOnFirstDisk() =>
-        Get("instruction_duplicate_on_first_disk").Equals("true", StringComparison.OrdinalIgnoreCase);
-    public void SetDuplicateInstructionOnFirstDisk(bool value) =>
-        Set("instruction_duplicate_on_first_disk", value ? "true" : "false");
 
     // ── Хранилище на хостинге (S3) ───────────────────────────────────────────────────────────
 

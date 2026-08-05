@@ -30,8 +30,7 @@ public interface IInstructionPublisher
 /// нет каталогов, «папка» в нём — это общий префикс ключа, и ничего специально создавать не нужно.
 ///
 /// Неудача выкладки — предупреждение, а не ошибка: файл к этому моменту уже лежит на диске, версия
-/// уже создана, и отменять всё это из-за недоступного хостинга нельзя (ровно то же правило, что и
-/// у недоступного третьего диска — см. InstructionDiskResolver).</summary>
+/// уже создана, и отменять всё это из-за недоступного хостинга нельзя.</summary>
 public sealed class InstructionPublisher : IInstructionPublisher
 {
     private readonly S3Settings _settings;
