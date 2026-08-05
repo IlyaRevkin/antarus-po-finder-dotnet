@@ -71,7 +71,7 @@ public partial class DiskMigrationDialog : Window
         var input = new DiskLayoutMigrator.MigrationInput(
             root,
             _services.Cfg.ThirdDiskPath(),
-            _services.Cfg.ThirdDiskShortcuts(),
+            _services.Cfg.DuplicateInstructionOnFirstDisk(),
             // Вместе с архивными: снятая с показа версия — это по-прежнему папка на диске, и оставить
             // её в старой раскладке значит оставить полперестройки недоделанной.
             _services.Db.GetAllFwVersionsWithNames(includeArchived: true),
@@ -144,10 +144,9 @@ public partial class DiskMigrationDialog : Window
             // потока посреди обхода диска нельзя.
             var renames = new List<DiskLayoutMigrator.Op>();
             var repoints = new List<DiskLayoutMigrator.Op>();
-            var shortcuts = new ShortcutCreator();
 
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
-                await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op), shortcuts,
+                await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op),
                     repointed: op => repoints.Add(op), stubs: new InstructionStubWriter()));
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший

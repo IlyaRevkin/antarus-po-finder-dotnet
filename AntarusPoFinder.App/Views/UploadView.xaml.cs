@@ -1147,7 +1147,10 @@ public partial class UploadView : UserControl
             Reservation = GetSelectedReservation(),
             RootPath = _services.Cfg.RootPath(),
             ThirdDiskPath = _services.Cfg.ThirdDiskPath(),
-            ThirdDiskShortcuts = _services.Cfg.ThirdDiskShortcuts(),
+            DuplicateInstructionOnFirstDisk = _services.Cfg.DuplicateInstructionOnFirstDisk(),
+            // Копия инструкции на хостинге — та самая, которую открывает QR-код с наклейки. null,
+            // пока не вписаны ключи доступа: загрузка версии от этого не меняется вовсе.
+            InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),
             // Перестроен ли диск под «пять папок внутри версии»: флаг ставит перестройка диска и
             // уносит синхронизацией всем — новые версии обязаны рождаться в той же раскладке, в
             // которой лежат остальные (см. ConfigService.DiskLayoutV2).

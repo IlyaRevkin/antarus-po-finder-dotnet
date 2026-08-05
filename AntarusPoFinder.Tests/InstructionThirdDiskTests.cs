@@ -15,16 +15,6 @@ namespace AntarusPoFinder.Tests;
 /// Плюс поведение «третий диск не настроен/недоступен» — оно обязано быть ровно прежним.</summary>
 public class InstructionThirdDiskTests
 {
-    private sealed class RecordingShortcuts : IShortcutCreator
-    {
-        public List<(string Link, string Target)> Created { get; } = new();
-        public void Create(string shortcutPath, string targetPath, string description)
-        {
-            Created.Add((shortcutPath, targetPath));
-            File.WriteAllText(shortcutPath, "lnk");
-        }
-    }
-
     private static string TouchFile(string folder, string name)
     {
         Directory.CreateDirectory(folder);
@@ -70,10 +60,9 @@ public class InstructionThirdDiskTests
         var instrFolder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
         var src = TouchFile(source.Path, "инструкция.docx");
         var warnings = new List<string>();
-        var shortcuts = new RecordingShortcuts();
 
         var placement = InstructionStorage.Copy(src, instrFolder, first.Path, third.Path,
-            createShortcut: true, shortcuts, warnings);
+            duplicateOnFirstDisk: true, warnings);
 
         var expectedActual = Path.Combine(third.Path, "ПО", "ПЖ", "SMH5", "Инструкция", "инструкция.docx");
         Assert.True(placement.WentToThirdDisk);
@@ -81,13 +70,61 @@ public class InstructionThirdDiskTests
         Assert.True(File.Exists(expectedActual));
         // В БД — путь на первом диске: он и разъезжается по машинам синхронизацией.
         Assert.Equal(Path.Combine(instrFolder, "инструкция.docx"), placement.StoredPath);
-        Assert.False(File.Exists(Path.Combine(instrFolder, "инструкция.docx")));
         Assert.Empty(warnings);
 
-        // На первом остался ярлык — чтобы коллега со старым клиентом не увидел пустую папку.
-        var link = Assert.Single(shortcuts.Created);
-        Assert.Equal(Path.Combine(instrFolder, "инструкция.docx.lnk"), link.Link);
-        Assert.Equal(expectedActual, link.Target);
+        // Рядом с прошивкой — НАСТОЯЩИЙ документ, а не ярлык: папку версии можно скопировать на
+        // флешку или открыть с машины без третьего диска, и путь из БД ведёт на существующий файл.
+        var copy = Path.Combine(instrFolder, "инструкция.docx");
+        Assert.True(File.Exists(copy));
+        Assert.Equal(File.ReadAllText(expectedActual), File.ReadAllText(copy));
+        Assert.False(File.Exists(copy + ".lnk"));
+    }
+
+    [Fact]
+    public void Copy_DuplicateDisabled_LeavesFirstDiskEmpty()
+    {
+        using var first = new TempRoot();
+        using var third = new TempRoot();
+        using var source = new TempRoot();
+
+        var instrFolder = Path.Combine(first.Path, "ПО", "Инструкция");
+        var src = TouchFile(source.Path, "инструкция.pdf");
+        var warnings = new List<string>();
+
+        var placement = InstructionStorage.Copy(src, instrFolder, first.Path, third.Path,
+            duplicateOnFirstDisk: false, warnings);
+
+        Assert.True(placement.WentToThirdDisk);
+        Assert.False(File.Exists(Path.Combine(instrFolder, "инструкция.pdf")));
+        Assert.Empty(warnings);
+    }
+
+    /// <summary>Перезаливка инструкции обновляет копию рядом с прошивкой, а не плодит вторую, и
+    /// убирает ярлык, оставшийся от прежних версий программы: иначе в папке лежал бы документ и
+    /// ярлык на этот же документ.</summary>
+    [Fact]
+    public void Copy_Again_OverwritesDuplicate_AndRemovesOldShortcut()
+    {
+        using var first = new TempRoot();
+        using var third = new TempRoot();
+        using var source = new TempRoot();
+
+        var instrFolder = Path.Combine(first.Path, "ПО", "Инструкция");
+        Directory.CreateDirectory(instrFolder);
+        File.WriteAllText(Path.Combine(instrFolder, "инструкция.docx.lnk"), "старый ярлык");
+
+        var src = TouchFile(source.Path, "инструкция.docx");
+        var warnings = new List<string>();
+        InstructionStorage.Copy(src, instrFolder, first.Path, third.Path, true, warnings);
+
+        File.WriteAllText(src, "новая редакция");
+        InstructionStorage.Copy(src, instrFolder, first.Path, third.Path, true, warnings);
+
+        var copy = Path.Combine(instrFolder, "инструкция.docx");
+        Assert.Equal("новая редакция", File.ReadAllText(copy));
+        Assert.False(File.Exists(copy + ".lnk"));
+        Assert.Single(Directory.GetFiles(instrFolder));
+        Assert.Empty(warnings);
     }
 
     [Fact]
@@ -99,15 +136,15 @@ public class InstructionThirdDiskTests
         var instrFolder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
         var src = TouchFile(source.Path, "инструкция.pdf");
         var warnings = new List<string>();
-        var shortcuts = new RecordingShortcuts();
 
         var placement = InstructionStorage.Copy(src, instrFolder, first.Path, thirdRoot: "",
-            createShortcut: true, shortcuts, warnings);
+            duplicateOnFirstDisk: true, warnings);
 
         Assert.False(placement.WentToThirdDisk);
         Assert.Equal(Path.Combine(instrFolder, "инструкция.pdf"), placement.StoredPath);
         Assert.True(File.Exists(placement.StoredPath));
-        Assert.Empty(shortcuts.Created);
+        // Дублировать нечего — файл и так на первом диске, второй копии рядом быть не должно.
+        Assert.Single(Directory.GetFiles(instrFolder));
         Assert.Empty(warnings);
     }
 
@@ -123,7 +160,7 @@ public class InstructionThirdDiskTests
         var warnings = new List<string>();
 
         var placement = InstructionStorage.Copy(src, instrFolder, first.Path, missingThird,
-            createShortcut: true, new RecordingShortcuts(), warnings);
+            duplicateOnFirstDisk: true, warnings);
 
         // Недоступный третий диск — не ошибка: файл ложится на первый, как до появления затеи.
         Assert.False(placement.WentToThirdDisk);

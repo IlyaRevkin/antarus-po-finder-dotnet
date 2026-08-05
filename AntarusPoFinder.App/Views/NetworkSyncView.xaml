@@ -52,10 +52,78 @@
                 <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseThirdDisk_Click"
                         ToolTip="Выбрать папку — сохранится сразу"/>
             </Grid>
-            <CheckBox x:Name="ThirdDiskShortcutsCheck" Content="Оставлять на первом диске ярлык на уехавшую инструкцию"
-                      Margin="0,0,0,4" Click="ThirdDiskShortcuts_Click"
-                      ToolTip="Нужно, пока у кого-то из коллег стоит старая версия программы: без ярлыка он увидит пустую папку «Инструкция» и решит, что инструкции нет. Сама программа ярлыки не открывает — она читает третий диск напрямую."/>
+            <CheckBox x:Name="InstructionDuplicateCheck" Content="Класть рядом с прошивкой копию инструкции, уехавшей на третий диск"
+                      Margin="0,0,0,4" Click="InstructionDuplicate_Click"
+                      ToolTip="Настоящий документ, а не ярлык: папка версии на первом диске остаётся самодостаточной — её можно скопировать на флешку или открыть с машины, где третий диск не подключён. Раньше здесь клался .lnk, который на чужой машине вёл в никуда."/>
             <TextBlock x:Name="ThirdDiskStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+            <!-- Хранилище на хостинге. Ключей на 05.08.2026 ещё нет — карточка сделана так, чтобы их
+                 можно было вписать в любой момент позже, без обновления программы: пустые ключи это
+                 штатное состояние, выкладка просто не делается. -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="ХРАНИЛИЩЕ НА ХОСТИНГЕ (S3)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,10"
+                               Text="Копия инструкции уходит сюда — по этому адресу она открывается по QR-коду с наклейки с любого телефона, а не только из офисной сети. Пока не вписаны ключи доступа, выкладки не происходит и всё работает как прежде."/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="140"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Адрес хранилища:" Margin="0,0,0,4"/>
+                            <TextBox x:Name="S3EndpointInput" Height="34" Margin="0,0,8,0"
+                                     LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"
+                                     ToolTip="Напр. https://s3.twcstorage.ru"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                            <TextBlock Text="Бакет:" Margin="0,0,0,4"/>
+                            <TextBox x:Name="S3BucketInput" Height="34" Width="160"
+                                     LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Регион:" Margin="0,0,0,4"/>
+                            <TextBox x:Name="S3RegionInput" Height="34"
+                                     LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"
+                                     ToolTip="У Timeweb — ru-1"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="Папка внутри бакета (необязательно):" Margin="0,0,0,4"/>
+                    <TextBox x:Name="S3PrefixInput" Height="34" Margin="0,0,0,10"
+                             LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"
+                             ToolTip="Пусто — раскладка в бакете повторяет раскладку диска один в один."/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="Access Key:" Margin="0,0,0,4"/>
+                            <TextBox x:Name="S3AccessKeyInput" Height="34"
+                                     LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Secret Access Key:" Margin="0,0,0,4"/>
+                            <PasswordBox x:Name="S3SecretKeyInput" Height="34"
+                                         LostFocus="S3Secret_LostFocus" KeyDown="S3Field_KeyDown"
+                                         ToolTip="Хранится зашифрованным и не уезжает в общий конфиг: это доступ на запись во весь бакет."/>
+                        </StackPanel>
+                    </Grid>
+
+                    <CheckBox x:Name="S3PublishCheck" Content="Выкладывать инструкции на хостинг"
+                              Margin="0,0,0,8" Click="S3Publish_Click"
+                              ToolTip="Снять, чтобы приостановить выкладку, не стирая реквизиты."/>
+
+                    <Button x:Name="S3CheckButton" Content="Проверить доступ" Style="{StaticResource SecondaryButton}"
+                            HorizontalAlignment="Left" Click="S3Check_Click"
+                            ToolTip="Спрашивает у бакета список файлов. Право на запись так не проверить — оно проверится первой же выложенной инструкцией."/>
+                    <TextBlock x:Name="S3Status" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
 
             <TextBlock Text="ПАПКА ОСМОТРА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <TextBlock Text="Сюда сохраняются сканы, фото по QR и файлы, накопленные во время осмотра оборудования."
