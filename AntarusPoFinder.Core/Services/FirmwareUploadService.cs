@@ -290,12 +290,12 @@ public static class FirmwareUploadService
     /// Ровно то, что делал этот метод до разбиения на фазы, и остаётся нормальным способом вызова
     /// там, где не нужно держать интерфейс живым (тесты, любой не-UI код).</summary>
     public static FirmwareUploadResult Upload(Database db, HierarchyService hierarchy, FirmwareUploadRequest request,
-        IShortcutCreator? shortcuts = null)
+        IShortcutCreator? shortcuts = null, IInstructionStubWriter? stubs = null)
     {
         var (plan, failure) = Prepare(db, hierarchy, request);
         if (plan is null) return failure!;
 
-        var copy = CopyFiles(plan, shortcuts);
+        var copy = CopyFiles(plan, shortcuts, stubs);
         if (copy.IoErrorMessage is not null) return FirmwareUploadResult.IoFailure(copy.IoErrorMessage);
 
         return Register(db, hierarchy, plan, copy, shortcuts);
@@ -494,7 +494,10 @@ public static class FirmwareUploadService
     /// окно не висело всё время копирования (см. UploadView.Upload_Click).</summary>
     /// <param name="shortcuts">Нужен только инструкции, уехавшей на третий диск: на первом остаётся
     /// ярлык (см. InstructionStorage). null — ярлык не создаётся, всё остальное как прежде.</param>
-    public static FirmwareUploadCopyResult CopyFiles(FirmwareUploadPlan plan, IShortcutCreator? shortcuts = null)
+    /// <param name="stubs">Чем рисовать заглушку «Инструкция в разработке», когда инструкцию к
+    /// версии не приложили (см. InstructionStub). null — заглушка не кладётся.</param>
+    public static FirmwareUploadCopyResult CopyFiles(FirmwareUploadPlan plan, IShortcutCreator? shortcuts = null,
+        IInstructionStubWriter? stubs = null)
     {
         var request = plan.Request;
         var warnings = new List<string>();
@@ -548,9 +551,20 @@ public static class FirmwareUploadService
             try
             {
                 instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
-                    request.RootPath, request.ThirdDiskPath, request.ThirdDiskShortcuts, shortcuts, warnings).StoredPath;
+                    request.RootPath, request.ThirdDiskPath, request.ThirdDiskShortcuts, shortcuts, warnings,
+                    plan.Version.Raw).StoredPath;
             }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
+        }
+        if (string.IsNullOrEmpty(instrStored))
+        {
+            // Инструкции к версии нет — кладём заглушку, чтобы папка «Инструкция» не выглядела
+            // потерянной: и на первом диске, и в зеркале на третьем (см. InstructionStub). Имя у неё
+            // то же каноническое «инструкция_<версия>.pdf», под которым потом ляжет настоящий
+            // документ, — наклейку с QR можно печатать и клеить уже сейчас. Настоящей инструкцией
+            // она не считается ни одним резолвером, поэтому «инструкция ✓» на карточке не загорится.
+            InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath, request.ThirdDiskPath,
+                plan.Version.Raw, stubs, warnings);
         }
         string modbusStored = "";
         if (!string.IsNullOrEmpty(request.ModbusMapSourcePath))

@@ -47,7 +47,13 @@ public partial class InstructionLabelWindow : Window
         _qrContent = content;
 
         HeaderText.Text = $"{title}\n{subtitle}".Trim();
-        LinkText.Text = explanation;
+        // Печатать наклейку до готовности документа — нормально и задумано: ссылка постоянная, по
+        // ней сейчас откроется заглушка, а потом ровно тот же QR откроет саму инструкцию.
+        LinkText.Text = InstructionStub.IsStub(instructionFile)
+            ? "Инструкция ещё в разработке — по ссылке пока откроется страница «Инструкция в разработке». "
+              + "Ссылка постоянная: когда документ допишут, тот же код откроет его, наклейку переделывать не нужно.\n"
+              + explanation
+            : explanation;
 
         FillLayoutInputs(_layout);
         Redraw();

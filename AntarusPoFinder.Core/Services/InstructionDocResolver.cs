@@ -65,9 +65,12 @@ public static class InstructionDocResolver
         try
         {
             // .lnk отсеивается вместе с прочим неподходящим расширением — ярлык на уехавшую на
-            // третий диск инструкцию документом не является (см. DocFileResolver.IsShortcut).
+            // третий диск инструкцию документом не является. Заглушка «Инструкция в разработке» —
+            // тоже .pdf, и её приходится отсеивать явно: иначе «инструкция есть, можно печатать»
+            // включалось бы ровно там, где инструкции ещё нет (см. DocFileResolver.IsNotADocument).
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
                 .Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant())
+                            && !DocFileResolver.IsNotADocument(f)
                             && !DocFileResolver.IsUnder(folder, f, excludeSubfolder))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();

@@ -1621,8 +1621,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // по медленной шаре и были одной из тех «программа не отвечает при запуске» пауз.
         var plan = _services.Hierarchy.PlanStructure(root, _services.Cfg.ThirdDiskPath());
         EnsureStructureResult result;
+        // Это главная точка, где папки «Инструкция» вообще появляются на диске (проверка структуры
+        // идёт при каждом запуске), поэтому и заглушка «Инструкция в разработке» кладётся здесь:
+        // пустая папка неотличима от «инструкцию потеряли». Настоящий документ не затирается, а
+        // документ, лежащий в зеркале на третьем диске, план учитывает сам — см. InstructionStub.
+        var stubs = new Services.InstructionStubWriter();
         using (Busy.Begin("Проверка структуры диска…"))
-            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan));
+            result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
 
         if (result.CreatedCount > 0)
             ShowStatus($"Структура диска создана: {result.CreatedCount} папок", 6000, NotificationCategory.Sync);
