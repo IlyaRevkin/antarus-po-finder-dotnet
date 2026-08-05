@@ -111,6 +111,64 @@ public class PassportPrintTicketTests
         Assert.Null(PrintTicketXml.DuplexOption(TicketWithPaperSize));
     }
 
+    // ── Два режима: паспорт-буклет и инструкция-обычный лист ─────────────────────────────────
+
+    /// <summary>ПАСПОРТ — буклет: две страницы на лист И переворот по короткому краю. Просьба Ильи:
+    /// «для паспорта мне нужно как буклет печатать, разворачивая относительно короткого края».</summary>
+    [Fact]
+    public void ApplyPassportBooklet_SetsShortEdgeAndTwoPagesPerSheet()
+    {
+        var ticket = PrintTicketXml.ApplyPassportBooklet(TicketWithPaperSize);
+
+        Assert.Equal(PrintTicketXml.TwoSidedShortEdge, PrintTicketXml.DuplexOption(ticket));
+        Assert.Equal(2, PrintTicketXml.PagesPerSheet(ticket));
+        // Остальное в тикете (размер бумаги) не теряется.
+        var paper = XDocument.Parse(ticket).Root!.Elements(Psf + "Feature")
+            .Single(f => f.Attribute("name")!.Value.EndsWith("PageMediaSize"));
+        Assert.Equal("psk:ISOA4", paper.Element(Psf + "Option")!.Attribute("name")!.Value);
+    }
+
+    /// <summary>ИНСТРУКЦИЯ — обычный лист: двусторонняя печать по ДЛИННОМУ краю и ОДНА страница на
+    /// лист (никакого буклета). «Инструкцию просто как лист с двусторонней печатью».</summary>
+    [Fact]
+    public void ApplyInstructionDuplex_SetsLongEdgeAndOnePagePerSheet()
+    {
+        var ticket = PrintTicketXml.ApplyInstructionDuplex(TicketWithPaperSize);
+
+        Assert.Equal(PrintTicketXml.TwoSidedLongEdge, PrintTicketXml.DuplexOption(ticket));
+        Assert.Equal(1, PrintTicketXml.PagesPerSheet(ticket));
+    }
+
+    /// <summary>Два режима — РАЗНЫЕ: их и разводили. Паспорт короткий край + 2 страницы, инструкция
+    /// длинный край + 1 страница. Плюс переключение туда-обратно на одной очереди не плодит вторых
+    /// вариантов признаков (задание с двумя Option противоречиво).</summary>
+    [Fact]
+    public void PassportBookletAndInstructionDuplex_AreDistinct_AndSwitchCleanly()
+    {
+        var booklet = PrintTicketXml.ApplyPassportBooklet(TicketWithPaperSize);
+        var duplex = PrintTicketXml.ApplyInstructionDuplex(booklet); // на той же очереди сменили режим
+
+        Assert.Equal(PrintTicketXml.TwoSidedLongEdge, PrintTicketXml.DuplexOption(duplex));
+        Assert.Equal(1, PrintTicketXml.PagesPerSheet(duplex));
+
+        // У каждого признака ровно один Option — прежний вариант заменён, а не оставлен рядом.
+        var root = XDocument.Parse(duplex).Root!;
+        Assert.Single(root.Elements(Psf + "Feature")
+            .Single(f => f.Attribute("name")!.Value.EndsWith(PrintTicketXml.DuplexFeature))
+            .Elements(Psf + "Option"));
+        Assert.Single(root.Elements(Psf + "Feature")
+            .Single(f => f.Attribute("name")!.Value.EndsWith(PrintTicketXml.NUpFeature))
+            .Elements(Psf + "Option"));
+    }
+
+    /// <summary>Про число страниц на лист в тикете не сказано ничего — это null, а не 1: различать
+    /// «неизвестно» и «одна страница» важно ровно так же, как у двусторонней печати.</summary>
+    [Fact]
+    public void PagesPerSheet_IsNull_WhenTheTicketSaysNothingAboutIt()
+    {
+        Assert.Null(PrintTicketXml.PagesPerSheet(TicketWithPaperSize));
+    }
+
     /// <summary>Двусторонняя печать паспорта включена по умолчанию — так просил Илья — и едет ко
     /// всем машинам: как оформляется паспорт, идущий заказчику, это политика предприятия, а не
     /// привычка отдельного компьютера.</summary>

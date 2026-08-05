@@ -204,7 +204,7 @@ public static class FirmwareAttachmentsService
         // без инструкции, поэтому и обрабатывается одинаково.
         if (instr is not null && instr.Length == 0)
             InstructionStub.EnsureForVersion(SlotFolder(HierarchyFolders.Instructions), root,
-                request.ThirdDiskPath, record.VersionRaw, stubs, warnings);
+                request.ThirdDiskPath, record.VersionRaw, stubs, warnings, request.InstructionPublisher);
 
         string? hmi = null;
         if (request.HmiSourcePath is not null && !PathsEqual(request.HmiSourcePath, record.HmiPath))

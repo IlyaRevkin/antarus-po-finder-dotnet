@@ -20,16 +20,39 @@ namespace AntarusPoFinder.Core.Services;
 ///
 /// «Относительно короткого края» в схеме — это psk:TwoSidedShortEdge у признака
 /// psk:JobDuplexAllDocumentsContiguously (двусторонняя печать всего задания); psk:TwoSidedLongEdge —
-/// это переворот относительно ДЛИННОГО края, то самое «книжкой», которого просили избежать.</summary>
+/// это переворот относительно ДЛИННОГО края, то самое «книжкой».
+///
+/// ДВА РАЗНЫХ РЕЖИМА (просьба Ильи): «для паспорта мне нужно как буклет печатать, разворачивая
+/// относительно короткого края, а инструкцию просто как лист с двусторонней печатью». Отсюда две
+/// сборки тикета:
+///   • ПАСПОРТ — буклет: две страницы на лист (psk:JobNUpAllDocumentsContiguously, PagesPerSheet=2)
+///     плюс двусторонняя печать с переворотом по КОРОТКОМУ краю. Настоящую брошюровку (перекладку
+///     страниц) тикет переносимо выразить не может — её делает драйвер; поэтому буклет собирается
+///     честно как «2-up + короткий край», ровно как и разрешил владелец на случай, когда драйвер
+///     брошюровку через тикет не поддерживает. См. <see cref="ApplyPassportBooklet"/>.
+///   • ИНСТРУКЦИЯ — обычный лист: двусторонняя печать с переворотом по ДЛИННОМУ краю (привычная
+///     «двусторонняя», страница листается как в книге) и одна страница на лист (без буклета). См.
+///     <see cref="ApplyInstructionDuplex"/>.</summary>
 public static class PrintTicketXml
 {
     public static readonly XNamespace Framework = "http://schemas.microsoft.com/windows/2003/08/printing/printschemaframework";
     public static readonly XNamespace Keywords = "http://schemas.microsoft.com/windows/2003/08/printing/printschemakeywords";
 
+    /// <summary>Пространства имён XML-схемы — нужны только затем, чтобы значение числа страниц на лист
+    /// в NUp несло тип (xsi:type="xsd:integer"), как его сериализует и сам Windows.</summary>
+    public static readonly XNamespace Xsi = "http://www.w3.org/2001/XMLSchema-instance";
+    public static readonly XNamespace Xsd = "http://www.w3.org/2001/XMLSchema";
+
     /// <summary>Признак «двусторонняя печать всего задания» в терминах схемы.</summary>
     public const string DuplexFeature = "JobDuplexAllDocumentsContiguously";
 
-    /// <summary>Переворот относительно КОРОТКОГО края — то, что нужно паспорту.</summary>
+    /// <summary>Признак «сколько страниц печатать на одном листе» (N-up). У паспорта-буклета — 2.</summary>
+    public const string NUpFeature = "JobNUpAllDocumentsContiguously";
+
+    /// <summary>Свойство внутри NUp, несущее само число страниц на лист.</summary>
+    public const string PagesPerSheetProperty = "PagesPerSheet";
+
+    /// <summary>Переворот относительно КОРОТКОГО края — то, что нужно паспорту-буклету.</summary>
     public const string TwoSidedShortEdge = "TwoSidedShortEdge";
 
     public const string TwoSidedLongEdge = "TwoSidedLongEdge";
@@ -78,6 +101,76 @@ public static class PrintTicketXml
         var feature = FindByName(root.Elements(Framework + "Feature"), DuplexFeature);
         var option = feature?.Elements(Framework + "Option").FirstOrDefault();
         return option is null ? null : LocalName(option, option.Attribute("name")?.Value);
+    }
+
+    // ── Два режима печати ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>ПАСПОРТ, буклет: две страницы на лист + двусторонняя печать с переворотом по короткому
+    /// краю. Порядок правок не важен — каждая трогает свой признак и сохраняет остальной тикет.</summary>
+    public static string ApplyPassportBooklet(string? ticketXml) =>
+        ApplyPagesPerSheet(ApplyDuplex(ticketXml, TwoSidedShortEdge), 2);
+
+    /// <summary>ИНСТРУКЦИЯ, обычный лист: двусторонняя печать с переворотом по длинному краю (привычная
+    /// «двусторонняя») и одна страница на лист — никакого буклета. PagesPerSheet=1 выставляется явно:
+    /// на принтере, где до этого печатали буклет, инструкция иначе так и уходила бы по две на лист.</summary>
+    public static string ApplyInstructionDuplex(string? ticketXml) =>
+        ApplyPagesPerSheet(ApplyDuplex(ticketXml, TwoSidedLongEdge), 1);
+
+    /// <summary>Выставляет число страниц на лист (N-up). Значение несёт тип, как это делает и сам
+    /// Windows: <c>&lt;psf:Value xsi:type="xsd:integer"&gt;N&lt;/psf:Value&gt;</c>. Как и у двусторонней
+    /// печати, прежний вариант признака заменяется целиком — двух Option у одного признака быть не должно.</summary>
+    public static string ApplyPagesPerSheet(string? ticketXml, int pagesPerSheet)
+    {
+        var root = Root(ticketXml);
+        var keywordsPrefix = EnsureKeywordsPrefix(root);
+        EnsureSchemaPrefixes(root);
+
+        var feature = FindByName(root.Elements(Framework + "Feature"), NUpFeature);
+        if (feature is null)
+        {
+            feature = new XElement(Framework + "Feature", new XAttribute("name", $"{keywordsPrefix}:{NUpFeature}"));
+            root.Add(feature);
+        }
+        else
+        {
+            feature.SetAttributeValue("name", $"{keywordsPrefix}:{NUpFeature}");
+            feature.Elements(Framework + "Option").Remove();
+        }
+
+        feature.Add(new XElement(Framework + "Option",
+            new XElement(Framework + "ScoredProperty",
+                new XAttribute("name", $"{keywordsPrefix}:{PagesPerSheetProperty}"),
+                new XElement(Framework + "Value",
+                    new XAttribute(Xsi + "type", "xsd:integer"),
+                    pagesPerSheet))));
+
+        return root.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>Сколько страниц на лист стоит в тикете сейчас, либо null, если про N-up не сказано
+    /// ничего. Нужно тестам: убедиться, что у паспорта 2 (буклет), а у инструкции 1 (обычный лист).</summary>
+    public static int? PagesPerSheet(string? ticketXml)
+    {
+        XElement root;
+        try { root = XDocument.Parse(ticketXml ?? "").Root ?? throw new InvalidOperationException(); }
+        catch (Exception) { return null; }
+
+        var feature = FindByName(root.Elements(Framework + "Feature"), NUpFeature);
+        var value = feature?.Elements(Framework + "Option")
+            .Elements(Framework + "ScoredProperty")
+            .FirstOrDefault(sp => string.Equals(LocalName(sp, sp.Attribute("name")?.Value), PagesPerSheetProperty, StringComparison.OrdinalIgnoreCase))
+            ?.Element(Framework + "Value");
+        return value is not null && int.TryParse(value.Value.Trim(), out var n) ? n : null;
+    }
+
+    /// <summary>Объявляет префиксы xsi/xsd, если их ещё нет: значение числа страниц на лист ссылается
+    /// на xsd:integer, и без объявления драйвер не разобрал бы тип.</summary>
+    private static void EnsureSchemaPrefixes(XElement root)
+    {
+        if (string.IsNullOrEmpty(root.GetPrefixOfNamespace(Xsi)))
+            root.SetAttributeValue(XNamespace.Xmlns + "xsi", Xsi.NamespaceName);
+        if (string.IsNullOrEmpty(root.GetPrefixOfNamespace(Xsd)))
+            root.SetAttributeValue(XNamespace.Xmlns + "xsd", Xsd.NamespaceName);
     }
 
     private static XElement Root(string? ticketXml)

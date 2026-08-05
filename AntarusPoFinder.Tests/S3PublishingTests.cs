@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Infrastructure;
 using AntarusPoFinder.Core.Services;
@@ -301,12 +302,13 @@ public class S3PublishingTests
 
     // ── Хранение реквизитов ───────────────────────────────────────────────────
 
-    /// <summary>Ключ доступа — это доступ на ЗАПИСЬ во весь бакет, а не настройка. Отсюда два
-    /// требования: в базе он не читается глазами, и он НЕ уезжает в общий конфиг — иначе оказался бы
-    /// на каждой машине предприятия, включая те, что ничего не выкладывают. Адрес/бакет/регион,
-    /// наоборот, синхронизируются: это одинаковая для всех политика хранения.</summary>
+    /// <summary>Secret хранится в базе ЗАШИФРОВАННЫМ (глазами не читается), а вот в общий конфиг ключи
+    /// хостинга теперь СИНХРОНИЗИРУЮТСЯ: администратор вписывает их один раз, и они доезжают до всех,
+    /// кому положено выкладывать (иначе выложить инструкцию мог бы только тот, кто вписал ключ у себя —
+    /// «это не дело»). Поэтому s3_access_key/s3_secret_key в SkipSettingsKeys больше НЕТ. Адрес/бакет/
+    /// регион и «дублировать ли копией» — синхронизировались и раньше.</summary>
     [Fact]
-    public void TheKeys_AreStoredLikePasswords_AndNeverLeaveThisMachine()
+    public void TheSecret_IsStoredEncrypted_AndTheKeysSyncToEveryMachine()
     {
         using var dbFile = new TempDb();
         using var db = new Database(dbFile.Path);
@@ -322,13 +324,50 @@ public class S3PublishingTests
         Assert.Equal("", cfg.Get("s3_secret_key"));
 
         var skipped = ConfigSyncSkipKeys.Read();
-        Assert.Contains("s3_access_key", skipped);
-        Assert.Contains("s3_secret_key", skipped);
+        Assert.DoesNotContain("s3_access_key", skipped);
+        Assert.DoesNotContain("s3_secret_key", skipped);
         Assert.DoesNotContain("s3_endpoint", skipped);
         Assert.DoesNotContain("s3_bucket", skipped);
         // «Дублировать ли копией рядом с прошивкой» — тоже общая политика: разъехавшись по машинам,
         // она дала бы диск, где половина папок с документом, а половина пустая.
         Assert.DoesNotContain("instruction_duplicate_on_first_disk", skipped);
+    }
+
+    /// <summary>Round-trip: администратор на машине A вписывает ключи хостинга, и после экспорта/приёма
+    /// они оказываются на машине B — секрет расшифровывается там в исходное значение. Плюс два
+    /// доказательства совместимости и безопасности: в снимке на диске секрет лежит ТОЛЬКО шифротекстом
+    /// (открытым текстом его там нет), а Access Key ID — как обычная строка.</summary>
+    [Fact]
+    public void S3Keys_TravelToAnotherMachine_AndTheSecretArrivesDecryptable()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        m.CfgA.SetS3AccessKey("AKIA-EXAMPLE-ID");
+        m.CfgA.SetS3SecretKey("очень-секретный-ключ");
+
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+
+        // Снимок на диске: секрет — шифротекстом (открытого значения нет вовсе), access key — строкой.
+        var bytes = File.ReadAllBytes(ConfigSyncService.ConfigPathFor(root));
+        var json = ConfigFileCrypto.TryDecrypt(bytes)!;
+        Assert.DoesNotContain("очень-секретный-ключ", json);
+        var payload = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        Assert.StartsWith("enc:", (string?)payload["s3_secret_key"]);
+        Assert.Equal("AKIA-EXAMPLE-ID", (string?)payload["s3_access_key"]);
+
+        // Машина B забирает обновление и применяет.
+        var update = ConfigSyncService.CheckForUpdate(m.SvcB, out var err);
+        Assert.True(err is null, err);
+        Assert.NotNull(update);
+        ConfigSyncService.Apply(m.SvcB, update!.ConfigPath, root);
+
+        Assert.Equal("AKIA-EXAMPLE-ID", m.CfgB.S3AccessKey());
+        Assert.Equal("очень-секретный-ключ", m.CfgB.S3SecretKey());
+        // На B он тоже лежит зашифрованным, а не открытым текстом.
+        Assert.DoesNotContain("очень-секретный-ключ", m.CfgB.Get("s3_secret_key"));
+        Assert.True(m.CfgB.S3().HasCredentials);
     }
 
     /// <summary>Ключ, вписанный в базу руками (или сохранённый версией программы без шифрования),

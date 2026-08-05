@@ -2149,8 +2149,12 @@ public partial class SearchView : UserControl
     {
         var pdf = await EnsureInstructionPdfAsync(result);
         if (pdf is null) return;
-        PrintFile(pdf);
-        _host.ShowStatus("Инструкция отправлена на печать");
+        // Инструкция печатается обычным листом с двусторонней печатью (переворот по длинному краю),
+        // в отличие от паспорта-буклета — см. DuplexPrinting/PrintTicketXml.
+        var outcome = DuplexPrinting.PrintInstructionDuplex(pdf);
+        _host.ShowStatus(outcome.DuplexApplied
+            ? "Инструкция отправлена на печать (двусторонняя)"
+            : "Инструкция отправлена на печать — двустороннюю печать выставить не удалось, проверьте настройки принтера");
     }
 
     /// <summary>Готовый к печати PDF инструкции: если docx правили после последней сборки (или pdf ещё
@@ -2162,8 +2166,6 @@ public partial class SearchView : UserControl
         return await PrintableDocActions.EnsurePdfAsync(doc, _host, "Инструкция", "инструкции",
             "AntarusInstr", "пунктом «Редактировать инструкцию (docx)»");
     }
-
-    private static void PrintFile(string path) => PrintableDocActions.Print(path);
 
     /// <summary>«QR и этикетка» — наклейка со ссылкой на инструкцию. В QR уходит именно PDF, если он
     /// есть: ссылку открывают телефоном, и docx на телефоне бесполезен. Пересборкой PDF из docx тут
