@@ -170,9 +170,8 @@ public partial class NetworkSyncView : UserControl
         S3BucketInput.Text = _services.Cfg.S3Bucket();
         S3RegionInput.Text = _services.Cfg.S3Region();
         S3PrefixInput.Text = _services.Cfg.S3Prefix();
-        S3AccessKeyInput.Text = _services.Cfg.S3AccessKey();
-        S3SecretKeyInput.Password = _services.Cfg.S3SecretKey();
         S3PublishCheck.IsChecked = _services.Cfg.S3Publish();
+        RefreshS3Keys();
         RefreshS3Status();
     }
 
@@ -182,10 +181,7 @@ public partial class NetworkSyncView : UserControl
     {
         if (e.Key != Key.Enter) return;
         SaveS3Fields();
-        SaveS3Secret();
     }
-
-    private void S3Secret_LostFocus(object sender, RoutedEventArgs e) => SaveS3Secret();
 
     private void SaveS3Fields()
     {
@@ -193,8 +189,7 @@ public partial class NetworkSyncView : UserControl
             Save(S3EndpointInput.Text, _services.Cfg.S3Endpoint(), _services.Cfg.SetS3Endpoint) |
             Save(S3BucketInput.Text, _services.Cfg.S3Bucket(), _services.Cfg.SetS3Bucket) |
             Save(S3RegionInput.Text, _services.Cfg.S3Region(), _services.Cfg.SetS3Region) |
-            Save(S3PrefixInput.Text, _services.Cfg.S3Prefix(), _services.Cfg.SetS3Prefix) |
-            Save(S3AccessKeyInput.Text, _services.Cfg.S3AccessKey(), _services.Cfg.SetS3AccessKey);
+            Save(S3PrefixInput.Text, _services.Cfg.S3Prefix(), _services.Cfg.SetS3Prefix);
 
         if (!changed) return;
         _host.ShowStatus("Реквизиты хранилища сохранены", category: NotificationCategory.Sync);
@@ -209,15 +204,134 @@ public partial class NetworkSyncView : UserControl
         }
     }
 
-    /// <summary>Secret Access Key сохраняется отдельно от остальных полей: он лежит зашифрованным, и
-    /// сравнить «изменилось ли» можно только с расшифрованным значением, а не с текстом в базе.</summary>
-    private void SaveS3Secret()
+    // ── Ключи доступа: файлом, а не руками ────────────────────────────────────
+    // Ключи выдаёт хостинг готовым файлом (просьба Ивана Герасимова от 06.08.2026 — «чтобы просто
+    // файл туда перенести»). Полей ввода здесь больше нет намеренно: сорок случайных символов,
+    // перепечатанные руками, дают опечатку, которая молчит до первой выкладки, — а файл либо
+    // разбирается, либо честно говорит, что в нём не то. Формат файла мы не выбираем, поэтому разбор
+    // терпимый (см. Core.Services.S3SecretsFile).
+
+    private void S3Secrets_Click(object sender, MouseButtonEventArgs e) => PickS3SecretsFile();
+
+    private void S3SecretsBrowse_Click(object sender, RoutedEventArgs e) => PickS3SecretsFile();
+
+    private void S3Secrets_DragOver(object sender, DragEventArgs e)
     {
-        var typed = S3SecretKeyInput.Password.Trim();
-        if (string.Equals(typed, _services.Cfg.S3SecretKey(), StringComparison.Ordinal)) return;
-        _services.Cfg.SetS3SecretKey(typed);
-        _host.ShowStatus("Ключ доступа к хранилищу сохранён", category: NotificationCategory.Sync);
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void S3Secrets_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            ApplyS3SecretsFile(paths[0]);
+    }
+
+    private void PickS3SecretsFile()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл с ключами доступа к хранилищу",
+            // «Все файлы» первым фильтром: имя и расширение файла с ключами задаёт хостинг, и файл
+            // без расширения (так их отдаёт часть панелей) не должен оказаться невидимым в диалоге.
+            Filter = "Все файлы (*.*)|*.*|Файлы с ключами (*.txt;*.csv;*.json;*.env)|*.txt;*.csv;*.json;*.env",
+        };
+        if (dlg.ShowDialog() == true) ApplyS3SecretsFile(dlg.FileName);
+    }
+
+    /// <summary>Читает и применяет файл с ключами. Всё, что может пойти не так (папку перетащили,
+    /// файл занят, внутри не то), заканчивается понятной строкой в состоянии карточки, а не
+    /// исключением: это настройка, которую делает не программист.</summary>
+    private void ApplyS3SecretsFile(string path)
+    {
+        string content;
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                S3Status.Text = "Это папка. Нужен сам файл с ключами, который прислал хостинг.";
+                return;
+            }
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                S3Status.Text = "Файл не найден.";
+                return;
+            }
+            if (info.Length > Core.Services.S3SecretsFile.MaxReasonableBytes)
+            {
+                S3Status.Text = "Файл слишком большой для файла с ключами — похоже, это не он.";
+                return;
+            }
+            content = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            S3Status.Text = $"Не удалось прочитать файл: {ex.Message}";
+            return;
+        }
+
+        var parsed = Core.Services.S3SecretsFile.Parse(content);
+        if (!parsed.Ok)
+        {
+            S3Status.Text = parsed.Error!;
+            return;
+        }
+
+        _services.Cfg.SetS3AccessKey(parsed.AccessKey);
+        _services.Cfg.SetS3SecretKey(parsed.SecretKey);
+
+        // Адрес/бакет/регион в файле бывают не всегда, но если есть — они точнее того, что стоит по
+        // умолчанию: файл выдаёт тот же, кто выдал ключи. Пустые значения не затирают заполненные.
+        var extras = new List<string>();
+        Apply(parsed.Endpoint, _services.Cfg.S3Endpoint(), _services.Cfg.SetS3Endpoint, "адрес хранилища");
+        Apply(parsed.Bucket, _services.Cfg.S3Bucket(), _services.Cfg.SetS3Bucket, "бакет");
+        Apply(parsed.Region, _services.Cfg.S3Region(), _services.Cfg.SetS3Region, "регион");
+
+        S3EndpointInput.Text = _services.Cfg.S3Endpoint();
+        S3BucketInput.Text = _services.Cfg.S3Bucket();
+        S3RegionInput.Text = _services.Cfg.S3Region();
+
+        RefreshS3Keys();
         RefreshS3Status();
+        _host.ShowStatus("Ключи доступа к хранилищу сохранены", category: NotificationCategory.Sync);
+
+        if (extras.Count > 0)
+            S3Status.Text += $" Из файла также взято: {string.Join(", ", extras)}.";
+        if (parsed.OrderGuessed)
+            S3Status.Text += " В файле не было подписей, какой ключ какой, — порядок определён по " +
+                             "виду ключей. Если проверка доступа не пройдёт, ключи в файле шли наоборот.";
+
+        void Apply(string value, string current, Action<string> set, string what)
+        {
+            if (value.Length == 0 || string.Equals(value, current, StringComparison.Ordinal)) return;
+            set(value);
+            extras.Add(what);
+        }
+    }
+
+    private void S3SecretsClear_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_services.Cfg.S3().HasCredentials) return;
+        _services.Cfg.SetS3AccessKey("");
+        _services.Cfg.SetS3SecretKey("");
+        RefreshS3Keys();
+        RefreshS3Status();
+        _host.ShowStatus("Ключи доступа к хранилищу убраны", category: NotificationCategory.Sync);
+    }
+
+    /// <summary>Что написано в зоне перетаскивания. Access Key ID показывается целиком — он не
+    /// секрет и по нему видно, те ли ключи стоят; секретный ключ не показывается никогда, включая
+    /// «первые символы»: по ним ключ не опознать, а утечь через плечо они вполне могут.</summary>
+    private void RefreshS3Keys()
+    {
+        var s3 = _services.Cfg.S3();
+        S3SecretsClearButton.IsEnabled = s3.HasCredentials;
+
+        S3SecretsLabel.Text = s3.HasCredentials
+            ? $"Ключи загружены\nAccess Key ID: {s3.AccessKey}\nСекретный ключ сохранён.\n" +
+              "Чтобы заменить — перетащите сюда новый файл"
+            : "Перетащите сюда файл с ключами доступа,\nкоторый прислал хостинг,\nили нажмите, чтобы выбрать его";
     }
 
     private void S3Publish_Click(object sender, RoutedEventArgs e)
@@ -241,7 +355,7 @@ public partial class NetworkSyncView : UserControl
         }
         if (!s3.HasCredentials)
         {
-            S3Status.Text = "Осталось вписать ключи доступа — до этого инструкции на хостинг не выкладываются.";
+            S3Status.Text = "Осталось загрузить файл с ключами доступа — до этого инструкции на хостинг не выкладываются.";
             return;
         }
         if (string.IsNullOrWhiteSpace(s3.WebUrl))
@@ -258,7 +372,6 @@ public partial class NetworkSyncView : UserControl
     private async void S3Check_Click(object sender, RoutedEventArgs e)
     {
         SaveS3Fields();
-        SaveS3Secret();
 
         var s3 = _services.Cfg.S3();
         S3CheckButton.IsEnabled = false;
