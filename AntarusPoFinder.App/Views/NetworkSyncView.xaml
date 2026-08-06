@@ -46,7 +46,7 @@
                 <StackPanel>
                     <TextBlock Text="ХРАНИЛИЩЕ НА ХОСТИНГЕ (S3)" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,10"
-                               Text="Копия инструкции уходит сюда — по этому адресу она открывается по QR-коду с наклейки с любого телефона, а не только из офисной сети. Пока не вписаны ключи доступа, выкладки не происходит и всё работает как прежде."/>
+                               Text="Копия инструкции уходит сюда — по этому адресу она открывается по QR-коду с наклейки с любого телефона, а не только из офисной сети. Пока не загружен файл с ключами доступа, выкладки не происходит и всё работает как прежде."/>
 
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
@@ -78,22 +78,29 @@
                              LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"
                              ToolTip="Пусто — раскладка в бакете повторяет раскладку диска один в один."/>
 
-                    <Grid Margin="0,0,0,8">
+                    <!-- Ключи доступа — файлом, а не полями ввода (просьба Ивана Герасимова от
+                         06.08.2026). Ключи приходят от хостинга готовым файлом, и любой ручной ввод
+                         здесь — это перепечатывание сорока случайных символов с шансом на опечатку,
+                         которая проявится не сразу, а первой несостоявшейся выкладкой. Разбор терпим
+                         к формату файла (txt/csv/json/env — см. S3SecretsFile): формат присланного
+                         файла мы не выбираем. -->
+                    <TextBlock Text="Ключи доступа:" Margin="0,0,0,4"/>
+                    <Border x:Name="S3SecretsDropZone" Style="{StaticResource DropZoneBorder}" Height="92" Cursor="Hand"
+                            AllowDrop="True" Drop="S3Secrets_Drop" DragOver="S3Secrets_DragOver" MouseLeftButtonUp="S3Secrets_Click"
+                            ToolTip="Файл с ключами, который прислал хостинг. Ключи хранятся зашифрованными; секретный ключ — это доступ на запись во весь бакет, поэтому показывается он только в виде «сохранён».">
+                        <TextBlock x:Name="S3SecretsLabel" Style="{StaticResource MutedText}" TextAlignment="Center"
+                                   TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12,0"/>
+                    </Border>
+                    <Grid Margin="0,6,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                            <TextBlock Text="Access Key:" Margin="0,0,0,4"/>
-                            <TextBox x:Name="S3AccessKeyInput" Height="34"
-                                     LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1">
-                            <TextBlock Text="Secret Access Key:" Margin="0,0,0,4"/>
-                            <PasswordBox x:Name="S3SecretKeyInput" Height="34"
-                                         LostFocus="S3Secret_LostFocus" KeyDown="S3Field_KeyDown"
-                                         ToolTip="Хранится зашифрованным и не уезжает в общий конфиг: это доступ на запись во весь бакет."/>
-                        </StackPanel>
+                        <Button Grid.Column="0" Content="Выбрать файл..." Style="{StaticResource SecondaryButton}"
+                                Click="S3SecretsBrowse_Click" ToolTip="Выбрать файл с ключами — применится сразу"/>
+                        <Button Grid.Column="2" x:Name="S3SecretsClearButton" Content="Убрать ключи" Style="{StaticResource SecondaryButton}"
+                                Click="S3SecretsClear_Click" ToolTip="Стереть ключи с этого компьютера. Выкладка остановится, всё остальное продолжит работать."/>
                     </Grid>
 
                     <CheckBox x:Name="S3PublishCheck" Content="Выкладывать инструкции на хостинг"
