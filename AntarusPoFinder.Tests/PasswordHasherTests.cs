@@ -88,6 +88,21 @@ public class PasswordHasherTests
         Assert.False(PasswordHasher.IsHashed(""));
     }
 
+    /// <summary>Обрезанная строка «pbkdf2$100000$&lt;соль&gt;$» (хеша нет вовсе) обязана закрывать
+    /// вход, а не открывать его всем: Pbkdf2 нулевой длины возвращает пустой массив, и сравнение с
+    /// постоянным временем двух пустых массивов даёт true. Сам Hash() такого не пишет никогда, но
+    /// значение в settings может оказаться обрезанным — оборвавшимся импортом конфига или правкой
+    /// файла базы руками, — и тогда пароль администратора перестал бы что-либо значить.</summary>
+    [Fact]
+    public void Verify_StoredHashWithoutHashPortion_RejectsEveryPassword()
+    {
+        var salt = PasswordHasher.Hash("12345").Split('$')[2];
+
+        Assert.False(PasswordHasher.Verify("12345", $"pbkdf2$100000${salt}$"));
+        Assert.False(PasswordHasher.Verify("", $"pbkdf2$100000${salt}$"));
+        Assert.False(PasswordHasher.Verify("что угодно", "pbkdf2$100000$$"));
+    }
+
     [Fact]
     public void Hash_EmptyPassword_RoundTrips()
     {
