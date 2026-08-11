@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>Одна строка постоянного журнала «что менялось по версиям приложения» — то, что окно

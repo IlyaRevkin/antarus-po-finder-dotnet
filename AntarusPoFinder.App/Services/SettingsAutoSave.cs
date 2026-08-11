@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.App.Services;
 
 /// <summary>Правила автосохранения полей в Настройках и на странице «Сетевые диски»: кнопок

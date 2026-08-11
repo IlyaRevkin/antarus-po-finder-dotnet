@@ -1,15 +1,10 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace AntarusPoFinder.Core.Services;

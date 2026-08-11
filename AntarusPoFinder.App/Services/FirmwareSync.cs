@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using AntarusPoFinder.Core.Infrastructure;
 using AntarusPoFinder.Core.Services;

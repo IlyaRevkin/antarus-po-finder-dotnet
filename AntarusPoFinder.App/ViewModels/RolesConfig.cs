@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace AntarusPoFinder.App.ViewModels;
 
 public static class RolesConfig

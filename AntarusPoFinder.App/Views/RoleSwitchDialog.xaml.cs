@@ -4,8 +4,6 @@ using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Services;
 
-using AntarusPoFinder.App;
-
 namespace AntarusPoFinder.App.Views;
 
 public record RoleOption(string RoleId, string Label);

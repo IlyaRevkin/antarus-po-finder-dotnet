@@ -1,23 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 

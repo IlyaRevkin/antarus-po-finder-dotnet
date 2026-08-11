@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.Core.Loader;
 
 /// <summary>Ответ наладчика на вопрос «форматировать ли контроллер перед загрузкой».</summary>

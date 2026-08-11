@@ -1,9 +1,7 @@
-using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Printing;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.Core.Services;
 

@@ -1,15 +1,12 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Windows;
 using AntarusPoFinder.Core.Services;
 

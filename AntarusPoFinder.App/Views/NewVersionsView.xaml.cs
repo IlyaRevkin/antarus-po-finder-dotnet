@@ -1,9 +1,7 @@
-﻿using System.Linq;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
-using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 

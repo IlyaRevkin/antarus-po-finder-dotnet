@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace AntarusPoFinder.Core.Data;
 
 public partial class Database

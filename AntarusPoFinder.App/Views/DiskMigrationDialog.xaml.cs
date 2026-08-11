@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
-using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using Microsoft.Win32;

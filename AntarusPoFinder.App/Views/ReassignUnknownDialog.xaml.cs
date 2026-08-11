@@ -1,4 +1,3 @@
-using System.Linq;
 using System.Windows;
 using AntarusPoFinder.Core.Domain;
 

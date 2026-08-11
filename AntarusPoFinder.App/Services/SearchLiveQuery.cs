@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.App.Services;
 
 /// <summary>Правила «поиск обновляется по мере ввода» — вынесены из SearchView отдельно, чтобы их

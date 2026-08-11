@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.Core.Services;
 
 /// <summary>Реквизиты хранилища на хостинге — куда Finder кладёт копию инструкции, чтобы ссылка под

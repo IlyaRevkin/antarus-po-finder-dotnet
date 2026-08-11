@@ -1,6 +1,5 @@
 using System.Windows;
 using AntarusPoFinder.Core.Data;
-using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App.Views;
 

@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,8 +9,6 @@ using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 

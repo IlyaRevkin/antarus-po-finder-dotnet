@@ -1,11 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using SharpCompress.Archives;
 using SharpCompress.Common;
-using AntarusPoFinder.Core.Infrastructure;
 
 namespace AntarusPoFinder.Core.Infrastructure;
 

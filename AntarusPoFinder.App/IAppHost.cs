@@ -1,4 +1,3 @@
-using System;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 

@@ -1,5 +1,3 @@
-using System.Linq;
-
 namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>Coarse taxonomy for AddNotification/ShowStatus calls (see MainWindowViewModel/IAppHost) —
