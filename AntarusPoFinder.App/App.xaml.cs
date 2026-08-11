@@ -1,10 +1,7 @@
-using System;
 using System.IO;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.Views;
 using AntarusPoFinder.Core.Domain;
@@ -42,6 +39,10 @@ public partial class App : Application
         Environment.GetEnvironmentVariable("ANTARUS_TEST_INSTANCE_ID") is { Length: > 0 } id ? $"_{id}" : "";
     private static readonly string InstanceMutexName = "AntarusPoFinder_SingleInstance_5B2E1A" + InstanceIdSuffix;
     private static readonly string ShowRequestEventName = "AntarusPoFinder_ShowRequest_5B2E1A" + InstanceIdSuffix;
+    /// <summary>Значение отсюда НИКОГДА не читают — поле существует ровно затем, чтобы держать
+    /// мьютекс живым на всё время работы приложения. Локальная переменная в OnStartup дала бы сборщику
+    /// право собрать мьютекс сразу после выхода из метода, финализатор освободил бы его, и вторая
+    /// копия перестала бы опознавать себя как вторую. Анализатор предлагает поле удалить — нельзя.</summary>
     private static Mutex? _singleInstanceMutex;
 
     /// <summary>Подсказки при наведении по умолчанию появляются через ~1 с и висят 5 с — за секунду

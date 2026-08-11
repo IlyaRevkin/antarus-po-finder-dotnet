@@ -1,4 +1,3 @@
-using System;
 using System.DirectoryServices.AccountManagement;
 using AntarusPoFinder.Core.Services;
 

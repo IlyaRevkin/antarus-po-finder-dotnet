@@ -1,12 +1,9 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Threading;
 using AntarusPoFinder.Core.Loader;
@@ -123,7 +120,12 @@ public partial class LoaderDialog : Window
         Task.Run(() =>
         {
             try { LoaderWorkspace.CleanupOlderThan(ConfigService.LocalLoader, WorkspaceRetention); }
-            catch (Exception) { }
+            catch (Exception)
+            {
+                // Уборка старых рабочих областей — обслуживание, а не часть загрузки в ПЛК: файл мог
+                // быть занят предыдущим запуском Loader. Сообщать оператору не о чем, а прервать
+                // из-за этого саму загрузку тем более нельзя — уберём при следующем открытии окна.
+            }
         });
     }
 

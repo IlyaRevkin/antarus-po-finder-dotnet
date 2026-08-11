@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -51,11 +50,6 @@ public partial class TagBubbleEditor : UserControl
     }
 
     public List<string> Tags => _tags.ToList();
-
-    /// <summary>Строка хранения — через TagList, а не через string.Join: тег из нескольких слов
-    /// («шкаф управления пожарными насосами …») должен доехать до базы одним тегом, а не рассыпаться
-    /// на слова при первом же сохранении.</summary>
-    public string TagsText => AntarusPoFinder.Core.Services.TagString.Join(_tags);
 
     private void Render()
     {

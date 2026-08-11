@@ -1,6 +1,4 @@
-using System;
 using System.Net;
-using System.Net.Http;
 using System.Threading;
 
 namespace AntarusPoFinder.Core.Services;
@@ -70,7 +68,7 @@ public class HttpAdCredentialValidator : IAdCredentialValidator
 
         try
         {
-            return CheckSync(uri, login, password, out error);
+            return CheckSync(uri, login, password, _timeout, out error);
         }
         catch (Exception ex)
         {
@@ -88,7 +86,8 @@ public class HttpAdCredentialValidator : IAdCredentialValidator
     /// only (never Basic/Digest) — matches how this was manually verified against disk.antarus.su
     /// via PowerShell earlier, and never sends the password anywhere the server didn't ask for it via
     /// exactly one of those two challenge types.</summary>
-    private static AdValidationStatus CheckSync(Uri uri, string login, string password, out string? error)
+    private static AdValidationStatus CheckSync(Uri uri, string login, string password, TimeSpan timeout,
+        out string? error)
     {
         var credentials = new CredentialCache
         {
@@ -100,7 +99,9 @@ public class HttpAdCredentialValidator : IAdCredentialValidator
             Credentials = credentials,
             AllowAutoRedirect = false,
         };
-        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        // Таймаут — тот, что задали конструктору (по умолчанию те же 10 секунд, что стояли здесь
+        // константой): раньше параметр конструктора сохранялся в поле и никуда не доходил.
+        using var client = new HttpClient(handler) { Timeout = timeout };
 
         var response = client.Send(new HttpRequestMessage(HttpMethod.Head, uri), CancellationToken.None);
         if (response.StatusCode == HttpStatusCode.MethodNotAllowed)

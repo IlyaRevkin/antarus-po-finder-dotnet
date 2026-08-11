@@ -1,8 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -11,8 +9,6 @@ using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using QRCoder;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 

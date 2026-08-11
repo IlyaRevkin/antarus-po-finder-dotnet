@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -65,12 +64,6 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
     }
 
     public override string ToString() => Raw;
-
-    public string FolderName => Raw;
-
-    /// <summary>Raw version without the trailing date/time suffix — "eq.sub.hw.sw" only.</summary>
-    public string NumberPart =>
-        $"{EqPrefix}.{SubPrefix}.{HwVersion.ToString("D4", CultureInfo.InvariantCulture)}.{SwVersion.ToString("D4", CultureInfo.InvariantCulture)}";
 
     /// <summary>Human-readable: 'hw42.sw1  (22.04.2026 13:48)', or just 'hw42.sw1' when no date/time was stamped.</summary>
     public string Display

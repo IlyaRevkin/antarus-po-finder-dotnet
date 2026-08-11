@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.Core.Services;
 
 /// <summary>Тег-шаблон: звёздочка внутри тега — подстановка «здесь стоит любая последовательность

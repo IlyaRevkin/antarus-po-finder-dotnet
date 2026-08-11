@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Data;
@@ -792,6 +790,17 @@ public partial class EditFirmwareDialog : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    /// <summary>Сохранить то, что диалог НЕ применил сам (описание, теги, типы пуска, подсказки «чем
+    /// открывать»), и следом рассказать обо всём остальном. Отдельным методом, потому что оба шага
+    /// нужны везде, откуда диалог открывается (поиск, новые версии, модерация), и разъехаться им
+    /// нельзя: забытый UpdateFwVersion — это молча потерянная правка тегов.</summary>
+    public static void ApplyResult(EditFirmwareDialog dlg, AppServices services, IAppHost host, int versionId)
+    {
+        services.Db.UpdateFwVersion(versionId, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+        ReportChanges(dlg, host);
+    }
 
     /// <summary>Всё, что диалог применил сам (доп. файлы и подтипы) — одним вызовом на все четыре
     /// места, откуда он открывается.</summary>

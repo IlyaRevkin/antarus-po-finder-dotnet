@@ -1,9 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Xml.Linq;
 
 namespace AntarusPoFinder.Core.Services;
@@ -75,6 +72,9 @@ public static class DocxTemplateFiller
             File.Copy(srcDocx, dstDocx, overwrite: true);
             // Копия шаблона с общего диска приезжает с его атрибутом «только для чтения» — без
             // снятия запись в неё упадёт правом доступа.
+            // Не всякая файловая система умеет атрибуты (WebDAV-монтирование, чужая шара) — там вызов
+            // бросит, но копия при этом обычно и так записываемая. Если она всё же только для чтения,
+            // ошибку покажет сама запись ниже, с понятным путём, а не эта служебная строчка.
             try { File.SetAttributes(dstDocx, FileAttributes.Normal); } catch (Exception) { }
             path = dstDocx;
         }

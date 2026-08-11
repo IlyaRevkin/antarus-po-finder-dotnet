@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace AntarusPoFinder.App.Views;
 
 public record RememberOption(string Key, string Label);

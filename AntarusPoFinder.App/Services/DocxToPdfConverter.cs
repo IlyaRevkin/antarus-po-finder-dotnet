@@ -1,4 +1,3 @@
-using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -62,6 +61,9 @@ public static class DocxToPdfConverter
         }
         finally
         {
+            // Уборка за Word: он мог уже упасть или быть закрыт человеком, и тогда каждый из этих
+            // вызовов кидает COM-ошибку. Результат конверсии от этого не зависит (он уже определён
+            // выше), а исключение отсюда затёрло бы его собой — поэтому глушим оба молча.
             try { if (doc is not null) doc.Close(false); } catch (Exception) { }
             try { if (word is not null) word.Quit(); } catch (Exception) { }
             if (doc is not null) TryRelease(doc);
@@ -69,6 +71,9 @@ public static class DocxToPdfConverter
         }
     }
 
+    /// <summary>Отпустить COM-обёртку. Бросает, если объект уже отпущен или процесс Word умер;
+    /// делать с этим нечего — освобождение и так best-effort, а падение здесь только помешало бы
+    /// вернуть уже готовый результат конверсии.</summary>
     private static void TryRelease(object comObject)
     {
         try { Marshal.FinalReleaseComObject(comObject); } catch (Exception) { }
@@ -101,6 +106,8 @@ public static class DocxToPdfConverter
             if (p is null) return false;
             if (!p.WaitForExit(120_000))
             {
+                // Не уложился в две минуты — снимаем. Kill бросает, если процесс успел завершиться
+                // сам между таймаутом и этой строкой; ответ всё равно «конвертация не удалась».
                 try { p.Kill(true); } catch (Exception) { }
                 return false;
             }
@@ -138,6 +145,8 @@ public static class DocxToPdfConverter
         };
         foreach (var c in candidates)
         {
+            // Недоступный путь (нет прав на Program Files, перенаправленная папка) — не повод падать
+            // на подборе кандидата: просто идём к следующему, а не нашли ни одного — вернём null.
             try { if (File.Exists(c)) return c; } catch (Exception) { }
         }
         return null;

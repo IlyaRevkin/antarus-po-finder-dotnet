@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,8 +9,6 @@ using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -599,16 +595,6 @@ public partial class UploadView : UserControl
 
         if (bad) OpcHintLabel.Foreground = (Brush)FindResource("ErrorBrush");
         else OpcHintLabel.ClearValue(TextBlock.ForegroundProperty);
-    }
-
-    /// <summary>Формат для имени файла — "(01312)"/"SN00042": число дополняется нулями до 5 цифр.
-    /// Не блокирует нечисловой ввод (возвращает как есть) — это косметика имени файла, а не строгая
-    /// валидация поля.</summary>
-    private static string Format5Digits(string raw)
-    {
-        var trimmed = raw.Trim();
-        if (trimmed.Length == 0) return "";
-        return int.TryParse(trimmed, out var n) && n is >= 0 and <= 99999 ? n.ToString("D5") : trimmed;
     }
 
     private void ReqNum_Changed(object sender, TextChangedEventArgs e)

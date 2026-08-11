@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;

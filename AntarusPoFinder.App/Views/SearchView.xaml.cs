@@ -1,23 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -650,6 +645,16 @@ public partial class SearchView : UserControl
         // покажет «правки этой прошивки ещё не на диске» (см. FirmwareCardFlags.TagsPending). Читаем
         // один раз на всю выдачу; на не-администраторских машинах набор обычно пуст (правят только они).
         var pendingSubjects = _services.Db.GetPendingSubjectKeys();
+        // Признаки «есть параметры» и «сколько доп. материалов» — тоже один запрос на всю выдачу, а не
+        // по запросу на карточку. Раньше каждая карточка звала GetParamFiles(subtypeId) (SELECT с двумя
+        // JOIN'ами и разбором всех строк ради Count > 0) и CountFwAttachments — на широком запросе это
+        // десятки запросов подряд на потоке интерфейса ровно в тот момент, когда человек ждёт выдачу.
+        var subtypesWithParams = _services.Db.GetSubtypeIdsWithParamFiles();
+        var attachmentCounts = _services.Db.GetFwAttachmentCounts();
+        // Режим подключения и подсказка о нём одинаковы для всех карточек — читаются из настроек
+        // (а это тоже запросы в SQLite) один раз, а не по три на карточку.
+        var connectionMode = _services.Cfg.LoaderConnectionMode();
+        var connectionHint = ConnectionHintText();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -665,10 +670,10 @@ public partial class SearchView : UserControl
             {
                 HasLocal = HasLocal(result),
                 HasAnyLocal = HasAnyLocal(result),
-                HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
-                // Доп. материалы — записи в БД, а не файлы «где-то рядом»: считаются здесь же, дешёвым
-                // COUNT, и не ждут фонового обхода папки версии.
-                ExtraFilesCount = _services.Db.CountFwAttachments(result.FwVersionId),
+                HasParams = subtypeName != "ПП" && subtypesWithParams.Contains(result.SubtypeId),
+                // Доп. материалы — записи в БД, а не файлы «где-то рядом»: считаются заранее, одним
+                // запросом на выдачу, и не ждут фонового обхода папки версии.
+                ExtraFilesCount = attachmentCounts.GetValueOrDefault(result.FwVersionId),
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
@@ -677,8 +682,8 @@ public partial class SearchView : UserControl
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint),
-                ConnectionMode = _services.Cfg.LoaderConnectionMode(),
-                ConnectionHint = ConnectionHintText(),
+                ConnectionMode = connectionMode,
+                ConnectionHint = connectionHint,
             };
 
             var card = new FirmwareCard();
@@ -701,7 +706,7 @@ public partial class SearchView : UserControl
             };
             card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader(((FirmwareCard)s!).Result); };
             card.ConnectionModeChangeRequested += (_, mode) => SaveConnectionMode(mode);
-            card.DownloadRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); DownloadFirmware(((FirmwareCard)s!).Result); };
+            card.DownloadRequested += (s, e) => { RecordUsage(((FirmwareCard)s!).Result); _ = DownloadFirmwareAsync(((FirmwareCard)s!).Result); };
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
@@ -781,16 +786,25 @@ public partial class SearchView : UserControl
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
         bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
         bool HasInstructionStub, bool HasModbus,
-        string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive);
+        string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
     /// нашлось. Только папки САМОЙ версии (VersionFolders): признак «есть LFS» должен относиться к
-    /// той версии, на карточке которой он написан.</summary>
-    private static DiskScan ScanVersionFolder(HierarchyResult result, DocRoots roots)
+    /// той версии, на карточке которой он написан.
+    ///
+    /// Реальная папка версии на сетевом диске (<c>net</c>) считается ЗДЕСЬ ОДИН РАЗ и передаётся во
+    /// все проверки ниже. Раньше её вычисляла каждая из них сама — ResolvedNetworkDir звался по
+    /// десятку раз на карточку, а он на каждый вызов ходит на шару (Directory.Exists, а при
+    /// переименованной папке ещё и перебор соседей с рекурсивным перечислением файлов в каждом).
+    /// На сетевом диске компании это и есть та самая «программа задумалась, когда что-то делает в
+    /// фоне»: цена одного обращения там на порядки выше локальной.</summary>
+    private static DiskScan ScanVersionFolder(HierarchyResult result, string root, bool netReachable, bool hasLocal)
     {
+        var net = ResolvedNetworkDir(result);
+
         bool lfs = false, psl = false, hmiFile = false, networkAlive = false;
-        foreach (var dir in VersionFolders(result))
+        foreach (var dir in VersionFolders(result, net))
         {
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
             try
@@ -814,10 +828,11 @@ public partial class SearchView : UserControl
         // Карта ВВ / инструкция / карта Modbus — есть, только если реально найден файл (путь версии,
         // указывающий на существующий файл, ЛИБО непустая общая папка документа), а не просто
         // заполненное поле в БД. Тот же резолвер потом открывает самый свежий файл (см. OpenMap и др.).
-        var hasIoMap = ResolveDocFile(result, result.IoMapPath, "Карта ВВ") is not null;
+        var hasIoMap = ResolveDocFile(net, result.IoMapPath, "Карта ВВ") is not null;
         // Инструкция разбирается детальнее прочих документов: у неё различаются исходный docx (для правки)
         // и pdf (для печати), от чего зависят разные пункты меню карточки (см. FirmwareCard.AddInstructionItems).
-        var instr = ResolveInstruction(result, roots);
+        var instructionFolder = InstructionFolder(net);
+        var instr = InstructionDocResolver.Resolve(result.InstructionsPath, instructionFolder);
         var hasInstructions = instr.HasAny;
         var hasInstrDocx = instr.Docx is not null;
         var hasInstrPrintable = instr.CanPrint;
@@ -825,67 +840,69 @@ public partial class SearchView : UserControl
         // которому ляжет настоящий документ, — от этого зависит только кнопка «QR инструкции»
         // (см. FirmwareCardFlags.HasInstructionStub). Ищем, лишь когда документа нет: иначе это
         // лишний обход папки на сетевом диске у каждой карточки.
-        var hasInstrStub = !hasInstructions && InstructionStub.ExistingIn(InstructionFolder(result, roots)) is not null;
-        var hasModbus = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus") is not null;
+        var hasInstrStub = !hasInstructions && InstructionStub.ExistingIn(instructionFolder) is not null;
+        var hasModbus = ResolveDocFile(net, result.ModbusMapPath, "Карта Modbus") is not null;
         // Расширение того файла, который реально откроет «Открыть прошивку ПЛК» — считается тем же
         // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
         // разойтись с тем, что откроется, и работает для ЛЮБОГО проекта, не только .psl/.lfs.
-        var plcExt = PlcOpenResolver.ResolveExtension(PlcSources(result));
+        var plcExt = PlcOpenResolver.ResolveExtension(PlcSources(result, net));
         // То же самое для панели: расширение считает HmiOpenResolver, он же потом и открывает (OpenHmi).
         // Только когда панель вообще есть — иначе это лишний обход папок ради подписи несуществующей кнопки.
-        var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result)) : null;
+        var hmiExt = hasHmi ? HmiOpenResolver.ResolveExtension(HmiSources(result, net)) : null;
+
+        // Проверка «прошивку удалили с диска» — тоже здесь, в фоне: она рекурсивно перечисляет папку
+        // версии (и, если ту переименовали, соседей), а раньше делалась на потоке интерфейса сразу
+        // после await, на каждую карточку. Условия и их порядок — ровно те же, что были там, включая
+        // короткое замыкание: дорогой VersionPresentOnDisk не вызывается, пока не сошлись дешёвые.
+        var diskMissing = netReachable && !hasLocal && !networkAlive
+            && !FirmwareDiskPresence.VersionPresentOnDisk(result.FirmwareDir, result.VersionRaw)
+            && PathCheckableHere(result, root);
+
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
-    /// разницу между наборами.</summary>
-    private static PlcOpenSources PlcSources(HierarchyResult result)
+    /// разницу между наборами. <paramref name="net"/> — уже вычисленная папка версии на сетевом диске
+    /// (см. ResolvedNetworkDir): в фоновом обходе она считается один раз на карточку.</summary>
+    private static PlcOpenSources PlcSources(HierarchyResult result, string net) => new()
     {
-        var net = ResolvedNetworkDir(result);
-        return new()
-        {
-            CandidateFolders = CandidateFolders(result).ToList(),
-            VersionFolders = VersionFolders(result).ToList(),
-            FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), net },
-            ExecutableHint = result.ExecutableHint,
-            NetworkFolder = net,
-        };
-    }
+        CandidateFolders = CandidateFolders(result, net).ToList(),
+        VersionFolders = VersionFolders(result, net).ToList(),
+        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), net },
+        ExecutableHint = result.ExecutableHint,
+        NetworkFolder = net,
+    };
+
+    private static PlcOpenSources PlcSources(HierarchyResult result) => PlcSources(result, ResolvedNetworkDir(result));
 
     /// <summary>Источники файла панели для HmiOpenResolver — зеркально PlcSources.
     /// Ходит на диск (FindSiblingFolder) — вызывать из фонового обхода или по клику, не в отрисовке.</summary>
-    private static HmiOpenSources HmiSources(HierarchyResult result) => new()
+    private static HmiOpenSources HmiSources(HierarchyResult result, string net) => new()
     {
         HmiPath = result.HmiPath,
-        SiblingHmiFolder = FindSiblingFolder(result, "HMI"),
+        SiblingHmiFolder = FindSiblingFolder(net, "HMI"),
         ExecutableHint = result.HmiExecutableHint,
-        CandidateFolders = CandidateFolders(result).ToList(),
-        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), ResolvedNetworkDir(result) },
+        CandidateFolders = CandidateFolders(result, net).ToList(),
+        FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), net },
     };
+
+    private static HmiOpenSources HmiSources(HierarchyResult result) => HmiSources(result, ResolvedNetworkDir(result));
 
     /// <summary>Самый свежий актуальный файл документа (карта ВВ / инструкция / карта Modbus) —
     /// общая папка документа рядом с папкой контроллера, см. DocFileResolver.
     /// Ходит на диск — вызывать из фонового потока (ScanVersionFolder) или по клику, не в отрисовке.</summary>
-    private static string? ResolveDocFile(HierarchyResult result, string? storedPath, string sharedFolderName) =>
-        DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, sharedFolderName));
-
-    /// <summary>Корень диска прошивок, от которого зависит поиск инструкции. Читается из настроек на
-    /// потоке интерфейса и передаётся в фоновый обход параметром — лезть за ним в базу из фонового
-    /// потока нельзя (соединение SQLite одно на приложение и не потокобезопасно).</summary>
-    private readonly record struct DocRoots(string First);
-
-    private DocRoots CurrentDocRoots() => new(_services.Cfg.RootPath());
+    private static string? ResolveDocFile(string net, string? storedPath, string sharedFolderName) =>
+        DocFileResolver.Resolve(storedPath, FindSiblingFolder(net, sharedFolderName));
 
     /// <summary>Папка, из которой читается инструкция: общая папка «Инструкция» рядом с папкой
     /// контроллера на первом диске.</summary>
-    private static string? InstructionFolder(HierarchyResult result, DocRoots roots) =>
-        FindSiblingFolder(result, "Инструкция");
+    private static string? InstructionFolder(string net) => FindSiblingFolder(net, "Инструкция");
 
     /// <summary>docx/pdf инструкции этой версии (см. InstructionDocResolver). Ходит на диск — из
     /// фонового обхода или по клику, не в отрисовке.</summary>
-    private static InstructionDoc ResolveInstruction(HierarchyResult result, DocRoots roots) =>
-        InstructionDocResolver.Resolve(result.InstructionsPath, InstructionFolder(result, roots));
+    private static InstructionDoc ResolveInstruction(HierarchyResult result) =>
+        InstructionDocResolver.Resolve(result.InstructionsPath, InstructionFolder(ResolvedNetworkDir(result)));
 
     /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
     /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
@@ -899,14 +916,13 @@ public partial class SearchView : UserControl
         // выдача схлопнулась бы в ноль (см. #12: «прошивка есть локально, а на диске её нет»).
         var root = _services.Cfg.RootPath();
         var netReachable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
-        // Читаем настройки один раз здесь, на потоке интерфейса: обход ниже уходит в Task.Run.
-        var roots = CurrentDocRoots();
 
         foreach (var (card, result, baseFlags) in cards)
         {
             if (generation != _searchGeneration) return;
 
-            var scan = await Task.Run(() => ScanVersionFolder(result, roots));
+            var hasLocal = baseFlags.HasLocal;
+            var scan = await Task.Run(() => ScanVersionFolder(result, root, netReachable, hasLocal));
             if (generation != _searchGeneration) return;
 
             // Версия, которой нет ни в локальном кэше, ни в папке на доступном сетевом диске — это
@@ -938,10 +954,11 @@ public partial class SearchView : UserControl
             // автосинхронизацией (тянуть нечего). Спрятать реальную прошивку хуже, чем показать её с
             // предупреждением: если файлов правда нет — карточка честно об этом и скажет, а решение
             // открыть/поискать вручную остаётся за оператором.
-            var diskMissing = netReachable && !baseFlags.HasLocal && !scan.NetworkAlive
-                && !FirmwareDiskPresence.VersionPresentOnDisk(result.FirmwareDir, result.VersionRaw)
-                && PathCheckableHere(result, root);
-            if (diskMissing)
+            //
+            // Сама проверка считается в фоновом обходе (ScanVersionFolder.DiskMissing) — она рекурсивно
+            // перечисляет папку версии на сетевом диске, и делать это здесь, уже вернувшись на поток
+            // интерфейса, значило подвешивать окно на каждой карточке.
+            if (scan.DiskMissing)
             {
                 var missingFlags = baseFlags with { DiskScanPending = false, DiskMissing = true };
                 card.Configure(result, missingFlags);
@@ -1683,12 +1700,10 @@ public partial class SearchView : UserControl
         var dlg = new EditFirmwareDialog(_services, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
         // Что именно изменилось (какие теги добавились/убрались и у какой прошивки по-человечески)
-        // сообщает сам ReportChanges — прежняя строка «Теги обновлены: 2.0.0042.0003» дублировала
-        // его и была заметно менее внятной.
-        EditFirmwareDialog.ReportChanges(dlg, _host);
+        // сообщает сам ReportChanges внутри ApplyResult — прежняя строка «Теги обновлены:
+        // 2.0.0042.0003» дублировала его и была заметно менее внятной.
+        EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
         PerformSearch();
     }
 
@@ -1720,20 +1735,21 @@ public partial class SearchView : UserControl
     // Детект «первый файл с нужным расширением в дереве папки» переехал в PlcOpenResolver.
     // FindByExtensions — им пользуются оба резолвера (ПЛК и панель), здесь дубля больше нет.
 
-    private static string? FindSiblingFolder(HierarchyResult result, string folderName)
+    /// <summary><paramref name="versionDir"/> — РЕАЛЬНАЯ папка версии (ResolvedNetworkDir), а не
+    /// записанный disk_path: если папку переименовали/перезалили, точного пути нет, и папка
+    /// контроллера — с ней рядом лежат «Карта ВВ»/«Инструкция»/«Карта Modbus» — иначе не находилась.
+    /// Ровно жалоба «инструкция на диске есть, а в карточке её взаимодействия нет». Принимается
+    /// готовой, а не вычисляется здесь: за один досмотр карточки эта функция зовётся по нескольку раз
+    /// (по разу на папку документа), и каждое вычисление — отдельный поход на сетевую шару.
+    ///
+    /// Сама развилка «своя папка внутри версии или общая папка контроллера» живёт в VersionLayout
+    /// (docs/hierarchy-rework-plan.md, этап 4) — это ЕДИНСТВЕННОЕ место в приложении, откуда
+    /// читаются документы версии, поэтому одной этой строчкой обе раскладки становятся видны
+    /// одинаково. Заодно чинится ОПЦ новой раскладки: её родитель — папка «ОПЦ», а не контроллер,
+    /// и прежний Directory.GetParent искал документы внутри «ОПЦ» (ControllerFolderOf знает про
+    /// лишний уровень).</summary>
+    private static string? FindSiblingFolder(string versionDir, string folderName)
     {
-        // От РЕАЛЬНОЙ папки версии, а не от записанного disk_path: если её переименовали/перезалили,
-        // точного пути нет, и папка контроллера — с ней рядом лежат «Карта ВВ»/«Инструкция»/
-        // «Карта Modbus» — иначе не находилась. Ровно жалоба «инструкция на диске есть, а в карточке её
-        // взаимодействия нет».
-        //
-        // Сама развилка «своя папка внутри версии или общая папка контроллера» живёт в VersionLayout
-        // (docs/hierarchy-rework-plan.md, этап 4) — это ЕДИНСТВЕННОЕ место в приложении, откуда
-        // читаются документы версии, поэтому одной этой строчкой обе раскладки становятся видны
-        // одинаково. Заодно чинится ОПЦ новой раскладки: её родитель — папка «ОПЦ», а не контроллер,
-        // и прежний Directory.GetParent искал документы внутри «ОПЦ» (ControllerFolderOf знает про
-        // лишний уровень).
-        var versionDir = ResolvedNetworkDir(result);
         if (!Directory.Exists(versionDir)) return null;
         return VersionLayout.SlotBestReadFolder(versionDir, VersionLayout.ControllerFolderOf(versionDir), folderName);
     }
@@ -1743,7 +1759,7 @@ public partial class SearchView : UserControl
     /// <summary>Папки, в которых может лежать эта версия, в порядке предпочтения: точная папка версии
     /// в локальном кэше, остальные локальные версии этой прошивки (свежие первыми), и только потом
     /// сетевая папка — открывать локальную копию всегда лучше, чем дёргать сеть.</summary>
-    private static IEnumerable<string> CandidateFolders(HierarchyResult result)
+    private static IEnumerable<string> CandidateFolders(HierarchyResult result, string net)
     {
         var baseDir = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name));
         yield return Path.Combine(baseDir, result.VersionRaw);
@@ -1752,9 +1768,11 @@ public partial class SearchView : UserControl
             foreach (var sub in Directory.EnumerateDirectories(baseDir).OrderByDescending(d => d))
                 yield return sub;
 
-        var net = ResolvedNetworkDir(result);
         if (!string.IsNullOrEmpty(net)) yield return net;
     }
+
+    private static IEnumerable<string> CandidateFolders(HierarchyResult result) =>
+        CandidateFolders(result, ResolvedNetworkDir(result));
 
     /// <summary>Реальная папка версии на сетевом диске: точный disk_path, если он на месте, иначе
     /// соседняя папка ТОЙ ЖЕ сборки — точную могли переименовать/перезалить под другой датой, а
@@ -1775,21 +1793,23 @@ public partial class SearchView : UserControl
     /// его не выкладывали, кнопка «Загрузить в ПЛК» подставляет .lfs ЧУЖОЙ версии, и в контроллер
     /// уезжает не та прошивка. Поймано живьём: версия с одним .psl показывала «LFS ✓», потому что
     /// рядом в кэше лежала более свежая версия с собранным файлом.</summary>
-    private static IEnumerable<string> VersionFolders(HierarchyResult result)
+    private static IEnumerable<string> VersionFolders(HierarchyResult result, string net)
     {
         yield return Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw);
-        var net = ResolvedNetworkDir(result);
         if (!string.IsNullOrEmpty(net)) yield return net;
     }
 
+    private static IEnumerable<string> VersionFolders(HierarchyResult result) =>
+        VersionFolders(result, ResolvedNetworkDir(result));
+
     private static string? ResolveOpenTarget(HierarchyResult result)
     {
-        foreach (var dir in CandidateFolders(result))
+        var net = ResolvedNetworkDir(result);
+        foreach (var dir in CandidateFolders(result, net))
             if (FindUsableFile(dir, result.ExecutableHint) is { } target) return target;
 
         // Ничего похожего на открываемый файл — но если папка версии на диске есть (точная или
         // соседняя той же сборки), показать хотя бы её содержимое полезнее, чем сказать «не найдено».
-        var net = ResolvedNetworkDir(result);
         return Directory.Exists(net) ? net : null;
     }
 
@@ -2038,8 +2058,11 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с
-    /// сетевой шары и бывает в сотни мегабайт, а раньше на всё это время окно просто замирало.</summary>
-    private async void DownloadFirmware(HierarchyResult result)
+    /// сетевой шары и бывает в сотни мегабайт, а раньше на всё это время окно просто замирало.
+    ///
+    /// async Task, а не async void: обработчик — сама кнопка карточки, и падение внутри async void
+    /// ушло бы мимо try/catch прямо в необработанное исключение приложения.</summary>
+    private async Task DownloadFirmwareAsync(HierarchyResult result)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(result.FirmwareDir))
@@ -2075,7 +2098,7 @@ public partial class SearchView : UserControl
 
     private void OpenMap(HierarchyResult result)
     {
-        var path = ResolveDocFile(result, result.IoMapPath, "Карта ВВ");
+        var path = ResolveDocFile(ResolvedNetworkDir(result), result.IoMapPath, "Карта ВВ");
         if (path is null)
         {
             AppMessageBox.Show($"Файл карты не найден.\nПуть: {result.IoMapPath}", "Карта in/out", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2086,7 +2109,7 @@ public partial class SearchView : UserControl
 
     private void OpenModbusMap(HierarchyResult result)
     {
-        var path = ResolveDocFile(result, result.ModbusMapPath, "Карта Modbus");
+        var path = ResolveDocFile(ResolvedNetworkDir(result), result.ModbusMapPath, "Карта Modbus");
         if (path is null)
         {
             AppMessageBox.Show($"Файл карты Modbus не найден.\nПуть: {result.ModbusMapPath}", "Карта modbus", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2157,9 +2180,7 @@ public partial class SearchView : UserControl
 
     private void OpenInstructions(HierarchyResult result)
     {
-        // Не общий ResolveDocFile: у инструкции своя папка чтения — зеркало на третьем диске,
-        // если оно есть (см. InstructionFolder).
-        var path = DocFileResolver.Resolve(result.InstructionsPath, InstructionFolder(result, CurrentDocRoots()));
+        var path = ResolveDocFile(ResolvedNetworkDir(result), result.InstructionsPath, "Инструкция");
         if (path is null)
         {
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2170,7 +2191,7 @@ public partial class SearchView : UserControl
 
     private void OpenInstructionFolder(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result, CurrentDocRoots());
+        var doc = ResolveInstruction(result);
         if (doc.Folder is not null && Directory.Exists(doc.Folder))
             TryOpen(doc.Folder);
         else
@@ -2179,7 +2200,7 @@ public partial class SearchView : UserControl
 
     private void EditInstruction(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result, CurrentDocRoots());
+        var doc = ResolveInstruction(result);
         if (doc.Docx is not null && File.Exists(doc.Docx))
             TryOpen(doc.Docx);
         else
@@ -2210,7 +2231,7 @@ public partial class SearchView : UserControl
     /// в PrintableDocActions. null — печатать/показывать нечего (сообщение об этом уже показано).</summary>
     private async Task<string?> EnsureInstructionPdfAsync(HierarchyResult result)
     {
-        var doc = ResolveInstruction(result, CurrentDocRoots());
+        var doc = ResolveInstruction(result);
         return await PrintableDocActions.EnsurePdfAsync(doc, _host, "Инструкция", "инструкции",
             "AntarusInstr", "пунктом «Редактировать инструкцию (docx)»");
     }
@@ -2221,12 +2242,12 @@ public partial class SearchView : UserControl
     /// подвешивать оператора запуском Word — берём то, что на диске уже лежит.</summary>
     private void ShowInstructionLabel(HierarchyResult result)
     {
-        var roots = CurrentDocRoots();
-        var doc = ResolveInstruction(result, roots);
+        var instructionFolder = InstructionFolder(ResolvedNetworkDir(result));
+        var doc = InstructionDocResolver.Resolve(result.InstructionsPath, instructionFolder);
         // Документа ещё нет — берём заглушку: она лежит ровно по тому пути, по которому потом ляжет
         // настоящая инструкция, поэтому напечатанный сейчас QR не придётся переклеивать
         // (см. InstructionStub).
-        var file = doc.Pdf ?? doc.Newest ?? doc.Docx ?? InstructionStub.ExistingIn(InstructionFolder(result, roots));
+        var file = doc.Pdf ?? doc.Newest ?? doc.Docx ?? InstructionStub.ExistingIn(instructionFolder);
         InstructionLabelWindow.ShowFor(Window.GetWindow(this), _services, _host,
             result.Name, result.VersionRaw, file);
     }

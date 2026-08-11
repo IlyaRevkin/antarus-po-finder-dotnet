@@ -1,11 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace AntarusPoFinder.Core.Loader;
@@ -88,7 +85,11 @@ public static class SegneticsLoaderResolver
         foreach (var candidate in candidates)
         {
             try { if (File.Exists(candidate)) return candidate; }
-            catch (Exception) { }
+            catch (Exception)
+            {
+                // См. док выше: недоступная шара в настройке — не повод падать. «Проверить не смогли»
+                // здесь равно «не подошёл», и решение принимается по остальным кандидатам.
+            }
         }
         return null;
     }

@@ -1,4 +1,3 @@
-using System;
 using AntarusPoFinder.Core.Data;
 
 namespace AntarusPoFinder.Core.Services;

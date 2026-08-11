@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -143,12 +142,6 @@ public class HierarchyService
 
     public string HmiPath(string root, string groupName, string subName, string controller) =>
         Path.Combine(PoCtrlFolder(root, groupName, subName, controller, false), HierarchyFolders.Hmi);
-
-    /// <summary>Общая папка паспортов шкафа — у ТИПА/ПОДТИПА, а не у контроллера (см.
-    /// HierarchyFolders.Passports): паспорт описывает шкаф, а не программу ПЛК, и у шкафа без
-    /// прошивки папки контроллера может не быть вовсе. Внутри — по подпапке на паспорт.</summary>
-    public string PassportsPath(string root, string groupName, string subName) =>
-        Path.Combine(GroupSubFolder(root, groupName, subName), HierarchyFolders.Passports);
 
     public string ParamsPath(string root, string groupName, string subName, string manufacturer)
     {

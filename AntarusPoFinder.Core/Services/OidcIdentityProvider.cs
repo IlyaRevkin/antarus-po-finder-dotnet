@@ -1,15 +1,10 @@
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace AntarusPoFinder.Core.Services;
@@ -170,7 +165,7 @@ public sealed class OidcIdentityProvider : IIdentityProvider
         finally
         {
             try { listener.Stop(); } catch (Exception) { /* закрытие слушателя не должно ломать вход */ }
-            try { listener.Close(); } catch (Exception) { }
+            try { listener.Close(); } catch (Exception) { /* и закрытие тоже — см. строку выше */ }
         }
     }
 

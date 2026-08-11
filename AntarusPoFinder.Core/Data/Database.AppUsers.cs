@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using AntarusPoFinder.Core.Domain;
 using Microsoft.Data.Sqlite;

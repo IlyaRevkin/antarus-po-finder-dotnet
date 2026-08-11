@@ -1,12 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
-
-using AntarusPoFinder.App;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -79,15 +75,28 @@ public partial class UnknownFilesDialog : Window
                 "Удаление", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             return;
 
+        RunOnSelected(selected, item =>
+        {
+            if (item.Entry.Type == "dir") Directory.Delete(item.Entry.Path, recursive: true);
+            else File.Delete(item.Entry.Path);
+            Deleted++;
+        });
+    }
+
+    /// <summary>Каркас массовой операции над отмеченными элементами: что удалось — исчезает из списка,
+    /// на чём споткнулись — перечисляется одним окном в конце. Именно «в конце», а не по ходу: на
+    /// десятке недоступных путей окно с ошибкой выскакивало бы десять раз подряд. Ошибка одного
+    /// элемента не отменяет остальные — операции независимы, и половина сделанной работы лучше нуля.
+    /// Возвращает то, что реально прошло, — вызывающему бывает нужно об этом отчитаться.</summary>
+    private List<Item> RunOnSelected(List<Item> selected, Action<Item> action)
+    {
         var errors = new List<string>();
         var done = new List<Item>();
         foreach (var item in selected)
         {
             try
             {
-                if (item.Entry.Type == "dir") Directory.Delete(item.Entry.Path, recursive: true);
-                else File.Delete(item.Entry.Path);
-                Deleted++;
+                action(item);
                 done.Add(item);
             }
             catch (Exception ex) { errors.Add($"{item.Entry.Path}: {ex.Message}"); }
@@ -95,6 +104,7 @@ public partial class UnknownFilesDialog : Window
         RemoveProcessed(done);
         if (errors.Count > 0)
             AppMessageBox.Show(string.Join("\n", errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
+        return done;
     }
 
     private void MoveToUnknownSelected_Click(object sender, RoutedEventArgs e)
@@ -102,27 +112,17 @@ public partial class UnknownFilesDialog : Window
         var selected = GetSelected();
         if (selected.Count == 0) return;
 
-        var errors = new List<string>();
-        var done = new List<Item>();
-        foreach (var item in selected)
+        RunOnSelected(selected, item =>
         {
-            try
-            {
-                var unknownDir = item.Entry.Section == "ПО"
-                    ? Path.Combine(_root, "ПО", HierarchyFolders.UnknownFw)
-                    : Path.Combine(_root, "Параметры", HierarchyFolders.UnknownParams);
-                Directory.CreateDirectory(unknownDir);
-                var dest = SafeDestination(unknownDir, item.Entry.Name);
-                if (item.Entry.Type == "dir") Directory.Move(item.Entry.Path, dest);
-                else File.Move(item.Entry.Path, dest);
-                Moved++;
-                done.Add(item);
-            }
-            catch (Exception ex) { errors.Add($"{item.Entry.Path}: {ex.Message}"); }
-        }
-        RemoveProcessed(done);
-        if (errors.Count > 0)
-            AppMessageBox.Show(string.Join("\n", errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
+            var unknownDir = item.Entry.Section == "ПО"
+                ? Path.Combine(_root, "ПО", HierarchyFolders.UnknownFw)
+                : Path.Combine(_root, "Параметры", HierarchyFolders.UnknownParams);
+            Directory.CreateDirectory(unknownDir);
+            var dest = SafeDestination(unknownDir, item.Entry.Name);
+            if (item.Entry.Type == "dir") Directory.Move(item.Entry.Path, dest);
+            else File.Move(item.Entry.Path, dest);
+            Moved++;
+        });
     }
 
     /// <summary>Task 3 — "перераспределить" вместо удаления/переноса в «Неизвестное»: назначить
@@ -148,30 +148,22 @@ public partial class UnknownFilesDialog : Window
         var picker = new ReassignUnknownDialog(_services, section, selected.Count) { Owner = this };
         if (picker.ShowDialog() != true) return;
 
-        var errors = new List<string>();
-        var done = new List<Item>();
-        foreach (var item in selected)
+        var done = RunOnSelected(selected, item =>
         {
-            try
-            {
-                var destDir = section == "ПО"
-                    ? _services.Hierarchy.ControllerFolder(_root, picker.SelectedGroupName!, picker.SelectedSubtypeName,
-                        picker.SelectedControllerOrManufacturer, picker.SelectedIsOpc)
-                    : _services.Hierarchy.ParamsPath(_root, picker.SelectedGroupName!, picker.SelectedSubtypeName,
-                        picker.SelectedControllerOrManufacturer);
-                Directory.CreateDirectory(destDir);
-                var dest = SafeDestination(destDir, item.Entry.Name);
-                if (item.Entry.Type == "dir") Directory.Move(item.Entry.Path, dest);
-                else File.Move(item.Entry.Path, dest);
-                Reassigned++;
-                done.Add(item);
-            }
-            catch (Exception ex) { errors.Add($"{item.Entry.Path}: {ex.Message}"); }
-        }
-        RemoveProcessed(done);
-        if (errors.Count > 0)
-            AppMessageBox.Show(string.Join("\n", errors.Take(10)), "Ошибки", MessageBoxButton.OK, MessageBoxImage.Warning);
-        else if (done.Count > 0)
+            var destDir = section == "ПО"
+                ? _services.Hierarchy.ControllerFolder(_root, picker.SelectedGroupName!, picker.SelectedSubtypeName,
+                    picker.SelectedControllerOrManufacturer, picker.SelectedIsOpc)
+                : _services.Hierarchy.ParamsPath(_root, picker.SelectedGroupName!, picker.SelectedSubtypeName,
+                    picker.SelectedControllerOrManufacturer);
+            Directory.CreateDirectory(destDir);
+            var dest = SafeDestination(destDir, item.Entry.Name);
+            if (item.Entry.Type == "dir") Directory.Move(item.Entry.Path, dest);
+            else File.Move(item.Entry.Path, dest);
+            Reassigned++;
+        });
+        // Об успехе сообщаем только здесь: у удаления и переноса в «Неизвестное» видно по самому
+        // списку, а «перераспределить» уносит элемент в другое место дерева, и подтверждение нужно.
+        if (done.Count == selected.Count && done.Count > 0)
             AppMessageBox.Show($"Перемещено: {done.Count}", "Перемещение", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 

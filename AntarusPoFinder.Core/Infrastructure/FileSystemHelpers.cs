@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,18 +8,6 @@ namespace AntarusPoFinder.Core.Infrastructure;
 public static class FileSystemHelpers
 {
     public static readonly HashSet<string> ArchiveExts = new(StringComparer.OrdinalIgnoreCase) { ".zip", ".7z", ".rar" };
-    public static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase)
-        { "Архив", "Старая структура", "__pycache__", "build", "dist", "_archive" };
-
-    public record DiskSnapshot(DateTime Mtime, int FileCount);
-
-    public static DiskSnapshot GetDiskSnapshot(string path)
-    {
-        if (!Directory.Exists(path)) return new DiskSnapshot(DateTime.MinValue, 0);
-        var mtime = Directory.GetLastWriteTime(path);
-        var count = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Count();
-        return new DiskSnapshot(mtime, count);
-    }
 
     /// <summary>Deletes a directory tree, clearing read-only attributes first (common on Windows
     /// for files copied from read-only sources) so the delete doesn't fail partway through.</summary>
@@ -93,32 +80,6 @@ public static class FileSystemHelpers
         return "";
     }
 
-    /// <summary>Moves every file in dest_dir matching *extension into dest_dir/_archive/, timestamped
-    /// with today's date (e.g. report.pdf → report_bak20260714.pdf). No-op if extension is empty.</summary>
-    public static void ArchiveOldFiles(string destDir, string extension)
-    {
-        if (string.IsNullOrEmpty(extension)) return;
-        var archiveDir = Path.Combine(destDir, "_archive");
-        Directory.CreateDirectory(archiveDir);
-        var today = DateTime.Now.ToString("yyyyMMdd");
-
-        if (!Directory.Exists(destDir)) return;
-        foreach (var file in Directory.EnumerateFiles(destDir, $"*{extension}", SearchOption.TopDirectoryOnly))
-        {
-            try
-            {
-                var stem = Path.GetFileNameWithoutExtension(file);
-                var suffix = Path.GetExtension(file);
-                var newName = $"{stem}_bak{today}{suffix}";
-                File.Move(file, Path.Combine(archiveDir, newName), overwrite: true);
-            }
-            catch
-            {
-                // best effort, matches the Python app's silent-skip behavior
-            }
-        }
-    }
-
     /// <summary>Renames a rolled-back version's file/folder in place, appending a marker suffix —
     /// otherwise a future upload that reuses the version number it just freed up would land on the
     /// exact same path (CopyDirectoryContents/File.Copy overwrite=true) and silently merge into or
@@ -165,31 +126,5 @@ public static class FileSystemHelpers
     {
         try { if (File.Exists(path)) File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly); }
         catch { /* best effort — see doc */ }
-    }
-
-    /// <summary>Numeric major.minor(.YYMMDD) subfolder scan — returns the path with the highest
-    /// (major, minor, date) key, or null if firmwareDir doesn't exist or has no matches.</summary>
-    public static string? FindLatestVersionFolder(string firmwareDir)
-    {
-        if (!Directory.Exists(firmwareDir)) return null;
-
-        string? best = null;
-        (int, int, int) bestKey = (-1, -1, -1);
-
-        foreach (var dir in Directory.EnumerateDirectories(firmwareDir))
-        {
-            var name = Path.GetFileName(dir);
-            var m = System.Text.RegularExpressions.Regex.Match(name, @"^(\d+)\.(\d+)(?:\.(\d{6}))?$");
-            if (!m.Success) continue;
-
-            var key = (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value),
-                m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : 0);
-            if (best is null || key.CompareTo(bestKey) > 0)
-            {
-                best = dir;
-                bestKey = key;
-            }
-        }
-        return best;
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -90,10 +89,6 @@ public partial class Database
     private List<FwVersionRecord>? _searchIndex;
     private int _searchIndexRevision = -1;
     private int _dataRevision;
-
-    /// <summary>Сколько раз данные, которые видит поиск, менялись за жизнь соединения. Публичная —
-    /// на неё же опираются тесты, проверяющие, что снимок действительно пересобирается.</summary>
-    public int DataRevision => _dataRevision;
 
     private const string SearchIndexSql = """
         SELECT fv.*,

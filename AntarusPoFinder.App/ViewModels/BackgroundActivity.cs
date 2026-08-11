@@ -1,7 +1,7 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AntarusPoFinder.App.ViewModels;
@@ -30,6 +30,10 @@ public sealed partial class BusyTracker : ObservableObject
 {
     private readonly List<Scope> _active = new();
 
+    /// <summary>Поток, на котором объект создан. В приложении это поток интерфейса (объект живёт в
+    /// MainWindowViewModel), а привязка WPF читает свойства только оттуда.</summary>
+    private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
+
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _text = "";
     [ObservableProperty] private bool _isIndeterminate = true;
@@ -54,8 +58,14 @@ public sealed partial class BusyTracker : ObservableObject
         // Свойства читает привязка WPF — обновлять их можно только с потока интерфейса. Сами
         // операции живут на нём же, но Dispose иногда прилетает из продолжения задачи, поэтому
         // маршалим на всякий случай, а не надеемся на вызывающего.
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is not null && !dispatcher.CheckAccess())
+        //
+        // Поток берём СВОЙ — тот, на котором объект создан (а создаётся он вместе с
+        // MainWindowViewModel, то есть на потоке интерфейса), а не Application.Current.Dispatcher.
+        // Разница видна там, где Application в процессе не тот или его нет вовсе: глобальный
+        // Application.Current превращает поведение этого класса в зависимость от чужого состояния —
+        // ровно на этом сломались тесты, когда в том же процессе появился второй поток с WPF.
+        var dispatcher = _dispatcher;
+        if (!dispatcher.CheckAccess())
         {
             dispatcher.BeginInvoke(Refresh);
             return;

@@ -1,9 +1,7 @@
-﻿using System.Linq;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Domain;
-using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -58,9 +56,7 @@ public partial class NewVersionsView : UserControl
         var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportChanges(dlg, _host);
+        EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",

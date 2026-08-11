@@ -21,7 +21,26 @@
                         <TextBlock Text="ХРАНИЛИЩЕ НА ХОСТИНГЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                         <TextBlock x:Name="StorageStateText" TextWrapping="Wrap" Margin="0,0,0,4"
                                    Foreground="{DynamicResource TextBrush}"/>
-                        <TextBlock x:Name="StorageAddressText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="StorageAddressText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                                   Margin="0,0,0,10"/>
+
+                        <!-- Предел размера — политика хранения, а не свойство машины, поэтому живёт
+                             здесь же, где видно его последствия, а не в общих настройках: человек,
+                             увидевший в журнале «файл 34 МБ при пределе 20 МБ», должен править
+                             предел не уходя со страницы. -->
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Предел размера файла, МБ:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="MaxSizeInput" Width="70" Height="28" VerticalContentAlignment="Center"
+                                     LostFocus="HostingLimit_Changed" KeyDown="HostingLimit_KeyDown"
+                                     ToolTip="Ограничение касается только хостинга: на диск сколь угодно большой проект ПЛК класть можно."/>
+                            <ComboBox x:Name="LimitModeCombo" Width="260" Height="28" Margin="10,0,0,0"
+                                      SelectionChanged="HostingLimit_Changed">
+                                <ComboBoxItem Content="Сверх предела — не выкладывать"/>
+                                <ComboBoxItem Content="Сверх предела — выложить с предупреждением"/>
+                            </ComboBox>
+                            <TextBlock x:Name="LimitSavedText" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                                       Margin="10,0,0,0"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

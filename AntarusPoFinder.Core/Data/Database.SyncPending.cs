@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace AntarusPoFinder.Core.Data;
 
 /// <summary>Одно изменение справочника, накопленное этой машиной и ещё не отправленное на общий

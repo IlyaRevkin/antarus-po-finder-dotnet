@@ -1,11 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -88,11 +85,60 @@ public partial class HostingView : UserControl
             $"Предел размера файла {limit} МБ, файлы сверх предела {mode}. " +
             $"Переопределений написания в адресах: {s.Translit.Count}.";
 
+        // Поля предела заполняются здесь же, но без срабатывания обработчиков: иначе открытие
+        // страницы выглядело бы для синхронизации как правка настройки.
+        _fillingLimit = true;
+        try
+        {
+            MaxSizeInput.Text = limit.ToString();
+            LimitModeCombo.SelectedIndex = _services.Cfg.HostingSizeLimitHard() ? 0 : 1;
+        }
+        finally { _fillingLimit = false; }
+
         var ready = s.CanPublish;
         CheckBtn.IsEnabled = ready;
         PublishMissingBtn.IsEnabled = ready;
         PublishSelectedBtn.IsEnabled = ready;
         RepublishAllBtn.IsEnabled = ready;
+    }
+
+    /// <summary>Пока поля заполняются из настроек, их события не должны считаться правкой человека.</summary>
+    private bool _fillingLimit;
+
+    /// <summary>Сохранение предела и режима. Настройка ОБЩАЯ — уезжает на все машины, поэтому правка
+    /// объявляется накопителю синхронизации, как и любое другое изменение справочников: иначе на
+    /// соседней машине предел остался бы прежним, а человек считал бы, что поменял его для всех.</summary>
+    private void HostingLimit_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_fillingLimit) return;
+
+        var before = (_services.Cfg.HostingMaxFileMb(), _services.Cfg.HostingSizeLimitHard());
+
+        if (int.TryParse(MaxSizeInput.Text.Trim(), out var mb) && mb > 0)
+            _services.Cfg.SetHostingMaxFileMb(mb);
+        _services.Cfg.SetHostingSizeLimitHard(LimitModeCombo.SelectedIndex != 1);
+
+        var after = (_services.Cfg.HostingMaxFileMb(), _services.Cfg.HostingSizeLimitHard());
+        if (before == after)
+        {
+            // Ничего не поменялось (поле потеряло фокус без правки, ввели тот же предел) — молчим.
+            ShowStorageState();
+            return;
+        }
+
+        _host.PushCatalogChange($"Предел размера файла на хостинге: {after.Item1} МБ, " +
+                                (after.Item2 ? "сверх предела не выкладывать" : "сверх предела предупреждать"));
+        LimitSavedText.Text = "Сохранено";
+        ShowStorageState();
+        BuildList();
+    }
+
+    private void HostingLimit_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        HostingLimit_Changed(sender, e);
+        // Снимаем фокус, чтобы Enter вёл себя как «применил и закончил», а не оставлял курсор в поле.
+        System.Windows.Input.Keyboard.ClearFocus();
     }
 
     // ── Список ────────────────────────────────────────────────────────────────

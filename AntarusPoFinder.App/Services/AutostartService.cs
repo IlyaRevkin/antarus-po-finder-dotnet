@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Win32;
 
 namespace AntarusPoFinder.App.Services;

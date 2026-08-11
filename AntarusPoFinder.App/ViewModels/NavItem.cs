@@ -32,13 +32,6 @@ public partial class NavItem : ObservableObject
     /// ShowIn*-свойствам ниже.</summary>
     public NavSection Section { get; }
 
-    /// <summary>"Тикеты"/"Сетевые диски" — used rarely (checked once in a while, not the everyday
-    /// pages), so they render in a small secondary strip near the bottom of the sidebar instead of
-    /// alongside Поиск/Осмотр/Загрузка ПО etc. in the main list — same role access as before (see
-    /// RolesConfig.RoleAccess), this only changes WHERE a role that can see the page finds its
-    /// button.</summary>
-    public bool IsCompact => Section == NavSection.More;
-
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private bool _isActive;
     /// <summary>Pending-count badge, e.g. unmoderated firmware versions on "Модерация прошивок" — 0 hides it.</summary>

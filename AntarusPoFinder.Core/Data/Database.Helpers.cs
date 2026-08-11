@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Microsoft.Data.Sqlite;
 
@@ -77,12 +76,6 @@ public partial class Database
             cmd.Parameters.AddWithValue($"@p{i}", ids[i]);
         cmd.ExecuteNonQuery();
         BumpDataRevisionIfNeeded(sql);
-    }
-
-    private static string? GetStringOrNull(SqliteDataReader r, string col)
-    {
-        int idx = r.GetOrdinal(col);
-        return r.IsDBNull(idx) ? null : r.GetString(idx);
     }
 
     private static string GetString(SqliteDataReader r, string col, string fallback = "")

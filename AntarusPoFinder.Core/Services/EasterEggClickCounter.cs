@@ -1,5 +1,3 @@
-using System;
-
 namespace AntarusPoFinder.Core.Services;
 
 /// <summary>Что делать по итогу очередного клика по номеру версии: ничего (ещё не набрали серию),

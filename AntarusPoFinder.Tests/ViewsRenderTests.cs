@@ -65,8 +65,14 @@ public class ViewsRenderTests
                 {
                     _dispatcher = Dispatcher.CurrentDispatcher;
 
-                    // Приложение с ресурсами — без него стили и кисти не резолвятся. Тема грузится
-                    // тёмная: какая именно, для разбора разметки неважно, важно что словарь есть.
+                    // Application нужен: {StaticResource} резолвится в момент РАЗБОРА разметки, то
+                    // есть внутри InitializeComponent, — навесить словари на готовый элемент уже
+                    // поздно. Живой Application.Current при этом остаётся на весь процесс, и код,
+                    // который маршалит работу через Application.Current.Dispatcher, начал бы
+                    // откладывать её на ЭТОТ поток: первая версия этого файла так и уронила
+                    // BackgroundActivityTests (по отдельности проходили, вместе — нет). Лечится это
+                    // на стороне продукта — класс, которому нужен поток интерфейса, должен помнить
+                    // СВОЙ поток, а не спрашивать глобальный Application (см. BusyTracker).
                     var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                     foreach (var path in new[] { "Themes/Dark.xaml", "Themes/Icons.xaml", "Themes/Styles.xaml" })
                         app.Resources.MergedDictionaries.Add(new ResourceDictionary

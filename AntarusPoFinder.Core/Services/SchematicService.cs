@@ -1,9 +1,7 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -67,13 +65,6 @@ public class SchematicService
 
     private record ScannedFile(string CabinetName, string UpperMatchText, string Path);
 
-    public void InvalidateCache()
-    {
-        _cachedDiskPath = null;
-        _cachedExtensionsKey = "";
-        _cache = new();
-    }
-
     /// <summary>Кэш для этого диска (и этого набора расширений сканирования — см.
     /// <paramref name="scanExtensions"/>) уже наполнен — значит, поиск по нему отработает мгновенно,
     /// обходить диск заново не нужно. Вызывающему это нужно, чтобы решить, показывать ли индикатор
@@ -121,7 +112,7 @@ public class SchematicService
     }
 
     /// <summary>All schematic files found on disk, sorted by cabinet name. Cached per disk path
-    /// (and scanExtensions — see EnsureScanned) until InvalidateCache().</summary>
+    /// (and scanExtensions — see EnsureScanned) until the disk path or the extension set changes.</summary>
     public List<SchematicHit> CabinetHits(string diskPath, IReadOnlyCollection<string>? scanExtensions = null) =>
         Scanned(diskPath, scanExtensions).Select(f => new SchematicHit(f.CabinetName, f.Path)).ToList();
 
