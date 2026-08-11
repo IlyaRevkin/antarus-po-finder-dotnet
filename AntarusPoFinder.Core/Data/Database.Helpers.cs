@@ -79,12 +79,6 @@ public partial class Database
         BumpDataRevisionIfNeeded(sql);
     }
 
-    private static string? GetStringOrNull(SqliteDataReader r, string col)
-    {
-        int idx = r.GetOrdinal(col);
-        return r.IsDBNull(idx) ? null : r.GetString(idx);
-    }
-
     private static string GetString(SqliteDataReader r, string col, string fallback = "")
     {
         int idx = r.GetOrdinal(col);

@@ -668,9 +668,6 @@ public class ConfigService
         SetLoaderUpdateKernelDefault(value);
     }
 
-    /// <summary>Последний введённый порт/адрес контроллера — подставляется в диалог лоадера.</summary>
-    public string LoaderLastTarget() => Get("loader_last_target");
-    public void SetLoaderLastTarget(string target) => Set("loader_last_target", target.Trim());
 
     /// <summary>Как подключаемся к ПЛК: "usb" / "ethernet" / пусто («не трогать выбор в самом
     /// Loader»). Переносится в настройки Segnetics Loader перед запуском операции — см.
@@ -701,7 +698,6 @@ public class ConfigService
         return string.IsNullOrEmpty(v) ? LocalFw : v;
     }
     public void SetInspectionFolder(string path) => Set("inspection_folder", path);
-    public string ProtocolFolder() => InspectionFolder();
 
     /// <summary>DPI used both to request a resolution from the scanner (best-effort — not every
     /// driver honors it) and to size the resulting PDF page to the document's real physical size.</summary>
@@ -805,27 +801,7 @@ public class ConfigService
     public string AdHttpUrl() => Get("ad_http_url");
     public void SetAdHttpUrl(string url) => Set("ad_http_url", url.Trim());
 
-    /// <summary>Сигнал (не блокировка) для UI/лога: текущий ad_http_url задан и не https — значит
-    /// логин/пароль при способе №2 уходят по сети без шифрования канала (Negotiate/NTLM сам по
-    /// себе канал не шифрует, только согласовывает challenge). Не мешает работе способа —
-    /// в реальном окружении на момент внедрения единственный доступный адрес мог быть только
-    /// HTTP, — но должно быть видно тому, кто это настраивает. См. HttpAdCredentialValidator.IsInsecureUrl
-    /// за самой проверкой схемы (общая логика, не дублируется здесь).</summary>
-    public bool AdHttpUrlIsInsecure()
-    {
-        var url = AdHttpUrl();
-        return !string.IsNullOrWhiteSpace(url) && HttpAdCredentialValidator.IsInsecureUrl(url);
-    }
-
-    /// <summary>Хранимая строка пароля администратора — с этого раунда всегда хеш (см.
-    /// PasswordHasher), НИКОГДА не открытый текст пароля. Оставлена публичной только для мест,
-    /// которым нужно знать «задан ли вообще пароль» (пустая/непустая строка), а не сам пароль —
-    /// для реальной проверки пароля используй <see cref="VerifyAdminPassword"/>, не строковое
-    /// сравнение с результатом этого метода (сравнение с хешем никогда не совпадёт с открытым
-    /// текстом, который ввёл пользователь).</summary>
-    public string AdminPassword() => Get("admin_password");
-
-    /// <summary>То же самое для пароля программиста — пустая строка означает «пароль не задан»
+    /// <summary>Пароль программиста — пустая строка означает «пароль не задан»
     /// (см. VerifyProgrammerPassword), непустая — всегда хеш, никогда открытый текст.</summary>
     public string ProgrammerPassword() => Get("programmer_password");
 
@@ -868,13 +844,14 @@ public class ConfigService
 
     public bool KeepArchives() => Get("keep_archives").Equals("true", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>0 = automatic pull sync disabled on this machine (see MainWindowViewModel.StartTimers/
-    /// SetSyncIntervalMinutes) — manual "Синхронизировать сейчас" still works either way.</summary>
+    /// <summary>0 = automatic pull sync disabled on this machine (see MainWindowViewModel.StartTimers) —
+    /// manual "Синхронизировать сейчас" still works either way. Только чтение: поле настройки убрано
+    /// из «Сетевых дисков» (Задача 2 — маркер ревизии опрашивается на фиксированном коротком
+    /// интервале), значение остаётся ради тех баз, где его когда-то выставили.</summary>
     public int SyncIntervalMin()
     {
         return int.TryParse(Get("sync_interval_min"), out var v) ? Math.Max(0, v) : 5;
     }
-    public void SetSyncIntervalMin(int minutes) => Set("sync_interval_min", Math.Max(0, minutes).ToString());
 
     /// <summary>Administrator-only: periodically export the local config to the shared drive so
     /// naladchik/programmer clients pick up hierarchy/tag/reservation changes without the admin

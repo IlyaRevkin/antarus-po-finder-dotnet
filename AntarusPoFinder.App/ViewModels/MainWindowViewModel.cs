@@ -107,7 +107,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [ObservableProperty] private bool _pendingChangesBannerVisible;
     [ObservableProperty] private string _pendingChangesSummary = "";
     [ObservableProperty] private int _pendingChangesCount;
-    [ObservableProperty] private bool _pendingChangesDetailsVisible;
     /// <summary>Задача 4 (приёмник) — «Поступили изменения (N): […]», см. ShowIncomingChangesBanner.</summary>
     [ObservableProperty] private bool _incomingChangesBannerVisible;
     [ObservableProperty] private string _incomingChangesBannerText = "";
@@ -167,9 +166,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     public ObservableCollection<NavItem> NavItems { get; } = new();
     public ObservableCollection<QuickAppItem> QuickApps { get; } = new();
     public ObservableCollection<NotificationEntry> NotificationHistory { get; } = new();
-    /// <summary>Развёрнутый список накопителя изменений (Задача 4) — по одной строке-описанию на
-    /// каждую запись Database.SyncPendingChange, показывается только пока PendingChangesDetailsVisible.</summary>
-    public ObservableCollection<string> PendingChangesDetails { get; } = new();
 
     private const int NotificationHistoryLimit = 100;
     private const int BannerAutoHideMs = 10000;
@@ -1003,20 +999,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         Views.TextViewDialog.Show(Application.Current?.MainWindow, $"Что нового в v{current}", notes);
     }
 
-    /// <summary>Открыть журнал «что менялось по версиям приложения» — постоянная история release notes
-    /// всех версий, которые эта установка видела (ConfigService.AppChangelogHistory наполняется в
-    /// CheckWhatsNewAsync выше). В отличие от разового окна «Что нового», сюда можно вернуться в любой
-    /// момент — например, разбираясь, в какой версии починили конкретную вещь.</summary>
-    [RelayCommand]
-    private void ShowAppChangelog()
-    {
-        var win = new AppChangelogWindow(_services.Cfg.AppChangelogHistory())
-        {
-            Owner = Application.Current?.MainWindow,
-        };
-        win.ShowDialog();
-    }
-
     // ── Firmware updates ─────────────────────────────────────────────────────
 
     private async Task CheckForFirmwareUpdatesAsync()
@@ -1386,10 +1368,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         PendingChangesBannerVisible = pending.Count > 0;
         PendingChangesSummary = pending.Count == 0 ? "" : $"Изменений готово к отправке: {pending.Count}";
 
-        PendingChangesDetails.Clear();
-        foreach (var change in pending)
-            PendingChangesDetails.Add(change.Description);
-
         // Накопитель (в т.ч. правки тегов) — это и есть «неотправленное» для пилюли статуса синхры.
         RefreshSyncStatus();
     }
@@ -1411,9 +1389,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             }));
         Views.TextViewDialog.Show(System.Windows.Application.Current?.MainWindow, "Готово к отправке", text);
     }
-
-    [RelayCommand]
-    private void TogglePendingChangesDetails() => PendingChangesDetailsVisible = !PendingChangesDetailsVisible;
 
     /// <summary>Неисчезающая по дизайну (п.4) — в отличие от остальных баннеров скрытие здесь не
     /// очищает накопитель, только прячет саму плашку до следующего изменения (следующий
@@ -1706,44 +1681,6 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         QuickAppsSidebarVisible = hasApps && !onTop;
         QuickAppsTopVisible = hasApps && onTop;
         QuickAppsTopShowLabels = mode == "top_labeled";
-    }
-
-    /// <summary>0 disables periodic auto-sync — stops any running repeat timer instead of setting a
-    /// zero interval (which would fire continuously). A non-zero value re-arms a repeat timer even
-    /// if one wasn't running before (interval was previously 0), reusing the same Tick handlers as
-    /// StartTimers.</summary>
-    public void SetSyncIntervalMinutes(int minutes)
-    {
-        if (minutes <= 0)
-        {
-            _syncRepeatTimer?.Stop();
-            _syncRepeatTimer = null;
-            _configPullRepeatTimer?.Stop();
-            _configPullRepeatTimer = null;
-            return;
-        }
-
-        if (_syncRepeatTimer is not null)
-        {
-            _syncRepeatTimer.Interval = TimeSpan.FromMinutes(minutes);
-        }
-        else
-        {
-            _syncRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _syncRepeatTimer.Tick += async (_, _) => await RunSyncAsync();
-            _syncRepeatTimer.Start();
-        }
-
-        if (_configPullRepeatTimer is not null)
-        {
-            _configPullRepeatTimer.Interval = TimeSpan.FromMinutes(minutes);
-        }
-        else
-        {
-            _configPullRepeatTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(minutes) };
-            _configPullRepeatTimer.Tick += async (_, _) => await CheckForConfigUpdateAsync();
-            _configPullRepeatTimer.Start();
-        }
     }
 
     void IAppHost.Navigate(string pageId) => Navigate(pageId);

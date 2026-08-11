@@ -34,7 +34,6 @@ public interface IAppHost
     /// ручной синхронизации, иначе пилюля показывала бы «всё хорошо» после неудачной кнопки.</summary>
     void NoteSyncResult(string? message, bool isError);
 
-    void SetSyncIntervalMinutes(int minutes);
     void ReloadSidebarApps();
     void SwitchRole(string role);
     void Navigate(string pageId);

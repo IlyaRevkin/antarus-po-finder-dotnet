@@ -32,7 +32,6 @@ public partial class HistoryDialog : Window
         /// <summary>Самая свежая живая версия — выделяется жирным в таблице.</summary>
         public bool IsCurrent { get; init; }
         public string StatusLabel { get; init; } = "";
-        public string DescriptionShort => Record.Description.Length > 80 ? Record.Description[..80] + "…" : Record.Description;
     }
 
     private readonly AppServices _services;

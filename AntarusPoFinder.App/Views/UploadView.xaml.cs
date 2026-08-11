@@ -601,16 +601,6 @@ public partial class UploadView : UserControl
         else OpcHintLabel.ClearValue(TextBlock.ForegroundProperty);
     }
 
-    /// <summary>Формат для имени файла — "(01312)"/"SN00042": число дополняется нулями до 5 цифр.
-    /// Не блокирует нечисловой ввод (возвращает как есть) — это косметика имени файла, а не строгая
-    /// валидация поля.</summary>
-    private static string Format5Digits(string raw)
-    {
-        var trimmed = raw.Trim();
-        if (trimmed.Length == 0) return "";
-        return int.TryParse(trimmed, out var n) && n is >= 0 and <= 99999 ? n.ToString("D5") : trimmed;
-    }
-
     private void ReqNum_Changed(object sender, TextChangedEventArgs e)
     {
         if (IsOpc) _opcTouched = true;
