@@ -108,7 +108,12 @@ public partial class PhotoViewerWindow : Window
         _frameIndex = 0;
         _pendingVideo = false;
         try { Video.Stop(); Video.Source = null; }
-        catch (Exception) { }
+        catch (Exception)
+        {
+            // MediaElement бросает, если проигрывание уже сорвалось (кодека нет, файл исчез с шары).
+            // Это остановка перед показом следующего файла или перед закрытием окна — вываливать
+            // ошибку прошлого файла человеку, который уже листает дальше, незачем.
+        }
     }
 
     /// <summary>Показывает ленту <paramref name="files"/>, начиная с <paramref name="startIndex"/>.
@@ -319,6 +324,10 @@ public partial class PhotoViewerWindow : Window
         if (!_pendingVideo || !IsLoaded) return;
         _pendingVideo = false;
         try { Video.Play(); }
-        catch (Exception) { }
+        catch (Exception)
+        {
+            // Нет кодека, битый файл — MediaElement сообщит об этом сам своим MediaFailed, там же и
+            // рисуется сообщение. Второе окно с ошибкой поверх ленты просмотра только мешало бы.
+        }
     }
 }

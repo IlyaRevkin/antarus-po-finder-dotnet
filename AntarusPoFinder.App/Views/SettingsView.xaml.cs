@@ -1766,7 +1766,7 @@ public partial class SettingsView : UserControl
     private void InstallLatestUpdate_Click(object sender, RoutedEventArgs e)
     {
         if (_latestAppRelease == null) return;
-        InstallAppVersion(_latestAppRelease);
+        _ = InstallAppVersionAsync(_latestAppRelease);
     }
 
     /// <summary>Открыть постоянный журнал «что менялось по версиям программы» — то же, что разовое
@@ -1786,10 +1786,13 @@ public partial class SettingsView : UserControl
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        InstallAppVersion(option.Release);
+        _ = InstallAppVersionAsync(option.Release);
     }
 
-    private async void InstallAppVersion(UpdateRelease release)
+    /// <summary>async Task, а не async void: обработчик — это кнопка выше, а не сам метод, и падение
+    /// внутри async void ушло бы мимо try/catch прямо в необработанное исключение приложения.
+    /// Вызывается как «пустил и не жду» тем же `_ = …`, что и остальные такие места в проекте.</summary>
+    private async Task InstallAppVersionAsync(UpdateRelease release)
     {
         var current = AppUpdateService.CurrentVersion;
         var direction = release.Version > current ? "Обновить" : release.Version < current ? "Откатить" : "Переустановить";
@@ -2917,9 +2920,7 @@ public partial class SettingsView : UserControl
         var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportChanges(dlg, _host);
+        EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
 
         var release = AppMessageBox.Show(
             "Вывести версию из модерации и сделать релизной?",
@@ -3084,9 +3085,7 @@ public partial class SettingsView : UserControl
         bool otherChanged = v.Description != dlg.ResultDescription ||
             !new HashSet<string>(v.LaunchTypes, StringComparer.OrdinalIgnoreCase).SetEquals(dlg.ResultLaunchTypes);
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
-        EditFirmwareDialog.ReportChanges(dlg, _host);
+        EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
         if (!tagsChanged && !otherChanged)
             _host.ShowStatus($"Без изменений: {title}", category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();

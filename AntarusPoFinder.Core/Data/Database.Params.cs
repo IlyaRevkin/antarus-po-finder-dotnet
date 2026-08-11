@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Data;
@@ -32,6 +32,17 @@ public partial class Database
 
     // ── Param Files ───────────────────────────────────────────────────────────
 
+    /// <summary>Начало любого чтения файлов параметров. Именами группы/подтипа, которые дотягивает
+    /// этот JOIN, пользуется ReadParamFile — расходись список колонок между четырьмя запросами ниже,
+    /// один из них молча отдавал бы записи с пустым названием подтипа. LEFT JOIN, а не JOIN: подтип у
+    /// файла может быть не проставлен, и такая запись обязана остаться в выдаче.</summary>
+    private const string ParamFileSelect = """
+        SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
+        FROM param_files pf
+        LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
+        LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+        """;
+
     /// <summary>Заводит новую запись файла параметров. sync_id проставляется ПРЯМО ЗДЕСЬ, а не
     /// откладывается до следующего BackfillSyncIds на старте приложения: строка может уехать в общий
     /// конфиг в ту же минуту (экспорт делается вручную сразу после загрузки), а строка без sync_id у
@@ -63,11 +74,8 @@ public partial class Database
 
     public List<ParamFile> GetParamFiles(int? subtypeId = null, string? manufacturer = null)
     {
-        var sql = """
-            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
-            FROM param_files pf
-            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
-            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+        var sql = $"""
+            {ParamFileSelect}
             WHERE pf.archived = 0
             """;
         var binds = new List<(string, object)>();
@@ -126,11 +134,8 @@ public partial class Database
     {
         var result = new List<ParamFile>();
         if (string.IsNullOrWhiteSpace(diskPath) || string.IsNullOrWhiteSpace(filename)) return result;
-        using var reader = ExecuteReader("""
-            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
-            FROM param_files pf
-            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
-            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+        using var reader = ExecuteReader($"""
+            {ParamFileSelect}
             WHERE pf.archived = 0 AND pf.disk_path = @d AND pf.filename = @f
             ORDER BY pf.id
             """, cmd =>
@@ -148,11 +153,8 @@ public partial class Database
     /// которому перезаливка находит запись, чтобы ОБНОВИТЬ её вместо заведения дубля.</summary>
     public ParamFile? FindLiveParamFile(int subtypeId, string manufacturer, string filename)
     {
-        using var reader = ExecuteReader("""
-            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
-            FROM param_files pf
-            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
-            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+        using var reader = ExecuteReader($"""
+            {ParamFileSelect}
             WHERE pf.archived = 0 AND pf.subtype_id = @s AND pf.manufacturer = @m AND pf.filename = @f
             ORDER BY pf.id
             """, cmd =>
@@ -171,11 +173,8 @@ public partial class Database
     public ParamFile? FindParamFileBySyncId(string syncId)
     {
         if (string.IsNullOrEmpty(syncId)) return null;
-        using var reader = ExecuteReader("""
-            SELECT pf.*, es.name AS subtype_name, es.folder_name, eg.name AS group_name
-            FROM param_files pf
-            LEFT JOIN equipment_subtypes es ON pf.subtype_id = es.id
-            LEFT JOIN equipment_groups   eg ON es.group_id   = eg.id
+        using var reader = ExecuteReader($"""
+            {ParamFileSelect}
             WHERE pf.sync_id = @sy
             ORDER BY pf.id
             """, cmd => cmd.Parameters.AddWithValue("@sy", syncId));

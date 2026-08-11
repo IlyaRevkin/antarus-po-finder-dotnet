@@ -711,7 +711,7 @@ public partial class SearchView : UserControl
             };
             card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader(((FirmwareCard)s!).Result); };
             card.ConnectionModeChangeRequested += (_, mode) => SaveConnectionMode(mode);
-            card.DownloadRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); DownloadFirmware(((FirmwareCard)s!).Result); };
+            card.DownloadRequested += (s, e) => { RecordUsage(((FirmwareCard)s!).Result); _ = DownloadFirmwareAsync(((FirmwareCard)s!).Result); };
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
             card.ModbusMapRequested += (s, _) => OpenModbusMap(((FirmwareCard)s!).Result);
             card.ParamsRequested += (s, _) => OpenParams(((FirmwareCard)s!).Result);
@@ -1705,12 +1705,10 @@ public partial class SearchView : UserControl
         var dlg = new EditFirmwareDialog(_services, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
-        _services.Db.UpdateFwVersion(v.Id!.Value, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
         // Что именно изменилось (какие теги добавились/убрались и у какой прошивки по-человечески)
-        // сообщает сам ReportChanges — прежняя строка «Теги обновлены: 2.0.0042.0003» дублировала
-        // его и была заметно менее внятной.
-        EditFirmwareDialog.ReportChanges(dlg, _host);
+        // сообщает сам ReportChanges внутри ApplyResult — прежняя строка «Теги обновлены:
+        // 2.0.0042.0003» дублировала его и была заметно менее внятной.
+        EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
         PerformSearch();
     }
 
@@ -2065,8 +2063,11 @@ public partial class SearchView : UserControl
     }
 
     /// <summary>Копирование — в фоновом потоке, с индикатором внизу окна: папка версии тянется с
-    /// сетевой шары и бывает в сотни мегабайт, а раньше на всё это время окно просто замирало.</summary>
-    private async void DownloadFirmware(HierarchyResult result)
+    /// сетевой шары и бывает в сотни мегабайт, а раньше на всё это время окно просто замирало.
+    ///
+    /// async Task, а не async void: обработчик — сама кнопка карточки, и падение внутри async void
+    /// ушло бы мимо try/catch прямо в необработанное исключение приложения.</summary>
+    private async Task DownloadFirmwareAsync(HierarchyResult result)
     {
         var root = _services.Cfg.RootPath();
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(result.FirmwareDir))

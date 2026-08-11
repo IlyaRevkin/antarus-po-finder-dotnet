@@ -170,7 +170,7 @@ public sealed class OidcIdentityProvider : IIdentityProvider
         finally
         {
             try { listener.Stop(); } catch (Exception) { /* закрытие слушателя не должно ломать вход */ }
-            try { listener.Close(); } catch (Exception) { }
+            try { listener.Close(); } catch (Exception) { /* и закрытие тоже — см. строку выше */ }
         }
     }
 

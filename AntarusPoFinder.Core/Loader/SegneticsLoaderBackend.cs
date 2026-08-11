@@ -88,7 +88,11 @@ public static class SegneticsLoaderResolver
         foreach (var candidate in candidates)
         {
             try { if (File.Exists(candidate)) return candidate; }
-            catch (Exception) { }
+            catch (Exception)
+            {
+                // См. док выше: недоступная шара в настройке — не повод падать. «Проверить не смогли»
+                // здесь равно «не подошёл», и решение принимается по остальным кандидатам.
+            }
         }
         return null;
     }
