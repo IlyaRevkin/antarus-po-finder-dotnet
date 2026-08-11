@@ -86,6 +86,20 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Подтипы, у которых есть хоть один живой файл параметров, — ОДНИМ запросом на всю
+    /// выдачу поиска. Раньше карточка отвечала на «показывать ли кнопку „Параметры“» вызовом
+    /// GetParamFiles(subtypeId), то есть запросом с двумя JOIN'ами и полным разбором строк ради
+    /// одного Count > 0, и таких запросов было по числу найденных версий (см. SearchView.BuildCard).</summary>
+    public HashSet<int> GetSubtypeIdsWithParamFiles()
+    {
+        var result = new HashSet<int>();
+        using var reader = ExecuteReader(
+            "SELECT DISTINCT subtype_id FROM param_files WHERE archived = 0 AND subtype_id IS NOT NULL");
+        while (reader.Read())
+            result.Add(reader.GetInt32(0));
+        return result;
+    }
+
     private static ParamFile ReadParamFile(Microsoft.Data.Sqlite.SqliteDataReader reader) => new()
     {
         Id = GetInt(reader, "id"),

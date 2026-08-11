@@ -120,6 +120,19 @@ public partial class Database
 
     /// <summary>Сколько живых вложений у версии — карточке выдачи нужен только счётчик, тянуть ради
     /// значка на карточке весь список по каждой строке выдачи незачем.</summary>
+    /// <summary>Сколько живых вложений у каждой версии — ОДНИМ запросом на всю выдачу поиска, вместо
+    /// CountFwAttachments на каждую карточку (см. SearchView.BuildCard). Версии без вложений в словарь
+    /// не попадают: их подавляющее большинство, и хранить для них нули незачем.</summary>
+    public Dictionary<int, int> GetFwAttachmentCounts()
+    {
+        var result = new Dictionary<int, int>();
+        using var reader = ExecuteReader(
+            "SELECT fw_version_id, COUNT(*) FROM fw_attachments WHERE deleted_at='' GROUP BY fw_version_id");
+        while (reader.Read())
+            result[reader.GetInt32(0)] = reader.GetInt32(1);
+        return result;
+    }
+
     public int CountFwAttachments(int fwVersionId) =>
         Convert.ToInt32(ExecuteScalar("SELECT COUNT(*) FROM fw_attachments WHERE fw_version_id=@id AND deleted_at=''",
             cmd => cmd.Parameters.AddWithValue("@id", fwVersionId)) ?? 0);
