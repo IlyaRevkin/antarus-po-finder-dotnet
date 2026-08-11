@@ -248,6 +248,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             uploadView.RefreshIfActive();
         if (pageId == "params" && _pageCache[pageId] is ParamsView paramsView)
             paramsView.RefreshIfActive();
+        // «Чистка диска» на возврате сбрасывает показанный список находок: применять его к диску,
+        // который за это время могли поменять коллеги, нельзя (см. DiskCleanupView.RefreshIfActive).
+        if (pageId == "cleanup" && _pageCache[pageId] is DiskCleanupView cleanupView)
+            cleanupView.RefreshIfActive();
 
         foreach (var item in NavItems)
             item.IsActive = item.PageId == pageId;
@@ -514,6 +518,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "network" => new NetworkSyncView(_services, this),
             "hosting" => new HostingView(_services, this),
             "tickets" => new TicketsView(_services, this),
+            "cleanup" => new DiskCleanupView(_services, this),
             _ => null,
         };
         if (page is null) return false;

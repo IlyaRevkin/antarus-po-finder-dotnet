@@ -32,17 +32,30 @@ public class SidebarSetupSectionTests
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
-    /// <summary>«ДОПОЛНИТЕЛЬНО» — редкое и настроечное: сетевые диски, хранилище на хостинге, тикеты.
-    /// На неё завязан живой GUI-стенд, поэтому состав фиксируется тестом целиком: любое пополнение
-    /// должно быть осознанным, а не заехать сюда случайно.</summary>
+    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: сетевые диски, хранилище на хостинге,
+    /// тикеты и чистка диска. На неё завязан живой GUI-стенд, и переезд наклеек с паспортами не
+    /// должен был её задеть. Состав фиксируется тестом целиком, чтобы пополнение было осознанным, а
+    /// не заезжало сюда случайно; «Чистка диска» добавлена именно осознанно — она админская и редкая,
+    /// в секцию «ДЛЯ НАЛАДЧИКА» ей нельзя (наладчику она не положена вовсе, см. RoleAccess).</summary>
     [Fact]
     public void TheOldMoreSection_IsUntouched()
     {
         Assert.Equal(NavSection.More, SectionOf("network"));
         Assert.Equal(NavSection.More, SectionOf("hosting"));
         Assert.Equal(NavSection.More, SectionOf("tickets"));
-        Assert.Equal(new[] { "network", "hosting", "tickets" },
+        Assert.Equal(new[] { "network", "hosting", "tickets", "cleanup" },
             RolesConfig.NavItems.Where(n => n.Section == NavSection.More).Select(n => n.PageId).ToArray());
+    }
+
+    /// <summary>Чистка диска переименовывает, переносит и безвозвратно удаляет файлы на общем диске —
+    /// то есть чужую работу. Единственная страница, оставленная только администратору; если кто-то
+    /// когда-нибудь добавит её наладчику или программисту, это должно сломаться здесь.</summary>
+    [Fact]
+    public void DiskCleanup_IsAdministratorOnly()
+    {
+        Assert.Contains("cleanup", RolesConfig.RoleAccess["administrator"]);
+        Assert.DoesNotContain("cleanup", RolesConfig.RoleAccess["naladchik"]);
+        Assert.DoesNotContain("cleanup", RolesConfig.RoleAccess["programmer"]);
     }
 
     /// <summary>Каждодневное остаётся наверху и в один клик: поиск, осмотр, загрузка ПО.</summary>
