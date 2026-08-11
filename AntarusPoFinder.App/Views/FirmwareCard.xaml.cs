@@ -74,6 +74,12 @@ public sealed record FirmwareCardFlags
     /// факт, пока сетевую папку ещё читают (см. SearchView.ScanDiskFlagsAsync).</summary>
     public bool DiskScanPending { get; init; }
 
+    /// <summary>Сколько доп. материалов приложено к версии — краткое руководство, специфика работы,
+    /// прошивка ПЛК поставщика и т.п. (см. FwAttachment). Число, а не bool: «доп. материалы ✓ (3)»
+    /// сразу говорит, есть ли смысл открывать список. Считается дешёвым запросом в SQLite вместе с
+    /// остальными флагами карточки, обхода диска не требует.</summary>
+    public int ExtraFilesCount { get; init; }
+
     public bool CanEditTags { get; init; }
 
     /// <summary>Включена ли автосинхронизация локальной копии (Настройки → Общие). От неё зависит
@@ -151,6 +157,11 @@ public partial class FirmwareCard : UserControl
     /// <summary>Показать окно «QR и этикетка» — наклейка со ссылкой на инструкцию этой версии.
     /// Печатается на принтер этикеток из Настройки → Печать, а не на общий принтер документов.</summary>
     public event EventHandler? InstructionLabelRequested;
+    /// <summary>Показать доп. материалы версии — файлы, которые не укладываются ни в карту, ни в
+    /// инструкцию (краткое руководство для наладчика, специфика работы объекта, прошивка ПЛК
+    /// поставщика). Что именно с ними делать, решает SearchView: один файл открывается сразу,
+    /// несколько — выбором из списка с комментариями.</summary>
+    public event EventHandler? ExtraFilesRequested;
     public event EventHandler? HistoryRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
@@ -338,9 +349,15 @@ public partial class FirmwareCard : UserControl
         // жалоба «зачем она, файла же нет»). Клик всегда открывает самый свежий файл документа, а не
         // путь конкретной версии (см. SearchView.OpenMap/OpenInstructions/OpenModbusMap). Раздел целиком
         // пропускается, если показывать нечего — иначе «ДОКУМЕНТАЦИЯ» висела бы пустым заголовком.
-        if (flags.HasIoMap || flags.HasModbus || flags.HasInstructions)
+        if (flags.HasIoMap || flags.HasModbus || flags.HasInstructions || flags.ExtraFilesCount > 0)
         {
             AddMenuHeader("Документация");
+            // Доп. материалы — не файл на диске «где-то рядом», а список записей у самой версии,
+            // поэтому обхода диска не ждут: пункт есть сразу, как только записи существуют.
+            if (flags.ExtraFilesCount > 0)
+                AddMenuItem($"Доп. материалы ({flags.ExtraFilesCount})",
+                    () => ExtraFilesRequested?.Invoke(this, EventArgs.Empty),
+                    "Руководство наладчика, специфика работы, прошивка ПЛК поставщика и прочее, что приложили к этой версии");
             if (flags.HasIoMap)
                 AddMenuItem("Карта in/out", () => MapRequested?.Invoke(this, EventArgs.Empty),
                     "Открывается самый свежий файл карты ВВ");
@@ -477,6 +494,9 @@ public partial class FirmwareCard : UserControl
         if (flags.HasIoMap) parts.Add("карта ВВ ✓");
         if (flags.HasModbus) parts.Add("карта modbus ✓");
         if (flags.HasInstructions) parts.Add("инструкция ✓");
+        // Доп. материалы считаются по записям в БД, а не обходом диска, поэтому число здесь точное
+        // сразу и не уточняется потом (в отличие от LFS/PSL/HMI выше).
+        if (flags.ExtraFilesCount > 0) parts.Add($"доп. материалы ✓ ({flags.ExtraFilesCount})");
         // Ни одного файла-спутника — строка не нужна вовсе, пустое «Файлы:» только занимает место.
         FilesLabel.Visibility = parts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FilesLabel.Text = "Файлы: " + string.Join(" · ", parts);

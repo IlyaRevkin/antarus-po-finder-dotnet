@@ -52,7 +52,7 @@ public static class FirmwareExtraFilesService
     /// Порядок намеренный: сначала снятия (иначе только что доложенный файл мог бы схлопнуться с
     /// удаляемым одноимённым), потом правки, потом копирование новых.</summary>
     public static FirmwareExtraFilesResult Apply(Database db, FwVersionRecord record, string root,
-        string groupName, string subtypeName, string controllerName, string author,
+        string groupName, string subtypeName, string controllerName, string? author,
         IEnumerable<int>? removedIds = null, IEnumerable<FirmwareExtraFileEdit>? edits = null,
         IEnumerable<FirmwareExtraFileAdd>? added = null)
     {

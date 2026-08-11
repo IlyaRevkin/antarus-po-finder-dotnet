@@ -63,6 +63,11 @@ public partial class EditFirmwareDialog : Window
     /// показать это пользователю.</summary>
     public FirmwareAttachmentsResult? AttachmentsResult { get; private set; }
 
+    /// <summary>Что изменилось в списке ДОП. МАТЕРИАЛОВ версии (см. FirmwareExtraFilesService) — по
+    /// той же причине, что и AttachmentsResult: копирование файлов и правка записей делаются прямо
+    /// здесь, вызывающему остаётся показать итог. Null — блок не показывался или ничего не меняли.</summary>
+    public FirmwareExtraFilesResult? ExtraFilesResult { get; private set; }
+
     /// <summary>Что изменилось в наборе подтипов шкафов — по той же причине, что и AttachmentsResult,
     /// применяется прямо здесь (заведение записей и ярлыков на диске), а вызывающему остаётся только
     /// показать итог. Null, если блок подтипов вообще не показывался.</summary>
@@ -171,6 +176,7 @@ public partial class EditFirmwareDialog : Window
                 AttachmentsPanel.Visibility = Visibility.Visible;
                 BuildSubtypeChecks();
                 BuildConfigs();
+                BuildExtraFiles();
             }
             LoadSearchWeights(v.Id.Value);
         }
@@ -487,6 +493,199 @@ public partial class EditFirmwareDialog : Window
         if (result.Changed) ConfigResult = result;
     }
 
+    // ── Доп. материалы ────────────────────────────────────────────────────────
+    // Свободный список файлов у версии (см. Core/Services/FirmwareExtraFilesService.cs). Строки
+    // строятся кодом, а не биндингом: у уже приложенного файла и у ещё не скопированного разный набор
+    // кнопок, а править надо оба одинаково — на паре шаблонов DataGrid это вышло бы длиннее.
+
+    /// <summary>Одна строка списка: либо уже приложенный файл (Existing), либо выбранный сейчас и ещё
+    /// не скопированный (SourcePath). Removed — строку убрали крестиком; сама операция (снятие записи
+    /// и удаление файла) произойдёт только при сохранении, как и всё остальное в этом диалоге.</summary>
+    private sealed class ExtraFileRow
+    {
+        public FwAttachment? Existing;
+        public string? SourcePath;
+        public ComboBox KindBox = null!;
+        public TextBox CommentBox = null!;
+        public bool Removed;
+    }
+
+    private readonly List<ExtraFileRow> _extraRows = new();
+    private List<string> _extraKinds = new();
+
+    private void BuildExtraFiles()
+    {
+        if (_record.Id is null) return;
+
+        _extraKinds = _db.GetFwAttachmentKinds();
+        foreach (var attachment in _db.GetFwAttachments(_record.Id.Value))
+            AddExtraFileRow(new ExtraFileRow { Existing = attachment });
+
+        ExtraFilesPanel.Visibility = Visibility.Visible;
+    }
+
+    private void AddExtraFileRow(ExtraFileRow row)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var isNew = row.Existing is null;
+        var path = row.Existing?.DiskPath ?? row.SourcePath ?? "";
+        var name = new TextBlock
+        {
+            // «(новый)» — чтобы было видно, что файл ещё не на диске и появится там при сохранении.
+            Text = isNew ? $"{Path.GetFileName(path)}  (новый)" : row.Existing!.Filename,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = path,
+        };
+        Grid.SetColumn(name, 0);
+        grid.Children.Add(name);
+
+        // Список редактируемый: свой вид администратор вписывает прямо здесь и он попадает в
+        // справочник при сохранении — ровно как новый тег в редакторе тегов выше.
+        row.KindBox = new ComboBox
+        {
+            IsEditable = true,
+            ItemsSource = _extraKinds,
+            Text = row.Existing?.Kind ?? "",
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "Вид материала. Можно выбрать из списка или вписать свой — он добавится в справочник.",
+        };
+        Grid.SetColumn(row.KindBox, 1);
+        grid.Children.Add(row.KindBox);
+
+        row.CommentBox = new TextBox
+        {
+            Text = row.Existing?.Comment ?? "",
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "Зачем этот файл и что в нём. Этот текст ищется поиском по прошивке.",
+        };
+        Grid.SetColumn(row.CommentBox, 2);
+        grid.Children.Add(row.CommentBox);
+
+        if (!isNew)
+        {
+            var openBtn = new Button
+            {
+                Content = "Открыть",
+                Style = (Style)FindResource("SecondaryButton"),
+                Margin = new Thickness(0, 0, 4, 0),
+            };
+            openBtn.Click += (_, _) => OpenExtraFile(row.Existing!);
+            Grid.SetColumn(openBtn, 3);
+            grid.Children.Add(openBtn);
+        }
+
+        var removeBtn = new Button
+        {
+            Content = "✕",
+            Style = (Style)FindResource("SecondaryButton"),
+            ToolTip = isNew ? "Не добавлять этот файл" : "Убрать материал от этой версии",
+        };
+        removeBtn.Click += (_, _) =>
+        {
+            row.Removed = true;
+            ExtraFilesList.Children.Remove(grid);
+        };
+        Grid.SetColumn(removeBtn, 4);
+        grid.Children.Add(removeBtn);
+
+        _extraRows.Add(row);
+        ExtraFilesList.Children.Add(grid);
+    }
+
+    private void OpenExtraFile(FwAttachment attachment)
+    {
+        var path = FirmwarePathLocalizer.Localize(attachment.DiskPath, _services.Cfg.RootPath());
+        if (!File.Exists(path))
+        {
+            AppMessageBox.Show($"Файл не найден на диске:\n{path}", "Доп. материалы",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show(ex.Message, "Доп. материалы", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>Выбор файлов — сразу нескольких: доп. материалы приносят пачкой («руководство, схема
+    /// объекта, прошивка ПЛК поставщика»), и заводить их по одному значило бы шесть раз пройти диалог.
+    /// Каждый выбранный файл становится ОТДЕЛЬНЫМ вложением со своим видом и комментарием.</summary>
+    private void AddExtraFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать доп. материалы",
+            Filter = "Все файлы (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog() != true) return;
+        foreach (var path in dlg.FileNames) AddExtraFileRow(new ExtraFileRow { SourcePath = path });
+    }
+
+    private void ExtraFilesDragOver(object sender, DragEventArgs e) => FilePickerRow.HandleDragOver(e);
+
+    private void ExtraFilesDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } paths) return;
+        foreach (var path in paths)
+        {
+            // Папку целиком доп. материалом не делаем: вложение — это один файл со своим видом и
+            // комментарием, а «папка» не открывается одной кнопкой и не описывается одной подписью.
+            if (Directory.Exists(path))
+            {
+                AppMessageBox.Show($"«{Path.GetFileName(path)}» — папка. Доп. материалом можно приложить только файл.",
+                    "Доп. материалы", MessageBoxButton.OK, MessageBoxImage.Warning);
+                continue;
+            }
+            AddExtraFileRow(new ExtraFileRow { SourcePath = path });
+        }
+    }
+
+    private void ApplyExtraFiles()
+    {
+        if (ExtraFilesPanel.Visibility != Visibility.Visible || _names is null || _record.Id is null) return;
+
+        var removed = new List<int>();
+        var edits = new List<FirmwareExtraFileEdit>();
+        var added = new List<FirmwareExtraFileAdd>();
+
+        foreach (var row in _extraRows)
+        {
+            var kind = (row.KindBox.Text ?? "").Trim();
+            var comment = (row.CommentBox.Text ?? "").Trim();
+
+            if (row.Existing is not null)
+            {
+                if (row.Removed) removed.Add(row.Existing.Id!.Value);
+                else edits.Add(new FirmwareExtraFileEdit(row.Existing.Id!.Value, kind, comment));
+                continue;
+            }
+            if (row.Removed || string.IsNullOrEmpty(row.SourcePath)) continue;
+            added.Add(new FirmwareExtraFileAdd(row.SourcePath!, kind, comment));
+        }
+
+        if (removed.Count == 0 && added.Count == 0 && edits.Count == 0) return;
+
+        var result = FirmwareExtraFilesService.Apply(_db, _record, _services.Cfg.RootPath(),
+            _names.Value.GroupName, _names.Value.SubtypeName, _names.Value.ControllerName,
+            _services.CurrentAdLogin, removed, edits, added);
+        if (result.Applied.Count > 0 || result.Warnings.Count > 0) ExtraFilesResult = result;
+    }
+
     private void ApplySubtypeLinks()
     {
         if (_subtypeChecks.Count == 0 || _names is null || _record.Id is null) return;
@@ -583,6 +782,7 @@ public partial class EditFirmwareDialog : Window
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         ApplyAttachments();
+        ApplyExtraFiles();
         ApplySubtypeLinks();
         // После ApplySubtypeLinks и после того, как ResultTags/ResultDescription уже посчитаны: базовые
         // теги прошивки подмешиваются в каждую конфигурацию, и брать их надо уже НОВЫМИ.
@@ -598,6 +798,7 @@ public partial class EditFirmwareDialog : Window
     public static void ReportChanges(EditFirmwareDialog dlg, IAppHost host)
     {
         ReportAttachments(dlg.AttachmentsResult, host);
+        ReportExtraFiles(dlg, host);
         ReportSubtypes(dlg.SubtypeLinkResult, host);
         ReportConfigs(dlg, host);
         ReportMetadataEdits(dlg, host);
@@ -673,6 +874,27 @@ public partial class EditFirmwareDialog : Window
         if (added.Count > 0) bits.Add("добавлены: " + string.Join(", ", added));
         if (removed.Count > 0) bits.Add("убраны: " + string.Join(", ", removed));
         return "теги " + string.Join("; ", bits);
+    }
+
+    /// <summary>Итог правки доп. материалов. Кладётся и в накопитель синхронизации: вложение уезжает
+    /// коллегам своей секцией общего конфига, и пока накопитель не отправлен, у них его нет — та же
+    /// причина, что у ReportMetadataEdits ниже. Выдачу поиска сбрасываем: вид и комментарий вложения
+    /// участвуют в поиске по прошивке, а значит выдача могла измениться.</summary>
+    private static void ReportExtraFiles(EditFirmwareDialog dlg, IAppHost host)
+    {
+        var result = dlg.ExtraFilesResult;
+        if (result is null) return;
+
+        if (result.Applied.Count > 0)
+        {
+            var what = $"{dlg._title}: доп. материалы — {string.Join(", ", result.Applied)}";
+            host.ShowStatus(what, category: NotificationCategory.FirmwareAndParams);
+            host.PushCatalogChange(what, dlg._record.Id?.ToString() ?? "");
+            host.InvalidateSearchResults();
+        }
+        if (result.Warnings.Count > 0)
+            AppMessageBox.Show(string.Join("\n", result.Warnings), "Доп. материалы",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private static void ReportSubtypes(FirmwareSubtypeLinkService.ApplyResult? result, IAppHost host)
