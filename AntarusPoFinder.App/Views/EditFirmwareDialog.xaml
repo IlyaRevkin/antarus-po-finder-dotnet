@@ -189,6 +189,28 @@
             </StackPanel>
         </StackPanel>
 
+        <!-- Доп. материалы: свободный список файлов, которые нужны наладчику рядом с прошивкой —
+             краткое руководство по шкафу, специфика работы объекта, прошивка ПЛК от поставщика.
+             Не фиксированные слоты, как «Карта ВВ»/«Инструкция» выше: набор таких файлов заранее не
+             известен, и следующий вид не должен требовать нового релиза. Вид берётся из справочника,
+             но список редактируемый — администратор вписывает свой прямо здесь, как новый тег. -->
+        <StackPanel x:Name="ExtraFilesPanel" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBlock Text="ДОП. МАТЕРИАЛЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Text="Любые файлы, которые нужны рядом с прошивкой: краткое руководство для наладчика, специфика работы объекта, прошивка ПЛК от поставщика. Вид и комментарий ищутся поиском наравне с тегами — по ним наладчик и найдёт нужное. Файлы лягут в папку «Доп. материалы» этой версии."/>
+            <StackPanel x:Name="ExtraFilesList" Margin="0,0,0,6"/>
+            <Border x:Name="ExtraFilesDropZone" AllowDrop="True" Drop="ExtraFilesDrop" DragOver="ExtraFilesDragOver"
+                    Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                    BorderThickness="1" CornerRadius="6" Padding="8">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,10,0"
+                               Text="Перетащите файлы сюда или"/>
+                    <Button x:Name="AddExtraFileBtn" Content="Выбрать файлы..." Style="{StaticResource SecondaryButton}"
+                            Click="AddExtraFile_Click"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
         <!-- Модерация исполняемых файлов: и для ПЛК, и для HMI (раньше можно было переназначить
              только HMI, и только среди файлов КОРНЯ папки — если нужный файл лежал во вложенной
              папке, выбрать его было нечем). Кнопка открывает PickFileDialog с обходом подпапок. -->

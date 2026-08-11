@@ -666,6 +666,9 @@ public partial class SearchView : UserControl
                 HasLocal = HasLocal(result),
                 HasAnyLocal = HasAnyLocal(result),
                 HasParams = subtypeName != "ПП" && _services.Db.GetParamFiles(subtypeId: result.SubtypeId).Count > 0,
+                // Доп. материалы — записи в БД, а не файлы «где-то рядом»: считаются здесь же, дешёвым
+                // COUNT, и не ждут фонового обхода папки версии.
+                ExtraFilesCount = _services.Db.CountFwAttachments(result.FwVersionId),
                 CanEditTags = canEditTags,
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
@@ -708,6 +711,7 @@ public partial class SearchView : UserControl
             card.OpenInstructionPdfRequested += (s, e) => { _ = OpenInstructionPdfAsync(((FirmwareCard)s!).Result); };
             card.PrintInstructionRequested += (s, e) => { _ = PrintInstructionAsync(((FirmwareCard)s!).Result); };
             card.InstructionLabelRequested += (s, _) => ShowInstructionLabel(((FirmwareCard)s!).Result);
+            card.ExtraFilesRequested += (s, _) => OpenExtraFiles(((FirmwareCard)s!).Result);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
@@ -2086,6 +2090,53 @@ public partial class SearchView : UserControl
         if (path is null)
         {
             AppMessageBox.Show($"Файл карты Modbus не найден.\nПуть: {result.ModbusMapPath}", "Карта modbus", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        TryOpen(path);
+    }
+
+    /// <summary>Доп. материалы версии (см. FwAttachment): краткое руководство наладчика, специфика
+    /// работы объекта, прошивка ПЛК поставщика. Один файл открывается сразу — предлагать выбор из
+    /// одного пункта незачем; несколько — списком, где рядом с именем стоят вид и комментарий: именно
+    /// они и объясняют, какой из файлов сейчас нужен.</summary>
+    private void OpenExtraFiles(HierarchyResult result)
+    {
+        var files = _services.Db.GetFwAttachments(result.FwVersionId);
+        if (files.Count == 0)
+        {
+            AppMessageBox.Show("К этой версии доп. материалы не приложены.", "Доп. материалы",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (files.Count == 1)
+        {
+            OpenExtraFile(files[0]);
+            return;
+        }
+
+        var options = files.Select((f, i) => new PickOptionDialog.Option(i, ExtraFileLabel(f))).ToList();
+        var picked = PickOptionDialog.Pick(Window.GetWindow(this), "Доп. материалы",
+            $"{result.Name} {result.VersionRaw}".Trim() + " — что открыть?", options, 0);
+        if (picked is int index && index >= 0 && index < files.Count) OpenExtraFile(files[index]);
+    }
+
+    private static string ExtraFileLabel(AntarusPoFinder.Core.Domain.FwAttachment f)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(f.Kind)) parts.Add(f.Kind);
+        parts.Add(f.Filename);
+        if (!string.IsNullOrWhiteSpace(f.Comment)) parts.Add(f.Comment);
+        return string.Join(" — ", parts);
+    }
+
+    private void OpenExtraFile(AntarusPoFinder.Core.Domain.FwAttachment attachment)
+    {
+        var path = FirmwarePathLocalizer.Localize(attachment.DiskPath, _services.Cfg.RootPath());
+        if (!File.Exists(path))
+        {
+            AppMessageBox.Show($"Файл не найден на диске:\n{path}", "Доп. материалы",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         TryOpen(path);

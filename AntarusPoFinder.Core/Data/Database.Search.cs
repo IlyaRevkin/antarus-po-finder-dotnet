@@ -114,7 +114,7 @@ public partial class Database
     /// грубая: лишний пересбор снимка стоит одного SELECT'а, а пропущенный означал бы выдачу,
     /// которая молча отстаёт от базы.</summary>
     private static readonly string[] SearchAffectingTables =
-        { "fw_versions", "equipment_subtypes", "equipment_groups", "controller_models" };
+        { "fw_versions", "equipment_subtypes", "equipment_groups", "controller_models", "fw_attachments" };
 
     private void BumpDataRevisionIfNeeded(string sql)
     {
@@ -144,6 +144,15 @@ public partial class Database
                 rows.Add(rec);
             }
         }
+
+        // Доп. материалы — отдельным чтением, а не JOIN'ом к запросу выше: вложений у версии может
+        // быть сколько угодно, и JOIN размножил бы строки прошивок. Одно чтение на пересборку снимка,
+        // а не по запросу на карточку (см. GetFwAttachmentSearchText).
+        var attachments = GetFwAttachmentSearchText();
+        if (attachments.Count > 0)
+            foreach (var rec in rows)
+                if (rec.Id is int id && attachments.TryGetValue(id, out var text))
+                    rec.AttachmentsText = text;
 
         _searchIndex = rows;
         _searchIndexRevision = _dataRevision;
@@ -252,6 +261,11 @@ public partial class Database
                 // тип пуска не то поле, где полезно угадывать.
                 if (launchTypes.Any(lt => string.Equals(lt, token, StringComparison.OrdinalIgnoreCase)))
                 { weighted += 2; hit = true; }
+                // Вид и комментарий доп. материала: «краткое руководство для наладчика» пишут ровно
+                // затем, чтобы файл потом нашли этими словами. Вес как у названия, а не как у тега:
+                // комментарий — свободный текст в несколько слов, случайное пересечение в нём куда
+                // вероятнее, чем в теге, который вешают осознанно и коротко.
+                if (TokenMatches(token, row.AttachmentsText, false)) { weighted += 1; hit = true; }
                 if (hit) matchedTokens++;
             }
 
@@ -355,6 +369,7 @@ public partial class Database
             Append(row.CtrlName);
             foreach (var tag in TagString.Parse(row.Tags)) Append(tag);
             foreach (var lt in row.LaunchTypes ?? new List<string>()) Append(lt);
+            Append(row.AttachmentsText);
         }
 
         return sb.ToString();
@@ -397,6 +412,9 @@ public partial class Database
         var parts = new List<string?> { row.GroupName, row.SubtypeName, row.SubtypeFolder, row.CtrlName };
         parts.AddRange(tags);
         parts.AddRange(row.LaunchTypes ?? new List<string>());
+        // Доп. материалы — в общем стоге наравне с остальным: в кавычках («точное совпадение») ищут
+        // в том числе и точную формулировку из комментария к файлу.
+        parts.Add(row.AttachmentsText);
         return CollapseForOrdered(string.Join(" ", parts.Where(p => !string.IsNullOrEmpty(p))));
     }
 

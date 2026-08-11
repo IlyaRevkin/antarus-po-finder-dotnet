@@ -77,4 +77,11 @@ public class FwVersionRecord
     public string SubtypeName { get; set; } = "";
     public string SubtypeFolder { get; set; } = "";
     public string CtrlName { get; set; } = "";
+
+    /// <summary>Виды, комментарии и имена файлов доп. материалов этой версии, склеенные в одну строку
+    /// для ПОИСКА (см. FwAttachment и Database.Search.cs). Заполняется только снимком поиска, как и
+    /// названия выше: в самой таблице fw_versions этого поля нет — вложения живут отдельной таблицей.
+    /// Без него «краткое руководство для наладчика», написанное человеком в комментарии к файлу,
+    /// поиском бы не находилось, а ради этого комментарий и пишут.</summary>
+    public string AttachmentsText { get; set; } = "";
 }

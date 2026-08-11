@@ -148,6 +148,38 @@ public partial class Database : IDisposable
                  sync_id     TEXT    NOT NULL DEFAULT ''
              );
 
+             -- Доп. материалы версии прошивки: краткое руководство для наладчика, специфика работы
+             -- объекта, прошивка ПЛК от поставщика и всё прочее, что нужно рядом с программой. Список,
+             -- а не три-четыре поля в fw_versions рядом с картами: набор таких файлов заранее не
+             -- известен, и следующий по счёту вид не должен требовать нового релиза (см. FwAttachment).
+             -- deleted_at — тумбстоун: таблица аддитивная (у каждой машины бывают свои вложения),
+             -- поэтому «строки нет в снимке» никогда не значит «удалили», ровно как у fw_versions.
+             -- ON DELETE CASCADE: жёсткое удаление строки прошивки (Database.DeleteFwVersion, чистка
+             -- подтипов «—» в RunDataMigrations) не должно падать на FOREIGN KEY constraint — вложения
+             -- уходят вместе с ней.
+             CREATE TABLE IF NOT EXISTS fw_attachments (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 fw_version_id INTEGER NOT NULL REFERENCES fw_versions(id) ON DELETE CASCADE,
+                 filename      TEXT    NOT NULL DEFAULT '',
+                 disk_path     TEXT    NOT NULL DEFAULT '',
+                 kind          TEXT    NOT NULL DEFAULT '',
+                 comment       TEXT    NOT NULL DEFAULT '',
+                 added_by      TEXT    NOT NULL DEFAULT '',
+                 added_at      TEXT    NOT NULL DEFAULT '',
+                 deleted_at    TEXT    NOT NULL DEFAULT '',
+                 sync_id       TEXT    NOT NULL DEFAULT '',
+                 updated_at    TEXT    NOT NULL DEFAULT ''
+             );
+
+             -- Справочник видов доп. материалов — такой же плоский список, как param_manufacturers/
+             -- tags выше, и синхронизируется тем же LWW-механизмом через flat_list_state. Стартовый
+             -- набор заводит разовая миграция SeedFwAttachmentKindsOnce (сид «пока таблица пуста» до
+             -- установленных копий не доезжает).
+             CREATE TABLE IF NOT EXISTS fw_attachment_kinds (
+                 name       TEXT PRIMARY KEY COLLATE NOCASE,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
              CREATE TABLE IF NOT EXISTS users (
                  id            INTEGER PRIMARY KEY AUTOINCREMENT,
                  name          TEXT    NOT NULL,
@@ -463,6 +495,8 @@ public partial class Database : IDisposable
         CREATE INDEX IF NOT EXISTS idx_passports_subtype        ON passports(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
         CREATE INDEX IF NOT EXISTS idx_fw_search_usage_version  ON fw_search_usage(fw_version_id);
+        CREATE INDEX IF NOT EXISTS idx_fw_attachments_version   ON fw_attachments(fw_version_id);
+        CREATE INDEX IF NOT EXISTS idx_fw_attachments_sync_id   ON fw_attachments(sync_id);
         CREATE INDEX IF NOT EXISTS idx_fw_usage_shared_query    ON fw_usage_shared(query_key);
         """);
 
@@ -682,6 +716,7 @@ public partial class Database : IDisposable
         SeedDefaultAdminPasswordHash();
         MigratePlaintextPasswordsToHashesOnce();
         AddNewDefaultManufacturersOnce();
+        SeedFwAttachmentKindsOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
