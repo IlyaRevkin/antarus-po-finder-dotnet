@@ -59,6 +59,14 @@ public static class PasswordHasher
             return false; // повреждённая/чужая строка в settings — не наш формат, не совпадёт
         }
 
+        // Строка «pbkdf2$100000$<соль>$» (хеша нет вовсе) без этой проверки пускала бы ЛЮБОЙ пароль:
+        // Pbkdf2 с нулевой длиной вернул бы пустой массив, а FixedTimeEquals двух пустых массивов —
+        // true. Hash() такого не пишет никогда, но значение в settings может оказаться обрезанным
+        // (оборвавшийся импорт конфига, правка файла базы руками), и в этом случае вход в роль
+        // администратора обязан ЗАКРЫТЬСЯ, а не открыться всем. Пустая соль допустима — она на
+        // сравнение не влияет, лишь бы совпадала с той, с которой хеш считали.
+        if (expected.Length == 0) return false;
+
         var actual = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, iterations, HashAlgorithmName.SHA256, expected.Length);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }

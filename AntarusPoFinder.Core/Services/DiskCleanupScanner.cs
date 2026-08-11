@@ -169,6 +169,12 @@ public static class DiskCleanupScanner
     /// находки, но и места, куда чистильщик сознательно не полез.</param>
     public sealed record CleanupPlan(IReadOnlyList<Finding> Findings, IReadOnlyList<string> Skipped)
     {
+        /// <summary>Корень диска прошивок, по которому план построен. Нужен не для показа, а для
+        /// <see cref="Apply"/>: чистка УДАЛЯЕТ файлы, и перед каждой операцией она обязана ещё раз
+        /// убедиться, что путь лежит внутри этого корня — см. <see cref="Inside"/>. Пусто (план
+        /// собран не через <see cref="Plan"/>) — проверка не делается, поведение как было.</summary>
+        public string Root { get; init; } = "";
+
         public int Count => Findings.Count;
     }
 
@@ -181,6 +187,7 @@ public static class DiskCleanupScanner
         var findings = new List<Finding>();
         var skipped = new List<string>();
         var ctx = new Scope(input);
+        var outside = 0;
 
         // Папки версий берём тем же обходом, что и перестройка диска (DiskLayoutMigrator.VersionDirs):
         // одна папка на несколько записей, переименованная папка находится соседом.
@@ -188,10 +195,41 @@ public static class DiskCleanupScanner
                      new DiskLayoutMigrator.MigrationInput(input.Root, input.Versions,
                          new DiskLayoutMigrator.MigrationOptions(false))))
         {
+            // Обход идёт по disk_path из базы, а он туда попадает в том числе синхронизацией с чужих
+            // машин — то есть значение это не наше и указывать может куда угодно, хоть в «Мои
+            // документы», хоть в системную папку. Мигратор от этого не страдает (он только двигает
+            // файлы внутри самой папки версии), а чистильщик ПРЕДЛАГАЕТ УДАЛЯТЬ, и предложить он
+            // должен только то, что лежит на диске прошивок. Заодно это ловит и обычную опечатку в
+            // пути, которую иначе видно не было бы.
+            if (!Inside(input.Root, dir)) { outside++; continue; }
             ScanVersion(dir, record, dbPaths, ctx, findings, skipped);
         }
 
-        return new CleanupPlan(findings, skipped);
+        if (outside > 0)
+            skipped.Add($"Папок версий вне диска прошивок: {outside} — не разбирались. " +
+                        "У этих записей путь в базе указывает мимо корня диска (Настройки → Сетевые диски).");
+
+        return new CleanupPlan(findings, skipped) { Root = input.Root };
+    }
+
+    /// <summary>Путь лежит внутри корня диска прошивок (или это сам корень). Сравнение по полному
+    /// пути и без учёта регистра — Windows. Пустой корень означает «проверять нечем»: так ведёт себя
+    /// план, собранный не через <see cref="Plan"/> (тесты), и запрещать ему всё подряд нельзя.</summary>
+    private static bool Inside(string root, string path)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return true;
+        try
+        {
+            var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+            var rooted = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+            return string.Equals(full, rooted, StringComparison.OrdinalIgnoreCase)
+                   || full.StartsWith(rooted + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            // Путь не разбирается (недопустимые символы пришли из базы) — трогать такое нельзя.
+            return false;
+        }
     }
 
     /// <summary>Переименование файла прошивки в каноническое имя. Само правило не переписывается —
@@ -628,12 +666,18 @@ public static class DiskCleanupScanner
         {
             try
             {
-                f.Status = f.Action switch
-                {
-                    Act.Move => Move(f) ? "ok" : "skip",
-                    Act.Delete => Delete(f.Path) ? "ok" : "skip",
-                    _ => "skip",
-                };
+                // Последняя проверка перед необратимым действием. План строит Plan(), и там путь уже
+                // проверен — но между «проверить диск» и «применить отмеченное» проходит время, план
+                // публичный, а цена ошибки здесь — удалённый файл вне диска прошивок. Проверка стоит
+                // одного разбора пути на операцию.
+                f.Status = !Inside(plan.Root, f.Path) || (f.Target.Length > 0 && !Inside(plan.Root, f.Target))
+                    ? "skip"
+                    : f.Action switch
+                    {
+                        Act.Move => Move(f) ? "ok" : "skip",
+                        Act.Delete => Delete(f.Path) ? "ok" : "skip",
+                        _ => "skip",
+                    };
             }
             catch (Exception ex)
             {
@@ -684,13 +728,33 @@ public static class DiskCleanupScanner
 
     private static List<string> TopLevelFiles(string dir)
     {
-        try { return Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly).ToList(); }
+        try
+        {
+            if (IsLink(dir)) return new List<string>();
+            return Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly).ToList();
+        }
         catch (Exception) { return new List<string>(); }
     }
 
     private static List<string> TopLevelDirs(string dir)
     {
-        try { return Directory.EnumerateDirectories(dir).ToList(); }
+        try
+        {
+            if (IsLink(dir)) return new List<string>();
+            return Directory.EnumerateDirectories(dir).Where(d => !IsLink(d)).ToList();
+        }
         catch (Exception) { return new List<string>(); }
+    }
+
+    /// <summary>Папка на самом деле символическая ссылка или junction. Такие обходить нельзя: пути
+    /// под ними ВЫГЛЯДЯТ лежащими на диске прошивок (проверка <see cref="Inside"/> их пропускает —
+    /// она сравнивает строки, а не то, куда ссылка ведёт), а файлы за ними лежат где угодно.
+    /// Символическую ссылку внутри папки версии никто не заводит осознанно, поэтому пропустить её
+    /// целиком дешевле и честнее, чем разрешать ссылки на «правильные» цели: цель ссылки проверяется
+    /// один раз, а поменять её могут в любой момент после проверки.</summary>
+    private static bool IsLink(string path)
+    {
+        try { return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint); }
+        catch (Exception) { return false; } // не прочитались атрибуты — пусть решает обычный обход
     }
 }

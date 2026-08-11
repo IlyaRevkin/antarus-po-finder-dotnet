@@ -455,4 +455,35 @@ public class S3PublishingTests
         Assert.Null(placement.PublishedUrl);
         Assert.Single(warnings);
     }
+
+    /// <summary>Секрет не должен уезжать в текст только оттого, что запись где-то подставили в
+    /// строку. В S3Settings он лежит уже расшифрованным (ConfigService.S3()), а печатается запись
+    /// целиком по умолчанию — то есть достаточно одного «{settings}» в предупреждении, в журнале
+    /// страницы «Хранилище» или в тикете, чтобы ключ на запись во весь бакет предприятия оказался
+    /// открытым текстом там, где его прочитает кто угодно.</summary>
+    [Fact]
+    public void S3Settings_ToString_DoesNotRevealTheSecret()
+    {
+        var settings = new S3Settings("https://s3.twcstorage.ru", "amperus", "ru-1", "po",
+            ExampleAccessKey, ExampleSecretKey, "https://fs.elitacompany.ru", true);
+
+        var text = settings.ToString();
+
+        Assert.DoesNotContain(ExampleSecretKey, text);
+        Assert.DoesNotContain("wJalrXUtnFEMI", text);
+        // Всё остальное остаётся видимым — иначе запись стала бы бесполезна для разбора «почему не
+        // выкладывается», ради которого её в строку и подставляют.
+        Assert.Contains("amperus", text);
+        Assert.Contains(ExampleAccessKey, text);
+    }
+
+    /// <summary>«Ключ не задан» и «ключ задан, но скрыт» — разные состояния, и по печати записи их
+    /// обязано быть видно: именно этим отличается «ещё не настроили» от «настроили, но не пускает».</summary>
+    [Fact]
+    public void S3Settings_ToString_StillTellsWhetherTheKeyIsSet()
+    {
+        var without = new S3Settings("https://s3", "amperus", "ru-1", "", "", "", "", false);
+
+        Assert.Contains("не задан", without.ToString());
+    }
 }

@@ -178,4 +178,20 @@ public class S3SecretsFileTests
         Assert.False(S3SecretsFile.Parse("   \r\n  ").Ok);
         Assert.False(S3SecretsFile.Parse(null).Ok);
     }
+
+    /// <summary>Разбор живёт ровно там, где результат хочется куда-нибудь вывести («что за файл мне
+    /// подсунули»), а запись C# по умолчанию печатает ВСЕ свои свойства. Одного «{parsed}» в тексте
+    /// сообщения хватило бы, чтобы только что прочитанный Secret Access Key лёг открытым текстом в
+    /// журнал или в тикет.</summary>
+    [Fact]
+    public void ToString_DoesNotRevealTheSecret()
+    {
+        var parsed = S3SecretsFile.Parse(
+            "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI0000EXAMPLEKEY");
+
+        Assert.True(parsed.Ok);
+        Assert.DoesNotContain(parsed.SecretKey, parsed.ToString());
+        // Access Key ID — не секрет, это лишь идентификатор пары; в диагностике он нужен.
+        Assert.Contains(parsed.AccessKey, parsed.ToString());
+    }
 }

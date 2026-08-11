@@ -80,7 +80,7 @@ public sealed class TranslitMap
     {
         var trimmed = (name ?? "").Trim();
         if (trimmed.Length == 0) return "";
-        if (_overrides.TryGetValue(trimmed, out var manual)) return manual;
+        if (_overrides.TryGetValue(trimmed, out var manual)) return SafeSegment(manual);
 
         // У файла переводится только само имя — расширение остаётся расширением. Иначе «.pdf» после
         // общей обработки остался бы «.pdf», а вот «.РУС» превратилось бы в мусор, и файл перестал бы
@@ -89,11 +89,39 @@ public sealed class TranslitMap
         if (ext.Length > 1 && !Transliteration.HasCyrillic(ext))
         {
             var stem = System.IO.Path.GetFileNameWithoutExtension(trimmed);
-            if (_overrides.TryGetValue(stem, out var manualStem)) return manualStem + ext.ToLowerInvariant();
-            return Transliteration.Auto(stem) + ext.ToLowerInvariant();
+            if (_overrides.TryGetValue(stem, out var manualStem))
+                return SafeSegment(manualStem + ext.ToLowerInvariant());
+            return SafeSegment(Transliteration.Auto(stem) + ext.ToLowerInvariant());
         }
 
-        return Transliteration.Auto(trimmed);
+        return SafeSegment(Transliteration.Auto(trimmed));
+    }
+
+    /// <summary>Один кусок адреса, который заведомо остаётся ОДНИМ куском и не двигает по дереву.
+    ///
+    /// Ключ объекта в бакете складывается из таких кусков (<see cref="S3Settings.KeyFor"/>), а бакет
+    /// у предприятия общий и ключ доступа даёт запись во весь бакет. Сегмент «..» увёл бы запись за
+    /// пределы своего префикса, сегмент со слэшем — создал бы лишний уровень; и то, и другое
+    /// одинаково испортило бы ссылку под QR, которая считается по этой же таблице.
+    ///
+    /// Имя папки с диска ничего такого дать не может (в именах Windows нет слэшей, а «..» папкой не
+    /// бывает), а вот ПЕРЕОПРЕДЕЛЕНИЕ — вполне: латиницу для него человек вписывает руками в
+    /// «Хранилище → Написание в адресах», и оттуда оно уезжает на все машины общей синхронизацией
+    /// настроек, то есть приходит и с чужой машины тоже. Поэтому чистим здесь, на общем выходе, а не
+    /// в форме ввода.</summary>
+    public static string SafeSegment(string? value)
+    {
+        var trimmed = (value ?? "").Trim();
+        if (trimmed.Length == 0) return "";
+
+        var sb = new System.Text.StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+            sb.Append(ch is '/' or '\\' || char.IsControl(ch) ? '_' : ch);
+
+        var result = sb.ToString();
+        // «.», «..», «…» — это не имя, а переход по дереву. Заменяем целиком, а не выкусываем точки:
+        // «..» превратилось бы в пустую строку, сегмент бы исчез, и два разных уровня схлопнулись бы.
+        return result.Trim('.').Length == 0 ? "_" : result;
     }
 
     /// <summary>Путь относительно корня диска — в путь внутри бакета и в хвост веб-ссылки. Посегментно:

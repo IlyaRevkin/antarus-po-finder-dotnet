@@ -36,6 +36,14 @@ public sealed record S3SecretsFile(
     /// умолчанию, и файл с одними ключами это нормальный, самый частый случай.</summary>
     public bool Ok => Error is null;
 
+    /// <summary>Печать записи БЕЗ секретного ключа — по той же причине, что и у
+    /// <see cref="S3Settings.ToString"/>: разбор файла с ключами живёт ровно в том месте, где ошибку
+    /// хочется куда-нибудь вывести («что за файл мне подсунули»), и напечатанная целиком запись
+    /// положила бы только что прочитанный Secret Access Key в текст сообщения.</summary>
+    public override string ToString() =>
+        $"S3SecretsFile {{ AccessKey = {AccessKey}, SecretKey = {(SecretKey.Length == 0 ? "<не найден>" : "<скрыт>")}, " +
+        $"Endpoint = {Endpoint}, Bucket = {Bucket}, Region = {Region}, OrderGuessed = {OrderGuessed}, Error = {Error} }}";
+
     private static S3SecretsFile Fail(string error) => new("", "", "", "", "", false, error);
 
     /// <summary>Больше этого файл с ключами быть не может — там от силы несколько строк. Ограничение
