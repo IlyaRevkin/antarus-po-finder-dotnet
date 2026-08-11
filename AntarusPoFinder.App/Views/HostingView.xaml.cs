@@ -80,8 +80,11 @@ public partial class HostingView : UserControl
 
         var limit = _services.Cfg.HostingMaxFileMb();
         var mode = _services.Cfg.HostingSizeLimitHard() ? "не выкладываются" : "выкладываются с предупреждением";
+        // Пустой веб-адрес — не редкость (его задают отдельно, в Настройки → Печать), и строка
+        // «адрес для ссылок » с пустотой на конце читается как поломка вёрстки, а не как «не задан».
+        var webUrl = string.IsNullOrWhiteSpace(s.WebUrl) ? "не задан (Настройки → Печать)" : s.WebUrl;
         StorageAddressText.Text =
-            $"{s.Endpoint} · бакет {s.Bucket} · регион {s.Region} · адрес для ссылок {s.WebUrl}\n" +
+            $"{s.Endpoint} · бакет {s.Bucket} · регион {s.Region} · адрес для ссылок: {webUrl}\n" +
             $"Предел размера файла {limit} МБ, файлы сверх предела {mode}. " +
             $"Переопределений написания в адресах: {s.Translit.Count}.";
 
