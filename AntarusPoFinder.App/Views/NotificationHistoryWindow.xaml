@@ -184,7 +184,7 @@
                                  срабатывал чуть раньше её левого края, а не впритык. ClipToBounds
                                  оставлен как страховка на редкий экстремальный случай (сама
                                  раскладка теперь корректна и без неё), но в норме уже не требуется. -->
-                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,0,10,0" VerticalAlignment="Center"
+                            <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" Margin="0,0,10,0" VerticalAlignment="Center"
                                        ClipToBounds="True" Foreground="{DynamicResource TextBrush}"/>
                         </DockPanel>
                     </Border>

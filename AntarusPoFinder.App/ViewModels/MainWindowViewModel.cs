@@ -610,15 +610,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// setting their *BannerVisible flag — this only guards the history entry, not the banner.</summary>
     private void AddNotification(string text, NotificationCategory category, Action? reopen = null, bool reopenIsModal = false)
     {
-        // Same text as the entry already on top (e.g. the operator clicking "Сохранить папку
-        // осмотра" several times in a row) — refresh its timestamp instead of piling up identical
-        // rows. Doesn't bump UnseenNotificationsCount either, since it's not actually new information.
-        if (NotificationHistory.Count > 0 && NotificationHistory[0].Text == text)
-        {
-            var existing = NotificationHistory[0];
-            NotificationHistory[0] = existing with { When = DateTime.Now, Reopen = reopen ?? existing.Reopen };
-            return;
-        }
+        // Повтор уже показанного сообщения не заводит новую строку — поднимает существующую наверх
+        // со счётчиком (см. NotificationHistoryOps.CollapseRepeat). UnseenNotificationsCount при
+        // этом не растёт: это не новая информация.
+        if (NotificationHistoryOps.CollapseRepeat(NotificationHistory, text, reopen, DateTime.Now)) return;
 
         NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, category, reopen) { ReopenIsModal = reopenIsModal });
         while (NotificationHistory.Count > NotificationHistoryLimit)

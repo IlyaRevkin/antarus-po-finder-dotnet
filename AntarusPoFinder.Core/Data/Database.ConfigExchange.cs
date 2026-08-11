@@ -358,9 +358,7 @@ public partial class Database
         Action countAdded, Action countRemoved)
     {
         var localNames = new HashSet<string>(getLocalNames(), StringComparer.OrdinalIgnoreCase);
-        var localState = GetFlatListState()
-            .Where(s => s.Kind == kind)
-            .ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase);
+        var localState = FlatStateByName(kind);
 
         var states = (incomingState ?? new()).Where(s => s.Kind == kind).ToList();
         foreach (var s in states)
@@ -396,6 +394,36 @@ public partial class Database
             countAdded();
             if (apply) { addLocal(name); localNames.Add(name); }
         }
+    }
+
+    /// <summary>Отметки одного плоского списка, разобранные по имени так, как их сравнивает
+    /// ОСТАЛЬНОЙ код — <see cref="StringComparer.OrdinalIgnoreCase"/>.
+    ///
+    /// <b>Почему это не <c>ToDictionary</c>.</b> Первичный ключ flat_list_state — (kind, name) с
+    /// <c>COLLATE NOCASE</c>, и раньше отсюда напрашивался прямой <c>ToDictionary(s =&gt; s.Name, …,
+    /// OrdinalIgnoreCase)</c>: раз база не даёт двух имён, различающихся только регистром, то и
+    /// ключи уникальны. Не даёт она их только в ASCII — <c>NOCASE</c> в SQLite сворачивает регистр
+    /// ровно у латиницы, кириллицу не трогает вовсе. Поэтому «ПИ» и «пи» — две совершенно законные
+    /// строки таблицы, а для .NET это ОДИН ключ, и построение словаря падало с
+    /// «An item with the same key has already been added. Key: ПИ». Падало на КАЖДОМ тике приёма
+    /// конфига, то есть весь рабочий день, и каждый раз давало уведомление об ошибке синхронизации.
+    ///
+    /// Разошедшиеся написания сводим тем же правилом, что и весь остальной обмен — побеждает более
+    /// свежая отметка (LWW). Терять здесь нечего: обе строки описывают одно и то же имя списка,
+    /// просто набранное когда-то по-разному.</summary>
+    private Dictionary<string, FlatListState> FlatStateByName(string kind)
+    {
+        var result = new Dictionary<string, FlatListState>(StringComparer.OrdinalIgnoreCase);
+        foreach (var state in GetFlatListState())
+        {
+            if (state.Kind != kind) continue;
+            var name = state.Name.Trim();
+            if (name.Length == 0) continue;
+            if (result.TryGetValue(name, out var kept) &&
+                string.CompareOrdinal(kept.LastEventAt, state.LastEventAt) >= 0) continue;
+            result[name] = state;
+        }
+        return result;
     }
 
     /// <summary>Эталонная синхронизация (authoritative=true) — дополнительный проход поверх

@@ -84,7 +84,13 @@ public partial class Database
     }
 
     /// <summary>Отметки по тегам записей одним чтением — импорт перебирает тысячи строк, и ходить в
-    /// таблицу за состоянием на каждую было бы квадратично.</summary>
+    /// таблицу за состоянием на каждую было бы квадратично.
+    ///
+    /// Ключ словаря сворачивает регистр, а первичный ключ таблицы — только ASCII (SQLite NOCASE
+    /// кириллицу не трогает, см. Database.ConfigExchange.FlatStateByName), поэтому у одного тега
+    /// здесь законно могут встретиться два написания. Берём более свежее по отметке, а не «то, что
+    /// прочиталось последним»: иначе снятие тега могло бы проиграть давнему навешиванию просто из-за
+    /// порядка строк в выборке.</summary>
     internal Dictionary<string, FlatListState> GetRowTagState()
     {
         var result = new Dictionary<string, FlatListState>(StringComparer.OrdinalIgnoreCase);
@@ -94,7 +100,10 @@ public partial class Database
         while (reader.Read())
         {
             var state = new FlatListState(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3));
-            result[state.Kind + "\n" + state.Name] = state;
+            var key = state.Kind + "\n" + state.Name.Trim();
+            if (result.TryGetValue(key, out var kept) &&
+                string.CompareOrdinal(kept.LastEventAt, state.LastEventAt) >= 0) continue;
+            result[key] = state;
         }
         return result;
     }
@@ -170,8 +179,13 @@ public partial class Database
             foreach (var s in incomingState ?? new List<ExportedFlatListState>())
             {
                 if (s.Kind is null || !s.Kind.StartsWith(FlatKindRowTagPrefix, StringComparison.Ordinal)) continue;
-                _incoming[Key(s.Kind, s.Name ?? "")] =
-                    new FlatListState(s.Kind, s.Name ?? "", s.DeletedAt ?? "", s.RevivedAt ?? "");
+                var state = new FlatListState(s.Kind, s.Name ?? "", s.DeletedAt ?? "", s.RevivedAt ?? "");
+                var key = Key(s.Kind, s.Name ?? "");
+                // Два написания одного тега во входящем снимке — та же история, что и в
+                // GetRowTagState: побеждает более свежая отметка, а не порядок в JSON.
+                if (_incoming.TryGetValue(key, out var kept) &&
+                    string.CompareOrdinal(kept.LastEventAt, state.LastEventAt) >= 0) continue;
+                _incoming[key] = state;
             }
         }
 
