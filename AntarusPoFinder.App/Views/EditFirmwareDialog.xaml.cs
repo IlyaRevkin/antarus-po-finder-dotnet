@@ -541,7 +541,7 @@ public partial class EditFirmwareDialog : Window
             PslFileSourcePath = PslFilePanel.Visibility == Visibility.Visible ? PslFileInput.Text.Trim() : null,
         };
         var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request,
-            new Services.ShortcutCreator(), new Services.InstructionStubWriter());
+            new Services.ShortcutCreator(), _services.StubWriter());
         if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;
     }
 

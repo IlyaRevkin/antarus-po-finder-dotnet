@@ -1428,6 +1428,14 @@ public partial class SettingsView : UserControl
             : $"Веб-адрес диска инструкций сохранён: {url}");
     }
 
+    /// <summary>Макет страницы-заглушки — отдельным окном с живым предпросмотром, а не полями здесь:
+    /// подобрать текст и размеры вслепую нельзя, а страницу эту видит заказчик (см. StubLayoutWindow).</summary>
+    private void EditStubLayout_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new StubLayoutWindow(_services, _host) { Owner = Window.GetWindow(this) };
+        win.ShowDialog();
+    }
+
     /// <summary>Проверка ссылки — ровно то, чего не хватает при настройке: собранный адрес открывается
     /// или нет. Спрашивается САМ базовый адрес (что за ним лежит конкретный файл — уже видно в окне
     /// этикетки): промахнуться можно в схеме, хосте или корне, а не в хвосте.</summary>
@@ -2695,7 +2703,7 @@ public partial class SettingsView : UserControl
         EnsureStructureResult result;
         // Заглушка «Инструкция в разработке» — там же, где создаются папки: см. InstructionStub и
         // ту же связку в MainWindowViewModel.EnsureHierarchyAsync.
-        var stubs = new Services.InstructionStubWriter();
+        var stubs = _services.StubWriter();
         using (_host.BeginBusy("Проверка структуры диска…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
         if (result.Errors.Count > 0)

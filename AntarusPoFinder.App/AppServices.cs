@@ -35,6 +35,11 @@ public class AppServices
     public IInstructionPublisher? Publisher() =>
         InstructionPublisher.For(Cfg.S3(), new Services.DocxToPdfConverter.Adapter());
 
+    /// <summary>Рисовальщик заглушек «Инструкция в разработке» с текущим макетом. Через одну точку
+    /// по той же причине, что и выкладчик выше: макет настраивается, и забудь его подставить в одном
+    /// из шести вызовов — с той страницы заглушки поедут в старом виде, а заметит это заказчик.</summary>
+    public Services.InstructionStubWriter StubWriter() => new(Cfg.StubLayout());
+
     public AppServices()
     {
         Db = new Database(ConfigService.DbPath);

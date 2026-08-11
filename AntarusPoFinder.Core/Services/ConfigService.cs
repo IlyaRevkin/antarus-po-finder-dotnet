@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -78,6 +78,11 @@ public class ConfigService
         // касается ТОЛЬКО хостинга: на диск сколь угодно большой проект ПЛК класть можно, а тянуть
         // его по ссылке с телефона в цеху — нет. Общие настройки: политика хранения, а не свойство
         // машины.
+        // Вид страницы-заглушки «Инструкция в разработке». Её видит заказчик, наведя телефон на
+        // наклейку до того, как инструкцию допишут, — то есть это оформление, а не техническая
+        // затычка. Общая настройка: заглушки на хостинг кладут разные машины, выглядеть они обязаны
+        // одинаково. Пусто — вид по умолчанию (см. StubLayout.Default).
+        ["stub_layout"] = "",
         ["hosting_max_file_mb"] = "20",
         ["hosting_size_limit_hard"] = "true",
         // «Диск перестроен под новую раскладку» (docs/hierarchy-rework-plan.md, этап 4): у версии
@@ -400,6 +405,11 @@ public class ConfigService
         !Get("hosting_size_limit_hard").Equals("false", StringComparison.OrdinalIgnoreCase);
 
     public void SetHostingSizeLimitHard(bool value) => Set("hosting_size_limit_hard", value ? "true" : "false");
+
+    /// <summary>Вид страницы-заглушки «Инструкция в разработке» (см. <see cref="StubLayout"/>).</summary>
+    public StubLayout StubLayout() => Services.StubLayout.Parse(Get("stub_layout")).Sane();
+
+    public void SetStubLayout(StubLayout layout) => Set("stub_layout", layout.Sane().ToJson());
 
     /// <summary>Справочник написаний для адресов на хостинге. Читается из общей настройки, поэтому
     /// одинаков на всех машинах — от этого зависит, попадёт ли наклейка с QR в выложенный файл

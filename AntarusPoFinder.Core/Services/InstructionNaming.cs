@@ -40,6 +40,20 @@ public static class InstructionNaming
         return Prefix + versionRaw.Trim() + e.ToLowerInvariant();
     }
 
+    /// <summary>Обратная операция к <see cref="BuildFileName"/>: вытащить номер версии из
+    /// канонического имени. Пусто — имя не каноническое (общая папка контроллера, файл положили
+    /// руками): версии в нём нет, и выдумывать её нельзя.
+    ///
+    /// Нужна рисовальщику заглушки: макет умеет подставлять номер версии в текст, а из общего для
+    /// всех реализаций интерфейса до него доходит только путь файла.</summary>
+    public static string VersionFromFileName(string? path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path ?? "");
+        return name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+            ? name[Prefix.Length..]
+            : "";
+    }
+
     /// <summary>Имя файла уже каноническое (с точностью до регистра расширения — «.PDF» считается
     /// НЕ каноническим, его тоже надо привести к нижнему).</summary>
     public static bool IsCanonical(string? path, string? versionRaw)

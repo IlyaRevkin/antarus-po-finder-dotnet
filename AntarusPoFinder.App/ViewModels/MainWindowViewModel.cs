@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -1623,7 +1623,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // идёт при каждом запуске), поэтому и заглушка «Инструкция в разработке» кладётся здесь:
         // пустая папка неотличима от «инструкцию потеряли». Настоящий документ не затирается — см.
         // InstructionStub.
-        var stubs = new Services.InstructionStubWriter();
+        var stubs = _services.StubWriter();
         using (Busy.Begin("Проверка структуры диска…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
 

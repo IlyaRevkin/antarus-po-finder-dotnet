@@ -1010,7 +1010,7 @@ public partial class UploadView : UserControl
                 FirmwareUploadCopyResult copy;
                 using (_host.BeginBusy($"Загрузка на диск: {plan.Version.Raw}"))
                     copy = await Task.Run(() => FirmwareUploadService.CopyFiles(plan, shortcuts,
-                        new Services.InstructionStubWriter()));
+                        _services.StubWriter()));
 
                 result = copy.IoErrorMessage is not null
                     ? FirmwareUploadResult.IoFailure(copy.IoErrorMessage)

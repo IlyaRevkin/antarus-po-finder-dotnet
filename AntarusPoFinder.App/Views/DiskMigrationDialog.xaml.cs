@@ -147,7 +147,7 @@ public partial class DiskMigrationDialog : Window
             var firstRoot = _services.Cfg.RootPath();
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
                 await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op),
-                    repointed: op => repoints.Add(op), stubs: new InstructionStubWriter(),
+                    repointed: op => repoints.Add(op), stubs: _services.StubWriter(),
                     publisher: publisher, firstRoot: firstRoot));
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
@@ -199,7 +199,7 @@ public partial class DiskMigrationDialog : Window
         // Заглушка кладётся вместе с созданием папок: пустая папка «Инструкция» неотличима от
         // «инструкцию потеряли», а версия для общей папки контроллера не нужна — заглушка одна на
         // папку (см. InstructionStub).
-        var stubs = InstructionNamingCheck.IsChecked == true ? new InstructionStubWriter() : null;
+        var stubs = InstructionNamingCheck.IsChecked == true ? _services.StubWriter() : null;
         using (_host.BeginBusy("Проверка структуры папок…"))
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
         if (result.CreatedCount > 0)
