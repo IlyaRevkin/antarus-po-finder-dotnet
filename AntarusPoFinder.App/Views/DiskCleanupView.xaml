@@ -37,12 +37,30 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Файл" Binding="{Binding FileDisplay}" Width="2*" MinWidth="220"
-                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <!-- Путь и объяснение длиннее любой разумной колонки, а объяснение — это вообще
+                     главное, ради чего страница показывает список: без подсказки при наведении оно
+                     обрывалось бы на «Расширение «.svg» не входит ни в один белый список (ПЛК, HMI,
+                     схемы), и в базе на этот файл никто не ссы…», то есть ровно там, где начинается
+                     смысл. Поэтому обе колонки — шаблонные, с ToolTip на полный текст (переносы у
+                     подсказок общие, см. Themes/Styles.xaml). -->
+                <DataGridTemplateColumn Header="Файл" Width="2*" MinWidth="220" SortMemberPath="FileDisplay">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding FileDisplay}" ToolTip="{Binding FullPath}"
+                                       Style="{StaticResource DataGridCellText}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Что не так" Binding="{Binding IssueLabel}" Width="Auto" MinWidth="140"
                                     ElementStyle="{StaticResource DataGridCellText}"/>
-                <DataGridTextColumn Header="Почему" Binding="{Binding Reason}" Width="3*" MinWidth="260"
-                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTemplateColumn Header="Почему" Width="3*" MinWidth="260" SortMemberPath="Reason">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Reason}" ToolTip="{Binding Reason}"
+                                       Style="{StaticResource DataGridCellText}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <!-- Действие меняется по строке: предложенное — это предложение, а не приговор.
                      Выпадающий список собирается из Finding.AllowedActions, поэтому «удалить» никогда
                      не появится там, где чистильщик к удалению не готов. -->

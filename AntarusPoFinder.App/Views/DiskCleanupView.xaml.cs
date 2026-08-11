@@ -58,6 +58,10 @@ public partial class DiskCleanupView : UserControl
             }
         }
 
+        /// <summary>Полный путь — только в подсказке при наведении: в колонке он не помещается, а
+        /// знать «а это точно тот файл?» перед удалением надо.</summary>
+        public string FullPath => Finding.Path;
+
         public string IssueLabel => Finding.IssueLabel;
         public string Reason => Finding.Reason;
 
