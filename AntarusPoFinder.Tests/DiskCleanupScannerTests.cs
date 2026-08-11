@@ -331,4 +331,102 @@ public class DiskCleanupScannerTests
 
         Assert.False(File.Exists(junk));
     }
+
+    // ── Границы диска прошивок ───────────────────────────────────────────────
+
+    /// <summary>Обход идёт по disk_path из базы, а туда значение попадает в том числе синхронизацией
+    /// с чужих машин — то есть путь не наш и указывать может куда угодно. Чистильщик ПРЕДЛАГАЕТ
+    /// УДАЛЯТЬ, поэтому папку версии вне корня диска прошивок он разбирать не должен вовсе: иначе
+    /// одна опечатка (или одна чужая машина) выводила бы в список файлы из «Моих документов» и
+    /// системных папок, где человеку нечем отличить своё от чужого.</summary>
+    [Fact]
+    public void Plan_VersionFolderOutsideTheFirmwareDisk_IsNotScanned()
+    {
+        using var root = new TempRoot();
+        using var elsewhere = new TempRoot();
+
+        var outsideDir = Path.Combine(elsewhere.Path, "чужая папка", "1.0.0005.0001");
+        VersionLayout.EnsureFolders(outsideDir);
+        var outsideJunk = Touch(VersionLayout.FirmwareFolder(outsideDir), "Thumbs.db");
+        var record = new FwVersionRecord { VersionRaw = "1.0.0005.0001", DiskPath = outsideDir };
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+
+        Assert.Empty(plan.Findings);
+        Assert.Contains(plan.Skipped, s => s.Contains("вне диска прошивок"));
+        Assert.True(File.Exists(outsideJunk));
+    }
+
+    /// <summary>Тот же запрет, но уже на исполнении: между «проверить диск» и «применить отмеченное»
+    /// проходит время, а цена ошибки здесь — безвозвратно удалённый файл вне диска прошивок. План
+    /// помнит корень, по которому он построен, и перед каждой необратимой операцией сверяется с ним
+    /// ещё раз.</summary>
+    [Fact]
+    public void Apply_RefusesToTouchAnythingOutsideTheRootItPlannedFor()
+    {
+        using var root = new TempRoot();
+        using var elsewhere = new TempRoot();
+
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0001");
+        Touch(VersionLayout.FirmwareFolder(dir), "Thumbs.db");
+        var outsideFile = Touch(elsewhere.Path, "чужой.txt", "не трогать");
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+        var finding = plan.Findings.Single();
+
+        // Подменяем путь уже в готовом плане — ровно то, от чего проверка в Apply и страхует.
+        var tampered = new DiskCleanupScanner.CleanupPlan(
+            new[]
+            {
+                new DiskCleanupScanner.Finding
+                {
+                    Issue = finding.Issue,
+                    Path = outsideFile,
+                    VersionDir = dir,
+                    VersionRaw = finding.VersionRaw,
+                    Action = DiskCleanupScanner.Act.Delete,
+                    Selected = true,
+                },
+            },
+            System.Array.Empty<string>()) { Root = root.Path };
+
+        DiskCleanupScanner.Apply(tampered, renamed: null);
+
+        Assert.True(File.Exists(outsideFile));
+        Assert.Equal("skip", tampered.Findings.Single().Status);
+    }
+
+    /// <summary>Папка версии, оказавшаяся символической ссылкой (junction), не обходится. Это дыра
+    /// именно в проверке корня, а не отдельная придирка: путь <c>…\1.0.0005.0001\Инструкция\Thumbs.db</c>
+    /// ВЫГЛЯДИТ лежащим на диске прошивок — сравнение строк его пропускает, — а файл за ссылкой лежит
+    /// где угодно, и «удалить мусор» унесло бы чужое. Проверять цель ссылки смысла нет: её могут
+    /// поменять сразу после проверки, поэтому такая папка пропускается целиком.</summary>
+    [Fact]
+    public void Plan_DoesNotFollowJunctionsOutOfTheDisk()
+    {
+        using var root = new TempRoot();
+        using var elsewhere = new TempRoot();
+
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0001");
+        var outsideJunk = Touch(elsewhere.Path, "Thumbs.db");
+
+        // Подменяем ссылкой настоящую папку раскладки — так эту подмену и делают на шаре, когда
+        // документы «физически лежат на другом томе».
+        var slot = VersionLayout.SlotFolder(dir, HierarchyFolders.Instructions);
+        Directory.Delete(slot);
+        try { Directory.CreateSymbolicLink(slot, elsewhere.Path); }
+        catch (System.Exception)
+        {
+            // Создание ссылок требует прав администратора или режима разработчика — без них
+            // проверять нечего, и валить прогон на этом нельзя.
+            return;
+        }
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+        foreach (var f in plan.Findings) f.Selected = true;
+        DiskCleanupScanner.Apply(plan, renamed: null);
+
+        Assert.Empty(plan.Findings);
+        Assert.True(File.Exists(outsideJunk));
+    }
 }
