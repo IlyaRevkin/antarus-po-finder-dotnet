@@ -55,8 +55,77 @@ public partial class InstructionLabelWindow : Window
               + explanation
             : explanation;
 
+        _instructionFile = instructionFile;
+        ShowHostingState();
+
         FillLayoutInputs(_layout);
         Redraw();
+    }
+
+    // ── Доехал ли файл до хостинга ───────────────────────────────────────────
+    // Наклейку печатают и клеят на шкаф — если файла на хостинге нет, QR ведёт в пустоту, и узнать
+    // об этом надо ДО печати, а не от наладчика через месяц.
+
+    private readonly string? _instructionFile;
+
+    /// <summary>Ключ объекта на хостинге для этой инструкции, или null — файла нет, хостинг не
+    /// настроен, файл лежит вне диска прошивок.</summary>
+    private string? HostingKey()
+    {
+        if (string.IsNullOrWhiteSpace(_instructionFile)) return null;
+        var settings = _services.Cfg.S3();
+        if (!settings.HasAddress) return null;
+
+        var relative = LabelLinkBuilder.RelativeTo(_services.Cfg.RootPath(), _instructionFile);
+        return relative is null ? null : settings.KeyFor(InstructionPublisher.AsPublishedName(relative));
+    }
+
+    /// <summary>Что мы знаем о файле на хостинге прямо сейчас — по кэшу наблюдений, без сети:
+    /// открытие окна не должно ждать ответа хранилища.</summary>
+    private void ShowHostingState()
+    {
+        var key = HostingKey();
+        if (key is null)
+        {
+            HostingStateText.Text = "";
+            CheckHostingBtn.IsEnabled = false;
+            return;
+        }
+
+        CheckHostingBtn.IsEnabled = _services.Cfg.S3().CanPublish;
+        HostingStateText.Text = _services.Db.GetHostingCheck(key) switch
+        {
+            { Present: true } seen => $"На хостинге есть (проверено {seen.CheckedAt})",
+            { Present: false } seen => $"На хостинге НЕ найден (проверено {seen.CheckedAt})",
+            _ => "На хостинге — не проверялось",
+        };
+    }
+
+    private async void CheckHosting_Click(object sender, RoutedEventArgs e)
+    {
+        if (HostingKey() is not { } key) return;
+
+        CheckHostingBtn.IsEnabled = false;
+        HostingStateText.Text = "Спрашиваю хранилище…";
+        try
+        {
+            var settings = _services.Cfg.S3();
+            var presence = await new S3Client().HeadAsync(settings, key);
+            if (presence.Ok)
+            {
+                _services.Db.SaveHostingCheck(key, presence.Exists, S3Client.PublicUrl(settings, key));
+                ShowHostingState();
+            }
+            else
+            {
+                // «Не смогли спросить» — это не «нет»: в кэш такое не пишем, иначе значок соврал бы.
+                HostingStateText.Text = $"Не удалось проверить: {presence.Error}";
+            }
+        }
+        finally
+        {
+            CheckHostingBtn.IsEnabled = true;
+        }
     }
 
     // ── Макет ────────────────────────────────────────────────────────────────

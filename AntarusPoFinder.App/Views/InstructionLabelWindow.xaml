@@ -109,6 +109,12 @@
         <TextBlock Grid.Row="3" Grid.ColumnSpan="2" x:Name="PrinterText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
 
         <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <!-- Ссылка на наклейке ведёт на хостинг, и «а файл-то туда доехал?» — первый вопрос
+                 перед печатью. Один запрос по одному ключу: дёшево и отвечает правдой. -->
+            <TextBlock x:Name="HostingStateText" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                       Margin="0,0,10,0" TextWrapping="Wrap"/>
+            <Button x:Name="CheckHostingBtn" Content="Проверить на хостинге" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="CheckHosting_Click"/>
             <Button Content="Копировать ссылку" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CopyLink_Click"/>
             <Button Content="Печать" Width="120" Margin="0,0,8,0" Click="Print_Click"/>
             <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="100" IsCancel="True" Click="Close_Click"/>

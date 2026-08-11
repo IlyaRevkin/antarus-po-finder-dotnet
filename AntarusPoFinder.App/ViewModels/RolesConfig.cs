@@ -17,6 +17,7 @@ public static class RolesConfig
         ("params", "Параметры ПЧ/УПП", NavSection.Setup),
         ("newversions", "Модерация прошивок", NavSection.Setup),
         ("network", "Сетевые диски", NavSection.More),
+        ("hosting", "Хранилище", NavSection.More),
         ("tickets", "Тикеты", NavSection.More),
     ];
 
@@ -31,9 +32,11 @@ public static class RolesConfig
     /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
+        // «hosting» — состояние выкладки на хостинг. Наладчику там делать нечего: он инструкции не
+        // выкладывает, а читает их по QR. Программист выкладывает и обязан видеть, доехало ли.
         ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
-        ["programmer"] = ["search", "upload", "params", "settings", "network", "tickets"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets"],
+        ["programmer"] = ["search", "upload", "params", "settings", "network", "hosting", "tickets"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "hosting", "tickets"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =

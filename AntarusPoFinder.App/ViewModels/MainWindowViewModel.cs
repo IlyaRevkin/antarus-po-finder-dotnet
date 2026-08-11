@@ -229,6 +229,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             newVersionsView.RefreshIfActive();
         if (pageId == "inspection" && _pageCache[pageId] is InspectionView inspectionView)
             inspectionView.RefreshIfActive();
+        if (pageId == "hosting" && _pageCache[pageId] is HostingView hostingView)
+            hostingView.RefreshIfActive();
         if (pageId == "network" && _pageCache[pageId] is NetworkSyncView networkView)
             networkView.RefreshIfActive();
         if (pageId == "tickets" && _pageCache[pageId] is TicketsView ticketsView)
@@ -510,6 +512,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "params" => new ParamsView(_services, this),
             "settings" => new SettingsView(_services, this),
             "network" => new NetworkSyncView(_services, this),
+            "hosting" => new HostingView(_services, this),
             "tickets" => new TicketsView(_services, this),
             _ => null,
         };

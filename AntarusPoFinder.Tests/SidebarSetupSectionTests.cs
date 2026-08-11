@@ -32,14 +32,16 @@ public class SidebarSetupSectionTests
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
-    /// <summary>«ДОПОЛНИТЕЛЬНО» осталась прежней: Настройки, Сетевые диски, Тикеты. На неё завязан
-    /// живой GUI-стенд, и переезд наклеек с паспортами не должен был её задеть.</summary>
+    /// <summary>«ДОПОЛНИТЕЛЬНО» — редкое и настроечное: сетевые диски, хранилище на хостинге, тикеты.
+    /// На неё завязан живой GUI-стенд, поэтому состав фиксируется тестом целиком: любое пополнение
+    /// должно быть осознанным, а не заехать сюда случайно.</summary>
     [Fact]
     public void TheOldMoreSection_IsUntouched()
     {
         Assert.Equal(NavSection.More, SectionOf("network"));
+        Assert.Equal(NavSection.More, SectionOf("hosting"));
         Assert.Equal(NavSection.More, SectionOf("tickets"));
-        Assert.Equal(new[] { "network", "tickets" },
+        Assert.Equal(new[] { "network", "hosting", "tickets" },
             RolesConfig.NavItems.Where(n => n.Section == NavSection.More).Select(n => n.PageId).ToArray());
     }
 

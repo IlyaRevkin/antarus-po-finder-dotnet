@@ -92,6 +92,45 @@ public sealed class S3Client
         }
     }
 
+    /// <summary>Лежит ли объект в бакете — HEAD по ключу. Нужен странице «Хранилище», чтобы отвечать
+    /// на вопрос «эта инструкция там или нет» ПРАВДОЙ, а не своей записью о том, что когда-то
+    /// выкладывали: файл могли удалить руками через S3-клиент, выложить с другой машины, или наша
+    /// запись о выкладке могла потеряться вместе с локальной базой.
+    ///
+    /// Отсутствие объекта (404) — это НЕ ошибка, а законный ответ «нет», поэтому у метода отдельный
+    /// тип результата: <c>Exists</c> false при <c>Ok</c> true. Смешай мы их в один Result — страница
+    /// не смогла бы отличить «точно не выложено» от «не смогли проверить», а это разные состояния:
+    /// первое чинится кнопкой «Выложить», второе — разбирательством с сетью.</summary>
+    public sealed record Presence(bool Ok, bool Exists, long? Length, string? Error)
+    {
+        public static Presence Found(long? length) => new(true, true, length, null);
+        public static Presence Missing() => new(true, false, null, null);
+        public static Presence Unknown(string error) => new(false, false, null, error);
+    }
+
+    public async Task<Presence> HeadAsync(S3Settings s, string key, CancellationToken ct = default)
+    {
+        if (!s.CanPublish) return Presence.Unknown("Хранилище на хостинге не настроено");
+
+        try
+        {
+            var request = BuildRequest(s, HttpMethod.Head, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
+            using var response = await _http.SendAsync(request, ct);
+
+            if (response.StatusCode == HttpStatusCode.NotFound) return Presence.Missing();
+            if (!response.IsSuccessStatusCode) return Presence.Unknown(await DescribeFailureAsync(response, ct));
+            return Presence.Found(response.Content.Headers.ContentLength);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return Presence.Unknown("хранилище не ответило вовремя");
+        }
+        catch (Exception ex)
+        {
+            return Presence.Unknown(ex.Message);
+        }
+    }
+
     /// <summary>Проверка «реквизиты рабочие»: запрашиваем у бакета один объект из списка. Именно
     /// список, а не запись пробного файла, — проверка не должна оставлять за собой мусор в чужом
     /// бакете, и она же честно отвечает на вопрос «а ключи вообще подходят к ЭТОМУ бакету».

@@ -197,6 +197,20 @@ public partial class Database : IDisposable
                  PRIMARY KEY (kind, name)
              );
 
+             -- Что мы в последний раз ВИДЕЛИ на хостинге — кэш наблюдений, а не источник правды
+             -- (правда живёт в бакете, см. HostingSyncService). Нужен ровно для того, чтобы карточка
+             -- прошивки могла показать «на хостинге ✓» мгновенно, не устраивая запрос к сети на
+             -- каждую строку выдачи. Строго ЛОКАЛЬНАЯ таблица: между машинами не синхронизируется —
+             -- это наблюдение конкретной машины в конкретный момент, а не решение, которое надо
+             -- распространять. Ключ объекта уже латинский (TranslitMap) и в S3 регистрозависим,
+             -- поэтому обычное двоичное сравнение здесь и правильное.
+             CREATE TABLE IF NOT EXISTS hosting_checks (
+                 object_key TEXT PRIMARY KEY,
+                 present    INTEGER NOT NULL DEFAULT 0,
+                 url        TEXT NOT NULL DEFAULT '',
+                 checked_at TEXT NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS fw_version_reservations (
                  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                  subtype_id              INTEGER NOT NULL REFERENCES equipment_subtypes(id),
