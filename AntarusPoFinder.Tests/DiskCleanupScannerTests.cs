@@ -197,6 +197,28 @@ public class DiskCleanupScannerTests
         Assert.Null(Find(plan, hinted));
     }
 
+    /// <summary>Второй канал ссылок из базы — вложения версии и файлы параметров ПЧ/УПП, записанные
+    /// полным путём. Папка защищает всё своё содержимое: HMI-проект и сканы инструкции лежат папкой,
+    /// и разбирать их по файлам чистильщик не вправе.</summary>
+    [Fact]
+    public void Plan_PathsReferencedByDb_ProtectFilesAndWholeFolders()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0001");
+        var project = Path.Combine(dir, "hmi_project");
+        var insideProject = Touch(project, "screens.dat");
+        record.HmiPath = project;
+        var paramFile = Touch(VersionLayout.FirmwareFolder(dir), "danfoss.cp0");
+
+        var plan = DiskCleanupScanner.Plan(new DiskCleanupScanner.CleanupInput(
+            root.Path, new[] { record }, Plc, Hmi, Schematic, new[] { paramFile }));
+
+        Assert.Null(Find(plan, paramFile));
+        Assert.Null(Find(plan, insideProject));
+        // И сама папка проекта не предлагается к переносу — на неё ссылается hmi_path.
+        Assert.Null(Find(plan, project));
+    }
+
     /// <summary>Внутрь папки проекта чистильщик не заходит: проект это единое целое, и лежащий в нём
     /// временный файл — дело среды разработки, а не чистки.</summary>
     [Fact]

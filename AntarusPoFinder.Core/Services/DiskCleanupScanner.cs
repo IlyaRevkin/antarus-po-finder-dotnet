@@ -208,7 +208,7 @@ public static class DiskCleanupScanner
     /// панелью) — по-прежнему отказ, потому что какой из них «главный», знает только
     /// executable_hint, а он у коллег импортом не обновляется.</summary>
     private static DiskLayoutMigrator.Op? PlanRename(string dir, FwVersionRecord record,
-        IReadOnlyList<string> dbPaths, Scope ctx, List<string> skipped)
+        IReadOnlyList<string> dbPaths, VersionScope ctx, List<string> skipped)
     {
         var folder = VersionLayout.IsNewLayout(dir) ? VersionLayout.FirmwareFolder(dir) : dir;
         var candidates = TopLevelFiles(folder)
@@ -248,8 +248,9 @@ public static class DiskCleanupScanner
     }
 
     private static void ScanVersion(string dir, FwVersionRecord record, IReadOnlyList<string> dbPaths,
-        Scope ctx, List<Finding> findings, List<string> skipped)
+        Scope scope, List<Finding> findings, List<string> skipped)
     {
+        var ctx = scope.For(dbPaths);
         var rename = PlanRename(dir, record, dbPaths, ctx, skipped);
         var renames = new Dictionary<string, DiskLayoutMigrator.Op>(StringComparer.OrdinalIgnoreCase);
         if (rename is not null) renames[rename.Source] = rename;
@@ -311,7 +312,7 @@ public static class DiskCleanupScanner
             }
     }
 
-    private static Finding? ClassifyRoot(string file, string dir, FwVersionRecord record, Scope ctx,
+    private static Finding? ClassifyRoot(string file, string dir, FwVersionRecord record, VersionScope ctx,
         Dictionary<string, DiskLayoutMigrator.Op> renames, bool newLayout, string firmwareFolder)
     {
         if (renames.TryGetValue(file, out var op)) return Rename(op, dir, record);
@@ -338,7 +339,7 @@ public static class DiskCleanupScanner
     }
 
     private static Finding? ClassifyFirmwareFolder(string file, string dir, FwVersionRecord record,
-        Scope ctx, Dictionary<string, DiskLayoutMigrator.Op> renames)
+        VersionScope ctx, Dictionary<string, DiskLayoutMigrator.Op> renames)
     {
         if (renames.TryGetValue(file, out var op)) return Rename(op, dir, record);
 
@@ -460,14 +461,30 @@ public static class DiskCleanupScanner
 
     // ── Что трогать нельзя ───────────────────────────────────────────────────
 
-    /// <summary>Белые списки расширений и пути, занятые базой, — посчитанные один раз на весь
-    /// прогон: обход версий спрашивает их для каждого файла, а собирать множества заново на каждый
-    /// вопрос значило бы гонять сетевую шару впустую.</summary>
+    /// <summary>Белые списки расширений и пути, занятые базой, — посчитанные один раз на весь прогон.
+    ///
+    /// <b>Ни одного обращения к диску.</b> Соблазн есть: проверить <c>Directory.Exists</c> у каждого
+    /// пути из базы и защищать папки целиком по префиксу. Но записей о прошивках тысячи, диск сетевой,
+    /// и это была бы тысяча лишних round-trip'ов ЕЩЁ ДО того, как чистильщик начнёт работать —
+    /// проверка диска и так идёт минуты. Поэтому «файл под защищённой папкой» узнаётся подъёмом по
+    /// родителям (папка-вложение сама лежит в этом же множестве), а имена файлов из
+    /// <c>filename/executable_hint</c> сверяются в пределах своей папки версии — см.
+    /// <see cref="For"/>.</summary>
     private sealed class Scope
     {
         private readonly HashSet<string> _extensions = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Абсолютные пути, занятые базой: вложения версий (HMI-проект, карты, инструкция)
+        /// и файлы параметров ПЧ/УПП. Путь может оказаться и файлом, и папкой — разбирать это по
+        /// диску не нужно, см. <see cref="ReferencedPath"/>.</summary>
         private readonly HashSet<string> _paths = new(StringComparer.OrdinalIgnoreCase);
-        private readonly List<string> _folders = new();
+
+        /// <summary>Имена файлов, на которые ссылаются записи, — по значению их <c>disk_path</c>.
+        /// В базе имя хранится без пути, а лежать файл может и в «Прошивка\», и в корне версии
+        /// (режим совместимости), поэтому сверяем именно имя, а не собранный путь.</summary>
+        private readonly Dictionary<string, HashSet<string>> _namesByDiskPath = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly HashSet<string> NoNames = new(StringComparer.OrdinalIgnoreCase);
 
         public Scope(CleanupInput input)
         {
@@ -479,42 +496,63 @@ public static class DiskCleanupScanner
 
             foreach (var v in input.Versions)
             {
-                var dir = FirmwareDiskPresence.ResolveVersionDir(v.DiskPath, v.VersionRaw);
-                if (!string.IsNullOrEmpty(dir))
-                    // Имя файла в базе хранится без пути, а лежать он может и в «Прошивка\», и в корне
-                    // версии (режим совместимости) — защищаем оба варианта.
-                    foreach (var folder in VersionLayout.FirmwareFolders(dir))
-                        foreach (var name in new[] { v.Filename, v.ExecutableHint, v.HmiExecutableHint })
-                            Add(string.IsNullOrWhiteSpace(name) ? null : Path.Combine(folder, name));
-
+                foreach (var name in new[] { v.Filename, v.ExecutableHint, v.HmiExecutableHint })
+                    AddName(v.DiskPath, name);
                 foreach (var path in new[] { v.HmiPath, v.InstructionsPath, v.IoMapPath, v.ModbusMapPath })
-                    Add(path);
+                    AddPath(path);
             }
 
-            foreach (var path in input.ReferencedPaths) Add(path);
+            foreach (var path in input.ReferencedPaths) AddPath(path);
         }
 
-        private void Add(string? path)
+        private void AddName(string? diskPath, string? name)
+        {
+            if (string.IsNullOrWhiteSpace(diskPath) || string.IsNullOrWhiteSpace(name)) return;
+            var key = Full(diskPath);
+            if (key is null) return;
+            if (!_namesByDiskPath.TryGetValue(key, out var names))
+                _namesByDiskPath[key] = names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            names.Add(Path.GetFileName(name!));
+        }
+
+        private void AddPath(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
-            var full = Full(path);
-            if (full is null) return;
-            _paths.Add(full);
-            // Вложение (HMI-проект папкой, папка со сканами инструкции) защищается целиком.
-            try { if (Directory.Exists(full)) _folders.Add(full + Path.DirectorySeparatorChar); }
-            catch (Exception) { /* недоступный путь — защитим хотя бы точным совпадением */ }
+            if (Full(path) is { } full) _paths.Add(full);
+        }
+
+        /// <summary>Взгляд на защиту с точки зрения ОДНОЙ папки версии: к общим спискам добавляются
+        /// имена файлов, записанные у всех строк базы, которые указывают на эту папку. Путей у одной
+        /// папки бывает несколько — конфигурации шкафа делят файлы, а у части строк disk_path успел
+        /// устареть (см. DiskLayoutMigrator.VersionDirs).</summary>
+        public VersionScope For(IReadOnlyList<string> diskPaths)
+        {
+            HashSet<string>? names = null;
+            foreach (var path in diskPaths)
+            {
+                if (Full(path) is not { } key) continue;
+                if (!_namesByDiskPath.TryGetValue(key, out var found)) continue;
+                if (names is null) names = new HashSet<string>(found, StringComparer.OrdinalIgnoreCase);
+                else names.UnionWith(found);
+            }
+            return new VersionScope(this, names ?? NoNames);
         }
 
         /// <summary>Расширение файла есть в одном из белых списков БД.</summary>
         public bool Whitelisted(string file) => _extensions.Contains(Path.GetExtension(file));
 
-        /// <summary>На файл ссылается запись в базе — сам путь или папка, внутри которой он лежит.</summary>
-        public bool Referenced(string path)
+        /// <summary>Путь занят базой — сам или любым из своих родителей. Подъём по родителям и
+        /// заменяет проверку «а это папка?»: вложение папкой (HMI-проект, сканы инструкции) лежит в
+        /// том же множестве, и файл внутри него находит его как своего предка.</summary>
+        public bool ReferencedPath(string path)
         {
             var full = Full(path);
-            if (full is null) return false;
-            if (_paths.Contains(full)) return true;
-            return _folders.Any(f => full.StartsWith(f, StringComparison.OrdinalIgnoreCase));
+            while (!string.IsNullOrEmpty(full))
+            {
+                if (_paths.Contains(full!)) return true;
+                full = Path.GetDirectoryName(full);
+            }
+            return false;
         }
 
         /// <summary>Файл, который чистильщик не рассматривает вообще: CHANGELOG.md (его читает досмотр
@@ -529,6 +567,27 @@ public static class DiskCleanupScanner
             try { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar); }
             catch (Exception) { return null; }
         }
+    }
+
+    /// <summary>Защита в пределах одной папки версии — то, чем пользуется разбор файлов.</summary>
+    private readonly struct VersionScope
+    {
+        private readonly Scope _scope;
+        private readonly HashSet<string> _names;
+
+        public VersionScope(Scope scope, HashSet<string> names)
+        {
+            _scope = scope;
+            _names = names;
+        }
+
+        public bool Whitelisted(string file) => _scope.Whitelisted(file);
+        public bool Untouchable(string file) => _scope.Untouchable(file);
+
+        /// <summary>На путь ссылается запись в базе: по имени файла внутри этой папки версии либо по
+        /// абсолютному пути вложения.</summary>
+        public bool Referenced(string path) =>
+            _names.Contains(Path.GetFileName(path)) || _scope.ReferencedPath(path);
     }
 
     // ── Выполнение ──────────────────────────────────────────────────────────

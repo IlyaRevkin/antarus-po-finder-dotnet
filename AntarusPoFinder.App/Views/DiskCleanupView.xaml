@@ -1,0 +1,66 @@
+<UserControl x:Class="AntarusPoFinder.App.Views.DiskCleanupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Чистка диска" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"
+                   Text="Ищет файлы, не подходящие под раскладку диска: прошивки с неправильным именем, документы и проекты не в своей папке, служебный мусор. Ничего не делается без вашей отметки. Расширения из белых списков (Настройки → Иерархия) и файлы, на которые ссылается база, мусором не считаются никогда, а всё незнакомое показывается без предложенного действия — решаете вы."/>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="ScanButton" Content="Проверить диск" Width="150" Margin="0,0,8,0" Click="Scan_Click"/>
+            <Button x:Name="ApplyButton" Content="Применить отмеченное" Width="180" Margin="0,0,8,0"
+                    IsEnabled="False" Click="Apply_Click"/>
+            <Button Content="Отметить безопасные" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                    Click="CheckSafe_Click"
+                    ToolTip="Переименование и перенос — операции обратимые: файл остаётся на диске. Удаление так не отмечается."/>
+            <Button Content="Снять все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="UncheckAll_Click"/>
+            <Button Content="Сохранить отчёт в файл" Style="{StaticResource SecondaryButton}" Click="SaveReport_Click"/>
+        </StackPanel>
+
+        <DataGrid Grid.Row="3" x:Name="FindingsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                  Style="{StaticResource RoomyDataGrid}"
+                  MouseDoubleClick="FindingsGrid_MouseDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="" Width="40">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Файл" Binding="{Binding FileDisplay}" Width="2*" MinWidth="220"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Что не так" Binding="{Binding IssueLabel}" Width="Auto" MinWidth="140"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Почему" Binding="{Binding Reason}" Width="3*" MinWidth="260"
+                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                <!-- Действие меняется по строке: предложенное — это предложение, а не приговор.
+                     Выпадающий список собирается из Finding.AllowedActions, поэтому «удалить» никогда
+                     не появится там, где чистильщик к удалению не готов. -->
+                <DataGridTemplateColumn Header="Что предлагается" Width="Auto" MinWidth="160">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding ActionOptions}" Margin="4,2"
+                                      SelectedItem="{Binding ActionLabel, Mode=TwoWay}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Итог" Binding="{Binding StatusLabel}" Width="Auto" MinWidth="90"
+                                    ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Grid.Row="4" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}"
+                   Margin="0,10,0,0"
+                   Text="Нажмите «Проверить диск». Обход сетевой папки занимает минуты — окно при этом остаётся рабочим."/>
+    </Grid>
+</UserControl>

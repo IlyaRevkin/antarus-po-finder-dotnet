@@ -18,6 +18,9 @@ public static class RolesConfig
         ("newversions", "Модерация прошивок", NavSection.Setup),
         ("network", "Сетевые диски", NavSection.More),
         ("tickets", "Тикеты", NavSection.More),
+        // «Чистка диска» — рядом с «Сетевыми дисками», в свёрнутой секции: заходят туда раз в месяц,
+        // а не каждый день. Роль только администратор (см. RoleAccess).
+        ("cleanup", "Чистка диска", NavSection.More),
     ];
 
     /// <summary>Все три роли работают с одним и тем же общим диском, поэтому пути и интервал
@@ -28,12 +31,16 @@ public static class RolesConfig
     /// доступ и смена статуса для администратора), не через видимость самого пункта меню.
     /// "settings" тоже теперь доступна наладчику/программисту — что именно из неё видно каждой роли
     /// решается внутри SettingsView (ApplyRoleVisibility: урезанный набор вкладок + урезанное
-    /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".</summary>
+    /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".
+    ///
+    /// "cleanup" (Чистка диска) — единственная страница, оставленная ТОЛЬКО администратору: она
+    /// переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то есть чужую работу.
+    /// Наладчик и программист имеют дело с диском через выдачу и загрузку, где такого рычага нет.</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
         ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
         ["programmer"] = ["search", "upload", "params", "settings", "network", "tickets"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "tickets", "cleanup"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =
