@@ -118,6 +118,17 @@ public static class DocxToPdfConverter
         }
     }
 
+    /// <summary>Этот же конвертер, но как <see cref="Core.Services.IDocumentToPdf"/> — ядру нужен PDF
+    /// на пути выкладки на хостинг (инструкция в docx туда уходит собранным PDF, см.
+    /// InstructionPublisher), а ссылаться из ядра на приложение нельзя.</summary>
+    public sealed class Adapter : Core.Services.IDocumentToPdf
+    {
+        public bool IsSupported => DocxToPdfConverter.IsSupported;
+
+        public string? Convert(string documentPath, string outputPdfPath) =>
+            DocxToPdfConverter.Convert(documentPath, outputPdfPath);
+    }
+
     private static string? FindSoffice()
     {
         var candidates = new[]

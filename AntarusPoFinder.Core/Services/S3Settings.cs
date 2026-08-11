@@ -39,6 +39,20 @@ public sealed record S3Settings(
     /// одинаково берут и выкладка, и построитель ссылки.</summary>
     public TranslitMap Translit { get; init; } = TranslitMap.Empty;
 
+    /// <summary>Предельный размер файла, уходящего на хостинг. По умолчанию 20 МБ — столько просил
+    /// владелец. Ограничение именно на ХОСТИНГ, а не на загрузку в программу вообще: на диск
+    /// сколь угодно большой проект ПЛК класть можно и нужно, а вот тянуть его по ссылке с телефона в
+    /// цеху — нет.</summary>
+    public long MaxFileBytes { get; init; } = DefaultMaxFileBytes;
+
+    /// <summary>Что делать с файлом сверх предела: true — не выкладывать вовсе, false — выложить, но
+    /// сказать об этом. Переключателем, а не константой, по прямой просьбе: бывает документ, который
+    /// «большой, но нужен», и упереться в жёсткий запрет в такой момент хуже, чем получить
+    /// предупреждение.</summary>
+    public bool HardSizeLimit { get; init; } = true;
+
+    public const long DefaultMaxFileBytes = 20L * 1024 * 1024;
+
     /// <summary>Адрес хранилища задан настолько, что запрос вообще есть куда отправить.</summary>
     public bool HasAddress =>
         !string.IsNullOrWhiteSpace(Endpoint) && !string.IsNullOrWhiteSpace(Bucket);

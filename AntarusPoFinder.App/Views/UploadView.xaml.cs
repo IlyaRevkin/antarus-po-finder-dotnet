@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -1148,7 +1148,7 @@ public partial class UploadView : UserControl
             RootPath = _services.Cfg.RootPath(),
             // Копия инструкции на хостинге — та самая, которую открывает QR-код с наклейки. null,
             // пока не вписаны ключи доступа: загрузка версии от этого не меняется вовсе.
-            InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),
+            InstructionPublisher = _services.Publisher(),
             // Перестроен ли диск под «пять папок внутри версии»: флаг ставит перестройка диска и
             // уносит синхронизацией всем — новые версии обязаны рождаться в той же раскладке, в
             // которой лежат остальные (см. ConfigService.DiskLayoutV2).

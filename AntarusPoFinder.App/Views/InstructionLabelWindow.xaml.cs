@@ -175,9 +175,13 @@ public partial class InstructionLabelWindow : Window
         var baseUrl = services.Cfg.InstructionBaseUrl();
         var root = services.Cfg.RootPath();
 
-        // Справочник написаний — тот же, по которому файл кладётся на хостинг: иначе напечатанная
-        // здесь ссылка не совпадёт с ключом выложенного объекта (см. TranslitMap).
-        if (LabelLinkBuilder.BuildUrl(baseUrl, root, file, services.Cfg.Translit()) is { } url)
+        // Ссылка обязана совпасть с тем, что реально ляжет на хостинг, причём в двух местах сразу:
+        // справочник написаний тот же (см. TranslitMap), и расширение — тоже итоговое. Инструкция в
+        // формате Word уезжает туда собранным PDF (см. InstructionPublisher), и наклейка, ведущая на
+        // .docx, вела бы в пустоту — при том что напечатана и наклеена она обычно раньше, чем кто-то
+        // это заметит.
+        var published = InstructionPublisher.AsPublishedName(file);
+        if (LabelLinkBuilder.BuildUrl(baseUrl, root, published, services.Cfg.Translit()) is { } url)
             return (url, $"В QR: {url}");
 
         var unc = NetworkPathHelper.TryResolveUnc(file) ?? file;

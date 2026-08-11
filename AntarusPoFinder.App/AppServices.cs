@@ -27,6 +27,14 @@ public class AppServices
     /// downstream audit field still said "наладка3" (the shared PC account), not "revkin.i".</summary>
     public string CurrentUserName => CurrentAdLogin ?? Environment.UserName;
 
+    /// <summary>Выкладчик на хостинг по текущим настройкам — или null, если выкладывать некуда
+    /// (ключи не выданы, выкладка выключена). Собирается здесь, а не по месту, ровно из-за одной
+    /// детали: инструкция в формате Word уходит на хостинг собранным PDF, а конвертер живёт в
+    /// приложении. Забудь его подставить в одном из вызовов — и с той страницы docx молча перестанет
+    /// выкладываться.</summary>
+    public IInstructionPublisher? Publisher() =>
+        InstructionPublisher.For(Cfg.S3(), new Services.DocxToPdfConverter.Adapter());
+
     public AppServices()
     {
         Db = new Database(ConfigService.DbPath);

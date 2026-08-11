@@ -74,6 +74,12 @@ public class ConfigService
         // печатает одна машина, а файл выкладывает другая, и разойдись у них перевод — наклейка
         // поведёт в пустоту.
         ["translit_map"] = "",
+        // Предел размера файла, уходящего на хостинг, и что делать с превышением. Ограничение
+        // касается ТОЛЬКО хостинга: на диск сколь угодно большой проект ПЛК класть можно, а тянуть
+        // его по ссылке с телефона в цеху — нет. Общие настройки: политика хранения, а не свойство
+        // машины.
+        ["hosting_max_file_mb"] = "20",
+        ["hosting_size_limit_hard"] = "true",
         // «Диск перестроен под новую раскладку» (docs/hierarchy-rework-plan.md, этап 4): у версии
         // есть свои «Прошивка» и четыре папки документов. Ставится САМА, когда человек выполнил
         // перестройку диска (DiskMigrationDialog), и синхронизируется — это свойство ОБЩЕГО ДИСКА, а
@@ -373,7 +379,27 @@ public class ConfigService
         Enabled: S3Publish())
     {
         Translit = Translit(),
+        MaxFileBytes = HostingMaxFileBytes(),
+        HardSizeLimit = HostingSizeLimitHard(),
     };
+
+    /// <summary>Предел размера файла на хостинге в мегабайтах. Ноль или мусор в настройке —
+    /// значение по умолчанию: пустое поле не должно означать «предела нет», иначе достаточно
+    /// случайно стереть цифру, чтобы ограничение молча перестало работать.</summary>
+    public int HostingMaxFileMb() =>
+        int.TryParse(Get("hosting_max_file_mb"), out var mb) && mb > 0
+            ? mb
+            : (int)(S3Settings.DefaultMaxFileBytes / 1024 / 1024);
+
+    public void SetHostingMaxFileMb(int mb) => Set("hosting_max_file_mb", Math.Max(1, mb).ToString());
+
+    public long HostingMaxFileBytes() => (long)HostingMaxFileMb() * 1024 * 1024;
+
+    /// <summary>Жёсткий запрет (true) или предупреждение с выкладкой (false).</summary>
+    public bool HostingSizeLimitHard() =>
+        !Get("hosting_size_limit_hard").Equals("false", StringComparison.OrdinalIgnoreCase);
+
+    public void SetHostingSizeLimitHard(bool value) => Set("hosting_size_limit_hard", value ? "true" : "false");
 
     /// <summary>Справочник написаний для адресов на хостинге. Читается из общей настройки, поэтому
     /// одинаков на всех машинах — от этого зависит, попадёт ли наклейка с QR в выложенный файл

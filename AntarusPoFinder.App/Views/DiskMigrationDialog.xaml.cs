@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -143,7 +143,7 @@ public partial class DiskMigrationDialog : Window
             // же ключами, что и при обычной загрузке — иначе после перестройки QR вёл бы в никуда, а
             // заглушек «в разработке» на хостинге не появилось бы вовсе. Хостинг не настроен (ключей
             // нет) — For() вернёт null, и выкладка просто не делается.
-            var publisher = InstructionPublisher.For(_services.Cfg.S3());
+            var publisher = _services.Publisher();
             var firstRoot = _services.Cfg.RootPath();
             using (_host.BeginBusy("Перестраиваем структуру диска…"))
                 await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op),

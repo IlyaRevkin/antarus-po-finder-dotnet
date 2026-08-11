@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -528,7 +528,7 @@ public partial class EditFirmwareDialog : Window
             RootPath = _services.Cfg.RootPath(),
             // Доложенная позже инструкция обязана лечь туда же, куда легла бы приложенная сразу, —
             // в том числе и на хостинг (см. FirmwareAttachmentsRequest).
-            InstructionPublisher = InstructionPublisher.For(_services.Cfg.S3()),
+            InstructionPublisher = _services.Publisher(),
             GroupName = _names.Value.GroupName,
             SubtypeName = _names.Value.SubtypeName,
             ControllerName = _names.Value.ControllerName,
