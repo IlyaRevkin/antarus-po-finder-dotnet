@@ -491,6 +491,16 @@ public partial class Database : IDisposable
         CREATE INDEX IF NOT EXISTS idx_fw_versions_subtype_ctrl ON fw_versions(subtype_id, controller_id);
         CREATE INDEX IF NOT EXISTS idx_fw_versions_version_raw  ON fw_versions(version_raw);
         CREATE INDEX IF NOT EXISTS idx_fw_versions_sync_id      ON fw_versions(sync_id);
+        -- Папка версии на диске. По ней спрашивают «кто ещё ссылается на эти файлы» — на КАЖДУЮ
+        -- удаляемую запись при приёме конфига (IsDiskPathSharedByOtherVersions) и на КАЖДЫЙ
+        -- переименованный файл при перестройке/чистке диска (RenameFirmwareFileRecords, два UPDATE
+        -- на операцию). Без индекса каждый такой вопрос — полный перебор fw_versions, а операций в
+        -- этих циклах столько же, сколько версий: получается перебор в квадрате.
+        CREATE INDEX IF NOT EXISTS idx_fw_versions_disk_path    ON fw_versions(disk_path);
+        -- Пара «контроллер + версия железа»: по ней проверяют, можно ли удалить контроллер или его
+        -- модификацию, приехавшую отсутствующей в чужом снимке (Database.ConfigExchange.cs), и
+        -- ищут версии конкретной модификации. Композитный индекс работает и на один controller_id.
+        CREATE INDEX IF NOT EXISTS idx_fw_versions_ctrl_hw      ON fw_versions(controller_id, hw_version);
         CREATE INDEX IF NOT EXISTS idx_param_files_subtype      ON param_files(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_passports_subtype        ON passports(subtype_id);
         CREATE INDEX IF NOT EXISTS idx_fw_reservations_lookup   ON fw_version_reservations(subtype_id, controller_id, hw_version);
