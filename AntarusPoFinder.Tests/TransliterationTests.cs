@@ -143,6 +143,62 @@ public class TransliterationTests
         Assert.Equal("po/PZH/Instrukciya", settings.KeyFor(@"ПЖ\Инструкция"));
     }
 
+    /// <summary>Ключ объекта не выходит за свой префикс, как бы ни выглядело переопределение.
+    /// Латиницу в справочник вписывает человек, а уезжает справочник на все машины общей
+    /// синхронизацией — то есть значение приходит и с чужой машины. Ключ доступа даёт запись во ВЕСЬ
+    /// бакет предприятия, поэтому «..» или слэш в одном сегменте — это запись в чужую часть общего
+    /// хранилища, а не косметика.</summary>
+    [Theory]
+    [InlineData("../../evil")]
+    [InlineData("..")]
+    [InlineData("/absolute")]
+    [InlineData(@"a\b")]
+    public void KeyFor_OverrideCannotEscapeItsPrefix(string malicious)
+    {
+        var settings = new S3Settings("https://s3", "amperus", "ru-1", "po", "id", "secret", "https://fs", true)
+        {
+            Translit = TranslitMap.FromPairs(new[] { new KeyValuePair<string, string>("ПЖ", malicious) }),
+        };
+
+        var key = settings.KeyFor(@"ПЖ\Инструкция");
+
+        Assert.StartsWith("po/", key);
+        Assert.DoesNotContain(@"\", key);
+        // Уровней в ключе ровно столько же, сколько в пути на диске, плюс префикс: подмена одного
+        // сегмента не имеет права ни добавить уровень, ни схлопнуть два в один.
+        Assert.Equal(3, key.Split('/').Length);
+        // Разбор адреса считает особыми ЦЕЛЫЕ сегменты «.» и «..», а не точки внутри имени, — вот их
+        // и не должно остаться ни одного.
+        Assert.DoesNotContain(key.Split('/'), s => s is "." or "..");
+    }
+
+    /// <summary>То же самое со стороны префикса: он тоже приходит из синхронизируемой настройки
+    /// (s3_prefix), и «..» в нём увёл бы запись за пределы отведённой части бакета.</summary>
+    [Fact]
+    public void KeyFor_PrefixCannotEscape()
+    {
+        var settings = new S3Settings("https://s3", "amperus", "ru-1", "po/../..", "id", "secret", "https://fs", true);
+
+        var key = settings.KeyFor(@"ПЖ\Инструкция");
+
+        Assert.DoesNotContain(key.Split('/'), s => s is "." or "..");
+        Assert.EndsWith("PZH/Instrukciya", key);
+    }
+
+    /// <summary>Путь с «..», пришедший в KeyFor от вызывающего, который его не нормализовал.
+    /// Сегодня такого вызывающего нет (все считают путь через LabelLinkBuilder.RelativeTo, а он
+    /// нормализует), но появление нового не должно молча открывать запись мимо префикса.</summary>
+    [Fact]
+    public void KeyFor_DotSegmentsInRelativePathAreNeutralized()
+    {
+        var settings = new S3Settings("https://s3", "amperus", "ru-1", "po", "id", "secret", "https://fs", true);
+
+        var key = settings.KeyFor(@"ПЖ\..\..\Инструкция");
+
+        Assert.DoesNotContain(key.Split('/'), s => s is "." or "..");
+        Assert.StartsWith("po/", key);
+    }
+
     [Fact]
     public void FromPairs_SkipsEmptyRows()
     {

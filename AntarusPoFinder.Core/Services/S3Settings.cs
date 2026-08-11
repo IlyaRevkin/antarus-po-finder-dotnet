@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -67,6 +68,18 @@ public sealed record S3Settings(
     /// выкладку можно было приостановить, не стирая реквизиты.</summary>
     public bool CanPublish => Enabled && HasAddress && HasCredentials;
 
+    /// <summary>Печать записи БЕЗ секретного ключа. Запись C# по умолчанию печатает все свои
+    /// свойства, а <see cref="SecretKey"/> здесь лежит уже расшифрованным (см. ConfigService.S3()) —
+    /// то есть одного случайного «{settings}» в тексте предупреждения, в журнале страницы
+    /// «Хранилище» или в тикете хватило бы, чтобы ключ на запись во весь бакет предприятия лёг
+    /// открытым текстом туда, где его прочитает кто угодно. Дешевле закрыть здесь, чем потом следить
+    /// за каждым местом, где запись могла попасть в строку. «Задан/не задан» при этом видно — без
+    /// этого запись стала бы бесполезна для разбора «почему не выкладывается».</summary>
+    public override string ToString() =>
+        $"S3Settings {{ Endpoint = {Endpoint}, Bucket = {Bucket}, Region = {Region}, Prefix = {Prefix}, " +
+        $"AccessKey = {AccessKey}, SecretKey = {(string.IsNullOrEmpty(SecretKey) ? "<не задан>" : "<скрыт>")}, " +
+        $"WebUrl = {WebUrl}, Enabled = {Enabled} }}";
+
     /// <summary>Ключ объекта в бакете для пути файла относительно корня диска прошивок. Раскладка в
     /// бакете ПОВТОРЯЕТ раскладку на диске уровень в уровень: ничего не «маппится» таблицей путей, а
     /// значит переименование подтипа или контроллера на диске автоматически действует и на хостинге.
@@ -79,7 +92,14 @@ public sealed record S3Settings(
     public string KeyFor(string relativePath)
     {
         var normalized = Translit.Path(relativePath);
-        var prefix = (Prefix ?? "").Replace('\\', '/').Trim('/');
+        // Префикс чистится теми же правилами, что и остальные куски ключа (см. TranslitMap.SafeSegment):
+        // он приходит из настройки s3_prefix, которая синхронизируется между машинами, и «..» в нём
+        // увело бы запись за пределы отведённой предприятию части общего бакета ровно так же, как в
+        // любом другом сегменте.
+        var prefix = string.Join("/", (Prefix ?? "").Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(TranslitMap.SafeSegment)
+            .Where(s => s.Length > 0));
         return prefix.Length > 0 ? prefix + "/" + normalized : normalized;
     }
 }
