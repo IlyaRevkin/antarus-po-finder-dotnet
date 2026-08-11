@@ -15,9 +15,18 @@
              (см. SsoAuth_Click). Аварийный вход администратором остаётся всегда. Так переключение
              всех машин на Keycloak не запирает тех, у кого он в этот момент недоступен. -->
         <StackPanel x:Name="SsoPanel" Visibility="Collapsed" Margin="0,0,0,8">
-            <TextBlock Text="КОРПОРАТИВНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-            <TextBlock x:Name="SsoDescription" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
-                       Text="Вход выполняется в браузере — тем же способом, что и в другие корпоративные системы. Пароль вводится на странице компании, программа его не видит."/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="КОРПОРАТИВНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <ToggleButton x:Name="SsoInfoToggle" Style="{StaticResource InfoIconButton}" Margin="6,0,0,0"
+                              ToolTip="Подробнее о корпоративном входе"/>
+            </StackPanel>
+            <Popup PlacementTarget="{Binding ElementName=SsoInfoToggle}" Placement="Bottom" AllowsTransparency="True"
+                   IsOpen="{Binding IsChecked, ElementName=SsoInfoToggle, Mode=TwoWay}" StaysOpen="False">
+                <Border Style="{StaticResource InfoPopupCard}">
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                               Text="Вход выполняется в браузере — тем же способом, что и в другие корпоративные системы. Пароль вводится на странице компании, программа его не видит."/>
+                </Border>
+            </Popup>
             <Button x:Name="SsoButton" Content="Войти через браузер" HorizontalAlignment="Right" Click="SsoAuth_Click" Margin="0,0,0,4"/>
             <TextBlock x:Name="SsoStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Visibility="Collapsed"/>
             <!-- Запасной путь: раскрывает вход по доменной учётной записи, не покидая окно. Виден,
@@ -38,6 +47,10 @@
         <TextBlock Text="Запомнить вход на этом компьютере:" Margin="0,0,0,4"/>
         <ComboBox x:Name="RememberCombo" Margin="0,0,0,4" DisplayMemberPath="Label" SelectedValuePath="Key"
                   SelectionChanged="RememberCombo_SelectionChanged"/>
+        <!-- Предупреждение про «не спрашивать больше никогда» остаётся ТЕКСТОМ, а не уходит под
+             значок: оно появляется только когда человек выбрал именно этот вариант, и это ровно тот
+             случай, когда прочитать надо обязательно. Прятать в подсказку то, что показывается
+             в ответ на опасный выбор, — значит прятать предупреждение. -->
         <TextBlock x:Name="RememberAlwaysWarning" Style="{StaticResource MutedText}" Foreground="{DynamicResource ErrorBrush}"
                    TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
                    Text="⚠ Вход по AD не будет запрашиваться повторно на этом компьютере, пока вы не выйдете вручную — менее безопасно, если к компьютеру есть доступ у посторонних."/>
@@ -46,10 +59,9 @@
              в обычном случае оператору достаточно логина и пароля, поэтому эти поля убраны под
              раскрывающийся блок, чтобы не перегружать вход. Открываются, только если вход не проходит
              и IT дали другие значения; введённое здесь сохраняется на этой машине (см. AdAuth_Click). -->
-        <Expander Header="Дополнительные параметры" Margin="0,0,0,8">
+        <Expander Header="Дополнительные параметры" Margin="0,0,0,8"
+                  ToolTip="Обычно менять не нужно. Измените, только если вход не проходит и IT сообщили другой домен или адрес сервера.">
             <StackPanel Margin="0,8,0,0">
-                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
-                           Text="Обычно менять не нужно. Измените, только если вход не проходит и IT сообщили другой домен или адрес сервера."/>
                 <TextBlock Text="Домен:" Margin="0,0,0,4"/>
                 <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
                 <TextBlock Text="Сервер (проверка пароля по HTTP):" Margin="0,0,0,4"/>
@@ -65,6 +77,9 @@
              может прийтись на момент, когда сети ещё нет. Повтор — та же кнопка «Войти» (пароль в поле
              уже введён), рядом — диагностика, чтобы было видно, что именно недоступно. -->
         <StackPanel x:Name="RetryPanel" Visibility="Collapsed" Margin="0,8,0,0">
+            <!-- Этот текст остаётся на виду: он появляется ТОЛЬКО когда вход уже не прошёл, и в этот
+                 момент человек как раз ищет глазами, что делать дальше. Спрятать под «i» объяснение
+                 неудачи — значит спрятать единственную подсказку, ради которой панель и показана. -->
             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
                        Text="Похоже, сеть ещё не поднялась (VPN/IPsec подключается позже запуска программы). Подождите минуту и попробуйте снова — пароль вводить заново не нужно."/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -75,11 +90,20 @@
         </StackPanel>
 
         <Separator Margin="0,8,0,12"/>
-        <TextBlock Text="АВАРИЙНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-        <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
-                   Text="Домен недоступен или AD ещё не настроен? Паролем администратора можно войти без AD — например, чтобы затем в Настройки → Пользователи назначить нужную AD-учётку администратором. Такой вход не запоминается — при следующем запуске снова потребуется войти по AD или этим же паролем."
-                   Style="{StaticResource MutedText}"/>
-        <PasswordBox x:Name="AdminEscapePasswordInput" Margin="0,0,0,8"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+            <TextBlock Text="АВАРИЙНЫЙ ВХОД" Style="{StaticResource MutedText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <ToggleButton x:Name="EscapeInfoToggle" Style="{StaticResource InfoIconButton}" Margin="6,0,0,0"
+                          ToolTip="Подробнее об аварийном входе"/>
+        </StackPanel>
+        <Popup PlacementTarget="{Binding ElementName=EscapeInfoToggle}" Placement="Bottom" AllowsTransparency="True"
+               IsOpen="{Binding IsChecked, ElementName=EscapeInfoToggle, Mode=TwoWay}" StaysOpen="False">
+            <Border Style="{StaticResource InfoPopupCard}">
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Text="Домен недоступен или AD ещё не настроен? Паролем администратора можно войти без AD — например, чтобы затем в Настройки → Пользователи назначить нужную AD-учётку администратором. Такой вход не запоминается — при следующем запуске снова потребуется войти по AD или этим же паролем."/>
+            </Border>
+        </Popup>
+        <PasswordBox x:Name="AdminEscapePasswordInput" Margin="0,0,0,8"
+                     ToolTip="Пароль администратора приложения (Настройки → Пользователи)"/>
         <Button Content="Войти как администратор" HorizontalAlignment="Right" Click="AdminEscape_Click"/>
     </StackPanel>
 </Window>

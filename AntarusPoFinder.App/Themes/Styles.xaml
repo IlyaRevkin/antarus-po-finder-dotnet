@@ -795,6 +795,64 @@
         <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrush2}"/>
     </Style>
 
+    <!-- Кнопка-иконка «i»: длинное объяснение открывается по клику, а не висит абзацем на форме.
+         Заведена была локально в окне смены роли, теперь общая — по жалобе на окно входа: «куча
+         лишнего текста, не спрятанного в подсказку на кнопку i». Три-четыре абзаца пояснений
+         превращали форму из двух полей в простыню, которую всё равно не читают, а нужное — логин,
+         пароль, кнопка — в ней терялось.
+
+         ToggleButton, а не Button: рядом стоит Popup, привязанный к IsChecked в обе стороны. Popup
+         сбрасывает своё IsOpen сам при клике мимо (StaysOpen=False), и только TwoWay-биндинг
+         возвращает это состояние тумблеру — иначе после автозакрытия он остаётся «нажатым» и
+         открыть подсказку снова получается лишь со второго клика.
+
+         Подпись у кнопки задаётся на месте (ToolTip): «подробнее о входе по AD» и «подробнее об
+         аварийном входе» — разные вещи. -->
+    <Style x:Key="InfoIconButton" TargetType="ToggleButton">
+        <Setter Property="Width" Value="18"/>
+        <Setter Property="Height" Value="18"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="ToolTip" Value="Подробнее"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1" CornerRadius="9">
+                        <TextBlock Text="i" FontStyle="Italic" FontWeight="Bold" FontSize="11"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Пузырь с подробностями рядом с кнопкой «i». Ширина ограничена: длинный текст в одну строку
+         уехал бы за край экрана. -->
+    <Style x:Key="InfoPopupCard" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="MaxWidth" Value="300"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
+    </Style>
+
     <!-- Card container (search results, dialogs) -->
     <Style x:Key="CardBorder" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
