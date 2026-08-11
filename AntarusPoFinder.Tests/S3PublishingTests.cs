@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -100,11 +100,11 @@ public class S3PublishingTests
     [Fact]
     public void KeyFor_RepeatsTheDiskLayout_AndRespectsThePrefix()
     {
-        Assert.Equal("ПО/ПЖ/SMH5/Инструкция/и.pdf",
+        Assert.Equal("PO/PZH/SMH5/Instrukciya/i.pdf",
             Settings().KeyFor(@"ПО\ПЖ\SMH5\Инструкция\и.pdf"));
 
         var withPrefix = Settings() with { Prefix = "finder" };
-        Assert.Equal("finder/ПО/и.pdf", withPrefix.KeyFor(@"\ПО\и.pdf"));
+        Assert.Equal("finder/PO/i.pdf", withPrefix.KeyFor(@"\ПО\и.pdf"));
     }
 
     // ── Запрос целиком ────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ public class S3PublishingTests
         var url = PublisherOver(storage).Publish(file, file, first.Path, warnings);
 
         Assert.Empty(warnings);
-        Assert.Equal("https://fs.elitacompany.ru/ПО/ПЖ/SMH5/Инструкция/инструкция_2.1.pdf", url);
+        Assert.Equal("https://fs.elitacompany.ru/PO/PZH/SMH5/Instrukciya/instrukciya_2.1.pdf", url);
 
         var put = Assert.Single(storage.Puts);
         Assert.StartsWith("https://s3.twcstorage.ru/amperus/", put.Url);
@@ -219,7 +219,7 @@ public class S3PublishingTests
         var storage = new FakeStorage();
         var url = PublisherOver(storage).Publish(actual, onFirstDisk, first.Path, new List<string>());
 
-        Assert.Equal("https://fs.elitacompany.ru/ПО/Инструкция/и.pdf", url);
+        Assert.Equal("https://fs.elitacompany.ru/PO/Instrukciya/i.pdf", url);
         Assert.Single(storage.Puts);
     }
 
@@ -241,7 +241,7 @@ public class S3PublishingTests
         Assert.Empty(warnings);
         Assert.Equal(2, storage.Puts.Count);
         Assert.Contains(storage.Puts, p => p.Url.EndsWith("/01.png", StringComparison.Ordinal));
-        Assert.Contains(storage.Puts, p => p.Url.Contains("/стр/02.png", StringComparison.Ordinal));
+        Assert.Contains(storage.Puts, p => p.Url.Contains("/str/02.png", StringComparison.Ordinal));
         Assert.NotNull(url);
     }
 
@@ -410,7 +410,7 @@ public class S3PublishingTests
         Assert.StartsWith("https://fs.elitacompany.ru/", placement.PublishedUrl);
         // Имя каноническое на обоих экземплярах — по нему же строится ссылка под QR-кодом.
         Assert.EndsWith("инструкция_2.1.0042.0001.pdf", placement.StoredPath);
-        Assert.EndsWith("/инструкция_2.1.0042.0001.pdf", placement.PublishedUrl);
+        Assert.EndsWith("/instrukciya_2.1.0042.0001.pdf", placement.PublishedUrl);
     }
 
     /// <summary>Хостинг не настроен (ключи ещё не выданы) — укладка на диски обязана пройти ровно

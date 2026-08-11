@@ -175,7 +175,9 @@ public partial class InstructionLabelWindow : Window
         var baseUrl = services.Cfg.InstructionBaseUrl();
         var root = services.Cfg.RootPath();
 
-        if (LabelLinkBuilder.BuildUrl(baseUrl, root, file) is { } url)
+        // Справочник написаний — тот же, по которому файл кладётся на хостинг: иначе напечатанная
+        // здесь ссылка не совпадёт с ключом выложенного объекта (см. TranslitMap).
+        if (LabelLinkBuilder.BuildUrl(baseUrl, root, file, services.Cfg.Translit()) is { } url)
             return (url, $"В QR: {url}");
 
         var unc = NetworkPathHelper.TryResolveUnc(file) ?? file;

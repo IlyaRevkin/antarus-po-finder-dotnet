@@ -34,8 +34,15 @@ public static class LabelLinkBuilder
     private const string MustEscape = " %#?/\\\"<>[]^`{|}";
 
     /// <summary>Веб-ссылка на файл. null — базового адреса нет, файл лежит вне корня диска или путь
-    /// битый: ссылку строить не из чего.</summary>
-    public static string? BuildUrl(string? baseUrl, string? diskRoot, string? filePath)
+    /// битый: ссылку строить не из чего.
+    ///
+    /// <paramref name="translit"/> — справочник написаний для хостинга. Он ОБЯЗАН быть тем же, по
+    /// которому файл на хостинг клали (см. <see cref="S3Settings.KeyFor"/>): ссылку печатает одна
+    /// машина, а выкладывает другая, и разойдись у них перевод хоть одного сегмента — наклейка поведёт
+    /// в пустоту. Поэтому справочник и живёт в общем конфиге, а не считается на месте.
+    /// null — прежнее поведение, кириллица идёт в ссылку как есть (IRI): так строится ссылка на
+    /// внутренний ресурс, где переводить нечего и незачем.</summary>
+    public static string? BuildUrl(string? baseUrl, string? diskRoot, string? filePath, TranslitMap? translit = null)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(diskRoot) || string.IsNullOrWhiteSpace(filePath))
             return null;
@@ -43,11 +50,16 @@ public static class LabelLinkBuilder
         var relative = RelativeTo(diskRoot, filePath);
         if (relative is null) return null;
 
-        var segments = relative
-            .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(EscapeSegment);
+        // После перевода в сегментах остаются только латиница, цифры и «._-()» — экранировать там уже
+        // нечего, и прогонять результат через EscapeSegment значило бы только рисковать двойной
+        // обработкой.
+        var tail = translit is not null
+            ? translit.Path(relative)
+            : string.Join("/", relative
+                .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(EscapeSegment));
 
-        return baseUrl.TrimEnd('/') + "/" + string.Join("/", segments);
+        return baseUrl.TrimEnd('/') + "/" + tail;
     }
 
     /// <summary>Одно имя папки/файла, пригодное для подстановки в путь адреса. Кодируется только то,
