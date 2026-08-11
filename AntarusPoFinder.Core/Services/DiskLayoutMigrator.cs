@@ -321,8 +321,13 @@ public static class DiskLayoutMigrator
 
     /// <summary>Папки версий, по которым идут пооперационные проходы: по ПАПКЕ, а не по записи (одну
     /// папку могут делить несколько строк — конфигурации шкафа), вместе со всеми disk_path, которыми
-    /// она записана в базе.</summary>
-    private static List<(string Dir, FwVersionRecord First, List<string> Paths)> VersionDirs(MigrationInput input)
+    /// она записана в базе.
+    ///
+    /// internal, а не private: ровно этим же набором папок обходит диск чистильщик мусора
+    /// (<see cref="DiskCleanupScanner"/>), и второй реализации «где на диске папки версий» быть не
+    /// должно — она разошлась бы с этой на первом же исключении (переименованная папка, найденная
+    /// соседом, несколько записей на одну папку).</summary>
+    internal static List<(string Dir, FwVersionRecord First, List<string> Paths)> VersionDirs(MigrationInput input)
     {
         var byDir = new Dictionary<string, (FwVersionRecord First, List<string> Paths)>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
