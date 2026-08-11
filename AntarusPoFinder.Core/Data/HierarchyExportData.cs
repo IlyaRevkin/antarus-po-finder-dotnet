@@ -165,6 +165,40 @@ public class ExportedPassport
     [JsonPropertyName("general")] public int General { get; set; }
 }
 
+/// <summary>Один доп. материал версии прошивки в общем конфиге (см. FwAttachment и
+/// Database.FwAttachments.cs). Секция аддитивная, как fw_versions/param_files: отсутствие строки в
+/// снимке означает «отправитель о ней не знает», а не «её удалили», — поэтому удаление едет
+/// ПОЛОЖИТЕЛЬНЫМ сигналом <see cref="DeletedAt"/>, а снимок выгружается целиком, вместе со снятыми.
+///
+/// Прошивка адресуется переносимо: сначала её sync_id (<see cref="FwSyncId"/>), а запасным ключом —
+/// тот же натуральный ключ, которым пользуется сама секция fw_versions (подтип + контроллер +
+/// version_raw + config_name, все по sync_id с откатом на имена). Запасной нужен ровно для первого
+/// контакта двух независимо заведённых баз: пока строки не обменялись sync_id, связать их больше
+/// нечем.
+///
+/// <see cref="UpdatedAt"/> — отметка последней правки вида/комментария: выигрывает более поздняя, а не
+/// тот, кто позже нажал импорт (тот же принцип, что у flat_list_state).</summary>
+public class ExportedFwAttachment
+{
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("fw_sync_id")] public string FwSyncId { get; set; } = "";
+    [JsonPropertyName("filename")] public string Filename { get; set; } = "";
+    [JsonPropertyName("disk_path")] public string DiskPath { get; set; } = "";
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("comment")] public string Comment { get; set; } = "";
+    [JsonPropertyName("added_by")] public string AddedBy { get; set; } = "";
+    [JsonPropertyName("added_at")] public string AddedAt { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
+    [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
+    [JsonPropertyName("config_name")] public string ConfigName { get; set; } = "";
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+    [JsonPropertyName("controller_sync_id")] public string ControllerSyncId { get; set; } = "";
+    [JsonPropertyName("controller_name")] public string ControllerName { get; set; } = "";
+}
+
 public class ExportedAppUser
 {
     [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
@@ -343,6 +377,19 @@ public class HierarchyExportData
     /// дефолта — как и hw_rewrites рядом.</summary>
     [JsonPropertyName("ctrl_reassignments")] public List<ExportedCtrlReassign>? CtrlReassignments { get; set; }
 
+    /// <summary>Доп. материалы версий прошивок (см. ExportedFwAttachment) — полный список, вместе со
+    /// снятыми (они и есть тумбстоуны). Nullable без дефолта по той же причине, что Tags/FwUsage:
+    /// снимок со старой версии приложения ключа не содержит вовсе, и это «отправитель о секции не
+    /// знает», а не «у отправителя вложений ноль». Разница здесь не косметическая: пустой список
+    /// от машины, которая про доп. материалы ЗНАЕТ, — это законное «у меня их нет», а null — сигнал
+    /// вообще не трогать чужие вложения.</summary>
+    [JsonPropertyName("fw_attachments")] public List<ExportedFwAttachment>? FwAttachments { get; set; }
+
+    /// <summary>Справочник видов доп. материалов — такой же плоский список, как Tags/AllowedExtensions
+    /// выше, с теми же отметками удаления/возврата в FlatListState и той же nullable-без-дефолта
+    /// логикой для снимков со старой версии приложения.</summary>
+    [JsonPropertyName("fw_attachment_kinds")] public List<string>? FwAttachmentKinds { get; set; }
+
     /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
     /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой
     /// версии приложения ключа не содержит, и импорт тогда откатывается на прежнее чисто additive
@@ -444,6 +491,20 @@ public class ImportCounts
     public int AppUsersAdded { get; set; }
     public int AppUsersUpdated { get; set; }
 
+    /// <summary>Доп. материалы прошивок: заведённые здесь по входящему снимку / снятые по входящему
+    /// тумбстоуну / обновлённые (вид, комментарий). Полные аналоги трёх счётчиков ParamFiles* выше —
+    /// секция устроена так же (аддитивно + тумбстоун).</summary>
+    public int FwAttachmentsAdded { get; set; }
+    public int FwAttachmentsRemoved { get; set; }
+    public int FwAttachmentsUpdated { get; set; }
+    /// <summary>Виды доп. материалов, добавленные/убранные в справочнике входящим снимком — тот же
+    /// LWW-механизм, что у тегов и производителей (ImportFlatList).</summary>
+    public int AttachmentKindsAdded { get; set; }
+    public int AttachmentKindsRemoved { get; set; }
+    /// <summary>Вид, который эталонный снимок хотел бы убрать, но им ещё помечено локальное вложение —
+    /// оставлен (мягкий предохранитель, см. MirrorFlatListDeletions).</summary>
+    public int AttachmentKindsSkippedDelete { get; set; }
+
     /// <summary>Строк fw_versions, которые продвинуло вперёд приехавшее РЕШЕНИЕ МОДЕРАЦИИ с другой
     /// машины (см. ExportedModerationDecision / Database.ApplyModerationDecisions). Считается отдельно
     /// от FwVersions/FwVersionsRemoved: те отражают дифф самих строк снимка, а это — узкий канал
@@ -467,5 +528,7 @@ public class ImportCounts
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + FwVersionsRenamed +
         ParamFiles + ParamFilesRemoved + ParamFilesUpdated +
         Passports + PassportsRemoved + PassportsUpdated +
+        FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +
+        AttachmentKindsAdded + AttachmentKindsRemoved +
         AppUsersAdded + AppUsersUpdated + ModerationApplied;
 }

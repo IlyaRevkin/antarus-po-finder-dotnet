@@ -84,6 +84,7 @@ public partial class Database
                 data.ParamManufacturers.Add(new ExportedManufacturer { Name = r.GetString(0), SortOrder = r.GetInt32(1) });
 
         data.Tags = GetAllTags();
+        data.FwAttachmentKinds = GetFwAttachmentKinds();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
         data.AllowedExtensionsSchematic = GetAllowedExtensionsSchematic();
@@ -168,6 +169,39 @@ public partial class Database
                     SyncId = GetString(r, "sync_id"), Tags = GetString(r, "tags"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     GroupName = GetString(r, "group_name"),
+                });
+
+        // Доп. материалы прошивок (см. ExportedFwAttachment) — ЦЕЛИКОМ, вместе со снятыми: снятые и
+        // есть тумбстоуны, без них удаление не доехало бы до коллег (тот же довод, что у param_files
+        // выше). Строки прошивок, помеченных «не выгружать» (is_local_only), выпадают вместе со своей
+        // прошивкой — иначе вложение уехало бы, а версии, к которой его цеплять, у получателя нет.
+        data.FwAttachments = new();
+        using (var r = ExecuteReader("""
+            SELECT a.sync_id, a.filename, a.disk_path, a.kind, a.comment, a.added_by, a.added_at,
+                   a.deleted_at, a.updated_at,
+                   fv.sync_id AS fw_sync_id, fv.version_raw, fv.config_name,
+                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name,
+                   cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
+            FROM fw_attachments a
+            JOIN fw_versions       fv ON a.fw_version_id = fv.id
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.is_local_only = 0
+            ORDER BY a.id
+            """))
+            while (r.Read())
+                data.FwAttachments.Add(new ExportedFwAttachment
+                {
+                    SyncId = GetString(r, "sync_id"), FwSyncId = GetString(r, "fw_sync_id"),
+                    Filename = GetString(r, "filename"), DiskPath = GetString(r, "disk_path"),
+                    Kind = GetString(r, "kind"), Comment = GetString(r, "comment"),
+                    AddedBy = GetString(r, "added_by"), AddedAt = GetString(r, "added_at"),
+                    DeletedAt = GetString(r, "deleted_at"), UpdatedAt = GetString(r, "updated_at"),
+                    VersionRaw = GetString(r, "version_raw"), ConfigName = GetString(r, "config_name"),
+                    SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
+                    GroupName = GetString(r, "group_name"),
+                    ControllerName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
 
         // Паспорта шкафов из синхронизации УБРАНЫ: паспорт больше не хранимая запись, а эфемерный
@@ -295,6 +329,9 @@ public partial class Database
             DiffCategory("Теги",
                 local.Tags ?? new(),
                 onDisk.Tags ?? new()),
+            DiffCategory("Виды доп. материалов",
+                local.FwAttachmentKinds ?? new(),
+                onDisk.FwAttachmentKinds ?? new()),
             DiffCategory("Разрешённые расширения",
                 local.AllowedExtensions ?? new(),
                 onDisk.AllowedExtensions ?? new()),
@@ -455,6 +492,17 @@ public partial class Database
         }
         Collect("fw_versions");
         Collect("param_files");
+        return used;
+    }
+
+    /// <summary>Тот же предохранитель, что CollectUsedTagWords, только для видов доп. материалов:
+    /// fw_attachments.kind хранит вид точным именем, строкой, без разбора на слова.</summary>
+    private HashSet<string> CollectUsedAttachmentKinds()
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var r = ExecuteReader("SELECT DISTINCT kind FROM fw_attachments WHERE deleted_at='' AND kind != ''");
+        while (r.Read())
+            used.Add(r.GetString(0));
         return used;
     }
 
@@ -943,6 +991,14 @@ public partial class Database
             data.FlatListState, apply, GetAllTags, AddTag, DeleteTag,
             () => counts.TagsAdded++, () => counts.TagsRemoved++);
 
+        // Виды доп. материалов — четвёртый справочник того же устройства. Заводится администратором
+        // («Прочее» на всё не хватает), поэтому и удаление/возврат вида обязаны разъезжаться так же,
+        // как у тегов, а не «выигрывает тот, кто последним нажал импорт».
+        ImportFlatList(Database.FlatKindAttachmentKind,
+            data.FwAttachmentKinds ?? new(),
+            data.FlatListState, apply, GetFwAttachmentKinds, AddFwAttachmentKind, DeleteFwAttachmentKind,
+            () => counts.AttachmentKindsAdded++, () => counts.AttachmentKindsRemoved++);
+
         ImportFlatList(Database.FlatKindExtension,
             data.AllowedExtensions ?? new(),
             data.FlatListState, apply, GetAllowedExtensions, AddAllowedExtension, RemoveAllowedExtension,
@@ -990,6 +1046,14 @@ public partial class Database
                 (data.ParamManufacturers ?? new()).Select(m => m.Name),
                 flatState.Where(s => s.Kind == FlatKindManufacturer).Select(s => s.Name), usedManufacturers.Contains,
                 apply, () => counts.ManufacturersRemoved++, () => counts.ManufacturersSkippedDelete++);
+
+            // Вид доп. материала — не FK, а текст в fw_attachments.kind (как тег в fw_versions.tags),
+            // поэтому предохранитель тоже текстовый: вид, которым помечено живое вложение, эталонный
+            // снимок не убирает — иначе у файла пропала бы единственная подпись, что это вообще такое.
+            var usedKinds = CollectUsedAttachmentKinds();
+            MirrorFlatListDeletions(GetFwAttachmentKinds, DeleteFwAttachmentKind, data.FwAttachmentKinds ?? new(),
+                flatState.Where(s => s.Kind == FlatKindAttachmentKind).Select(s => s.Name), usedKinds.Contains,
+                apply, () => counts.AttachmentKindsRemoved++, () => counts.AttachmentKindsSkippedDelete++);
 
             MirrorFlatListDeletions(GetAllowedExtensions, RemoveAllowedExtension, data.AllowedExtensions ?? new(),
                 flatState.Where(s => s.Kind == FlatKindExtension).Select(s => s.Name), null,
@@ -1329,10 +1393,119 @@ public partial class Database
         ApplyModerationDecisions(data.ModerationDecisions, counts, apply, subtypeSyncToId, controllerSyncToId);
 
         ImportParamFiles(data, subtypeSyncToId, counts, apply, authoritative);
+        // Доп. материалы — ПОСЛЕ блока fw_versions и решений модерации, по той же причине, что и они:
+        // вложение может относиться к прошивке, которую этот же импорт только что и завёл.
+        ImportFwAttachments(data, subtypeSyncToId, controllerSyncToId, counts, apply);
         // Паспорта из синхронизации убраны: секцию data.Passports эта версия не читает вовсе (см.
         // ExportHierarchyData). Старый клиент мог прислать её заполненной — она просто игнорируется.
 
         return counts;
+    }
+
+    /// <summary>Синхронизация доп. материалов прошивок (см. ExportedFwAttachment). Секция аддитивная,
+    /// как fw_versions/param_files, и правила ровно те же, слово в слово:
+    /// <list type="bullet">
+    /// <item>секции нет вовсе (null — снимок со старой версии приложения) — не трогаем НИЧЕГО. Это не
+    ///       то же самое, что пустой список: пустой означает «у отправителя вложений нет», а null —
+    ///       «отправитель о них не знает», и принять второе за первое значило бы позволить старому
+    ///       клиенту стирать чужие вложения;</item>
+    /// <item>локальное снятие постоянно: приехавшая «живая» копия с машины, которая об удалении ещё не
+    ///       знает, вложение не воскрешает;</item>
+    /// <item>приехавший тумбстоун зеркалится — но ТОЛЬКО в БД: файл на диске не трогаем, он общий и
+    ///       может быть единственной копией (удаляет его лишь оператор своей рукой, см.
+    ///       FirmwareExtraFilesService);</item>
+    /// <item>вид и комментарий у совпавшей строки сводятся по updated_at — выигрывает более поздняя
+    ///       правка, а не тот, кто позже нажал импорт.</item>
+    /// </list>
+    /// Вид из чужой строки в СПРАВОЧНИК не добавляется намеренно: осознанно удалённый вид иначе
+    /// воскресал бы с каждым приехавшим вложением — ровно та грабля, ради которой заведён
+    /// flat_list_state. Сам справочник едет своей секцией и разбирается ImportFlatList выше; вложение
+    /// же показывает свой вид в любом случае, даже если в списке его уже нет.</summary>
+    private void ImportFwAttachments(HierarchyExportData data, Dictionary<string, int> subtypeSyncToId,
+        Dictionary<string, int> controllerSyncToId, ImportCounts counts, bool apply)
+    {
+        if (data.FwAttachments is null) return;
+
+        foreach (var inc in data.FwAttachments)
+        {
+            var local = FindFwAttachmentBySyncId(inc.SyncId);
+            if (local is not null)
+            {
+                if (!string.IsNullOrEmpty(local.DeletedAt)) continue;
+
+                if (!string.IsNullOrEmpty(inc.DeletedAt))
+                {
+                    counts.FwAttachmentsRemoved++;
+                    if (apply) TombstoneFwAttachment(local.Id!.Value, inc.DeletedAt);
+                    continue;
+                }
+
+                if (string.CompareOrdinal(inc.UpdatedAt, local.UpdatedAt) <= 0) continue;
+                if (inc.Kind == local.Kind && inc.Comment == local.Comment) continue;
+
+                counts.FwAttachmentsUpdated++;
+                if (apply) UpdateFwAttachment(local.Id!.Value, inc.Kind, inc.Comment, inc.UpdatedAt);
+                continue;
+            }
+
+            // Строки нет, а входящая уже снята — материализовать нечего: завести её только чтобы тут
+            // же спрятать под тумбстоуном значит показать фантом (та же логика, что у fw_versions).
+            if (!string.IsNullOrEmpty(inc.DeletedAt)) continue;
+
+            var fwId = ResolveFwVersionForAttachment(inc, subtypeSyncToId, controllerSyncToId);
+            if (fwId is null) continue;
+
+            counts.FwAttachmentsAdded++;
+            if (!apply) continue;
+            AddFwAttachment(new Domain.FwAttachment
+            {
+                FwVersionId = fwId.Value,
+                Filename = inc.Filename,
+                // Путь абсолютный и записан в нотации отправителя — к нашему корню его приводит тот же
+                // RemapFwPaths, что и остальные пути прошивки (см. ConfigSyncService.ApplyToDatabase),
+                // а при открытии ещё и FirmwarePathLocalizer.
+                DiskPath = inc.DiskPath,
+                Kind = inc.Kind,
+                Comment = inc.Comment,
+                AddedBy = inc.AddedBy,
+                AddedAt = inc.AddedAt,
+                SyncId = inc.SyncId,
+                UpdatedAt = inc.UpdatedAt,
+            });
+        }
+    }
+
+    /// <summary>К какой ЛОКАЛЬНОЙ строке прошивки относится приехавшее вложение: сначала по sync_id
+    /// прошивки, потом по её натуральному ключу (подтип + контроллер + version_raw + config_name) —
+    /// запасной вариант нужен на первом контакте двух независимо заведённых баз, пока строки ещё не
+    /// обменялись sync_id. Прошивки нет — вложение пропускается: приедет со следующей синхронизацией,
+    /// когда доедет и сама версия (секция аддитивная, терять здесь нечего).</summary>
+    private int? ResolveFwVersionForAttachment(ExportedFwAttachment inc,
+        Dictionary<string, int> subtypeSyncToId, Dictionary<string, int> controllerSyncToId)
+    {
+        if (!string.IsNullOrEmpty(inc.FwSyncId))
+        {
+            var bySync = ExecuteScalar("SELECT id FROM fw_versions WHERE sync_id=@sy AND deleted_at=''",
+                cmd => cmd.Parameters.AddWithValue("@sy", inc.FwSyncId));
+            if (bySync is long l) return (int)l;
+        }
+
+        var subId = ResolveId("equipment_subtypes", inc.SubtypeSyncId, subtypeSyncToId, "name", inc.SubtypeName, inc.GroupName);
+        var ctrlId = ResolveId("controller_models", inc.ControllerSyncId, controllerSyncToId, "name", inc.ControllerName);
+        if (subId is null || ctrlId is null) return null;
+
+        var byKey = ExecuteScalar("""
+            SELECT id FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND version_raw=@v
+              AND COALESCE(config_name,'') = @cfg AND deleted_at=''
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subId.Value);
+            cmd.Parameters.AddWithValue("@c", ctrlId.Value);
+            cmd.Parameters.AddWithValue("@v", inc.VersionRaw);
+            cmd.Parameters.AddWithValue("@cfg", inc.ConfigName ?? "");
+        });
+        return byKey is long l2 ? (int)l2 : null;
     }
 
     /// <summary>Синхронизация файлов параметров. Раньше здесь было три строки: «нашли по тройке
@@ -1787,6 +1960,28 @@ public partial class Database
             var (disk, changed) = Remap(row.DiskPath);
             if (!changed) continue;
             ExecuteNonQuery("UPDATE param_files SET disk_path=@d WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@d", disk);
+                cmd.Parameters.AddWithValue("@id", row.Id);
+            });
+            changedCount++;
+        }
+
+        // Доп. материалы лежат в папке версии (или в общей папке контроллера у неперестроенной) —
+        // тот же корень и то же дерево, что у самой прошивки, поэтому их путь задевает и смена корня,
+        // и переименование папки типа/подтипа. Без этого доп. материал, приехавший с машины с другой
+        // буквой диска, не открывался бы (см. FirmwarePathLocalizer — он спасает при открытии, но
+        // хранить в базе заведомо чужой путь после переименования незачем).
+        var attachmentRows = new List<(int Id, string DiskPath)>();
+        using (var r = ExecuteReader("SELECT id, disk_path FROM fw_attachments"))
+            while (r.Read())
+                attachmentRows.Add((r.GetInt32(0), GetString(r, "disk_path")));
+
+        foreach (var row in attachmentRows)
+        {
+            var (disk, changed) = Remap(row.DiskPath);
+            if (!changed) continue;
+            ExecuteNonQuery("UPDATE fw_attachments SET disk_path=@d WHERE id=@id", cmd =>
             {
                 cmd.Parameters.AddWithValue("@d", disk);
                 cmd.Parameters.AddWithValue("@id", row.Id);
