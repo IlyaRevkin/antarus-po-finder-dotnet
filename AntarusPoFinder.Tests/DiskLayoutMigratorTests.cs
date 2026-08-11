@@ -223,6 +223,63 @@ public class DiskLayoutMigratorTests
         Assert.Equal(record.DiskPath, dir);
     }
 
+    /// <summary>Жалоба Ильи: «в папке с прошивкой KINCO ПЛК лежит не в папке Прошивка, а в папке plc».
+    /// Проект KINCO разворачивается собственными подпапками (plc/hmi), и когда его контенты легли в
+    /// корень версии, перестройка уносила вниз только отдельные ФАЙЛЫ — папка проекта оставалась
+    /// наверху навсегда. Переезжает целиком, со всей вложенностью: разбирать проект на файлы нельзя.</summary>
+    [Fact]
+    public void Fold_MovesProjectSubfolders_LikeKincoPlc()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+        Touch(Path.Combine(dir, "plc"), "программа.kpr");
+        Touch(Path.Combine(dir, "plc", "src"), "модуль.bin");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
+            renamed: null);
+
+        var inner = VersionLayout.FirmwareFolder(dir);
+        Assert.True(File.Exists(Path.Combine(inner, "plc", "программа.kpr")));
+        Assert.True(File.Exists(Path.Combine(inner, "plc", "src", "модуль.bin")));
+        Assert.False(Directory.Exists(Path.Combine(dir, "plc")));
+    }
+
+    /// <summary>Собственные папки версии остаются на месте — их-то перестройка и заводит.</summary>
+    [Fact]
+    public void Fold_DoesNotSwallowTheVersionsOwnFolders()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+        Touch(Path.Combine(dir, HierarchyFolders.Instructions), "инструкция_1.0.0004.0003.pdf");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
+            renamed: null);
+
+        Assert.True(File.Exists(Path.Combine(dir, HierarchyFolders.Instructions, "инструкция_1.0.0004.0003.pdf")));
+        foreach (var slot in VersionLayout.SlotFolderNames)
+            Assert.True(Directory.Exists(Path.Combine(dir, slot)), $"папка «{slot}» должна остаться в корне версии");
+        Assert.False(Directory.Exists(Path.Combine(VersionLayout.FirmwareFolder(dir), HierarchyFolders.Instructions)));
+    }
+
+    [Fact]
+    public void Fold_ProjectFolderAlreadyDown_IsNotTouchedAgain()
+    {
+        // Повторный прогон после частичного переноса: одноимённая папка уже внизу — свою не затираем.
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "1.0.0004.0003.psl");
+        Touch(Path.Combine(dir, "plc"), "новая.kpr");
+        Touch(Path.Combine(VersionLayout.FirmwareFolder(dir), "plc"), "уже-лежит.kpr");
+
+        DiskLayoutMigrator.Apply(
+            DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }, rename: false, fold: true)),
+            renamed: null);
+
+        Assert.True(File.Exists(Path.Combine(VersionLayout.FirmwareFolder(dir), "plc", "уже-лежит.kpr")));
+        Assert.True(File.Exists(Path.Combine(dir, "plc", "новая.kpr")));
+    }
+
     [Fact]
     public void Fold_IsIdempotent_AndSecondRunPlansNothing()
     {

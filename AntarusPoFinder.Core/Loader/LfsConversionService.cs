@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Loader;
 
@@ -71,7 +72,13 @@ public static class LfsConversionService
                 null);
         }
 
-        if (LoaderFiles.FindLfs(publish.NetworkFolder) is { } existing)
+        // Смотрим ОБА места сразу — «Прошивка\» перестроенной версии и корень папки версии. Класть
+        // результат мы будем в первое (см. LfsPublisher.Plan), но искать уже лежащее нужно в обоих:
+        // .lfs, собранный до перестройки диска или прежней версией программы, лежит в корне, и не
+        // увидев его, кнопка предлагала бы собрать заново то, что уже есть.
+        var lookIn = VersionLayout.FirmwareFolders(networkFolder);
+
+        if (LoaderFiles.FindIn(lookIn, LoaderFiles.LfsExtension) is { } existing)
         {
             return new LfsConversionDecision(LfsConversionNeed.AlreadyPresent,
                 $"У версии уже есть собранный LFS: {Path.GetFileName(existing)}", null);
@@ -80,8 +87,7 @@ public static class LfsConversionService
         // Исходник берём именно с сетевого диска, а не из локального кэша: собранный файл ляжет
         // рядом с ним, и собирать его из устаревшей локальной копии значило бы выложить коллегам
         // .lfs, не соответствующий лежащему рядом .psl.
-        var psl = LoaderFiles.ResolvePreferHint(
-            new[] { publish.NetworkFolder }, executableHint, LoaderFiles.PslExtension);
+        var psl = LoaderFiles.ResolvePreferHint(lookIn, executableHint, LoaderFiles.PslExtension);
         if (psl is null)
         {
             return new LfsConversionDecision(LfsConversionNeed.NoSource,

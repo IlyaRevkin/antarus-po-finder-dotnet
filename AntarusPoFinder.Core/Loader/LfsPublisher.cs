@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Loader;
 
@@ -36,10 +37,20 @@ public static class LfsPublisher
 {
     public const string TempSuffix = ".part";
 
-    /// <summary>Существующие папки версии из тех, что нам дали. Несуществующая (сеть отвалилась,
-    /// локальной копии ещё нет) — не ошибка, просто не цель публикации.</summary>
+    /// <summary>Куда класть результат по папкам ВЕРСИИ, которые нам дали. Несуществующая (сеть
+    /// отвалилась, локальной копии ещё нет) — не ошибка, просто не цель публикации.
+    ///
+    /// Внутри перестроенной версии файлы прошивки живут в подпапке «Прошивка\», и собранный .lfs —
+    /// такой же файл прошивки, как лежащий рядом с ним .psl. Раньше здесь этого никто не знал, и
+    /// .lfs ложился в КОРЕНЬ папки версии — вперемешку с CHANGELOG.md и папками документов, отдельно
+    /// от собственного исходника. У неперестроенной версии подпапки нет, и всё остаётся как было:
+    /// решение принимает <see cref="VersionLayout.FirmwareWriteFolder"/>, единственное место, которое
+    /// вообще знает раскладку.</summary>
     public static LfsPublishPlan Plan(string? networkFolder, string? localFolder) =>
-        new(Existing(networkFolder), Existing(localFolder));
+        new(FirmwareTarget(networkFolder), FirmwareTarget(localFolder));
+
+    private static string? FirmwareTarget(string? versionFolder) =>
+        Existing(versionFolder) is { } dir ? VersionLayout.FirmwareWriteFolder(dir) : null;
 
     /// <summary>Кладёт файл в папку через временное имя. Возвращает итоговый путь.</summary>
     public static string Publish(string builtFile, string destDir)

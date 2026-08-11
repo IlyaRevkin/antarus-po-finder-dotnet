@@ -242,7 +242,15 @@ public static class DiskLayoutMigrator
             // завести их надо даже там, где файлы уже внизу (прерванный прогон) или где их не
             // осталось вовсе.
             var files = TopLevelFiles(dir).Where(f => !VersionLayout.IsServiceFile(f)).ToList();
-            if (files.Count == 0 && VersionLayout.HasAllFolders(dir)) continue;
+            // Подпапки самого проекта (KINCO разворачивается в «plc» и «hmi») переезжают вместе с
+            // файлами: без этого перестройка уносила вниз только то, что лежало отдельными файлами, а
+            // программа ПЛК так и оставалась в «plc\» в корне версии.
+            var strays = VersionLayout.StrayProjectFolders(dir);
+            if (files.Count == 0 && strays.Count == 0 && VersionLayout.HasAllFolders(dir)) continue;
+
+            var moving = new List<string>();
+            if (files.Count > 0) moving.Add($"файлов {files.Count}");
+            if (strays.Count > 0) moving.Add($"папок проекта {strays.Count}");
 
             ops.Add(new Op
             {
@@ -251,8 +259,8 @@ public static class DiskLayoutMigrator
                 Target = VersionLayout.FirmwareFolder(dir),
                 VersionDir = dir,
                 RecordPaths = dbPaths,
-                Note = files.Count > 0
-                    ? $"{first.VersionRaw}: файлов {files.Count} → «{VersionLayout.FirmwareFolderName}», папки версии"
+                Note = moving.Count > 0
+                    ? $"{first.VersionRaw}: {string.Join(", ", moving)} → «{VersionLayout.FirmwareFolderName}», папки версии"
                     : $"{first.VersionRaw}: завести недостающие папки версии",
             });
         }
@@ -556,10 +564,14 @@ public static class DiskLayoutMigrator
             .Where(f => !VersionLayout.IsServiceFile(f))
             .ToList();
 
+        // Подпапки проекта считаем ДО EnsureFolders: после него в корне появятся пять собственных
+        // папок версии, но StrayProjectFolders их и так не берёт — порядок здесь про наглядность.
+        var strays = VersionLayout.StrayProjectFolders(versionDir);
+
         // Пять папок версии — и когда есть что переносить, и когда файлы уже наверху не лежат:
         // операция могла быть запланирована ровно ради недостающих папок (см. PlanFoldIntoVersion).
         var createdFolders = VersionLayout.EnsureFolders(versionDir);
-        if (files.Count == 0) return createdFolders > 0;
+        if (files.Count == 0 && strays.Count == 0) return createdFolders > 0;
 
         var target = VersionLayout.FirmwareFolder(versionDir);
 
@@ -572,6 +584,18 @@ public static class DiskLayoutMigrator
             // не вправе, он останется наверху и попадёт в следующий прогон.
             if (File.Exists(dst)) continue;
             File.Move(file, dst);
+            moved++;
+        }
+
+        // Папка проекта переезжает целиком, со всей вложенностью: «plc» проекта KINCO — это не
+        // «какие-то файлы рядом», а часть прошивки, и разбирать её на файлы нельзя.
+        foreach (var stray in strays)
+        {
+            var dst = Path.Combine(target, Path.GetFileName(stray));
+            // Занятая цель — тот же принцип, что и у файлов: чужое не трогаем, папка остаётся
+            // наверху и попадёт в следующий прогон (или в чистильщик).
+            if (Directory.Exists(dst) || File.Exists(dst)) continue;
+            Directory.Move(stray, dst);
             moved++;
         }
         return moved > 0 || createdFolders > 0;

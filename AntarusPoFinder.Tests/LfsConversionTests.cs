@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AntarusPoFinder.Core.Loader;
+using AntarusPoFinder.Core.Services;
 using AntarusPoFinder.Tests.TestHelpers;
 
 namespace AntarusPoFinder.Tests;
@@ -289,5 +290,75 @@ public class LfsConversionTests
         var plan = LfsPublisher.Plan(network, local);
 
         Assert.Equal(new[] { network, local }, plan.Folders);
+    }
+
+    // ── Куда именно ложится собранный файл ────────────────────────────────
+    // Жалоба Ильи: «когда он создаёт LFS, он кладёт не в папку Прошивка, а в корень папки версии».
+
+    [Fact]
+    public void Plan_RebuiltVersion_TargetsFirmwareSubfolder()
+    {
+        using var root = new TempRoot();
+        var (network, local, _) = Layout(root);
+        var networkFirmware = VersionLayout.FirmwareFolder(network);
+        var localFirmware = VersionLayout.FirmwareFolder(local);
+        Directory.CreateDirectory(networkFirmware);
+        Directory.CreateDirectory(localFirmware);
+
+        var plan = LfsPublisher.Plan(network, local);
+
+        Assert.Equal(networkFirmware, plan.NetworkFolder);
+        Assert.Equal(localFirmware, plan.LocalFolder);
+    }
+
+    [Fact]
+    public void Plan_VersionWithoutFirmwareFolder_StaysInVersionRoot()
+    {
+        // Режим совместимости: у неперестроенной версии подпапки нет, и заводить её тут нельзя —
+        // коллеги со старым клиентом смотрят только в корень папки версии.
+        using var root = new TempRoot();
+        var (network, _, _) = Layout(root);
+
+        var plan = LfsPublisher.Plan(network, null);
+
+        Assert.Equal(network, plan.NetworkFolder);
+    }
+
+    [Fact]
+    public async Task BuildAndPublish_RebuiltVersion_PutsLfsNextToItsSource()
+    {
+        using var root = new TempRoot();
+        var (network, _, workspace) = Layout(root);
+        var firmware = VersionLayout.FirmwareFolder(network);
+        Directory.CreateDirectory(firmware);
+        // Исходник лежит там, где ему и положено у перестроенной версии.
+        File.WriteAllText(Path.Combine(firmware, "проект.psl"), "исходник");
+
+        var decision = LfsConversionService.Decide(network, null, null);
+        Assert.Equal(LfsConversionNeed.Build, decision.Need);
+
+        var result = await LfsConversionService.BuildAndPublishAsync(
+            new FakeBuildBackend(), decision.Plan!, workspace, "1.0.0001.0001",
+            new NullProgress(), CancellationToken.None);
+
+        Assert.Equal(LfsConversionStatus.Built, result.Status);
+        Assert.Equal(Path.Combine(firmware, "проект.lfs"), Assert.Single(result.Published));
+        // В корне папки версии не должно появиться ничего.
+        Assert.Empty(Directory.EnumerateFiles(network));
+    }
+
+    [Fact]
+    public void Decide_LfsLeftInVersionRootByOlderVersion_IsStillFound()
+    {
+        // Диск перестроили, но собранный до этого .lfs так и лежит в корне. Предлагать собрать его
+        // заново — значит гонять сборку минут на десять ради файла, который уже есть.
+        using var root = new TempRoot();
+        var (network, _, _) = Layout(root);
+        Directory.CreateDirectory(VersionLayout.FirmwareFolder(network));
+        File.WriteAllText(Path.Combine(network, "проект.lfs"), "собран давно");
+
+        var decision = LfsConversionService.Decide(network, null, null);
+
+        Assert.Equal(LfsConversionNeed.AlreadyPresent, decision.Need);
     }
 }

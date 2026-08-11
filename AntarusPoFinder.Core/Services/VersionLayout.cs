@@ -54,6 +54,34 @@ public static class VersionLayout
         string.Equals(Path.GetFileName(path), ChangelogFile.FileName, StringComparison.OrdinalIgnoreCase)
         || DocFileResolver.IsShortcut(path);
 
+    /// <summary>Папка внутри версии, которая принадлежит самой раскладке, — «Прошивка» и четыре папки
+    /// документов. Всё остальное, что лежит в корне папки версии подпапкой, туда не относится и почти
+    /// всегда является ЧАСТЬЮ ПРОЕКТА: проект KINCO разворачивается своими подпапками <c>plc</c> и
+    /// <c>hmi</c>, и когда его контенты легли в корень версии (загрузка до перестройки диска),
+    /// программа ПЛК оказывается в <c>plc\</c> вместо «Прошивка\» — ровно та жалоба, из-за которой эта
+    /// проверка и появилась.
+    ///
+    /// «ОПЦ» и «Паспорт» тоже считаются своими: это соседние узлы иерархии, а не части проекта, и
+    /// затаскивать их внутрь «Прошивка\» нельзя (см. HierarchyFolders).</summary>
+    public static bool IsVersionOwnFolder(string folderName) =>
+        string.Equals(folderName, FirmwareFolderName, StringComparison.OrdinalIgnoreCase)
+        || SlotFolderNames.Any(slot => string.Equals(folderName, slot, StringComparison.OrdinalIgnoreCase))
+        || string.Equals(folderName, HierarchyFolders.Opc, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(folderName, HierarchyFolders.Passports, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Подпапки в корне версии, которые на самом деле принадлежат проекту прошивки и должны
+    /// жить в «Прошивка\» рядом с ним. Недоступная папка — пустой список: чинить недоступное нельзя.</summary>
+    public static IReadOnlyList<string> StrayProjectFolders(string versionDir)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(versionDir, "*", SearchOption.TopDirectoryOnly)
+                .Where(d => !IsVersionOwnFolder(Path.GetFileName(d)))
+                .ToList();
+        }
+        catch (Exception) { return Array.Empty<string>(); }
+    }
+
     public static string FirmwareFolder(string versionDir) => Path.Combine(versionDir, FirmwareFolderName);
 
     public static string SlotFolder(string versionDir, string slot) => Path.Combine(versionDir, slot);
