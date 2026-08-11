@@ -60,9 +60,16 @@ public partial class Database
     public void DeleteFwAttachmentKind(string name)
     {
         name = (name ?? "").Trim();
+        if (name.Length == 0) return;
+
+        // Отметка ставится на ТО ЖЕ написание, что лежало в списке: у кириллицы «Прочее» и «прочее»
+        // для SQLite разные строки (NOCASE — только латиница), и пометив удалённым второе, мы завели
+        // бы в flat_list_state вторую запись про тот же вид — а импорт строит по ней словарь с
+        // OrdinalIgnoreCase и на дубликате ключа падает.
+        var stored = GetFwAttachmentKinds().FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) ?? name;
         ExecuteNonQuery("DELETE FROM fw_attachment_kinds WHERE name=@n COLLATE NOCASE",
-            cmd => cmd.Parameters.AddWithValue("@n", name));
-        MarkFlatListDeleted(FlatKindAttachmentKind, name);
+            cmd => cmd.Parameters.AddWithValue("@n", stored));
+        MarkFlatListDeleted(FlatKindAttachmentKind, stored);
     }
 
     /// <summary>Стартовый набор видов (см. FwAttachmentKinds.Defaults). Разовый флаг, а не «сеем,
