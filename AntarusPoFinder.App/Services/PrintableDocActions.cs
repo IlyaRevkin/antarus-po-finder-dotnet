@@ -91,6 +91,33 @@ public static class PrintableDocActions
         }
     }
 
+    /// <summary>Открыть проводник на этом файле и ВЫДЕЛИТЬ его. Не то же, что «открыть файл»: файл,
+    /// который нужен другой программе (прошивка ПЛК от поставщика — её кладут в среду разработки
+    /// контроллера перетаскиванием), открывать нечем и незачем, а вот дотянуться до него мышью
+    /// нужно — из выделенного в проводнике файла его и перетаскивают.
+    ///
+    /// Папку тоже принимает (тогда просто открывает её), а у исчезнувшего файла открывает
+    /// родительскую папку: «проводник не открылся вообще» — худший ответ из возможных.</summary>
+    public static void Reveal(string path)
+    {
+        try
+        {
+            var args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                var parent = Path.GetDirectoryName(path);
+                if (parent is null || !Directory.Exists(parent)) return;
+                args = $"\"{parent}\"";
+            }
+            Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // Проводник не запустился (крайне редкий случай) — показывать окно с ошибкой ради этого
+            // незачем: человек нажмёт ещё раз или откроет папку сам.
+        }
+    }
+
     public static void Open(string path)
     {
         try
