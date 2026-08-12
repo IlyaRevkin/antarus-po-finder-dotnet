@@ -300,7 +300,20 @@ public static class LabelPlanner
         bool stacked;
         var headlinePt = HeadlinePtFor(v);
 
-        if (hasText)
+        if (v.HeadlinePlace is HeadlinePlacement.Top or HeadlinePlacement.Bottom)
+        {
+            // Подпись попросили отдельной полосой — она берёт своё место ПЕРВОЙ, и код с текстом
+            // делят остаток. Это ровно то, чего избегает режим «сам» (полоса отнимает высоту у кода),
+            // но выбор осознанный: на крупной наклейке подпись во всю ширину читается заметно лучше.
+            var atBottom = v.HeadlinePlace == HeadlinePlacement.Bottom;
+            (headlineBox, headlinePt) = PlanHeadline(v, belowCaption, warnings, atBottom);
+            var forRest = headlineBox.IsEmpty
+                ? belowCaption
+                : new LabelBox(belowCaption.X, atBottom ? belowCaption.Y : belowCaption.Y + headlineBox.H + CaptionGapMm,
+                    belowCaption.W, Math.Max(0, belowCaption.H - headlineBox.H - CaptionGapMm));
+            (qr, textArea, stacked) = PlanQrAndText(v, forRest, hasText, warnings);
+        }
+        else if (hasText)
         {
             (qr, textArea, stacked) = PlanQrAndText(v, belowCaption, hasText, warnings);
             if (!textArea.IsEmpty)
@@ -358,7 +371,8 @@ public static class LabelPlanner
     /// область ТЕКСТА, а не полоса, отрезанная у кода). Пустой текст — блока нет вовсе; длинная
     /// строка сначала ужимается кеглем, а если и это не помогает, честно предупреждаем и отдаём ей
     /// не больше <see cref="HeadlineShareMax"/> высоты области.</summary>
-    private static (LabelBox Box, double Pt) PlanHeadline(LabelLayout v, LabelBox area, List<string> warnings)
+    private static (LabelBox Box, double Pt) PlanHeadline(LabelLayout v, LabelBox area, List<string> warnings,
+        bool atBottom = false)
     {
         var text = v.EffectiveHeadline();
         var pt = HeadlinePtFor(v);
@@ -385,7 +399,7 @@ public static class LabelPlanner
         if (shown < lines)
             warnings.Add("Подпись назначения длиннее двух строк — на этикетке поместится только её начало. Сократите текст.");
 
-        return (new LabelBox(area.X, area.Y, area.W, height), pt);
+        return (new LabelBox(area.X, atBottom ? area.Bottom - height : area.Y, area.W, height), pt);
     }
 
     /// <summary>Печатная область. Сдвиг здесь не просто двигает содержимое (так и уезжал текст за
@@ -457,7 +471,11 @@ public static class LabelPlanner
     }
 
     /// <summary>Код и место под текст. Сторона кода — не больше того, что реально осталось: заданная
-    /// в настройках величина именно ограничивается, а не «побеждает» остальные блоки.</summary>
+    /// в настройках величина именно ограничивается, а не «побеждает» остальные блоки.
+    ///
+    /// Сторона кода при этом не зависит от того, куда его попросили поставить, — зависит только от
+    /// того, стоит текст РЯДОМ с кодом или ПОД (НАД) ним: в первом случае код ограничен шириной за
+    /// вычетом текстовой колонки, во втором — высотой за вычетом двух строк текста.</summary>
     private static (LabelBox Qr, LabelBox Text, bool Stacked) PlanQrAndText(
         LabelLayout v, LabelBox upper, bool hasText, List<string> warnings)
     {
@@ -465,9 +483,20 @@ public static class LabelPlanner
 
         var wanted = v.QrMm > 0 ? v.QrMm : double.MaxValue;   // 0 — «сам», берём максимум по месту
         var side = Math.Min(wanted, Math.Min(upper.W, upper.H));
-        var stacked = false;
 
-        if (hasText)
+        if (!hasText)
+        {
+            // Текста нет — код по центру, куда бы его ни просили поставить: прижимать его к краю
+            // пустой этикетки не за чем, а место вокруг всё равно ничем не занять.
+            WarnAboutSide(v, side, warnings);
+            return (new LabelBox(upper.X + (upper.W - side) / 2, upper.Y + (upper.H - side) / 2, side, side),
+                default, false);
+        }
+
+        var place = v.QrPlace;
+        var stacked = place is QrPlacement.Above or QrPlacement.Below;
+
+        if (!stacked)
         {
             var forColumn = upper.W - GapMm - MinTextMm;
             if (side > forColumn)
@@ -479,40 +508,54 @@ public static class LabelPlanner
                 else
                 {
                     // Рядом с кодом текстовой колонке не остаётся ширины — ставим текст под код.
+                    // В режиме «сам» это штатный ход, а вот заданное человеком «слева»/«справа» мы
+                    // молча не переигрываем: он должен видеть, почему получилось не как просил.
+                    if (place != QrPlacement.Auto)
+                        warnings.Add("Рядом с кодом не остаётся ширины под название — код переставлен над текстом. " +
+                                     "Нужна этикетка шире или код мельче.");
                     stacked = true;
-                    var forStack = upper.H - GapMm - LineHeightMm(MinTitlePt) * 2;
-                    side = Math.Min(Math.Min(wanted, upper.W), Math.Max(MinQrMm, forStack));
-                    side = Math.Min(side, upper.H);
+                    place = QrPlacement.Above;
                 }
             }
         }
 
+        if (stacked)
+        {
+            var forStack = upper.H - GapMm - LineHeightMm(MinTitlePt) * 2;
+            side = Math.Min(Math.Min(wanted, upper.W), Math.Max(MinQrMm, forStack));
+            side = Math.Min(side, upper.H);
+        }
+
+        WarnAboutSide(v, side, warnings);
+
+        var (qr, text) = place switch
+        {
+            QrPlacement.Right => (
+                new LabelBox(upper.Right - side, upper.Y + (upper.H - side) / 2, side, side),
+                new LabelBox(upper.X, upper.Y, Math.Max(0, upper.W - side - GapMm), upper.H)),
+            QrPlacement.Below => (
+                new LabelBox(upper.X + (upper.W - side) / 2, upper.Bottom - side, side, side),
+                new LabelBox(upper.X, upper.Y, upper.W, Math.Max(0, upper.H - side - GapMm))),
+            QrPlacement.Above => (
+                new LabelBox(upper.X + (upper.W - side) / 2, upper.Y, side, side),
+                new LabelBox(upper.X, upper.Y + side + GapMm, upper.W, Math.Max(0, upper.H - side - GapMm))),
+            _ => (
+                new LabelBox(upper.X, upper.Y + (upper.H - side) / 2, side, side),
+                new LabelBox(upper.X + side + GapMm, upper.Y, Math.Max(0, upper.W - side - GapMm), upper.H)),
+        };
+
+        if (text.IsEmpty)
+            warnings.Add("Для заголовка не осталось места — печатается только код.");
+
+        return (qr, text, stacked);
+    }
+
+    private static void WarnAboutSide(LabelLayout v, double side, List<string> warnings)
+    {
         if (v.QrMm > 0 && side < v.QrMm - 0.01)
             warnings.Add($"Сторона QR уменьшена до {Mm(side)} мм — заданные {Mm(v.QrMm)} мм не помещаются в печатную область.");
         if (side < MinQrMm - 0.01)
             warnings.Add($"Код получился меньше {Mm(MinQrMm)} мм — телефон может его не взять. Нужна этикетка крупнее.");
-
-        LabelBox qr, text;
-        if (!hasText)
-        {
-            qr = new LabelBox(upper.X + (upper.W - side) / 2, upper.Y + (upper.H - side) / 2, side, side);
-            text = default;
-        }
-        else if (stacked)
-        {
-            qr = new LabelBox(upper.X + (upper.W - side) / 2, upper.Y, side, side);
-            text = new LabelBox(upper.X, upper.Y + side + GapMm, upper.W, Math.Max(0, upper.H - side - GapMm));
-        }
-        else
-        {
-            qr = new LabelBox(upper.X, upper.Y + (upper.H - side) / 2, side, side);
-            text = new LabelBox(upper.X + side + GapMm, upper.Y, Math.Max(0, upper.W - side - GapMm), upper.H);
-        }
-
-        if (hasText && text.IsEmpty)
-            warnings.Add("Для заголовка не осталось места — печатается только код.");
-
-        return (qr, text, stacked);
     }
 
     /// <summary>Кегль заголовка подбирается под отведённый прямоугольник: заданные 16 пт на узкой

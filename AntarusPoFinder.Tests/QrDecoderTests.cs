@@ -134,6 +134,24 @@ public class QrDecoderTests
         return 0;
     });
 
+    /// <summary>Каждый вид кода читается настоящим декодером. Форма клетки — «скруглённый», «точками»
+    /// или обычный квадрат — не двигает ни центр клетки, ни её размер, но проверять это словами нельзя:
+    /// вид выбирает человек в окне этикетки, и нечитаемым не имеет права оказаться ни один.
+    ///
+    /// Подпись в центре берётся длинная, в три строки: окошко под неё то же самое, но проверяется
+    /// заодно и то, что многострочная плашка не отъедает у кода лишнего.</summary>
+    [Theory]
+    [InlineData(QrStyle.Rounded)]
+    [InlineData(QrStyle.Dots)]
+    [InlineData(QrStyle.Classic)]
+    public void EveryCodeStyle_IsActuallyReadable(QrStyle style) => OnStaThread(() =>
+    {
+        var code = QrArt.Build(Url, 600, "ИНСТРУКЦИЯ", style);
+
+        Assert.Equal(Url, Decode(code, 8 * QrArt.ModuleCountWithQuietZone(Url)));
+        return 0;
+    });
+
     /// <summary>Тот же код без окошка по центру — на случай, если подпись стёрли в настройках.</summary>
     [Fact]
     public void TheCodeWithoutTheCentreCaption_IsReadableToo() => OnStaThread(() =>

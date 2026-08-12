@@ -144,9 +144,12 @@ public partial class InstructionLabelWindow : Window
             CaptionPtInput.Text = Num(v.CaptionPt);
             ShowLinkCheck.IsChecked = v.ShowLink;
             ShowFrameCheck.IsChecked = v.ShowFrame;
-            FancyQrCheck.IsChecked = v.FancyQr;
+            SelectTag(QrStyleCombo, v.Style);
+            SelectTag(QrPlaceCombo, v.QrPlace);
             ShowHeadlineCheck.IsChecked = v.ShowHeadline;
             HeadlineInput.Text = v.HeadlineText;
+            SelectTag(HeadlinePlaceCombo, v.HeadlinePlace);
+            SelectTag(HeadlineAlignCombo, v.HeadlineAlign);
             HoleTextInput.Text = v.HoleText;
         }
         finally
@@ -154,6 +157,27 @@ public partial class InstructionLabelWindow : Window
             _filling = false;
         }
     }
+
+    /// <summary>Значения перечислений лежат в Tag пунктов списка (см. XAML): выбор человека и
+    /// значение настройки связаны напрямую, без порядковых номеров, которые ломаются от любой
+    /// перестановки пунктов местами.</summary>
+    private static void SelectTag<T>(ComboBox combo, T value) where T : struct, Enum
+    {
+        var wanted = value.ToString();
+        foreach (var item in combo.Items.OfType<ComboBoxItem>())
+        {
+            if (!string.Equals(item.Tag as string, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+            combo.SelectedItem = item;
+            return;
+        }
+        combo.SelectedIndex = 0;
+    }
+
+    private static T ReadTag<T>(ComboBox combo, T fallback) where T : struct, Enum =>
+        combo.SelectedItem is ComboBoxItem { Tag: string tag } &&
+        Enum.TryParse<T>(tag, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : fallback;
 
     private static string Num(double value) => value.ToString("0.##", CultureInfo.CurrentCulture);
 
@@ -178,8 +202,11 @@ public partial class InstructionLabelWindow : Window
         CaptionPt = Read(CaptionPtInput, _layout.CaptionPt),
         ShowLink = ShowLinkCheck.IsChecked == true,
         ShowFrame = ShowFrameCheck.IsChecked == true,
-        FancyQr = FancyQrCheck.IsChecked == true,
+        Style = ReadTag(QrStyleCombo, _layout.Style),
+        QrPlace = ReadTag(QrPlaceCombo, _layout.QrPlace),
         ShowHeadline = ShowHeadlineCheck.IsChecked == true,
+        HeadlinePlace = ReadTag(HeadlinePlaceCombo, _layout.HeadlinePlace),
+        HeadlineAlign = ReadTag(HeadlineAlignCombo, _layout.HeadlineAlign),
         // Текст читается СЫРЫМ, без Clamped-обрезки на каждое нажатие клавиши: иначе набор длинной
         // подписи обрубался бы прямо под пальцами. Приведение к рабочему виду делает Clamped ниже.
         HeadlineText = HeadlineInput.Text ?? "",
@@ -209,6 +236,7 @@ public partial class InstructionLabelWindow : Window
     private void Redraw()
     {
         LabelHost.Content = BuildLabel(out var plan);
+        ShowHoleHint();
 
         // Раскладка сама ужимает то, что не помещается, — значит, обрезанного содержимого не будет
         // ни при каких настройках. Но молчать о том, что напечатается не ровно заказанное, нельзя:
@@ -221,6 +249,25 @@ public partial class InstructionLabelWindow : Window
                            + $" · этикетка {_layout.SizeCaption()} мм · поля {Num(_layout.MarginMm)} мм"
                            + $" · QR {Num(plan.Qr.W)} мм"
                            + " · сменить принтер — Настройки → Печать";
+    }
+
+    /// <summary>Как именно ляжет подпись в центре кода. В предпросмотре она мелкая, и разбиение на
+    /// строки на глаз читается плохо — а от него зависит, влезет подпись или выродится в точки.</summary>
+    private void ShowHoleHint()
+    {
+        var hole = _layout.EffectiveHoleText();
+        if (hole.Length == 0)
+        {
+            HoleHintText.Text = _layout.FancyQr
+                ? "Пусто — код печатается сплошным, без окошка."
+                : "У классического кода окошка в центре нет.";
+            return;
+        }
+
+        var lines = QrHoleText.Wrap(hole);
+        HoleHintText.Text = lines.Count == 1
+            ? "Печатается одной строкой."
+            : $"Печатается в {lines.Count} строки: {string.Join(" / ", lines)}";
     }
 
     /// <summary>«ИНСТ» в окошке кода — не украшение: наклейки на шкафу оказываются рядом (паспорт,

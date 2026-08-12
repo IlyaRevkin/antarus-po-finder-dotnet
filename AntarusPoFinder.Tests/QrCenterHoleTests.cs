@@ -79,6 +79,45 @@ public class QrCenterHoleTests
         Assert.True(QrArt.Measure("ИНСТРУК", seven).Width <= inner.Width + 0.01);
     }
 
+    /// <summary>Ради этого подпись и разбивают на строки: в ширину плашке расти некуда, а в высоту
+    /// есть куда — те же буквы, разложенные в три строки, печатаются заметно крупнее, чем одной
+    /// строкой. Если однажды это перестанет быть правдой, разбиение потеряет смысл.</summary>
+    [Theory]
+    [InlineData("ИНСТРУКЦИЯ", 40)]
+    [InlineData("ИНСТРУКЦИЯ", 55)]
+    [InlineData("ОТК ПРОШИВКА", 55)]
+    public void WrappedCaption_PrintsBiggerThanTheSameTextInOneLine(string text, double sideMm)
+    {
+        var (side, step) = Code(sideMm);
+        var (_, _, inner) = QrArt.HoleGeometry(side, step);
+
+        var oneLine = QrArt.FitFontSize(text, inner);
+        var wrapped = QrArt.FitFontSize(AntarusPoFinder.Core.Services.QrHoleText.Format(text), inner);
+
+        Assert.True(wrapped > oneLine * 1.2,
+            $"«{text}» в строках печатается кеглем {wrapped:0.##} против {oneLine:0.##} одной строкой — выигрыша нет");
+    }
+
+    /// <summary>И при этом многострочная подпись остаётся внутри плашки: плашка не растёт ни при
+    /// каком числе строк.</summary>
+    [Theory]
+    [InlineData("ИНСТРУКЦИЯ", 25)]
+    [InlineData("ИНСТРУКЦИЯ", 55)]
+    [InlineData("ЩИТ ПЖ НАЛАДКА", 40)]
+    public void WrappedCaption_StaysInsideThePlate(string text, double sideMm)
+    {
+        var (side, step) = Code(sideMm);
+        var (_, _, inner) = QrArt.HoleGeometry(side, step);
+
+        var lines = AntarusPoFinder.Core.Services.QrHoleText.Format(text);
+        var measured = QrArt.Measure(lines, QrArt.FitFontSize(lines, inner));
+
+        Assert.True(measured.Width <= inner.Width + 0.01,
+            $"«{text}» шире окна плашки: {measured.Width:0.##} > {inner.Width:0.##}");
+        Assert.True(measured.Height <= inner.Height + 0.01,
+            $"«{text}» выше окна плашки: {measured.Height:0.##} > {inner.Height:0.##}");
+    }
+
     /// <summary>Пустая подпись — окна нет вовсе; вырожденные размеры не должны ронять расчёт.</summary>
     [Fact]
     public void FitFontSize_SurvivesDegenerateInput()

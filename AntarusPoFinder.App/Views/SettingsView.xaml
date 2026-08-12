@@ -841,6 +841,12 @@
                                     <Button Grid.Column="1" Content="Проверить ссылку" Style="{StaticResource SecondaryButton}" Click="CheckInstructionUrl_Click"
                                             ToolTip="Запросить собранный адрес и показать, что ответил сервер"/>
                                 </Grid>
+                                <!-- Тот же адрес показан на странице «Хранилище»: он и правда нужен
+                                     обоим — по нему инструкция открывается с хостинга и он же уходит
+                                     в QR. Настройка одна (instruction_base_url), правится в любом из
+                                     двух мест. -->
+                                <TextBlock Text="Эта же настройка есть на странице «Хранилище» → «Реквизиты»."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
                                 <TextBlock x:Name="InstructionUrlCheckText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
                                 <Grid Margin="0,0,0,10">
@@ -870,11 +876,19 @@
                                 <CheckBox x:Name="LabelShowHeadlineCheck" Content="Печатать подпись назначения"
                                           Margin="0,0,0,10" Click="LabelShowHeadline_Click"/>
 
-                                <TextBlock Text="Подпись в центре фирменного кода (до 6 знаков):" Margin="0,0,0,4"/>
-                                <TextBox x:Name="LabelHoleTextInput" Width="120" HorizontalAlignment="Left" Height="34"
-                                         Margin="0,0,0,10" MaxLength="6"
+                                <TextBlock Text="Подпись в центре фирменного кода (до 15 знаков):" Margin="0,0,0,4"/>
+                                <TextBox x:Name="LabelHoleTextInput" Width="180" HorizontalAlignment="Left" Height="34"
+                                         Margin="0,0,0,4" MaxLength="15"
                                          LostFocus="LabelHoleText_LostFocus" KeyDown="PrintingField_KeyDown"
-                                         ToolTip="Например «ИНСТ». Пусто — код печатается сплошным, без окошка."/>
+                                         ToolTip="Например «ИНСТ». Длиннее четырёх знаков — печатается в две-три строки, так буквы получаются крупнее. Пусто — код печатается сплошным, без окошка."/>
+
+                                <!-- Остальное про вид наклейки (положение кода, его вид, положение и
+                                     выравнивание подписи назначения, поля, сдвиг, кегли) правится в
+                                     окне «QR инструкции» — там же, где это видно на предпросмотре.
+                                     Дублировать полтора десятка ручек ещё и здесь значило бы
+                                     настраивать вслепую. -->
+                                <TextBlock Text="Положение кода, его вид, положение подписи назначения, поля и кегли — в окне «QR инструкции»: там всё это сразу видно на предпросмотре."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             </StackPanel>
 
                             <TextBlock Text="Принтер этикеток (на этом компьютере):" Margin="0,0,0,4"/>

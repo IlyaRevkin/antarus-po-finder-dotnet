@@ -70,6 +70,28 @@
                     <TextBlock Text="Сторона QR, мм (0 — сам)" Style="{StaticResource MutedText}"/>
                     <TextBox x:Name="QrInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8" TextChanged="Layout_Changed"/>
 
+                    <!-- Положение кода и его вид. До сих пор раскладка была одна на всех: код слева,
+                         текст колонкой справа. На разных наклейках удобно по-разному, а увидеть, что
+                         получилось, всё равно можно только здесь — поэтому обе ручки стоят рядом с
+                         предпросмотром. -->
+                    <TextBlock Text="Положение кода" Style="{StaticResource MutedText}"
+                               ToolTip="Где стоит код относительно названия. «Сам» — как было: слева, а на узкой наклейке над текстом."/>
+                    <ComboBox x:Name="QrPlaceCombo" Margin="0,2,0,8" SelectionChanged="Layout_Changed">
+                        <ComboBoxItem Content="Сам" Tag="Auto"/>
+                        <ComboBoxItem Content="Слева от текста" Tag="Left"/>
+                        <ComboBoxItem Content="Справа от текста" Tag="Right"/>
+                        <ComboBoxItem Content="Над текстом" Tag="Above"/>
+                        <ComboBoxItem Content="Под текстом" Tag="Below"/>
+                    </ComboBox>
+
+                    <TextBlock Text="Вид кода" Style="{StaticResource MutedText}"
+                               ToolTip="Форма клеток. На считывание не влияет — сканер берёт пробу в середине клетки. «Классический» — обычная растровая матрица, запасной вариант на случай упрямого сканера; у него нет окошка с подписью в центре."/>
+                    <ComboBox x:Name="QrStyleCombo" Margin="0,2,0,8" SelectionChanged="Layout_Changed">
+                        <ComboBoxItem Content="Скруглённый" Tag="Rounded"/>
+                        <ComboBoxItem Content="Точками" Tag="Dots"/>
+                        <ComboBoxItem Content="Классический" Tag="Classic"/>
+                    </ComboBox>
+
                     <TextBlock Text="Кегль заголовка / ссылки, пт" Style="{StaticResource MutedText}"/>
                     <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
                         <TextBox x:Name="TitlePtInput" Width="80" TextChanged="Layout_Changed"/>
@@ -86,16 +108,30 @@
                     <TextBox x:Name="HeadlineInput" Margin="0,2,0,8" TextChanged="Layout_Changed" MaxLength="60"
                              ToolTip="Например: «Инструкция по эксплуатации — наведите камеру». Не длиннее двух строк на этикетке."/>
 
+                    <TextBlock Text="Положение подписи назначения" Style="{StaticResource MutedText}"
+                               ToolTip="«Сам» — подпись идёт первой строкой рядом с кодом и ничего у него не отнимает. «Сверху»/«снизу» — полосой во всю ширину: читается заметнее, но забирает высоту у кода."/>
+                    <ComboBox x:Name="HeadlinePlaceCombo" Margin="0,2,0,8" SelectionChanged="Layout_Changed">
+                        <ComboBoxItem Content="Сам" Tag="Auto"/>
+                        <ComboBoxItem Content="Полосой сверху" Tag="Top"/>
+                        <ComboBoxItem Content="Полосой снизу" Tag="Bottom"/>
+                    </ComboBox>
+
+                    <TextBlock Text="Выравнивание подписи" Style="{StaticResource MutedText}"/>
+                    <ComboBox x:Name="HeadlineAlignCombo" Margin="0,2,0,8" SelectionChanged="Layout_Changed">
+                        <ComboBoxItem Content="По центру" Tag="Center"/>
+                        <ComboBoxItem Content="По левому краю" Tag="Left"/>
+                        <ComboBoxItem Content="По правому краю" Tag="Right"/>
+                    </ComboBox>
+
                     <TextBlock Text="Подпись в центре кода" Style="{StaticResource MutedText}"
-                               ToolTip="До шести знаков — плашка в центре кода маленькая. Пусто — кода без окошка."/>
-                    <TextBox x:Name="HoleTextInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8"
-                             TextChanged="Layout_Changed" MaxLength="6"/>
+                               ToolTip="До 15 знаков. Длиннее четырёх — верстается в две-три строки: так те же буквы получаются крупнее, потому что плашке расти некуда. Пусто — код без окошка."/>
+                    <TextBox x:Name="HoleTextInput" Margin="0,2,0,2"
+                             TextChanged="Layout_Changed" MaxLength="15"/>
+                    <TextBlock x:Name="HoleHintText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                     <CheckBox x:Name="ShowLinkCheck" Content="Печатать ссылку текстом" Margin="0,0,0,4" Click="Layout_Changed"
                               ToolTip="Запасной путь, когда телефон код не берёт. На узкой этикетке можно выключить."/>
-                    <CheckBox x:Name="ShowFrameCheck" Content="Рамка по краю" Margin="0,0,0,4" Click="Layout_Changed"/>
-                    <CheckBox x:Name="FancyQrCheck" Content="Фирменный QR" Margin="0,0,0,8" Click="Layout_Changed"
-                              ToolTip="Векторный код со скруглёнными модулями и подписью в центре. Снимите галочку, если какой-то сканер его не берёт."/>
+                    <CheckBox x:Name="ShowFrameCheck" Content="Рамка по краю" Margin="0,0,0,8" Click="Layout_Changed"/>
 
                     <Button Content="Сохранить как настройки по умолчанию" Style="{StaticResource SecondaryButton}"
                             Margin="0,4,0,4" Click="SaveLayout_Click"

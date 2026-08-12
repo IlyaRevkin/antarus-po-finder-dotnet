@@ -2,6 +2,53 @@ using System.Globalization;
 
 namespace AntarusPoFinder.Core.Services;
 
+/// <summary>Где на этикетке стоит код относительно текста.
+///
+/// «Сам» — прежнее и единственное до сих пор поведение: код слева, текст колонкой справа, а если
+/// колонке не остаётся ширины — код сверху, текст под ним. Остальные значения ставят код туда, куда
+/// сказали: на разных наклейках и разных шкафах удобно по-разному, а единственная зашитая раскладка
+/// была ровно тем, на что и жаловались.</summary>
+public enum QrPlacement
+{
+    Auto,
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+/// <summary>Где печатается подпись назначения («Инструкция для заказчика»).
+///
+/// «Сам» — там, где она ничего не отнимает у кода: первой строкой в области текста. «Сверху»/«Снизу»
+/// — своей полосой во всю ширину, над всем содержимым или под ним: так подпись читается первой, но
+/// её полоса забирает высоту у кода. Выбор за тем, кто клеит: на крупной наклейке она ничего не
+/// портит, на мелкой — уводит код к пределу читаемости.</summary>
+public enum HeadlinePlacement
+{
+    Auto,
+    Top,
+    Bottom,
+}
+
+/// <summary>Как выровнена подпись назначения в своей строке.</summary>
+public enum HeadlineAlignment
+{
+    Center,
+    Left,
+    Right,
+}
+
+/// <summary>Вид самого кода. <see cref="Classic"/> — обычная чёрная матрица (запасной вариант на
+/// случай упрямого сканера), <see cref="Rounded"/> — фирменный со скруглёнными клетками,
+/// <see cref="Dots"/> — клетки точками. Все три читаются одинаково: скругление и форма клетки не
+/// меняют ни её центр, ни размер, а угловые маркеры во всех видах рисуются целиком.</summary>
+public enum QrStyle
+{
+    Rounded,
+    Classic,
+    Dots,
+}
+
 /// <summary>Макет этикетки с QR — всё, что задаёт её вид, одной записью. Отдельно от самой отрисовки
 /// (LabelPrinter живёт в App: там WPF), потому что настройки читаются и пишутся в Core и должны
 /// проверяться тестами без окна.
@@ -49,10 +96,18 @@ public sealed record LabelLayout
     /// рулоне — только тратит тонер.</summary>
     public bool ShowFrame { get; init; } = true;
 
-    /// <summary>Рисованный QR (скруглённые модули, фирменные «глаза», подпись в центре) вместо
-    /// обычной чёрной матрицы. Читается теми же сканерами: уровень коррекции Q допускает потерю до
-    /// четверти кода, а вырез под подпись занимает заметно меньше.</summary>
-    public bool FancyQr { get; init; } = true;
+    /// <summary>Вид кода: скруглённый (по умолчанию), классическая матрица или точки. Читается во
+    /// всех трёх видах: форма клетки не меняет ни её центр, ни размер, а уровень коррекции Q
+    /// допускает потерю до четверти кода — вырез под подпись занимает заметно меньше.</summary>
+    public QrStyle Style { get; init; } = QrStyle.Rounded;
+
+    /// <summary>Рисованный QR — то есть любой вид, кроме классической растровой матрицы. Осталось
+    /// отдельным свойством, потому что от него зависит не только отрисовка: у классического кода нет
+    /// окошка под подпись в центре.</summary>
+    public bool FancyQr => Style != QrStyle.Classic;
+
+    /// <summary>Где стоит код относительно текста. По умолчанию «сам» — прежнее поведение.</summary>
+    public QrPlacement QrPlace { get; init; } = QrPlacement.Auto;
 
     /// <summary>Строка над кодом, объясняющая, ЗАЧЕМ этот QR.
     ///
@@ -67,17 +122,29 @@ public sealed record LabelLayout
     /// подпись на мелкой наклейке и стереть заготовленный текст — разные намерения.</summary>
     public bool ShowHeadline { get; init; } = true;
 
-    /// <summary>Подпись в окошке по центру фирменного кода. Коротко — плашка маленькая, и длинная
-    /// строка в ней просто выродится в нечитаемый кегль (см. QrArt.FitFontSize). Пусто — окна нет
-    /// вовсе, код рисуется сплошным.</summary>
+    /// <summary>Где печатать подпись назначения. По умолчанию «сам» — прежнее поведение (первой
+    /// строкой в области текста, у кода она при этом ничего не забирает).</summary>
+    public HeadlinePlacement HeadlinePlace { get; init; } = HeadlinePlacement.Auto;
+
+    /// <summary>Выравнивание подписи назначения в её строке.</summary>
+    public HeadlineAlignment HeadlineAlign { get; init; } = HeadlineAlignment.Center;
+
+    /// <summary>Подпись в окошке по центру фирменного кода. Пусто — окна нет вовсе, код рисуется
+    /// сплошным. Длиннее <see cref="HoleWrapAfter"/> знаков — верстается в две-три строки (см.
+    /// <see cref="QrHoleText"/>): одной строкой «ИНСТРУКЦИЯ» вырождалась в нечитаемый кегль, потому
+    /// что плашке расти некуда, а в три строки те же буквы получаются заметно крупнее.</summary>
     public string HoleText { get; init; } = DefaultHoleText;
 
     public const string DefaultHeadline = "Инструкция для заказчика";
     public const string DefaultHoleText = "ИНСТ";
 
-    /// <summary>Столько знаков в подписи центра ещё читается на плашке в 20 % стороны кода; дальше
-    /// кегль падает ниже различимого на 203 dpi.</summary>
-    public const int MaxHoleTextLength = 6;
+    /// <summary>Столько знаков в подписи центра помещается в плашку в 20 % стороны кода, если верстать
+    /// её в три строки. Больше — кегль падает ниже различимого на 203 dpi, поэтому лишнее отсекается.</summary>
+    public const int MaxHoleTextLength = 15;
+
+    /// <summary>До скольких знаков подпись центра печатается одной строкой. Дословная просьба: «подпись
+    /// в центре чтобы могла в 2-3 строки по длине, если больше 4 букв».</summary>
+    public const int HoleWrapAfter = 4;
 
     /// <summary>Текст подписи над кодом с учётом галочки — то, что реально пойдёт на этикетку.</summary>
     public string EffectiveHeadline() => ShowHeadline ? (HeadlineText ?? "").Trim() : "";
@@ -148,9 +215,15 @@ public sealed record LabelLayout
         CaptionPt = cfg.LabelNumber("label_caption_pt", 9),
         ShowLink = cfg.LabelFlag("label_show_link", true),
         ShowFrame = cfg.LabelFlag("label_show_frame", true),
-        FancyQr = cfg.LabelFlag("label_fancy_qr", true),
+        // Вид кода раньше был галочкой «фирменный QR» (label_fancy_qr). На машинах, где её снимали,
+        // ключ так и лежит — новый ключ читается с оглядкой на него, иначе снятая когда-то галочка
+        // молча вернулась бы после обновления.
+        Style = ReadStyle(cfg.LabelText("label_qr_style", ""), cfg.LabelFlag("label_fancy_qr", true)),
+        QrPlace = ReadEnum(cfg.LabelText("label_qr_place", ""), QrPlacement.Auto),
         HeadlineText = cfg.LabelText("label_headline", DefaultHeadline),
         ShowHeadline = cfg.LabelFlag("label_show_headline", true),
+        HeadlinePlace = ReadEnum(cfg.LabelText("label_headline_place", ""), HeadlinePlacement.Auto),
+        HeadlineAlign = ReadEnum(cfg.LabelText("label_headline_align", ""), HeadlineAlignment.Center),
         HoleText = cfg.LabelText("label_hole_text", DefaultHoleText),
     }.Clamped();
 
@@ -167,11 +240,27 @@ public sealed record LabelLayout
         cfg.SetLabelNumber("label_caption_pt", v.CaptionPt);
         cfg.SetLabelFlag("label_show_link", v.ShowLink);
         cfg.SetLabelFlag("label_show_frame", v.ShowFrame);
+        cfg.SetLabelText("label_qr_style", v.Style.ToString());
+        // Старый ключ пишется и дальше: на соседней машине может стоять прежняя версия программы, а
+        // конфиг у нас общий — она обязана увидеть хотя бы «фирменный или классический».
         cfg.SetLabelFlag("label_fancy_qr", v.FancyQr);
+        cfg.SetLabelText("label_qr_place", v.QrPlace.ToString());
         cfg.SetLabelText("label_headline", v.HeadlineText);
         cfg.SetLabelFlag("label_show_headline", v.ShowHeadline);
+        cfg.SetLabelText("label_headline_place", v.HeadlinePlace.ToString());
+        cfg.SetLabelText("label_headline_align", v.HeadlineAlign.ToString());
         cfg.SetLabelText("label_hole_text", v.HoleText);
     }
+
+    /// <summary>Значение перечисления из настройки. Нечитаемое значение (пусто, чужая версия
+    /// программы записала неизвестное слово) — это не повод падать: берётся значение по умолчанию.</summary>
+    private static T ReadEnum<T>(string value, T fallback) where T : struct, Enum =>
+        Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed) ? parsed : fallback;
+
+    private static QrStyle ReadStyle(string value, bool fancy) =>
+        Enum.TryParse<QrStyle>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : fancy ? QrStyle.Rounded : QrStyle.Classic;
 
     public string SizeCaption() =>
         $"{WidthMm.ToString("0.##", CultureInfo.CurrentCulture)} × {HeightMm.ToString("0.##", CultureInfo.CurrentCulture)}";

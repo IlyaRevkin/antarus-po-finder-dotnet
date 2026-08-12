@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using AntarusPoFinder.Core.Services;
 using QRCoder;
 
 namespace AntarusPoFinder.App.Services;
@@ -53,8 +54,11 @@ public static class QrArt
     public static int ModuleCountWithQuietZone(string content) => Encode(content).ModuleMatrix.Count;
 
     /// <summary>Визуал кода стороной <paramref name="side"/> (в единицах WPF). <paramref name="hole"/>
-    /// — что написать в окошке по центру; пустая строка — окна нет вовсе.</summary>
-    public static FrameworkElement Build(string content, double side, string hole)
+    /// — что написать в окошке по центру; пустая строка — окна нет вовсе. <paramref name="style"/> —
+    /// форма клетки: она не меняет ни центр клетки, ни её размер, поэтому на считывание не влияет
+    /// (проверено настоящим декодером во всех видах, см. QrDecoderTests).</summary>
+    public static FrameworkElement Build(string content, double side, string hole,
+        QrStyle style = QrStyle.Rounded)
     {
         var matrix = Encode(content).ModuleMatrix;
         var total = matrix.Count;                    // данные + тихая зона с обеих сторон
@@ -81,7 +85,7 @@ public static class QrArt
                 // доставалась россыпь пятен вместо кода. Фирменный вид держится скруглением углов —
                 // соседние клетки при этом сливаются в скруглённые дорожки, как в любом «rounded QR».
                 var rect = new Rect((x + QuietModules) * step, (y + QuietModules) * step, step, step);
-                dots.Children.Add(new RectangleGeometry(rect, step * 0.25, step * 0.25));
+                dots.Children.Add(Module(rect, step, style));
             }
         }
 
@@ -89,13 +93,25 @@ public static class QrArt
         canvas.Children.Add(new Path { Data = dots, Fill = Brushes.Black });
 
         foreach (var (fx, fy) in new[] { (0, 0), (modules - 7, 0), (0, modules - 7) })
-            canvas.Children.Add(Finder((fx + QuietModules) * step, (fy + QuietModules) * step, step));
+            canvas.Children.Add(Finder((fx + QuietModules) * step, (fy + QuietModules) * step, step,
+                style == QrStyle.Classic ? 0 : FinderCornerRadius));
 
         // Плашка считается от стороны САМОГО КОДА, а не от визуала с тихой зоной: доля выреза
         // ограничена тем, что восстанавливает коррекция ошибок, и она про модули кода.
         if (hole.Length > 0) AddHole(canvas, side, modules * step, step, hole);
         return canvas;
     }
+
+    /// <summary>Геометрия одной клетки по выбранному виду. Клетка во всех видах занимает СВОЮ полную
+    /// ячейку и стоит по её центру — сканер берёт пробу в середине ячейки, поэтому вид на считывание
+    /// не влияет. «Точки» — единственный вид, где соседние клетки не смыкаются: на мелкой наклейке
+    /// это заметно хуже печатается, о чём и предупреждает раскладка (см. LabelPrinter).</summary>
+    private static Geometry Module(Rect cell, double step, QrStyle style) => style switch
+    {
+        QrStyle.Dots => new EllipseGeometry(cell),
+        QrStyle.Classic => new RectangleGeometry(cell),
+        _ => new RectangleGeometry(cell, step * 0.25, step * 0.25),
+    };
 
     /// <summary>Клетка внутри одного из трёх угловых маркеров 7×7.</summary>
     private static bool IsFinder(int x, int y, int modules) =>
@@ -112,7 +128,8 @@ public static class QrArt
     /// центр давал 1 : 0.5 : 3 : 0.5 : 1 вместо канонического 1 : 1 : 3 : 1 : 1. По этому соотношению
     /// сканер маркеры и ищет — не найдя их, он не видит кода ВООБЩЕ, сколько ни наводи камеру. Проверено
     /// настоящим декодером: QrDecoderTests, старая геометрия не читается ни в одном варианте.</summary>
-    private static FrameworkElement Finder(double left, double top, double step)
+    private static FrameworkElement Finder(double left, double top, double step,
+        double cornerRadius = FinderCornerRadius)
     {
         var group = new Canvas { Width = 7 * step, Height = 7 * step };
         Canvas.SetLeft(group, left);
@@ -124,8 +141,8 @@ public static class QrArt
         {
             Width = 7 * step,
             Height = 7 * step,
-            RadiusX = step * FinderCornerRadius,
-            RadiusY = step * FinderCornerRadius,
+            RadiusX = step * cornerRadius,
+            RadiusY = step * cornerRadius,
             Stroke = Brushes.Black,
             StrokeThickness = step,
         };
@@ -135,8 +152,8 @@ public static class QrArt
         {
             Width = 3 * step,
             Height = 3 * step,
-            RadiusX = step * FinderCornerRadius / 2,
-            RadiusY = step * FinderCornerRadius / 2,
+            RadiusX = step * cornerRadius / 2,
+            RadiusY = step * cornerRadius / 2,
             Fill = Brushes.Black,
         };
         Canvas.SetLeft(inner, 2 * step);
@@ -174,9 +191,24 @@ public static class QrArt
         return Math.Max(1, probe * scale);
     }
 
-    /// <summary>Размер строки в единицах WPF при заданном кегле — тем же начертанием, каким она потом
-    /// и печатается.</summary>
+    /// <summary>Размер подписи в единицах WPF при заданном кегле — тем же начертанием, каким она потом
+    /// и печатается. Многострочная подпись меряется построчно: ширина — по самой длинной строке,
+    /// высота — суммой. Именно ради этого длинную подпись и разбивают на строки (см.
+    /// <see cref="Core.Services.QrHoleText"/>): в ширину плашке расти некуда, а в высоту — есть куда.</summary>
     public static Size Measure(string text, double fontSize)
+    {
+        var width = 0.0;
+        var height = 0.0;
+        foreach (var line in (text ?? "").Replace("\r", "").Split('\n'))
+        {
+            var size = MeasureLine(line, fontSize);
+            width = Math.Max(width, size.Width);
+            height += size.Height;
+        }
+        return new Size(width, height);
+    }
+
+    private static Size MeasureLine(string text, double fontSize)
     {
         var formatted = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight,
@@ -200,6 +232,13 @@ public static class QrArt
     {
         var (size, border, inner) = HoleGeometry(codeSide, step);
 
+        // Строки считает ядро (одинаково для предпросмотра, печати и тестов), здесь они только
+        // меряются и рисуются. Межстрочный интервал фиксируется тем же замером, по которому подбирался
+        // кегль, — иначе трёхстрочная подпись рисовалась бы выше, чем под неё считали, и вылезала из
+        // плашки.
+        var lines = Core.Services.QrHoleText.Format(text);
+        var fontSize = FitFontSize(lines, inner);
+
         var box = new Border
         {
             Width = size,
@@ -210,11 +249,13 @@ public static class QrArt
             CornerRadius = new CornerRadius(size / 5),
             Child = new TextBlock
             {
-                Text = text,
+                Text = lines,
                 Foreground = Brushes.Black,
                 FontFamily = HoleFont,
                 FontWeight = FontWeights.Bold,
-                FontSize = FitFontSize(text, inner),
+                FontSize = fontSize,
+                LineHeight = MeasureLine("Ий", fontSize).Height,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextAlignment = TextAlignment.Center,

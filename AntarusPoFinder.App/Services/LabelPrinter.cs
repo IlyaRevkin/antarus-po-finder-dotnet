@@ -70,7 +70,8 @@ public static class LabelPrinter
     {
         var v = layout.Clamped();
         plan = LabelPlanner.Plan(v, title, subtitle, caption);
-        plan = WarnAboutModuleSize(plan, qrContent);
+        plan = WarnAboutModuleSize(plan, qrContent, v);
+        plan = WarnAboutHoleText(plan, qrContent, v, holeText);
 
         var page = new Canvas
         {
@@ -84,7 +85,7 @@ public static class LabelPrinter
 
         if (plan.Frame is { } frame) AddFrame(page, frame);
         if (!plan.Qr.IsEmpty) Place(page, BuildQrVisual(v, qrContent, MmToDiu(plan.Qr.W), holeText), plan.Qr);
-        if (plan.HasHeadline) Place(page, BuildHeadline(plan, v.EffectiveHeadline()), plan.Headline);
+        if (plan.HasHeadline) Place(page, BuildHeadline(plan, v), plan.Headline);
         if (plan.HasTitle) Place(page, BuildTexts(plan, title, subtitle), plan.Title);
         if (plan.HasCaption) Place(page, BuildCaption(plan, caption), plan.Caption);
 
@@ -96,7 +97,7 @@ public static class LabelPrinter
     /// модулей знает лишь тот, кто уже закодировал ссылку, а QRCoder живёт здесь, а не в Core.
     /// Молчать нельзя: код на 20 мм с длинной ссылкой выглядит в предпросмотре нормально, а
     /// телефоном не берётся — ровно та жалоба, из-за которой наклейку и переделывали.</summary>
-    private static LabelPlan WarnAboutModuleSize(LabelPlan plan, string qrContent)
+    private static LabelPlan WarnAboutModuleSize(LabelPlan plan, string qrContent, LabelLayout layout)
     {
         if (plan.Qr.IsEmpty || string.IsNullOrEmpty(qrContent)) return plan;
 
@@ -104,20 +105,68 @@ public static class LabelPrinter
         try { modules = QrArt.ModuleCountWithQuietZone(qrContent); }
         catch (Exception) { return plan; }
 
-        if (LabelPlanner.ModulesAreReadable(plan.Qr.W, modules, out var moduleMm)) return plan;
+        if (!LabelPlanner.ModulesAreReadable(plan.Qr.W, modules, out var moduleMm))
+        {
+            var text = $"Клетка кода — {moduleMm:0.00} мм при нужных {LabelPlanner.MinModuleMm:0.0} мм: телефон, скорее всего, " +
+                       "его не возьмёт. Увеличьте наклейку или сторону QR, либо сократите ссылку " +
+                       "(веб-адрес диска инструкций — на странице «Хранилище»).";
+            return Warn(plan, text);
+        }
 
-        var text = $"Клетка кода — {moduleMm:0.00} мм при нужных {LabelPlanner.MinModuleMm:0.0} мм: телефон, скорее всего, " +
-                   "его не возьмёт. Увеличьте наклейку или сторону QR, либо сократите ссылку " +
-                   "(Настройки → Печать, веб-адрес диска инструкций).";
-        return plan with { Warnings = plan.Warnings.Concat(new[] { text }).ToList() };
+        // «Точки» — единственный вид, где соседние клетки не смыкаются, и на 203 dpi каждая теряет по
+        // краю печатную точку. Пока клетка крупная, это только вид; ближе к пределу — уже риск.
+        if (layout.Style == QrStyle.Dots && moduleMm < DotsComfortableModuleMm)
+            return Warn(plan, $"Вид «точки» при клетке {moduleMm:0.00} мм печатается на грани: точки не смыкаются и " +
+                              "на термопринтере теряют по краю. Надёжнее «скруглённый» или код покрупнее.");
+
+        return plan;
     }
 
-    /// <summary>Подпись назначения («Инструкция для заказчика»). Полужирная и во всю ширину — её
-    /// задача объяснить наклейку с одного взгляда, до того как человек полезет за телефоном.</summary>
-    private static FrameworkElement BuildHeadline(LabelPlan plan, string text)
+    /// <summary>Клетка, ниже которой вид «точки» перестаёт быть просто украшением.</summary>
+    private const double DotsComfortableModuleMm = 0.6;
+
+    /// <summary>Подпись в центре кода тоже может выродиться: плашке расти некуда, и слишком длинная
+    /// подпись (даже разложенная в три строки) уходит в кегль, который на 203 dpi не разобрать. Молчать
+    /// об этом нельзя — увидят это уже на наклеенной этикетке.</summary>
+    private static LabelPlan WarnAboutHoleText(LabelPlan plan, string qrContent, LabelLayout layout, string holeText)
     {
-        var block = Text(text, plan.HeadlinePt, bold: true);
-        block.TextAlignment = TextAlignment.Center;
+        if (plan.Qr.IsEmpty || string.IsNullOrWhiteSpace(holeText) || !layout.FancyQr) return plan;
+
+        int modules;
+        try { modules = QrArt.ModuleCountWithQuietZone(qrContent); }
+        catch (Exception) { return plan; }
+        if (modules <= 0) return plan;
+
+        var step = MmToDiu(plan.Qr.W) / modules;
+        var codeSide = (modules - 2 * QrArt.QuietModules) * step;
+        var (_, _, inner) = QrArt.HoleGeometry(codeSide, step);
+        var pt = QrArt.FitFontSize(Core.Services.QrHoleText.Format(holeText), inner) * 72.0 / 96.0;
+
+        return pt >= MinHolePt
+            ? plan
+            : Warn(plan, $"Подпись в центре кода печатается кеглем {pt:0.#} пт — на принтере этикеток её будет не " +
+                         "разобрать. Сократите подпись или увеличьте сторону кода.");
+    }
+
+    /// <summary>Кегль, ниже которого подпись в плашке уже не читается на 203 dpi.</summary>
+    private const double MinHolePt = 5;
+
+    private static LabelPlan Warn(LabelPlan plan, string text) =>
+        plan with { Warnings = plan.Warnings.Concat(new[] { text }).ToList() };
+
+    /// <summary>Подпись назначения («Инструкция для заказчика»). Полужирная и во всю ширину — её
+    /// задача объяснить наклейку с одного взгляда, до того как человек полезет за телефоном.
+    /// Выравнивание задаётся настройкой: по центру наклейка выглядит опрятнее, но там, где подпись
+    /// стоит колонкой рядом с кодом, её чаще хотят прижать к тому же краю, что и название.</summary>
+    private static FrameworkElement BuildHeadline(LabelPlan plan, LabelLayout layout)
+    {
+        var block = Text(layout.EffectiveHeadline(), plan.HeadlinePt, bold: true);
+        block.TextAlignment = layout.HeadlineAlign switch
+        {
+            HeadlineAlignment.Left => TextAlignment.Left,
+            HeadlineAlignment.Right => TextAlignment.Right,
+            _ => TextAlignment.Center,
+        };
         block.TextTrimming = TextTrimming.CharacterEllipsis;
         return new Viewbox
         {
@@ -200,7 +249,7 @@ public static class LabelPrinter
     /// какой-то сканер вдруг заупрямится на скруглённом коде, галочку снимают и печатают привычный.</summary>
     private static FrameworkElement BuildQrVisual(LabelLayout layout, string content, double side, string holeText)
     {
-        if (layout.FancyQr) return QrArt.Build(content, side, holeText);
+        if (layout.FancyQr) return QrArt.Build(content, side, holeText, layout.Style);
 
         var image = new Image { Source = MakeQr(content), Width = side, Height = side };
         // Пиксельный QR не должен размываться интерполяцией при печати — иначе телефон его хуже ловит.

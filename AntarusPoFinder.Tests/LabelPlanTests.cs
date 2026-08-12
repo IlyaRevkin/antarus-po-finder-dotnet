@@ -310,6 +310,169 @@ public class LabelPlanTests
         Assert.Equal(first.WarningText, second.WarningText);
     }
 
+    // ── Положение кода и подписи назначения ──────────────────────────────────
+    // Раскладка до сих пор была одна на всех: код слева, текст колонкой справа. Просьба Ильи —
+    // «положение qr, положение подписи назначения тоже настраиваемое». Настройка, которая двигает
+    // блоки, обязана проверяться тем же главным инвариантом, что и всё остальное: куда бы человек ни
+    // поставил код, содержимое не имеет права вылезти за печатную область или наехать само на себя.
+
+    /// <summary>Перебор по всем положениям кода, положениям и выравниваниям подписи. Ни одно
+    /// сочетание не выносит содержимое за печатную область и не кладёт блоки друг на друга.</summary>
+    [Fact]
+    public void Plan_KeepsEverythingInside_ForEveryPlacementCombination()
+    {
+        var checkedCount = 0;
+
+        foreach (var (w, h) in new[] { (97.5, 72.0), (58.0, 40.0), (40.0, 20.0), (30.0, 60.0), (150.0, 100.0) })
+        foreach (var qrPlace in Enum.GetValues<QrPlacement>())
+        foreach (var headlinePlace in Enum.GetValues<HeadlinePlacement>())
+        foreach (var align in Enum.GetValues<HeadlineAlignment>())
+        foreach (var qr in new[] { 0.0, 25.0, 85.0 })
+        {
+            var layout = new LabelLayout
+            {
+                WidthMm = w, HeightMm = h, MarginMm = 2, QrMm = qr,
+                QrPlace = qrPlace, HeadlinePlace = headlinePlace, HeadlineAlign = align,
+            };
+
+            var plan = LabelPlanner.Plan(layout, Title, Subtitle, Url);
+            var what = $"{w}×{h}, QR {qr} {qrPlace}, подпись {headlinePlace}/{align}";
+
+            Assert.True(plan.FitsInsideBand(), $"содержимое вышло за печатную область: {what}");
+            Assert.Equal(plan.Qr.W, plan.Qr.H, 3);
+
+            // Полоса подписи и код делят место, а не рисуются один поверх другого.
+            if (plan.HasHeadline && !plan.Qr.IsEmpty && headlinePlace != HeadlinePlacement.Auto)
+            {
+                var apart = headlinePlace == HeadlinePlacement.Top
+                    ? plan.Headline.Bottom <= plan.Qr.Y + 0.01
+                    : plan.Headline.Y >= plan.Qr.Bottom - 0.01;
+                Assert.True(apart, $"подпись наехала на код: {what}");
+            }
+            checkedCount++;
+        }
+
+        Assert.True(checkedCount > 500, $"перебрано слишком мало сочетаний: {checkedCount}");
+    }
+
+    /// <summary>Код встаёт туда, куда попросили, а текст — по другую сторону от него. Проверяется на
+    /// просторной этикетке: на ней все четыре положения выполнимы буквально, без вынужденных
+    /// перестановок.</summary>
+    [Theory]
+    [InlineData(QrPlacement.Left)]
+    [InlineData(QrPlacement.Right)]
+    [InlineData(QrPlacement.Above)]
+    [InlineData(QrPlacement.Below)]
+    public void Plan_QrPlacement_PutsTheCodeWhereAsked(QrPlacement place)
+    {
+        var plan = LabelPlanner.Plan(
+            new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3, QrMm = 30, QrPlace = place },
+            Title, Subtitle, Url);
+
+        Assert.True(plan.HasTitle, "текст должен остаться на этикетке при любом положении кода");
+        Assert.True(plan.FitsInsideBand());
+        Assert.Empty(plan.Warnings);
+
+        switch (place)
+        {
+            case QrPlacement.Left:
+                Assert.True(plan.Title.X >= plan.Qr.Right - 0.01, "текст должен стоять правее кода");
+                Assert.False(plan.Stacked);
+                break;
+            case QrPlacement.Right:
+                Assert.True(plan.Qr.X >= plan.Title.Right - 0.01, "код должен стоять правее текста");
+                Assert.True(plan.Qr.Right <= plan.Band.Right + 0.01);
+                Assert.False(plan.Stacked);
+                break;
+            case QrPlacement.Above:
+                Assert.True(plan.Title.Y >= plan.Qr.Bottom - 0.01, "текст должен стоять под кодом");
+                Assert.True(plan.Stacked);
+                break;
+            case QrPlacement.Below:
+                Assert.True(plan.Qr.Y >= plan.Title.Bottom - 0.01, "код должен стоять под текстом");
+                Assert.True(plan.Stacked);
+                break;
+        }
+    }
+
+    /// <summary>Подпись назначения полосой: она идёт во всю ширину печатной области и стоит над всем
+    /// содержимым или под ним. Это и есть то, чего нет в режиме «сам», где подпись — первая строка
+    /// текстовой колонки рядом с кодом.</summary>
+    [Theory]
+    [InlineData(HeadlinePlacement.Top)]
+    [InlineData(HeadlinePlacement.Bottom)]
+    public void Plan_HeadlineBand_RunsFullWidth_AboveOrBelowTheContent(HeadlinePlacement place)
+    {
+        var layout = new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3, HeadlinePlace = place };
+        var plan = LabelPlanner.Plan(layout, Title, Subtitle, Url);
+        var auto = LabelPlanner.Plan(layout with { HeadlinePlace = HeadlinePlacement.Auto }, Title, Subtitle, Url);
+
+        Assert.True(plan.HasHeadline);
+        Assert.True(plan.FitsInsideBand());
+
+        // Во всю ширину — в отличие от режима «сам», где подпись живёт в колонке рядом с кодом.
+        Assert.True(plan.Headline.W > auto.Headline.W + 1,
+            $"полоса подписи не шире колонки: {plan.Headline.W:0.##} против {auto.Headline.W:0.##}");
+        Assert.Equal(plan.Title.X < plan.Qr.X ? plan.Band.X : plan.Qr.X, plan.Headline.X, 0);
+
+        if (place == HeadlinePlacement.Top)
+        {
+            Assert.True(plan.Headline.Bottom <= plan.Qr.Y + 0.01, "полоса сверху должна стоять над кодом");
+            Assert.True(plan.Headline.Bottom <= plan.Title.Y + 0.01);
+        }
+        else
+        {
+            Assert.True(plan.Headline.Y >= plan.Qr.Bottom - 0.01, "полоса снизу должна стоять под кодом");
+            Assert.True(plan.Headline.Y >= plan.Title.Bottom - 0.01);
+            // Ссылка отрезается от низа раньше подписи — полоса встаёт над ней, а не поверх.
+            if (plan.HasCaption) Assert.True(plan.Headline.Bottom <= plan.Caption.Y + 0.01);
+        }
+
+        // Полоса берёт высоту у кода — ровно та цена, о которой сказано в подсказке к настройке.
+        Assert.True(plan.Qr.W < auto.Qr.W, "полоса подписи обязана отнять высоту у кода");
+    }
+
+    /// <summary>Заданное человеком «слева»/«справа» на узкой этикетке выполнить нечем: текстовой
+    /// колонке не остаётся ширины. Раскладка ставит текст под код (иначе он выродится в лесенку), но
+    /// молча этого не делает — человек должен понимать, почему вышло не как просил.</summary>
+    [Fact]
+    public void Plan_SidePlacement_OnNarrowLabel_StacksAndSaysSo()
+    {
+        var plan = LabelPlanner.Plan(
+            new LabelLayout { WidthMm = 30, HeightMm = 60, MarginMm = 2, QrPlace = QrPlacement.Right },
+            Title, Subtitle, Url);
+
+        Assert.True(plan.Stacked);
+        Assert.True(plan.FitsInsideBand());
+        Assert.Contains(plan.Warnings, w => w.Contains("переставлен", StringComparison.OrdinalIgnoreCase));
+
+        // А в режиме «сам» та же перестановка — штатный ход, и предупреждать не о чем.
+        var auto = LabelPlanner.Plan(
+            new LabelLayout { WidthMm = 30, HeightMm = 60, MarginMm = 2 }, Title, Subtitle, Url);
+        Assert.True(auto.Stacked);
+        Assert.DoesNotContain(auto.Warnings, w => w.Contains("переставлен", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Без текста код стоит по центру при любом заданном положении: прижимать его к краю
+    /// пустой этикетки не за чем.</summary>
+    [Fact]
+    public void Plan_WithoutText_CentresTheCode_WhereverItWasAsked()
+    {
+        foreach (var place in Enum.GetValues<QrPlacement>())
+        {
+            var plan = LabelPlanner.Plan(
+                new LabelLayout
+                {
+                    WidthMm = 58, HeightMm = 40, MarginMm = 2, QrPlace = place,
+                    ShowLink = false, ShowHeadline = false,
+                }, "", "", "");
+
+            Assert.False(plan.HasTitle);
+            Assert.True(plan.FitsInsideBand());
+            Assert.Equal(plan.Band.X + (plan.Band.W - plan.Qr.W) / 2, plan.Qr.X, 1);
+        }
+    }
+
     // ── Оценка текста ────────────────────────────────────────────────────────
 
     /// <summary>Оценка числа строк должна рвать длинное слово посередине — ссылка это одно слово на

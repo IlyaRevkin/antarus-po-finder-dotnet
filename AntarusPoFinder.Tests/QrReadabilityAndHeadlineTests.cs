@@ -287,13 +287,17 @@ public class QrReadabilityAndHeadlineTests
         var v = new LabelLayout
         {
             HeadlineText = "  Инструкция \r\n  для   заказчика  ",
-            HoleText = "ИНСТРУКЦИЯ",
+            HoleText = "ИНСТРУКЦИЯ ПО ЭКСПЛУАТАЦИИ",
         }.Clamped();
 
         Assert.Equal("Инструкция для заказчика", v.HeadlineText);
-        // Подпись в центре не «ужимается», а отсекается: плашка не растёт.
+        // Подпись в центре не «ужимается», а отсекается: плашка не растёт, и то, что в неё не влезает
+        // тремя строками, на печати всё равно превратилось бы в точки.
         Assert.Equal(LabelLayout.MaxHoleTextLength, v.HoleText.Length);
-        Assert.Equal("ИНСТРУ", v.HoleText);
+        Assert.Equal("ИНСТРУКЦИЯ ПО Э", v.HoleText);
+
+        // «ИНСТРУКЦИЯ» отсекать больше не за что — она укладывается в три строки.
+        Assert.Equal("ИНСТРУКЦИЯ", new LabelLayout { HoleText = "ИНСТРУКЦИЯ" }.Clamped().HoleText);
 
         // Слишком длинная подпись назначения обрезается по разумной границе, но не пропадает.
         var long60 = new LabelLayout { HeadlineText = new string('и', 200) }.Clamped();
@@ -304,8 +308,9 @@ public class QrReadabilityAndHeadlineTests
     [Fact]
     public void CentreCaption_OnlyExists_ForTheFancyCode()
     {
-        Assert.Equal("ИНСТ", new LabelLayout { FancyQr = true, HoleText = "ИНСТ" }.EffectiveHoleText());
-        Assert.Equal("", new LabelLayout { FancyQr = false, HoleText = "ИНСТ" }.EffectiveHoleText());
+        Assert.Equal("ИНСТ", new LabelLayout { Style = QrStyle.Rounded, HoleText = "ИНСТ" }.EffectiveHoleText());
+        Assert.Equal("ИНСТ", new LabelLayout { Style = QrStyle.Dots, HoleText = "ИНСТ" }.EffectiveHoleText());
+        Assert.Equal("", new LabelLayout { Style = QrStyle.Classic, HoleText = "ИНСТ" }.EffectiveHoleText());
         Assert.Equal("", new LabelLayout { ShowHeadline = false, HeadlineText = "х" }.EffectiveHeadline());
     }
 
@@ -340,5 +345,71 @@ public class QrReadabilityAndHeadlineTests
         Assert.Equal("", erased.HoleText);
         Assert.Equal("", erased.EffectiveHeadline());
         Assert.Equal("", erased.EffectiveHoleText());
+    }
+
+    /// <summary>Положение кода, вид кода и положение подписи хранятся словами, а не номерами: конфиг
+    /// общий, и от перестановки пунктов местами в списке настройка на соседней машине не должна
+    /// превращаться в другую.</summary>
+    [Fact]
+    public void PlacementAndStyle_SurviveReload()
+    {
+        using var db = new TempDb();
+        using var database = new Database(db.Path);
+        var cfg = new ConfigService(database);
+
+        var fresh = LabelLayout.FromConfig(cfg);
+        Assert.Equal(QrPlacement.Auto, fresh.QrPlace);
+        Assert.Equal(QrStyle.Rounded, fresh.Style);
+        Assert.Equal(HeadlinePlacement.Auto, fresh.HeadlinePlace);
+        Assert.Equal(HeadlineAlignment.Center, fresh.HeadlineAlign);
+
+        (fresh with
+        {
+            QrPlace = QrPlacement.Right,
+            Style = QrStyle.Dots,
+            HeadlinePlace = HeadlinePlacement.Bottom,
+            HeadlineAlign = HeadlineAlignment.Left,
+        }).SaveTo(cfg);
+
+        var back = LabelLayout.FromConfig(cfg);
+        Assert.Equal(QrPlacement.Right, back.QrPlace);
+        Assert.Equal(QrStyle.Dots, back.Style);
+        Assert.Equal(HeadlinePlacement.Bottom, back.HeadlinePlace);
+        Assert.Equal(HeadlineAlignment.Left, back.HeadlineAlign);
+    }
+
+    /// <summary>Снятая когда-то галочка «фирменный QR» обязана пережить обновление: на машине лежит
+    /// только старый ключ label_fancy_qr, нового ещё нет — и код должен остаться классическим, а не
+    /// молча стать скруглённым.</summary>
+    [Fact]
+    public void OldFancyQrFlag_StillDecidesTheStyle()
+    {
+        using var db = new TempDb();
+        using var database = new Database(db.Path);
+        var cfg = new ConfigService(database);
+
+        cfg.SetLabelFlag("label_fancy_qr", false);
+        Assert.Equal(QrStyle.Classic, LabelLayout.FromConfig(cfg).Style);
+
+        // А новый ключ, когда он есть, главнее старого.
+        (LabelLayout.FromConfig(cfg) with { Style = QrStyle.Dots }).SaveTo(cfg);
+        Assert.Equal(QrStyle.Dots, LabelLayout.FromConfig(cfg).Style);
+        // …и старый ключ при этом остаётся правдивым для прежних версий программы на соседних машинах.
+        Assert.True(cfg.LabelFlag("label_fancy_qr", false));
+    }
+
+    /// <summary>Неизвестное значение (записала более новая версия программы) — не повод падать или
+    /// потерять этикетку: берётся умолчание.</summary>
+    [Fact]
+    public void UnknownStoredPlacement_FallsBackToDefault()
+    {
+        using var db = new TempDb();
+        using var database = new Database(db.Path);
+        var cfg = new ConfigService(database);
+
+        cfg.SetLabelText("label_qr_place", "ПоДиагонали");
+        cfg.SetLabelText("label_headline_place", "");
+        Assert.Equal(QrPlacement.Auto, LabelLayout.FromConfig(cfg).QrPlace);
+        Assert.Equal(HeadlinePlacement.Auto, LabelLayout.FromConfig(cfg).HeadlinePlace);
     }
 }
