@@ -1,10 +1,12 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -213,6 +215,94 @@ public partial class TicketsView : UserControl
 
         _pendingAttachmentPaths.Clear();
         UpdateAttachmentsSummary();
+    }
+
+    // ── Выгрузка в архив ─────────────────────────────────────────────────────
+
+    /// <summary>Складывает тикеты в один файл, который можно унести с рабочей машины. Тикеты живут
+    /// на сетевом диске конторы, и тот, кто их чинит, до него не достаёт — до этой кнопки текст
+    /// приходилось пересказывать своими словами, а скриншоты пересобирать руками.</summary>
+    private async void ExportTickets_Click(object sender, RoutedEventArgs e)
+    {
+        var visible = (TicketsGrid.ItemsSource as IEnumerable<TicketRow>)?.Select(r => r.Ticket).ToList() ?? new List<Ticket>();
+        var active = visible.Where(t => t.Status != TicketStatus.Closed).ToList();
+        var selected = (TicketsGrid.SelectedItem as TicketRow)?.Ticket;
+
+        if (visible.Count == 0)
+        {
+            AppMessageBox.Show("Выгружать нечего — тикетов в списке нет.", "Выгрузка тикетов",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        var shareAvailable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
+
+        var options = new TicketExportDialog(visible.Count, active.Count, selected is not null, shareAvailable)
+        { Owner = Window.GetWindow(this) };
+        if (options.ShowDialog() != true) return;
+
+        var (tickets, scopeLabel) = options.SelectedScope switch
+        {
+            TicketExportDialog.Scope.Selected => (new List<Ticket> { selected! }, "один выбранный тикет"),
+            TicketExportDialog.Scope.AllVisible => (visible, IsAdmin ? "все тикеты" : "тикеты этого пользователя"),
+            _ => (active, "открытые и в работе"),
+        };
+        if (tickets.Count == 0)
+        {
+            AppMessageBox.Show("По этому отбору тикетов не нашлось.", "Выгрузка тикетов",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var at = DateTime.Now;
+        var save = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Куда сохранить выгрузку тикетов",
+            FileName = TicketExportService.SuggestedFileName(at),
+            Filter = "Архив (*.zip)|*.zip",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        if (save.ShowDialog() != true) return;
+
+        var meta = new TicketExportService.Meta(
+            AppUpdateService.CurrentVersionText, Environment.MachineName, _services.CurrentUserName,
+            RolesConfig.RoleLabel(_services.Cfg.CurrentRole()), scopeLabel, at);
+        var withAttachments = options.WithAttachments && shareAvailable;
+        var path = save.FileName;
+
+        // Вложения читаются с сетевой шары — на десятке скриншотов это заметные секунды, а окно всё
+        // это время не должно висеть замороженным.
+        ExportBtn.IsEnabled = false;
+        try
+        {
+            var result = await Task.Run(() => TicketExportService.Write(
+                path, meta, tickets,
+                withAttachments ? id => TicketSyncService.AttachmentsDir(root, id) : null));
+
+            var summary = $"Выгружено тикетов: {result.Tickets}" +
+                          (result.Attachments > 0 ? $", вложений: {result.Attachments}" : "") +
+                          $"\nФайл: {path} ({TicketExportService.SizeLabel(result.Bytes)})";
+            if (result.Warnings.Count > 0)
+                summary += "\n\nНе попало в архив:\n" + string.Join("\n", result.Warnings);
+
+            _host.ShowStatus($"Тикеты выгружены: {path}", category: NotificationCategory.General);
+            if (AppMessageBox.Show(summary + "\n\nПоказать файл в папке?", "Выгрузка тикетов",
+                    MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+            {
+                try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
+                catch { /* проводник не открылся — путь к файлу человеку уже показан выше */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось выгрузить: {ex.Message}", "Выгрузка тикетов",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            ExportBtn.IsEnabled = true;
+        }
     }
 
     // ── Detail view (full text + attachments) ────────────────────────────────

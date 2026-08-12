@@ -74,6 +74,8 @@
                     ToolTip="Полный текст тикета и вложения — то же, что двойной клик по строке"/>
             <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"
                     ToolTip="Перечитать список — тикеты с других машин приезжают синхронизацией"/>
+            <Button x:Name="ExportBtn" Content="Выгрузить…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ExportTickets_Click"
+                    ToolTip="Сложить тикеты вместе с вложениями в один архив — унести флешкой, отправить почтой или загрузить на страницу приёма"/>
             <Button x:Name="TakeInProgressBtn" Content="Взять в работу" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                     Click="SetStatus_Click" Tag="in_progress" Visibility="Collapsed"
                     ToolTip="Отметить, что тикетом занимаются — автор увидит это у себя"/>
