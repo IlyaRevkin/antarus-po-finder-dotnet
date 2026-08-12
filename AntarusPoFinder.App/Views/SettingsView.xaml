@@ -56,8 +56,14 @@
             <Button x:Name="TabBtnPrinting" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Печать" Style="{StaticResource NavButtonContentText}"/>
             </Button>
-            <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+            <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <!-- «Чистка диска» была отдельным пунктом бокового меню и переехала сюда по просьбе Ильи:
+                 это разовая уборка общего диска, а не рабочий экран. Вкладка последняя в полосе и
+                 видна только администратору (ApplyRoleVisibility) — ровно как раньше пункт меню. -->
+            <Button x:Name="TabBtnCleanup" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+                <TextBlock Text="Чистка диска" Style="{StaticResource NavButtonContentText}"/>
             </Button>
         </StackPanel>
         </ScrollViewer>
@@ -1195,6 +1201,13 @@
                         ToolTip="Убрать из ростера. При следующем входе по AD он заведётся заново с ролью «Наладчик»"/>
             </StackPanel>
         </Grid>
+
+        <!-- ═══════════════════════════ ЧИСТКА ДИСКА ═══════════════════════════ -->
+        <!-- Содержимое — та же DiskCleanupView, что раньше была отдельной страницей: она собирается
+             в коде (её конструктору нужны службы приложения) и кладётся сюда при первом открытии
+             вкладки. Прямо в разметке её не создать — конструктора без параметров у неё нет, и
+             заводить его ради разметки значило бы дать странице способ существовать без служб. -->
+        <ContentControl x:Name="CleanupTab" Visibility="Collapsed"/>
         </Grid>
     </Grid>
 </UserControl>

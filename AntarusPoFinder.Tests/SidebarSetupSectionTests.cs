@@ -32,30 +32,31 @@ public class SidebarSetupSectionTests
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
-    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: сетевые диски, хранилище на хостинге,
-    /// тикеты и чистка диска. На неё завязан живой GUI-стенд, и переезд наклеек с паспортами не
-    /// должен был её задеть. Состав фиксируется тестом целиком, чтобы пополнение было осознанным, а
-    /// не заезжало сюда случайно; «Чистка диска» добавлена именно осознанно — она админская и редкая,
-    /// в секцию «ДЛЯ НАЛАДЧИКА» ей нельзя (наладчику она не положена вовсе, см. RoleAccess).</summary>
+    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: сетевые диски, хранилище на хостинге и
+    /// тикеты. На неё завязан живой GUI-стенд, и переезд наклеек с паспортами не должен был её
+    /// задеть. Состав фиксируется тестом целиком, чтобы пополнение было осознанным, а не заезжало
+    /// сюда случайно.</summary>
     [Fact]
     public void TheOldMoreSection_IsUntouched()
     {
         Assert.Equal(NavSection.More, SectionOf("network"));
         Assert.Equal(NavSection.More, SectionOf("hosting"));
         Assert.Equal(NavSection.More, SectionOf("tickets"));
-        Assert.Equal(new[] { "network", "hosting", "tickets", "cleanup" },
+        Assert.Equal(new[] { "network", "hosting", "tickets" },
             RolesConfig.NavItems.Where(n => n.Section == NavSection.More).Select(n => n.PageId).ToArray());
     }
 
-    /// <summary>Чистка диска переименовывает, переносит и безвозвратно удаляет файлы на общем диске —
-    /// то есть чужую работу. Единственная страница, оставленная только администратору; если кто-то
-    /// когда-нибудь добавит её наладчику или программисту, это должно сломаться здесь.</summary>
+    /// <summary>«Чистка диска» больше не пункт меню: она переехала во вкладку Настроек (просьба Ильи
+    /// от 12.08.2026). Пункта не должно остаться ни в списке меню, ни в правах ролей — иначе роль
+    /// «видела» бы страницу, которую построить уже некому: фабрики страниц "cleanup" в
+    /// MainWindowViewModel тоже нет. Что вкладка осталась администраторской, проверяется на настоящем
+    /// контроле — ViewsRenderTests.DiskCleanupTab_IsAdministratorOnly.</summary>
     [Fact]
-    public void DiskCleanup_IsAdministratorOnly()
+    public void DiskCleanup_IsNoLongerASidebarPage()
     {
-        Assert.Contains("cleanup", RolesConfig.RoleAccess["administrator"]);
-        Assert.DoesNotContain("cleanup", RolesConfig.RoleAccess["naladchik"]);
-        Assert.DoesNotContain("cleanup", RolesConfig.RoleAccess["programmer"]);
+        Assert.DoesNotContain(RolesConfig.NavItems, n => n.PageId == "cleanup");
+        foreach (var (role, pages) in RolesConfig.RoleAccess)
+            Assert.False(pages.Contains("cleanup"), $"роль «{role}» всё ещё видит страницу cleanup");
     }
 
     /// <summary>Каждодневное остаётся наверху и в один клик: поиск, осмотр, загрузка ПО.</summary>

@@ -17,9 +17,11 @@ public static class RolesConfig
         ("network", "Сетевые диски", NavSection.More),
         ("hosting", "Хранилище", NavSection.More),
         ("tickets", "Тикеты", NavSection.More),
-        // «Чистка диска» — рядом с «Сетевыми дисками», в свёрнутой секции: заходят туда раз в месяц,
-        // а не каждый день. Роль только администратор (см. RoleAccess).
-        ("cleanup", "Чистка диска", NavSection.More),
+        // «Чистка диска» пунктом меню БЫЛА, но переехала в Настройки → «Чистка диска» (просьба Ильи
+        // от 12.08.2026: «кнопку чистка мусора вкладку перенеси в настройки лучше наверное»).
+        // Заходят туда раз в месяц и ради разовой уборки, а не ради работы, — место такой страницы
+        // среди настроек, а не в списке рабочих экранов. Права не поменялись: вкладку видит только
+        // администратор (SettingsView.ApplyRoleVisibility), ровно как раньше пункт меню.
     ];
 
     /// <summary>Все три роли работают с одним и тем же общим диском, поэтому пути и интервал
@@ -32,16 +34,17 @@ public static class RolesConfig
     /// решается внутри SettingsView (ApplyRoleVisibility: урезанный набор вкладок + урезанное
     /// "Общие"), не через видимость самого пункта меню, тем же способом что и "tickets".
     ///
-    /// "cleanup" (Чистка диска) — единственная страница, оставленная ТОЛЬКО администратору: она
-    /// переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то есть чужую работу.
-    /// Наладчик и программист имеют дело с диском через выдачу и загрузку, где такого рычага нет.</summary>
+    /// Страницы "cleanup" здесь больше нет: «Чистка диска» стала вкладкой Настроек. Она
+    /// переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то есть чужую работу,
+    /// поэтому осталась строго администраторской — теперь это видимость вкладки
+    /// (SettingsView.ApplyRoleVisibility), а не строка в этом справочнике.</summary>
     public static readonly Dictionary<string, HashSet<string>> RoleAccess = new()
     {
         // «hosting» — состояние выкладки на хостинг. Наладчику там делать нечего: он инструкции не
         // выкладывает, а читает их по QR. Программист выкладывает и обязан видеть, доехало ли.
         ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
         ["programmer"] = ["search", "upload", "params", "settings", "network", "hosting", "tickets"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "hosting", "tickets", "cleanup"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "hosting", "tickets"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =

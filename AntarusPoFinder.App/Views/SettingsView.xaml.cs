@@ -188,6 +188,7 @@ public partial class SettingsView : UserControl
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
         TabBtnTags, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
+        TabBtnCleanup,
     };
 
     /// <summary>Колесо мыши над полосой вкладок крутит саму полосу. В минимальном размере окна
@@ -218,8 +219,10 @@ public partial class SettingsView : UserControl
         LoaderTab.Visibility = Visibility.Collapsed;
         ConnectionTab.Visibility = Visibility.Collapsed;
         PrintingTab.Visibility = Visibility.Collapsed;
+        CleanupTab.Visibility = Visibility.Collapsed;
 
-        if (sender == TabBtnLoader) { LoaderTab.Visibility = Visibility.Visible; LoadLoaderTab(); }
+        if (sender == TabBtnCleanup) { CleanupTab.Visibility = Visibility.Visible; OpenCleanupTab(); }
+        else if (sender == TabBtnLoader) { LoaderTab.Visibility = Visibility.Visible; LoadLoaderTab(); }
         else if (sender == TabBtnConnection) { ConnectionTab.Visibility = Visibility.Visible; LoadConnectionTab(); }
         else if (sender == TabBtnPrinting) { PrintingTab.Visibility = Visibility.Visible; LoadPrintingTab(); }
         else if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
@@ -230,6 +233,22 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
+    }
+
+    /// <summary>«Чистка диска» строится при первом открытии вкладки, а не вместе с Настройками:
+    /// заходят туда раз в месяц, а страница тянет за собой таблицу находок и обход диска. При КАЖДОМ
+    /// открытии список находок сбрасывается — ровно то, что раньше делал возврат на страницу
+    /// (см. DiskCleanupView.RefreshIfActive): пока человек был на другой вкладке, коллега мог залить
+    /// прошивку в ту же папку, и «применить отмеченное» по устаревшему списку удаляло бы уже не то,
+    /// что человек видел глазами.</summary>
+    private void OpenCleanupTab()
+    {
+        if (CleanupTab.Content is not DiskCleanupView view)
+        {
+            view = new DiskCleanupView(_services, _host);
+            CleanupTab.Content = view;
+        }
+        view.RefreshIfActive();
     }
 
     /// <summary>Naladchik/programmer now have access to Настройки at all (previously administrator-
@@ -256,6 +275,10 @@ public partial class SettingsView : UserControl
         TabBtnHierarchy.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnUsers.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // «Чистка диска» переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то
+        // есть чужую работу. Была единственной администраторской СТРАНИЦЕЙ (RolesConfig.RoleAccess) —
+        // став вкладкой, осталась администраторской ровно так же.
+        TabBtnCleanup.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnTags.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;

@@ -121,6 +121,9 @@ public class ViewsRenderTests
         new object[] { "network" },
         new object[] { "hosting" },
         new object[] { "tickets" },
+        // «Чистка диска» пунктом меню больше не является (переехала во вкладку Настроек), но
+        // остаётся отдельным контролом — и строиться обязана так же: разбор её разметки от переезда
+        // не изменился, а вкладка создаёт её тем же конструктором.
         new object[] { "cleanup" },
     };
 
@@ -149,6 +152,37 @@ public class ViewsRenderTests
                 _ => throw new ArgumentOutOfRangeException(nameof(pageId), pageId, "неизвестная страница"),
             };
             Render(page);
+        });
+    }
+
+    /// <summary>«Чистка диска» переехала из бокового меню во вкладку Настроек, но администраторской
+    /// быть не перестала: раньше это была единственная страница, выданная в RoleAccess только
+    /// администратору, теперь — видимость кнопки вкладки. Проверяется на настоящем контроле, потому
+    /// что правило живёт в ApplyRoleVisibility: «переехала, но потеряла ограничение» не заметил бы
+    /// никто, а вкладка удаляет файлы на общем диске.</summary>
+    [Theory]
+    [InlineData("administrator", true)]
+    [InlineData("programmer", false)]
+    [InlineData("naladchik", false)]
+    public void DiskCleanupTab_IsAdministratorOnly(string role, bool visible)
+    {
+        Ui.Run(() =>
+        {
+            var services = Services();
+            var before = services.Cfg.CurrentRole();
+            try
+            {
+                services.Cfg.SetRole(role);
+                var view = new SettingsView(services, new MainWindowViewModel(services));
+                view.ApplyRoleVisibility();
+                Assert.Equal(visible ? Visibility.Visible : Visibility.Collapsed, view.TabBtnCleanup.Visibility);
+            }
+            finally
+            {
+                // База у тестового процесса одна на все классы — роль возвращаем, иначе соседний тест
+                // получил бы приложение в чужой роли.
+                services.Cfg.SetRole(before);
+            }
         });
     }
 
