@@ -136,7 +136,11 @@ public partial class InstructionLabelWindow : Window
         {
             WidthInput.Text = Num(v.WidthMm);
             HeightInput.Text = Num(v.HeightMm);
-            MarginInput.Text = Num(v.MarginMm);
+            MarginLeftInput.Text = Num(v.Margins.Left);
+            MarginTopInput.Text = Num(v.Margins.Top);
+            MarginRightInput.Text = Num(v.Margins.Right);
+            MarginBottomInput.Text = Num(v.Margins.Bottom);
+            SelectTag(RotationCombo, v.Rotation);
             OffsetXInput.Text = Num(v.OffsetXMm);
             OffsetYInput.Text = Num(v.OffsetYMm);
             QrInput.Text = Num(v.QrMm);
@@ -150,6 +154,7 @@ public partial class InstructionLabelWindow : Window
             HeadlineInput.Text = v.HeadlineText;
             SelectTag(HeadlinePlaceCombo, v.HeadlinePlace);
             SelectTag(HeadlineAlignCombo, v.HeadlineAlign);
+            NoteInput.Text = v.NoteText;
             HoleTextInput.Text = v.HoleText;
         }
         finally
@@ -194,7 +199,12 @@ public partial class InstructionLabelWindow : Window
     {
         WidthMm = Read(WidthInput, _layout.WidthMm),
         HeightMm = Read(HeightInput, _layout.HeightMm),
-        MarginMm = Read(MarginInput, _layout.MarginMm),
+        Margins = new LabelMargins(
+            Read(MarginLeftInput, _layout.Margins.Left),
+            Read(MarginTopInput, _layout.Margins.Top),
+            Read(MarginRightInput, _layout.Margins.Right),
+            Read(MarginBottomInput, _layout.Margins.Bottom)),
+        Rotation = ReadTag(RotationCombo, _layout.Rotation),
         OffsetXMm = Read(OffsetXInput, _layout.OffsetXMm),
         OffsetYMm = Read(OffsetYInput, _layout.OffsetYMm),
         QrMm = Read(QrInput, _layout.QrMm),
@@ -210,6 +220,7 @@ public partial class InstructionLabelWindow : Window
         // Текст читается СЫРЫМ, без Clamped-обрезки на каждое нажатие клавиши: иначе набор длинной
         // подписи обрубался бы прямо под пальцами. Приведение к рабочему виду делает Clamped ниже.
         HeadlineText = HeadlineInput.Text ?? "",
+        NoteText = NoteInput.Text ?? "",
         HoleText = HoleTextInput.Text ?? "",
     }.Clamped();
 
@@ -242,9 +253,12 @@ public partial class InstructionLabelWindow : Window
         FillLayoutInputs(_layout);
         Redraw();
 
-        ShowPrinterFit(fit.Text + "\nЧтобы это осталось и у коллег — «Сохранить как настройки по умолчанию» " +
-                       "(сдвиг останется на этой машине).");
-        _host.ShowStatus($"С принтера считано: наклейка {_layout.SizeCaption()} мм, поля {Num(_layout.MarginMm)} мм");
+        // Про «сохранить, чтобы было и у коллег» здесь больше не пишем: размер, поля, поворот и сдвиг
+        // теперь не синхронизируются вовсе (ConfigSyncService.SkipSettingsKeys) — они описывают ЭТОТ
+        // принтер, и обещать, что считанное с него доедет до соседей, было бы неправдой.
+        ShowPrinterFit(fit.Text + "\nЭто настройки данной машины: «Сохранить как настройки по умолчанию» " +
+                       "запомнит их здесь, коллегам они не уедут.");
+        _host.ShowStatus($"С принтера считано: наклейка {_layout.SizeCaption()} мм, поля {_layout.MarginsCaption()} мм");
     }
 
     private void ShowPrinterFit(string text)
@@ -256,7 +270,7 @@ public partial class InstructionLabelWindow : Window
     private void SaveLayout_Click(object sender, RoutedEventArgs e)
     {
         _layout.SaveTo(_services.Cfg);
-        _host.ShowStatus($"Макет этикетки сохранён: {_layout.SizeCaption()} мм, поля {Num(_layout.MarginMm)} мм");
+        _host.ShowStatus($"Макет этикетки сохранён: {_layout.SizeCaption()} мм, поля {_layout.MarginsCaption()} мм");
     }
 
     private void ResetLayout_Click(object sender, RoutedEventArgs e)
@@ -280,9 +294,15 @@ public partial class InstructionLabelWindow : Window
         WarningBox.Visibility = plan.Warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var printer = _services.Cfg.LabelPrinter();
+        var rotation = _layout.Rotation switch
+        {
+            LabelRotation.Clockwise90 => " · повёрнута по часовой",
+            LabelRotation.CounterClockwise90 => " · повёрнута против часовой",
+            _ => "",
+        };
         PrinterText.Text = (string.IsNullOrWhiteSpace(printer) ? "Принтер: по умолчанию" : $"Принтер: {printer}")
-                           + $" · этикетка {_layout.SizeCaption()} мм · поля {Num(_layout.MarginMm)} мм"
-                           + $" · QR {Num(plan.Qr.W)} мм"
+                           + $" · этикетка {_layout.SizeCaption()} мм · поля {_layout.MarginsCaption()} мм"
+                           + $" · QR {Num(plan.Qr.W)} мм" + rotation
                            + " · сменить принтер — Настройки → Печать";
     }
 
@@ -352,7 +372,7 @@ public partial class InstructionLabelWindow : Window
 
         // Печатаем СВЕЖИЙ визуал, а не тот, что показан в окне: показанный уже «занят» деревом
         // предпросмотра, и печать чужого визуального родителя в WPF не работает.
-        var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(), $"Этикетка — {_title}");
+        var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(), $"Этикетка — {_title}", _layout);
         _host.ShowStatus(outcome.Message, category: NotificationCategory.General);
         if (!outcome.Ok)
             AppMessageBox.Show(outcome.Message, "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);

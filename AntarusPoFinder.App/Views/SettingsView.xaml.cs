@@ -268,9 +268,10 @@ public partial class SettingsView : UserControl
         TabBtnConnection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
 
         // «Печать» видят все — этикетку и наклейки печатает наладчик. Но внутри вкладки общие
-        // настройки (адрес диска инструкций, размер этикетки, папка наклеек) уезжают по сети на все
-        // машины, поэтому редактировать их может только администратор; выбор принтера и сами кнопки
-        // печати остаются всем.
+        // настройки (адрес диска инструкций, тексты этикетки, папка наклеек) уезжают по сети на все
+        // машины, поэтому редактировать их может только администратор. Принтер, размер наклейки и
+        // сами кнопки печати остаются всем: это железо конкретного компьютера, по сети оно не
+        // разъезжается (ConfigSyncService.SkipSettingsKeys).
         TabBtnPrinting.Visibility = Visibility.Visible;
         PrintingSharedSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         StickersFolderSection.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
@@ -1293,10 +1294,10 @@ public partial class SettingsView : UserControl
 
     // ── Вкладка «Печать» ──────────────────────────────────────────────────────
     // Этикетка с QR на инструкцию + папка с шаблонами наклеек. Разделение настроек здесь важнее
-    // обычного: адрес диска инструкций, размер этикетки и папка наклеек — ОБЩИЕ (уезжают на все
-    // машины с конфигом, задаёт администратор), а имя принтера — своё у каждой машины
-    // (ConfigSyncService.SkipSettingsKeys). Поэтому поля общих настроек скрыты от наладчика с
-    // программистом, а выбор принтера и сама печать доступны всем — печатает как раз наладчик.
+    // обычного: адрес диска инструкций, тексты этикетки и папка наклеек — ОБЩИЕ (уезжают на все
+    // машины с конфигом, задаёт администратор), а имя принтера и размер наклейки — своё у каждой
+    // машины (ConfigSyncService.SkipSettingsKeys). Поэтому поля общих настроек скрыты от наладчика с
+    // программистом, а принтер, размер и сама печать доступны всем — печатает как раз наладчик.
 
     private bool _printingTabFilling;
 
@@ -1505,12 +1506,12 @@ public partial class SettingsView : UserControl
     {
         var layout = LabelLayout.FromConfig(_services.Cfg);
         var label = LabelPrinter.BuildLabel(layout, "https://example.org/проверка", "Пробная этикетка",
-            $"{layout.SizeCaption()} мм, поля {layout.MarginMm:0.##} мм",
+            $"{layout.SizeCaption()} мм, поля {layout.MarginsCaption()} мм",
             "Если что-то срезано по краю — увеличьте поля или подвиньте макет: кнопка «QR инструкции» на карточке версии.",
             // Подпись в центре кода берётся настоящая, а не «ТЕСТ»: образец должен показывать ровно ту
             // этикетку, которая пойдёт на шкаф, вместе с подписью назначения над кодом.
             layout.EffectiveHoleText());
-        var outcome = LabelPrinter.Print(label, _services.Cfg.LabelPrinter(), "Пробная этикетка");
+        var outcome = LabelPrinter.Print(label, _services.Cfg.LabelPrinter(), "Пробная этикетка", layout);
         _host.ShowStatus(outcome.Message);
         if (!outcome.Ok)
             AppMessageBox.Show(outcome.Message, "Пробная печать", MessageBoxButton.OK, MessageBoxImage.Warning);

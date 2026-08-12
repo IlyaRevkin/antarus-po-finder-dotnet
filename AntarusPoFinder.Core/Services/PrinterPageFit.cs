@@ -47,11 +47,12 @@ public sealed record PrinterFitResult(LabelLayout Layout, string Summary, IReadO
 ///
 /// Правила ровно три, и каждое отвечает на свою жалобу:
 ///   • <b>размер</b> берётся с листа драйвера — наклейку не надо мерить линейкой и вписывать руками;
-///   • <b>поля</b> — самая широкая непечатаемая кромка, одинаково со всех сторон: содержимому нужно
-///     начинаться после запретной полосы, а разные поля по сторонам макет и не умеет;
-///   • <b>сдвиг</b> — половина разницы между противоположными кромками: поля одинаковые, а запретные
-///     полосы у большинства принтеров нет, и без сдвига содержимое стоит по центру ЛИСТА, а не по
-///     центру того, что реально печатается. Это и есть «отцентровал».
+///   • <b>поля</b> — непечатаемая кромка КАЖДОЙ стороны кладётся в поле той же стороны. Раньше макет
+///     умел только одно поле на все четыре, поэтому приходилось брать самую широкую кромку и
+///     доводить результат сдвигом всего содержимого — то есть чинить одну кривизну другой. Теперь
+///     четыре числа драйвера ложатся в четыре поля, и «отцентровал» получается сам собой;
+///   • <b>сдвиг</b> обнуляется. Он остаётся ровно тем, чем и должен быть, — калибровкой протяжки
+///     («принтер тянет ленту на миллиметр вбок»), и подменять им перекос кромок больше не нужно.
 ///
 /// Ничего, кроме размера, полей и сдвига, здесь не трогается: кегли, вид кода и подписи — решение
 /// человека, а не принтера.</summary>
@@ -77,7 +78,12 @@ public static class PrinterPageFit
 
         var (width, height, sizeTaken) = ResolveSize(current, setup, notes);
 
-        var margin = Math.Max(setup.MaxUnprintableMm, ReserveMm);
+        // Поворот содержимого разворачивает и стороны: кромка, которую драйвер назвал верхней, для
+        // повёрнутого макета — боковая. Кладём кромки в физические поля наклейки, а раскладка сама
+        // развернёт их дальше (см. LabelMargins.ForRotation).
+        var wanted = new LabelMargins(Math.Max(left, ReserveMm), Math.Max(top, ReserveMm),
+            Math.Max(right, ReserveMm), Math.Max(bottom, ReserveMm));
+
         if (setup.MaxUnprintableMm < ReserveMm)
             notes.Add($"Драйвер сообщает, что печатает до самого края. Поля всё равно оставлены " +
                       $"{Num(ReserveMm)} мм: у принтеров этикеток кромка обычно съедается, а нулевые поля — " +
@@ -87,15 +93,18 @@ public static class PrinterPageFit
         {
             WidthMm = width,
             HeightMm = height,
-            MarginMm = Round(margin),
-            // Сдвиг — в сторону той кромки, что уже, то есть туда, где печатной площади больше.
-            OffsetXMm = Round((left - right) / 2),
-            OffsetYMm = Round((top - bottom) / 2),
+            Margins = new LabelMargins(Round(wanted.Left), Round(wanted.Top), Round(wanted.Right), Round(wanted.Bottom)),
+            // Перекос кромок теперь описан самими полями, и подменять его сдвигом нечем: сдвиг
+            // остаётся калибровкой протяжки и после подстановки честно начинается с нуля.
+            OffsetXMm = 0,
+            OffsetYMm = 0,
         }).Clamped();
 
-        if (Math.Abs(layout.MarginMm - Round(margin)) > 0.05)
-            notes.Add($"Поля {Num(margin)} мм для наклейки {layout.SizeCaption()} мм — больше четверти её " +
-                      $"стороны, поэтому оставлены {Num(layout.MarginMm)} мм. Похоже, драйвер описывает не ту бумагу.");
+        if (!SameMargins(layout.Margins, wanted))
+            notes.Add($"Поля {Num(wanted.Left)} / {Num(wanted.Top)} / {Num(wanted.Right)} / {Num(wanted.Bottom)} мм " +
+                      $"для наклейки {layout.SizeCaption()} мм — больше четверти её стороны, поэтому оставлены " +
+                      $"{Num(layout.Margins.Left)} / {Num(layout.Margins.Top)} / {Num(layout.Margins.Right)} / " +
+                      $"{Num(layout.Margins.Bottom)} мм. Похоже, драйвер описывает не ту бумагу.");
 
         return new PrinterFitResult(layout, Summarize(setup, layout, sizeTaken, left, top, right, bottom), notes);
     }
@@ -137,9 +146,14 @@ public static class PrinterPageFit
             ? $"лист {Num(setup.PageWidthMm)} × {Num(setup.PageHeightMm)} мм"
             : "размер листа не сообщён";
         var edges = $"непечатаемые края {Num(left)} / {Num(top)} / {Num(right)} / {Num(bottom)} мм (слева / сверху / справа / снизу)";
+        var m = layout.Margins;
         return $"{who}: {sheet}, {edges}. Подставлено: наклейка {layout.SizeCaption()} мм, поля " +
-               $"{Num(layout.MarginMm)} мм, сдвиг {Num(layout.OffsetXMm)} / {Num(layout.OffsetYMm)} мм.";
+               $"{Num(m.Left)} / {Num(m.Top)} / {Num(m.Right)} / {Num(m.Bottom)} мм, сдвиг сброшен в ноль.";
     }
+
+    private static bool SameMargins(LabelMargins a, LabelMargins b) =>
+        Math.Abs(a.Left - Round(b.Left)) < 0.05 && Math.Abs(a.Top - Round(b.Top)) < 0.05 &&
+        Math.Abs(a.Right - Round(b.Right)) < 0.05 && Math.Abs(a.Bottom - Round(b.Bottom)) < 0.05;
 
     /// <summary>Десятая миллиметра — предел, в котором это вообще имеет смысл: печатать точнее не
     /// умеет ни один принтер этикеток, а длинный хвост цифр в поле только пугает.</summary>

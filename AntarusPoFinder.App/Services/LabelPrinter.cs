@@ -56,7 +56,7 @@ public static class LabelPrinter
     /// знала — отсюда «увеличил QR, обрезался текст; убрал сдвиг, обрезан QR». Теперь расчёт один и
     /// тот же и для предпросмотра, и для принтера, и он проверяется тестами без окна.
     ///
-    /// <paramref name="holeText"/> — короткая подпись в окошке по центру кода (обычно «ИНСТ»); пусто
+    /// <paramref name="holeText"/> — короткая подпись в окошке по центру кода (обычно «РЭ»); пусто
     /// — окна нет.</summary>
     public static FrameworkElement BuildLabel(LabelLayout layout, string qrContent,
         string title, string subtitle, string caption, string holeText = "") =>
@@ -68,7 +68,39 @@ public static class LabelPrinter
     public static FrameworkElement BuildLabel(LabelLayout layout, string qrContent,
         string title, string subtitle, string caption, string holeText, out LabelPlan plan)
     {
-        var v = layout.Clamped();
+        var physical = layout.Clamped();
+        var element = BuildDesign(physical, qrContent, title, subtitle, caption, holeText, out plan);
+        return Rotate(element, physical);
+    }
+
+    /// <summary>Кладёт готовый макет на наклейку с поворотом — для рулонных принтеров, где наклейка
+    /// едет узкой стороной вперёд (см. <see cref="LabelRotation"/>). Сама компоновка про поворот не
+    /// знает: она посчитана на перевёрнутой стороне, а здесь её просто разворачивают целиком, вместе
+    /// с рамкой и кодом. Внешний холст — всегда физический размер наклейки: именно он и уходит в
+    /// задание печати (см. <see cref="LabelPrintJob"/>).</summary>
+    private static FrameworkElement Rotate(FrameworkElement design, LabelLayout physical)
+    {
+        if (physical.Rotation == LabelRotation.None) return design;
+
+        var w = MmToDiu(physical.WidthMm);
+        var h = MmToDiu(physical.HeightMm);
+        var transform = new TransformGroup();
+        transform.Children.Add(new RotateTransform(physical.Rotation == LabelRotation.Clockwise90 ? 90 : -90));
+        transform.Children.Add(physical.Rotation == LabelRotation.Clockwise90
+            ? new TranslateTransform(w, 0)
+            : new TranslateTransform(0, h));
+        design.RenderTransform = transform;
+
+        var page = new Canvas { Width = w, Height = h, Background = Brushes.White, ClipToBounds = true };
+        page.Children.Add(design);
+        Layout(page, w, h);
+        return page;
+    }
+
+    private static FrameworkElement BuildDesign(LabelLayout layout, string qrContent,
+        string title, string subtitle, string caption, string holeText, out LabelPlan plan)
+    {
+        var v = layout.ForDesign();
         plan = LabelPlanner.Plan(v, title, subtitle, caption);
         plan = WarnAboutModuleSize(plan, qrContent, v);
         plan = WarnAboutHoleText(plan, qrContent, v, holeText);
@@ -86,7 +118,7 @@ public static class LabelPrinter
         if (plan.Frame is { } frame) AddFrame(page, frame);
         if (!plan.Qr.IsEmpty) Place(page, BuildQrVisual(v, qrContent, MmToDiu(plan.Qr.W), holeText), plan.Qr);
         if (plan.HasHeadline) Place(page, BuildHeadline(plan, v), plan.Headline);
-        if (plan.HasTitle) Place(page, BuildTexts(plan, title, subtitle), plan.Title);
+        if (plan.HasTitle) Place(page, BuildTexts(plan, title, subtitle, v.NoteText), plan.Title);
         if (plan.HasCaption) Place(page, BuildCaption(plan, caption), plan.Caption);
 
         Layout(page, page.Width, page.Height);
@@ -154,7 +186,7 @@ public static class LabelPrinter
     private static LabelPlan Warn(LabelPlan plan, string text) =>
         plan with { Warnings = plan.Warnings.Concat(new[] { text }).ToList() };
 
-    /// <summary>Подпись назначения («Инструкция для заказчика»). Полужирная и во всю ширину — её
+    /// <summary>Подпись назначения («Руководство по эксплуатации»). Полужирная и во всю ширину — её
     /// задача объяснить наклейку с одного взгляда, до того как человек полезет за телефоном.
     /// Выравнивание задаётся настройкой: по центру наклейка выглядит опрятнее, но там, где подпись
     /// стоит колонкой рядом с кодом, её чаще хотят прижать к тому же краю, что и название.</summary>
@@ -197,15 +229,18 @@ public static class LabelPrinter
     /// <summary>Заголовок и подзаголовок в отведённом прямоугольнике. Кегль уже подобран расчётом;
     /// Viewbox поверх него — вторая линия обороны: если настоящий текст всё-таки оказался выше
     /// оценки, он ужмётся целиком, а не обрежется по нижней строке.</summary>
-    private static FrameworkElement BuildTexts(LabelPlan plan, string title, string subtitle)
+    private static FrameworkElement BuildTexts(LabelPlan plan, string title, string subtitle, string note)
     {
         var stack = new StackPanel { Width = MmToDiu(plan.Title.W) };
         if (!string.IsNullOrWhiteSpace(title)) stack.Children.Add(Text(title, plan.TitlePt, bold: true));
-        if (!string.IsNullOrWhiteSpace(subtitle))
+        // Своя строка человека идёт после версии тем же кеглем — место под неё отвела раскладка
+        // (LabelPlanner.TextBlockHeightMm), здесь только раскладывается.
+        foreach (var line in new[] { subtitle, note })
         {
-            var sub = Text(subtitle, plan.SubtitlePt, bold: false);
-            sub.Margin = new Thickness(0, MmToDiu(LabelPlanner.CaptionGapMm), 0, 0);
-            stack.Children.Add(sub);
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var extra = Text(line, plan.SubtitlePt, bold: false);
+            extra.Margin = new Thickness(0, MmToDiu(LabelPlanner.CaptionGapMm), 0, 0);
+            stack.Children.Add(extra);
         }
 
         return new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = stack };
@@ -269,8 +304,13 @@ public static class LabelPrinter
     public sealed record PrintOutcome(bool Ok, string Message);
 
     /// <summary>Печать без диалога выбора принтера: наладчику незачем каждый раз подтверждать окно —
-    /// принтер задан в Настройки → Печать. Возврат — что сказать человеку в статус-строке.</summary>
-    public static PrintOutcome Print(FrameworkElement label, string printerName, string jobName)
+    /// принтер задан в Настройки → Печать. Возврат — что сказать человеку в статус-строке.
+    ///
+    /// <b>Задание описывается целиком</b> — лист ровно в наклейку, одна копия, одна страница на лист,
+    /// односторонняя. Почему это обязательно и откуда бралась лишняя пустая наклейка — разобрано в
+    /// <see cref="LabelPrintJob"/>.</summary>
+    public static PrintOutcome Print(FrameworkElement label, string printerName, string jobName,
+        LabelLayout layout)
     {
         try
         {
@@ -283,6 +323,8 @@ public static class LabelPrinter
                 else note = $" (принтер «{printerName}» не найден — печать на принтер по умолчанию)";
             }
 
+            if (DescribeJob(dlg.PrintQueue, LabelPrintJob.SheetFor(layout)) is { } ticket) dlg.PrintTicket = ticket;
+
             dlg.PrintVisual(label, jobName);
             return new PrintOutcome(true, $"Этикетка отправлена на печать{note}");
         }
@@ -290,6 +332,68 @@ public static class LabelPrinter
         {
             return new PrintOutcome(false, $"Не удалось напечатать: {ex.Message}");
         }
+    }
+
+    /// <summary>Тикет задания под конкретную наклейку. Строится поверх ТЕКУЩИХ настроек очереди
+    /// (перечитанных — см. PrinterPageProbe про заводской снимок), чтобы не сбить человеку лоток,
+    /// плотность и скорость печати, и переопределяет только то, что относится к листу и к числу
+    /// оттисков.
+    ///
+    /// Драйвер проверяет заказ сам (<see cref="PrintQueue.MergeAndValidatePrintTicket"/>): принтеру,
+    /// который такой лист не умеет, спорить с нами не придётся — он подставит ближайший поддерживаемый.
+    /// Не вышло вовсе (нет очереди, драйвер отказал) — печатаем как раньше, без тикета: лучше
+    /// этикетка с прежней болячкой, чем несостоявшаяся печать.</summary>
+    private static PrintTicket? DescribeJob(PrintQueue? queue, LabelSheet sheet)
+    {
+        if (queue is null) return null;
+        try
+        {
+            // Очередь по умолчанию сюда приходит не через TryFindQueue и потому не перечитана — а
+            // тикет задания собирается поверх настроек человека (см. PrinterPageProbe про снимок).
+            try { queue.Refresh(); } catch (Exception) { /* нет прав перечитать — берём что есть */ }
+
+            var straight = Validate(queue, sheet.WidthDiu, sheet.HeightDiu, PageOrientation.Portrait);
+            if (straight is null || Matches(straight, sheet.WidthDiu, sheet.HeightDiu)) return straight;
+
+            // Наклейка шире, чем выше, а драйвер описывает бумагу только «по-книжному» и вернул
+            // стороны переставленными. Тогда тот же лист заказывается вторым законным способом:
+            // бумага книжная, а разворачивает её ориентация. Не помогло и это — печатаем с тем, что
+            // драйвер согласовал: хуже прежнего (когда лист не задавался вовсе) точно не будет.
+            return Validate(queue, sheet.HeightDiu, sheet.WidthDiu, PageOrientation.Landscape) ?? straight;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static PrintTicket? Validate(PrintQueue queue, double widthDiu, double heightDiu,
+        PageOrientation orientation)
+    {
+        var wanted = new PrintTicket
+        {
+            PageMediaSize = new PageMediaSize(widthDiu, heightDiu),
+            PageOrientation = orientation,
+            // Двустороннюю и «две страницы на лист» в тикет очереди кладёт печать паспорта и
+            // инструкции (см. DuplexPrinting) и возвращает обратно лишь после того, как очередь
+            // опустеет. Этикетка, напечатанная в это окно, наследовала их — и печаталась то
+            // половинкой, то с пустым оборотом.
+            PagesPerSheet = LabelPrintJob.Pages,
+            Duplexing = Duplexing.OneSided,
+            CopyCount = 1,
+            PageScalingFactor = 100,
+        };
+
+        return queue.MergeAndValidatePrintTicket(queue.UserPrintTicket, wanted).ValidatedPrintTicket;
+    }
+
+    /// <summary>Согласился ли драйвер печатать ровно тот лист, что мы заказали. Полмиллиметра —
+    /// допуск на округление: размер бумаги идёт в схему печати целыми микронами.</summary>
+    private static bool Matches(PrintTicket ticket, double widthDiu, double heightDiu)
+    {
+        if (ticket.PageMediaSize is not { Width: { } w, Height: { } h }) return true;
+        var tolerance = MmToDiu(0.5);
+        return Math.Abs(w - widthDiu) < tolerance && Math.Abs(h - heightDiu) < tolerance;
     }
 
     /// <summary>Имена принтеров, установленных на этой машине. Пустой список — служба печати
@@ -325,8 +429,17 @@ public static class LabelPrinter
             var server = new LocalPrintServer();
             foreach (var q in server.GetPrintQueues(new[] { EnumeratedPrintQueueTypes.Local, EnumeratedPrintQueueTypes.Connections }))
             {
-                if (string.Equals(q.Name, name, StringComparison.OrdinalIgnoreCase)) return q;
-                q.Dispose();
+                if (!string.Equals(q.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    q.Dispose();
+                    continue;
+                }
+
+                // Перечитываем очередь: до Refresh она отдаёт настройки из снимка перечисления, то
+                // есть заводские, а не выставленные человеком (подробно — в PrinterPageProbe). Тикет
+                // задания собирается поверх них, и без этого печать шла бы мимо настроек принтера.
+                try { q.Refresh(); } catch (Exception) { /* нет прав перечитать — печатаем как есть */ }
+                return q;
             }
         }
         catch (Exception)

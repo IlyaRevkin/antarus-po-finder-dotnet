@@ -727,6 +727,7 @@ public partial class Database : IDisposable
         AddNewDefaultManufacturersOnce();
         SeedFwAttachmentKindsOnce();
         SeedHostingAddressesOnce();
+        RenameLabelInstructionTextsOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -849,6 +850,33 @@ public partial class Database : IDisposable
         foreach (var (key, value) in Services.ConfigService.PresetDefaults)
             if (GetSetting(key) == "")
                 SetSetting(key, value);
+        SetSetting(doneFlag, "true");
+    }
+
+    /// <summary>Разово переписывает на наклейке «инструкцию» в «руководство по эксплуатации».
+    /// Поправка Ильи: «кст текст не инструкция, а руководство по эксплуатации» — эту строку читает
+    /// заказчик, и документ, который он по наклейке открывает, называется именно так.
+    ///
+    /// Меняется ТОЛЬКО нетронутое умолчание: если текст правили руками (а он для того и настраиваемый
+    /// — у разных шкафов он разный), он остаётся как есть. Умолчания в коде мало: тексты, однажды
+    /// сохранённые в окне «QR и этикетка», лежат в settings и подстановку из кода перекрывают.
+    ///
+    /// Внутренние имена при этом НЕ трогаются: папка «Инструкция» на диске, instructions_path,
+    /// InstructionNaming — их читает не заказчик, а диск и синхронизация.</summary>
+    private void RenameLabelInstructionTextsOnce()
+    {
+        const string doneFlag = "migration_label_manual_wording";
+        if (GetSetting(doneFlag) == "true") return;
+
+        foreach (var (key, legacy, fresh) in new[]
+                 {
+                     ("label_headline", Services.LabelLayout.LegacyHeadline, Services.LabelLayout.DefaultHeadline),
+                     ("label_hole_text", Services.LabelLayout.LegacyHoleText, Services.LabelLayout.DefaultHoleText),
+                 })
+        {
+            if (GetSetting(key) == legacy) SetSetting(key, fresh);
+        }
+
         SetSetting(doneFlag, "true");
     }
 

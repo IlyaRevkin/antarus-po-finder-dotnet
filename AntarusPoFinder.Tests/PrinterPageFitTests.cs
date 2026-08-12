@@ -20,15 +20,15 @@ public class PrinterPageFitTests
         };
 
     [Fact]
-    public void Takes_page_size_and_widest_edge_as_margin()
+    public void Takes_page_size_and_puts_each_edge_into_its_own_margin()
     {
         var fit = PrinterPageFit.Apply(new LabelLayout(), Setup(100, 70, 1.5, 2, 1.5, 2));
 
         Assert.Equal(100, fit.Layout.WidthMm);
         Assert.Equal(70, fit.Layout.HeightMm);
-        // Поля одинаковые со всех сторон, поэтому берётся самая широкая кромка: по узкой стороне
-        // содержимое отступит с запасом, по широкой — ровно настолько, чтобы не попасть под обрез.
-        Assert.Equal(2, fit.Layout.MarginMm);
+        // Каждая кромка ложится в поле своей стороны. Раньше здесь бралась самая широкая на все
+        // четыре — и по узким сторонам содержимое отступало лишнее, что и добирали сдвигом.
+        Assert.Equal(new LabelMargins(1.5, 2, 1.5, 2), fit.Layout.Margins);
         Assert.Empty(fit.Notes);
     }
 
@@ -42,15 +42,16 @@ public class PrinterPageFitTests
     }
 
     [Fact]
-    public void Asymmetric_edges_shift_content_to_the_middle_of_the_printable_area()
+    public void Asymmetric_edges_become_asymmetric_margins_and_leave_the_shift_alone()
     {
-        // Слева печатать нельзя 4 мм, справа — 1: печатная область смещена вправо на 3 мм, значит
-        // её середина правее середины листа на полтора. Без сдвига содержимое стояло бы по центру
-        // ЛИСТА и заметно жалось бы к правому краю печати.
-        var fit = PrinterPageFit.Apply(new LabelLayout(), Setup(100, 70, 4, 1, 1, 3));
+        // Слева печатать нельзя 4 мм, справа — 1. Раньше поле бралось одно (4 мм со всех сторон), а
+        // перекос добирался сдвигом всего макета на 1.5 мм — то есть одна кривизна лечилась другой.
+        // Теперь кромки просто ложатся в поля своих сторон, и двигать нечего.
+        var fit = PrinterPageFit.Apply(new LabelLayout { OffsetXMm = 4, OffsetYMm = -3 }, Setup(100, 70, 4, 1, 1, 3));
 
-        Assert.Equal(1.5, fit.Layout.OffsetXMm);
-        Assert.Equal(-1, fit.Layout.OffsetYMm);
+        Assert.Equal(new LabelMargins(4, 1, 1, 3), fit.Layout.Margins);
+        Assert.Equal(0, fit.Layout.OffsetXMm);
+        Assert.Equal(0, fit.Layout.OffsetYMm);
     }
 
     [Fact]
@@ -79,8 +80,10 @@ public class PrinterPageFitTests
     {
         var fit = PrinterPageFit.Apply(new LabelLayout(), Setup(100, 70, -5, double.NaN, 2, 2));
 
-        Assert.Equal(2, fit.Layout.MarginMm);
-        Assert.True(fit.Layout.OffsetXMm <= 0);
+        // Ерунда от драйвера считается «кромки нет», а не отрицательным полем; запас всё равно
+        // остаётся (ReserveMm), иначе вернулся бы обрезанный край.
+        Assert.Equal(new LabelMargins(PrinterPageFit.ReserveMm, PrinterPageFit.ReserveMm, 2, 2), fit.Layout.Margins);
+        Assert.False(double.IsNaN(fit.Layout.OffsetXMm));
         Assert.False(double.IsNaN(fit.Layout.OffsetYMm));
     }
 

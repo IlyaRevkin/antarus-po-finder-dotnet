@@ -55,12 +55,33 @@
                         <TextBox x:Name="HeightInput" Width="80" TextChanged="Layout_Changed"/>
                     </StackPanel>
 
-                    <TextBlock Text="Поля от краёв, мм" Style="{StaticResource MutedText}"
-                               ToolTip="Главное средство от обрезанного верха: у принтера этикеток есть непечатаемая кромка, и содержимое должно начинаться после неё."/>
-                    <TextBox x:Name="MarginInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8" TextChanged="Layout_Changed"/>
+                    <!-- Поля по сторонам, а не одно на все четыре: непечатаемая кромка у принтера
+                         почти никогда не одинакова, и раньше её перекос приходилось доводить сдвигом
+                         всего макета. Порядок полей — как на всех четырёх сторонах наклейки. -->
+                    <TextBlock Text="Поля: слева / сверху, мм" Style="{StaticResource MutedText}"
+                               ToolTip="Главное средство от обрезанного верха: у принтера этикеток есть непечатаемая кромка, и содержимое должно начинаться после неё. Кнопка «Считать с драйвера принтера» подставляет сюда настоящие кромки."/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,4">
+                        <TextBox x:Name="MarginLeftInput" Width="80" TextChanged="Layout_Changed"/>
+                        <TextBlock Text="/" VerticalAlignment="Center" Margin="6,0"/>
+                        <TextBox x:Name="MarginTopInput" Width="80" TextChanged="Layout_Changed"/>
+                    </StackPanel>
+                    <TextBlock Text="Поля: справа / снизу, мм" Style="{StaticResource MutedText}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
+                        <TextBox x:Name="MarginRightInput" Width="80" TextChanged="Layout_Changed"/>
+                        <TextBlock Text="/" VerticalAlignment="Center" Margin="6,0"/>
+                        <TextBox x:Name="MarginBottomInput" Width="80" TextChanged="Layout_Changed"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Поворот содержимого" Style="{StaticResource MutedText}"
+                               ToolTip="Для рулонных принтеров: наклейка едет узкой стороной вперёд, и макет надо развернуть, чтобы читался на шкафу правильно. Размер самой наклейки не меняется — её режет высечка."/>
+                    <ComboBox x:Name="RotationCombo" Margin="0,2,0,8" SelectionChanged="Layout_Changed">
+                        <ComboBoxItem Content="Без поворота" Tag="None"/>
+                        <ComboBoxItem Content="На 90° по часовой" Tag="Clockwise90"/>
+                        <ComboBoxItem Content="На 90° против часовой" Tag="CounterClockwise90"/>
+                    </ComboBox>
 
                     <TextBlock Text="Сдвиг X / Y, мм" Style="{StaticResource MutedText}"
-                               ToolTip="Если принтер тянет лист со смещением — двигаем макет целиком, не трогая поля. Настройка этой машины, коллегам не уезжает."/>
+                               ToolTip="Если принтер тянет ленту со смещением — двигаем макет целиком, не трогая поля. Настройка этой машины, коллегам не уезжает."/>
                     <StackPanel Orientation="Horizontal" Margin="0,2,0,8">
                         <TextBox x:Name="OffsetXInput" Width="80" TextChanged="Layout_Changed"/>
                         <TextBlock Text="/" VerticalAlignment="Center" Margin="6,0"/>
@@ -112,11 +133,12 @@
                     <!-- Подпись назначения. Дословная жалоба: «на этикетке нигде не написано, что
                          это инструкция для заказчика — просто QR, название установки и непонятные
                          цифры». Текст правится здесь и в Настройки → Печать, потому что у разных
-                         шкафов он разный («Инструкция для заказчика», «Руководство по эксплуатации»). -->
+                         шкафов он разный. По умолчанию — «Руководство по эксплуатации»: документ,
+                         который заказчик откроет по коду, называется именно так. -->
                     <CheckBox x:Name="ShowHeadlineCheck" Content="Подпись назначения" Margin="0,0,0,4" Click="Layout_Changed"
                               ToolTip="Строка над кодом, объясняющая, что это за наклейка и зачем её сканировать."/>
                     <TextBox x:Name="HeadlineInput" Margin="0,2,0,8" TextChanged="Layout_Changed" MaxLength="60"
-                             ToolTip="Например: «Инструкция по эксплуатации — наведите камеру». Не длиннее двух строк на этикетке."/>
+                             ToolTip="Например: «Руководство по эксплуатации — наведите камеру». Не длиннее двух строк на этикетке."/>
 
                     <TextBlock Text="Положение подписи назначения" Style="{StaticResource MutedText}"
                                ToolTip="«Сам» — подпись идёт первой строкой рядом с кодом и ничего у него не отнимает. «Сверху»/«снизу» — полосой во всю ширину: читается заметнее, но забирает высоту у кода."/>
@@ -133,6 +155,12 @@
                         <ComboBoxItem Content="По правому краю" Tag="Right"/>
                     </ComboBox>
 
+                    <!-- Своя строка под названием установки: номер договора, объект, «не снимать».
+                         Печатается тем же кеглем, что и версия, и рядом с ней. -->
+                    <TextBlock Text="Своя строка под названием" Style="{StaticResource MutedText}"
+                               ToolTip="Что дописать на этой наклейке от себя: номер договора, объект, предупреждение. Пусто — строки нет."/>
+                    <TextBox x:Name="NoteInput" Margin="0,2,0,8" TextChanged="Layout_Changed" MaxLength="80"/>
+
                     <TextBlock Text="Подпись в центре кода" Style="{StaticResource MutedText}"
                                ToolTip="До 15 знаков. Длиннее четырёх — верстается в две-три строки: так те же буквы получаются крупнее, потому что плашке расти некуда. Пусто — код без окошка."/>
                     <TextBox x:Name="HoleTextInput" Margin="0,2,0,2"
@@ -145,7 +173,7 @@
 
                     <Button Content="Сохранить как настройки по умолчанию" Style="{StaticResource SecondaryButton}"
                             Margin="0,4,0,4" Click="SaveLayout_Click"
-                            ToolTip="Размер, поля, кегли и стиль уедут ко всем машинам; сдвиг останется на этой."/>
+                            ToolTip="Оформление и тексты уедут ко всем машинам: вид и положение кода, кегли, подписи, рамка. Размер наклейки, поля, поворот и сдвиг останутся на этой машине — у каждого принтера они свои."/>
                     <Button Content="Вернуть исходный макет" Style="{StaticResource SecondaryButton}" Click="ResetLayout_Click"/>
                 </StackPanel>
             </ScrollViewer>

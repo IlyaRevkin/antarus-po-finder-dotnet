@@ -186,6 +186,12 @@ public static class DuplexPrinting
     {
         try
         {
+            // Refresh обязателен: очередь отдаёт пользовательский тикет из снимка, сделанного при её
+            // получении, и до перечитывания на его месте лежит ЗАВОДСКОЙ (подробно — в
+            // PrinterPageProbe). Здесь это опаснее, чем в подстановке полей: прочитанный тикет мы
+            // потом возвращаем на место как «настройки человека», то есть заводскими затирали бы то,
+            // что он выставил себе сам.
+            queue.Refresh();
             var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket;
             if (ticket is null) return null;
             using var stream = ticket.GetXmlStream();

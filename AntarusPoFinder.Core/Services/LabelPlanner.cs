@@ -43,7 +43,7 @@ public sealed record LabelPlan
 
     public LabelBox Qr { get; init; }
 
-    /// <summary>Подпись назначения («Инструкция для заказчика»). Пустой прямоугольник — подписи нет.
+    /// <summary>Подпись назначения («Руководство по эксплуатации»). Пустой прямоугольник — подписи нет.
     /// Отдельным блоком, а не частью заголовка: она объясняет НАЗНАЧЕНИЕ наклейки и должна читаться
     /// первой, а заголовок с версией — это уже «что именно». Место берётся у текста, а не у кода
     /// (см. LabelPlanner.Plan): наклейку делают ради того, чтобы код взяла камера.</summary>
@@ -130,7 +130,7 @@ public static class LabelPlanner
     /// ссылка и так укладывается в свои две-три строки задолго до предела доли.</summary>
     public const double CaptionShareMax = 0.3;
 
-    /// <summary>Доля ОБЛАСТИ ТЕКСТА под подпись назначения («Инструкция для заказчика»): не больше
+    /// <summary>Доля ОБЛАСТИ ТЕКСТА под подпись назначения («Руководство по эксплуатации»): не больше
     /// трети того места, что и так отведено под заголовок. У кода она не забирает ничего (см. Plan),
     /// но и заголовок с версией задавить не должна — подпись из двух строк уже прочитана.</summary>
     public const double HeadlineShareMax = 0.34;
@@ -243,15 +243,18 @@ public static class LabelPlanner
         if (length > 0) yield return (length, spaceBefore);
     }
 
-    /// <summary>Высота блока «заголовок + подзаголовок» при заданном кегле заголовка.</summary>
-    public static double TextBlockHeightMm(string? title, string? subtitle, double widthMm, double titlePt)
+    /// <summary>Высота блока «заголовок + подзаголовок + своя строка» при заданном кегле заголовка.
+    /// Своя строка (<see cref="LabelLayout.NoteText"/>) считается тем же кеглем, что подзаголовок:
+    /// это такая же поясняющая строка, только её пишет человек, а не программа.</summary>
+    public static double TextBlockHeightMm(string? title, string? subtitle, double widthMm, double titlePt,
+        string? note = null)
     {
         var h = EstimateLines(title, widthMm, titlePt, CharWidthBold) * LineHeightMm(titlePt);
+        var subPt = SubtitlePtFor(titlePt);
         if (!string.IsNullOrWhiteSpace(subtitle))
-        {
-            var subPt = SubtitlePtFor(titlePt);
             h += CaptionGapMm + EstimateLines(subtitle, widthMm, subPt) * LineHeightMm(subPt);
-        }
+        if (!string.IsNullOrWhiteSpace(note))
+            h += CaptionGapMm + EstimateLines(note, widthMm, subPt) * LineHeightMm(subPt);
         return h;
     }
 
@@ -261,7 +264,9 @@ public static class LabelPlanner
 
     public static LabelPlan Plan(LabelLayout raw, string? title, string? subtitle, string? caption)
     {
-        var v = raw.Clamped();
+        // Повёрнутый макет считается на перевёрнутой стороне — см. LabelLayout.ForDesign. Здесь про
+        // поворот больше нет ни слова: обратно на наклейку раскладку кладёт отрисовка.
+        var v = raw.Clamped().ForDesign();
         var warnings = new List<string>();
         var page = new LabelBox(0, 0, v.WidthMm, v.HeightMm);
 
@@ -288,7 +293,8 @@ public static class LabelPlanner
             ? inner
             : new LabelBox(inner.X, inner.Y, inner.W, Math.Max(0, inner.H - captionBox.H - CaptionGapMm));
 
-        var hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(subtitle);
+        var hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(subtitle)
+                      || !string.IsNullOrWhiteSpace(v.NoteText);
 
         // ГЛАВНОЕ ПРАВИЛО подписи назначения: она НЕ отнимает место у кода. Наклейку делают ради
         // того, чтобы код взяла камера телефона, а полоса во всю ширину сверху съедала высоту как
@@ -407,19 +413,20 @@ public static class LabelPlanner
     /// становится уже, содержимому достаётся меньше места — и оно остаётся на бумаге.</summary>
     private static LabelBox Band(LabelLayout v, List<string> warnings)
     {
-        var offX = LimitOffset(v.OffsetXMm, v.WidthMm, v.MarginMm);
-        var offY = LimitOffset(v.OffsetYMm, v.HeightMm, v.MarginMm);
+        var m = v.Margins;
+        var offX = LimitOffset(v.OffsetXMm, v.WidthMm, m.Left + m.Right);
+        var offY = LimitOffset(v.OffsetYMm, v.HeightMm, m.Top + m.Bottom);
         if (Math.Abs(offX - v.OffsetXMm) > 0.01 || Math.Abs(offY - v.OffsetYMm) > 0.01)
             warnings.Add($"Сдвиг больше половины этикетки не имеет смысла — учтён как {Mm(offX)} / {Mm(offY)} мм.");
 
-        var x0 = Math.Clamp(v.MarginMm + offX, 0, v.WidthMm);
-        var x1 = Math.Clamp(v.WidthMm - v.MarginMm + offX, 0, v.WidthMm);
-        var y0 = Math.Clamp(v.MarginMm + offY, 0, v.HeightMm);
-        var y1 = Math.Clamp(v.HeightMm - v.MarginMm + offY, 0, v.HeightMm);
+        var x0 = Math.Clamp(m.Left + offX, 0, v.WidthMm);
+        var x1 = Math.Clamp(v.WidthMm - m.Right + offX, 0, v.WidthMm);
+        var y0 = Math.Clamp(m.Top + offY, 0, v.HeightMm);
+        var y1 = Math.Clamp(v.HeightMm - m.Bottom + offY, 0, v.HeightMm);
 
         var band = new LabelBox(x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0));
 
-        var full = Math.Max(0, v.WidthMm - 2 * v.MarginMm) * Math.Max(0, v.HeightMm - 2 * v.MarginMm);
+        var full = Math.Max(0, v.WidthMm - m.Left - m.Right) * Math.Max(0, v.HeightMm - m.Top - m.Bottom);
         if (full > 0 && band.W * band.H < full - 0.01)
             warnings.Add("Сдвиг вывел макет к краю — содержимое ужато, чтобы не уйти за этикетку.");
 
@@ -428,9 +435,9 @@ public static class LabelPlanner
 
     /// <summary>Сдвиг не должен съедать больше половины полосы: дальше это уже не калибровка
     /// принтера, а способ выкинуть содержимое с этикетки.</summary>
-    private static double LimitOffset(double off, double sideMm, double marginMm)
+    private static double LimitOffset(double off, double sideMm, double marginsMm)
     {
-        var half = Math.Max(0, (sideMm - 2 * marginMm) / 2);
+        var half = Math.Max(0, (sideMm - marginsMm) / 2);
         return Math.Clamp(off, -half, half);
     }
 
@@ -564,14 +571,16 @@ public static class LabelPlanner
         LabelLayout v, LabelBox area, string? title, string? subtitle, List<string> warnings)
     {
         var pt = v.TitlePt;
-        if (area.IsEmpty || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(subtitle)))
+        var note = v.NoteText;
+        if (area.IsEmpty || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(subtitle)
+                                                             && string.IsNullOrWhiteSpace(note)))
             return (default, pt);
 
-        var need = TextBlockHeightMm(title, subtitle, area.W, pt);
+        var need = TextBlockHeightMm(title, subtitle, area.W, pt, note);
         while (pt > MinTitlePt && need > area.H)
         {
             pt = Math.Max(MinTitlePt, pt - 0.5);
-            need = TextBlockHeightMm(title, subtitle, area.W, pt);
+            need = TextBlockHeightMm(title, subtitle, area.W, pt, note);
         }
 
         if (pt < v.TitlePt - 0.01)

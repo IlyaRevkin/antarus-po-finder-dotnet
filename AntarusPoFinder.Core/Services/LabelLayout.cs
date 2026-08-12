@@ -17,7 +17,7 @@ public enum QrPlacement
     Below,
 }
 
-/// <summary>Где печатается подпись назначения («Инструкция для заказчика»).
+/// <summary>Где печатается подпись назначения («Руководство по эксплуатации»).
 ///
 /// «Сам» — там, где она ничего не отнимает у кода: первой строкой в области текста. «Сверху»/«Снизу»
 /// — своей полосой во всю ширину, над всем содержимым или под ним: так подпись читается первой, но
@@ -36,6 +36,53 @@ public enum HeadlineAlignment
     Center,
     Left,
     Right,
+}
+
+/// <summary>Поворот всего макета на наклейке.
+///
+/// Нужен рулонным принтерам: на ленте наклейка едет узкой стороной вперёд, и напечатанное «как
+/// смотрит макет» оказывается лежащим на боку относительно того, как наклейку клеят на шкаф. Сам
+/// физический размер наклейки при этом НЕ меняется (её режет высечка, а не мы) — поворачивается
+/// только содержимое: макет считается на перевёрнутой стороне и кладётся на ту же наклейку боком.</summary>
+public enum LabelRotation
+{
+    None,
+
+    /// <summary>По часовой стрелке: верх макета уходит к правому краю наклейки.</summary>
+    Clockwise90,
+
+    /// <summary>Против часовой: верх макета уходит к левому краю.</summary>
+    CounterClockwise90,
+}
+
+/// <summary>Поля этикетки по сторонам, в миллиметрах.
+///
+/// <b>Почему по сторонам, а не одно на все четыре.</b> Непечатаемая кромка у принтера почти никогда
+/// не одинакова: сверху её съедает подача, снизу — отрыв, слева и справа — направляющие. Единственное
+/// поле приходилось задавать по самой широкой кромке, и всё остальное содержимое уезжало к
+/// противоположному краю; лечили это сдвигом всего макета — то есть одной кривизной чинили другую.
+/// Теперь драйвер отдаёт четыре числа, и они кладутся туда же, четырьмя (см. PrinterPageFit), а
+/// сдвиг остаётся тем, чем и был: калибровкой протяжки.</summary>
+public readonly record struct LabelMargins(double Left, double Top, double Right, double Bottom)
+{
+    public static LabelMargins All(double mm) => new(mm, mm, mm, mm);
+
+    /// <summary>Самое узкое поле — им описывается набор одним числом там, где четырёх не завезли:
+    /// в настройке для старых версий программы и в короткой строке состояния.</summary>
+    public double Min => Math.Min(Math.Min(Left, Right), Math.Min(Top, Bottom));
+
+    public bool Uniform =>
+        Math.Abs(Left - Top) < 0.01 && Math.Abs(Left - Right) < 0.01 && Math.Abs(Left - Bottom) < 0.01;
+
+    /// <summary>Поля так, как их видит повёрнутый макет. Разворот содержимого меняет местами и
+    /// стороны: верх макета при повороте по часовой стрелке смотрит в правый край наклейки, значит
+    /// «поле сверху» для него — это правое поле наклейки.</summary>
+    public LabelMargins ForRotation(LabelRotation rotation) => rotation switch
+    {
+        LabelRotation.Clockwise90 => new LabelMargins(Top, Right, Bottom, Left),
+        LabelRotation.CounterClockwise90 => new LabelMargins(Bottom, Left, Top, Right),
+        _ => this,
+    };
 }
 
 /// <summary>Вид самого кода. <see cref="Classic"/> — обычная чёрная матрица (запасной вариант на
@@ -60,18 +107,30 @@ public enum QrStyle
 /// начинается от физического угла листа, у которого есть непечатаемая зона, а поля этикетки были
 /// нулевыми, и первые миллиметры содержимого просто не попадали на бумагу.
 ///
-/// Поэтому здесь есть и <see cref="MarginMm"/> (отступ содержимого от краёв — лечит обрезку сам по
+/// Поэтому здесь есть и <see cref="Margins"/> (отступы содержимого от краёв — лечат обрезку сами по
 /// себе), и <see cref="OffsetXMm"/>/<see cref="OffsetYMm"/> (сдвиг всего макета — на случай, когда
-/// принтер смещает лист, и лечить надо не полями, а именно сдвигом). Разделены они намеренно:
+/// принтер смещает ленту, и лечить надо не полями, а именно сдвигом). Разделены они намеренно:
 /// поля влияют на то, сколько места остаётся содержимому, а сдвиг — нет.</summary>
 public sealed record LabelLayout
 {
     public double WidthMm { get; init; } = 97.5;
     public double HeightMm { get; init; } = 72;
 
-    /// <summary>Отступ содержимого от краёв этикетки. По умолчанию 3 мм — с запасом больше
-    /// непечатаемой зоны любого известного термопринтера этикеток.</summary>
-    public double MarginMm { get; init; } = 3;
+    /// <summary>Отступы содержимого от краёв этикетки, по сторонам. По умолчанию 3 мм со всех —
+    /// с запасом больше непечатаемой зоны любого известного термопринтера этикеток.</summary>
+    public LabelMargins Margins { get; init; } = LabelMargins.All(3);
+
+    /// <summary>Поле одним числом — для короткой строки состояния и для настройки, которую читают
+    /// старые версии программы. Ставит одинаковое поле со всех сторон.</summary>
+    public double MarginMm
+    {
+        get => Margins.Min;
+        init => Margins = LabelMargins.All(value);
+    }
+
+    /// <summary>Поворот содержимого на наклейке — см. <see cref="LabelRotation"/>. Per-machine, как
+    /// и размер: зависит от того, каким боком наклейка едет в этом принтере.</summary>
+    public LabelRotation Rotation { get; init; } = LabelRotation.None;
 
     /// <summary>Сдвиг всего содержимого вправо/вниз (можно отрицательный) — калибровка под
     /// конкретный принтер. Per-machine, как и имя принтера.</summary>
@@ -114,7 +173,7 @@ public sealed record LabelLayout
     /// <b>Зачем настройка.</b> На шкафу наклеек несколько (паспорт, ОТК, инструкция), и без подписи
     /// заказчик видит «просто QR с названием установки и непонятными цифрами» — дословная жалоба. Одна
     /// строка снимает вопрос ещё до того, как человек достанет телефон. Текст правится, а не зашит:
-    /// у одних шкафов это «Инструкция для заказчика», у других — «Руководство по эксплуатации» или
+    /// у одних шкафов это «Руководство по эксплуатации» (умолчание), у других — «Паспорт шкафа» или
     /// имя заказчика, и переписывать программу ради этого никто не должен.</summary>
     public string HeadlineText { get; init; } = DefaultHeadline;
 
@@ -129,14 +188,35 @@ public sealed record LabelLayout
     /// <summary>Выравнивание подписи назначения в её строке.</summary>
     public HeadlineAlignment HeadlineAlign { get; init; } = HeadlineAlignment.Center;
 
+    /// <summary>Свободная строка под названием установки — то, что на этой наклейке надо дописать
+    /// «от себя»: номер договора, имя объекта, «после наладки не снимать». Печатается тем же кеглем,
+    /// что и подзаголовок с версией, и рядом с ним.
+    ///
+    /// Отдельно от подписи назначения: та объясняет, ЗАЧЕМ наклейка (одна на всё предприятие), а эта
+    /// — про конкретную партию шкафов, и меняют её чаще, чем весь остальной макет.</summary>
+    public string NoteText { get; init; } = "";
+
     /// <summary>Подпись в окошке по центру фирменного кода. Пусто — окна нет вовсе, код рисуется
     /// сплошным. Длиннее <see cref="HoleWrapAfter"/> знаков — верстается в две-три строки (см.
     /// <see cref="QrHoleText"/>): одной строкой «ИНСТРУКЦИЯ» вырождалась в нечитаемый кегль, потому
     /// что плашке расти некуда, а в три строки те же буквы получаются заметно крупнее.</summary>
     public string HoleText { get; init; } = DefaultHoleText;
 
-    public const string DefaultHeadline = "Инструкция для заказчика";
-    public const string DefaultHoleText = "ИНСТ";
+    /// <summary>Что печатается на наклейке по умолчанию. Дословная поправка Ильи: «кст текст не
+    /// инструкция, а руководство по эксплуатации» — наклейку читает заказчик, и документ, который он
+    /// по ней откроет, называется именно так. Внутренние имена (папка «Инструкция» на диске,
+    /// instructions_path, InstructionNaming) при этом не трогаются: их читает не заказчик, а диск и
+    /// синхронизация, и переименование сломало бы и то и другое.</summary>
+    public const string DefaultHeadline = "Руководство по эксплуатации";
+
+    /// <summary>«РЭ» — общепринятое сокращение руководства по эксплуатации; оно же и короче, то есть
+    /// печатается в плашке крупнее, чем прежнее «ИНСТ».</summary>
+    public const string DefaultHoleText = "РЭ";
+
+    /// <summary>Прежние умолчания. Нужны разовой миграции (Database.RenameLabelInstructionTextsOnce):
+    /// переписать текст можно только там, где его не правили руками.</summary>
+    public const string LegacyHeadline = "Инструкция для заказчика";
+    public const string LegacyHoleText = "ИНСТ";
 
     /// <summary>Столько знаков в подписи центра помещается в плашку в 20 % стороны кода, если верстать
     /// её в три строки. Больше — кегль падает ниже различимого на 203 dpi, поэтому лишнее отсекается.</summary>
@@ -165,13 +245,18 @@ public sealed record LabelLayout
         {
             WidthMm = w,
             HeightMm = h,
-            MarginMm = Clamp(MarginMm, 0, Math.Min(w, h) / 4),
+            // Каждое поле — не больше четверти своей стороны: два противоположных вместе не должны
+            // съесть половину наклейки, иначе содержимому остаётся полоска.
+            Margins = new LabelMargins(
+                Clamp(Margins.Left, 0, w / 4), Clamp(Margins.Top, 0, h / 4),
+                Clamp(Margins.Right, 0, w / 4), Clamp(Margins.Bottom, 0, h / 4)),
             OffsetXMm = Clamp(OffsetXMm, -20, 20),
             OffsetYMm = Clamp(OffsetYMm, -20, 20),
             QrMm = QrMm <= 0 ? 0 : Clamp(QrMm, 10, Math.Min(w, h)),
             TitlePt = Clamp(TitlePt, 6, 48),
             CaptionPt = Clamp(CaptionPt, 5, 24),
             HeadlineText = Trim(HeadlineText, 60),
+            NoteText = Trim(NoteText, 80),
             // Длинная подпись в центре не «ужимается», а вырождается: плашка не растёт (её площадь
             // ограничена тем, что вытягивает коррекция ошибок), поэтому лишнее отсекается здесь, а не
             // превращается в нечитаемую строку на печати.
@@ -198,6 +283,30 @@ public sealed record LabelLayout
     /// по которой этикетка и рисуется, так что разойтись им больше негде.</summary>
     public double EffectiveQrMm() => LabelPlanner.Plan(this, "Заголовок", "", ShowLink ? "ссылка" : "").Qr.W;
 
+    /// <summary>Макет так, как его считает раскладка. При повороте содержимого (рулонные принтеры,
+    /// см. <see cref="LabelRotation"/>) компоновка ведётся на ПЕРЕВЁРНУТОЙ стороне — ширина с высотой
+    /// меняются местами, вместе с ними меняются местами поля и сдвиг, — а обратно на наклейку готовую
+    /// раскладку кладёт уже отрисовка, одним поворотом.
+    ///
+    /// Так решено, чтобы поворот не размазывался по всей компоновке: <see cref="LabelPlanner"/> о нём
+    /// не знает вовсе и остаётся тем же расчётом, который проверяется тестами.</summary>
+    public LabelLayout ForDesign() => Rotation switch
+    {
+        LabelRotation.Clockwise90 => Swapped(OffsetYMm, -OffsetXMm),
+        LabelRotation.CounterClockwise90 => Swapped(-OffsetYMm, OffsetXMm),
+        _ => this,
+    };
+
+    private LabelLayout Swapped(double offX, double offY) => this with
+    {
+        WidthMm = HeightMm,
+        HeightMm = WidthMm,
+        Margins = Margins.ForRotation(Rotation),
+        OffsetXMm = offX,
+        OffsetYMm = offY,
+        Rotation = LabelRotation.None,
+    };
+
     private static double Clamp(double value, double min, double max) =>
         double.IsNaN(value) ? min : Math.Min(max, Math.Max(min, value));
 
@@ -207,7 +316,11 @@ public sealed record LabelLayout
     {
         WidthMm = cfg.LabelWidthMm(),
         HeightMm = cfg.LabelHeightMm(),
-        MarginMm = cfg.LabelNumber("label_margin_mm", 3),
+        // Поля по сторонам появились позже единого поля. Пока их не сохраняли, читается прежний
+        // ключ — иначе обновление программы обнулило бы подобранный отступ и «верх обрезается»
+        // вернулось бы в первый же день.
+        Margins = ReadMargins(cfg),
+        Rotation = ReadEnum(cfg.LabelText("label_rotation", ""), LabelRotation.None),
         OffsetXMm = cfg.LabelNumber("label_offset_x_mm", 0),
         OffsetYMm = cfg.LabelNumber("label_offset_y_mm", 0),
         QrMm = cfg.LabelNumber("label_qr_mm", 0),
@@ -224,15 +337,36 @@ public sealed record LabelLayout
         ShowHeadline = cfg.LabelFlag("label_show_headline", true),
         HeadlinePlace = ReadEnum(cfg.LabelText("label_headline_place", ""), HeadlinePlacement.Auto),
         HeadlineAlign = ReadEnum(cfg.LabelText("label_headline_align", ""), HeadlineAlignment.Center),
+        NoteText = cfg.LabelText("label_note", ""),
         HoleText = cfg.LabelText("label_hole_text", DefaultHoleText),
     }.Clamped();
+
+    /// <summary>Поля по сторонам, а если их ни разу не сохраняли — прежнее единое поле со всех
+    /// четырёх сторон.</summary>
+    private static LabelMargins ReadMargins(ConfigService cfg)
+    {
+        var all = cfg.LabelNumber("label_margin_mm", 3);
+        return new LabelMargins(
+            cfg.LabelNumber("label_margin_left_mm", all),
+            cfg.LabelNumber("label_margin_top_mm", all),
+            cfg.LabelNumber("label_margin_right_mm", all),
+            cfg.LabelNumber("label_margin_bottom_mm", all));
+    }
 
     public void SaveTo(ConfigService cfg)
     {
         var v = Clamped();
         cfg.SetLabelWidthMm(v.WidthMm);
         cfg.SetLabelHeightMm(v.HeightMm);
-        cfg.SetLabelNumber("label_margin_mm", v.MarginMm);
+        cfg.SetLabelNumber("label_margin_left_mm", v.Margins.Left);
+        cfg.SetLabelNumber("label_margin_top_mm", v.Margins.Top);
+        cfg.SetLabelNumber("label_margin_right_mm", v.Margins.Right);
+        cfg.SetLabelNumber("label_margin_bottom_mm", v.Margins.Bottom);
+        // Прежний ключ единого поля пишется и дальше — тем же приёмом, что label_fancy_qr ниже: на
+        // соседней машине может стоять версия, которая про стороны ещё не знает, и она обязана
+        // получить хоть какое-то поле. Самое узкое: оно точно не выведет содержимое за наклейку.
+        cfg.SetLabelNumber("label_margin_mm", v.Margins.Min);
+        cfg.SetLabelText("label_rotation", v.Rotation.ToString());
         cfg.SetLabelNumber("label_offset_x_mm", v.OffsetXMm);
         cfg.SetLabelNumber("label_offset_y_mm", v.OffsetYMm);
         cfg.SetLabelNumber("label_qr_mm", v.QrMm);
@@ -249,6 +383,7 @@ public sealed record LabelLayout
         cfg.SetLabelFlag("label_show_headline", v.ShowHeadline);
         cfg.SetLabelText("label_headline_place", v.HeadlinePlace.ToString());
         cfg.SetLabelText("label_headline_align", v.HeadlineAlign.ToString());
+        cfg.SetLabelText("label_note", v.NoteText);
         cfg.SetLabelText("label_hole_text", v.HoleText);
     }
 
@@ -261,6 +396,14 @@ public sealed record LabelLayout
         Enum.TryParse<QrStyle>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
             ? parsed
             : fancy ? QrStyle.Rounded : QrStyle.Classic;
+
+    /// <summary>Поля одной строкой: одинаковые — одним числом, разные — всеми четырьмя. Читать
+    /// «3 / 3 / 3 / 3» в строке состояния каждый раз незачем.</summary>
+    public string MarginsCaption() => Margins.Uniform
+        ? Mm(Margins.Left)
+        : $"{Mm(Margins.Left)} / {Mm(Margins.Top)} / {Mm(Margins.Right)} / {Mm(Margins.Bottom)}";
+
+    private static string Mm(double value) => value.ToString("0.##", CultureInfo.CurrentCulture);
 
     public string SizeCaption() =>
         $"{WidthMm.ToString("0.##", CultureInfo.CurrentCulture)} × {HeightMm.ToString("0.##", CultureInfo.CurrentCulture)}";

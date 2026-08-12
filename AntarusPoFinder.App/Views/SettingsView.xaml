@@ -825,9 +825,10 @@
                                         Click="EditStubLayout_Click"/>
                             </Grid>
 
-                            <!-- Адрес и размер этикетки — общие для предприятия (уезжают на все машины
-                                 с конфигом), поэтому только администратору. Принтер ниже — наоборот,
-                                 настройка своей машины, её выбирает тот, кто печатает. -->
+                            <!-- Адрес диска инструкций и тексты этикетки — общие для предприятия
+                                 (уезжают на все машины с конфигом), поэтому только администратору.
+                                 Принтер и размер наклейки ниже — наоборот, настройки своей машины:
+                                 их правит тот, кто печатает. -->
                             <StackPanel x:Name="PrintingSharedSection">
                                 <TextBlock Text="Веб-адрес диска инструкций:" Margin="0,0,0,4"/>
                                 <Grid Margin="0,0,0,4">
@@ -849,21 +850,6 @@
                                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
                                 <TextBlock x:Name="InstructionUrlCheckText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
-                                <Grid Margin="0,0,0,10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Размер этикетки, мм:" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                                    <TextBox Grid.Column="1" x:Name="LabelWidthInput" Width="80" Height="34"
-                                             LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Ширина"/>
-                                    <TextBlock Grid.Column="2" Text="×" VerticalAlignment="Center" Margin="8,0"/>
-                                    <TextBox Grid.Column="3" x:Name="LabelHeightInput" Width="80" Height="34"
-                                             LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Высота"/>
-                                </Grid>
-
                                 <!-- Подпись назначения. На шкафу наклеек несколько (паспорт, ОТК,
                                      инструкция), и без строки-пояснения заказчик видит «просто QR,
                                      название установки и непонятные цифры». Текст общий для
@@ -872,7 +858,7 @@
                                 <TextBlock Text="Подпись назначения на этикетке:" Margin="0,0,0,4"/>
                                 <TextBox x:Name="LabelHeadlineInput" Height="34" Margin="0,0,0,4" MaxLength="60"
                                          LostFocus="LabelHeadline_LostFocus" KeyDown="PrintingField_KeyDown"
-                                         ToolTip="Строка над кодом: «Инструкция по эксплуатации — наведите камеру». Пусто — строки не будет."/>
+                                         ToolTip="Строка над кодом: «Руководство по эксплуатации — наведите камеру». Пусто — строки не будет."/>
                                 <CheckBox x:Name="LabelShowHeadlineCheck" Content="Печатать подпись назначения"
                                           Margin="0,0,0,10" Click="LabelShowHeadline_Click"/>
 
@@ -880,7 +866,7 @@
                                 <TextBox x:Name="LabelHoleTextInput" Width="180" HorizontalAlignment="Left" Height="34"
                                          Margin="0,0,0,4" MaxLength="15"
                                          LostFocus="LabelHoleText_LostFocus" KeyDown="PrintingField_KeyDown"
-                                         ToolTip="Например «ИНСТ». Длиннее четырёх знаков — печатается в две-три строки, так буквы получаются крупнее. Пусто — код печатается сплошным, без окошка."/>
+                                         ToolTip="Например «РЭ». Длиннее четырёх знаков — печатается в две-три строки, так буквы получаются крупнее. Пусто — код печатается сплошным, без окошка."/>
 
                                 <!-- Остальное про вид наклейки (положение кода, его вид, положение и
                                      выравнивание подписи назначения, поля, сдвиг, кегли) правится в
@@ -890,6 +876,25 @@
                                 <TextBlock Text="Положение кода, его вид, положение подписи назначения, поля и кегли — в окне «QR инструкции»: там всё это сразу видно на предпросмотре."
                                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             </StackPanel>
+
+                            <!-- Размер наклейки стоит здесь, рядом с принтером, а НЕ в общем разделе
+                                 выше: наклейка заправлена в конкретный принтер, и по сети этот размер
+                                 больше не разъезжается (ConfigSyncService.SkipSettingsKeys). Правит
+                                 его тот, кто печатает, — как и выбор принтера. -->
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Размер наклейки на этом компьютере, мм:" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <TextBox Grid.Column="1" x:Name="LabelWidthInput" Width="80" Height="34"
+                                         LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Ширина"/>
+                                <TextBlock Grid.Column="2" Text="×" VerticalAlignment="Center" Margin="8,0"/>
+                                <TextBox Grid.Column="3" x:Name="LabelHeightInput" Width="80" Height="34"
+                                         LostFocus="LabelSize_LostFocus" KeyDown="PrintingField_KeyDown" ToolTip="Высота"/>
+                            </Grid>
 
                             <TextBlock Text="Принтер этикеток (на этом компьютере):" Margin="0,0,0,4"/>
                             <ComboBox x:Name="LabelPrinterCombo" Height="34" Margin="0,0,0,10" SelectionChanged="LabelPrinter_Changed"
