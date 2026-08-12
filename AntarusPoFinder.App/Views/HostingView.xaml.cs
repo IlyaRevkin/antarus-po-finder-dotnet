@@ -57,8 +57,50 @@ public partial class HostingView : UserControl
     public void RefreshIfActive()
     {
         ShowStorageState();
+        LoadAccess();
         LoadTranslit();
         BuildList();
+    }
+
+    // ── Разделы страницы ──────────────────────────────────────────────────────
+
+    /// <summary>Переключение разделов — тем же способом, что и вкладки «Настроек»: активная кнопка
+    /// помечается Tag="Active" (NavButton сам подсвечивает её акцентом), содержимое переключается
+    /// видимостью. Данные при этом никуда не деваются: и журнал, и список живут в полях страницы,
+    /// поэтому переключаться туда-сюда можно посреди прогона.</summary>
+    private void Tab_Click(object sender, RoutedEventArgs e) => ShowTab((Button)sender);
+
+    private void ShowTab(Button active)
+    {
+        foreach (var button in new[] { TabBtnState, TabBtnAccess, TabBtnLog, TabBtnTranslit })
+            button.Tag = null;
+        active.Tag = "Active";
+
+        StateTab.Visibility = active == TabBtnState ? Visibility.Visible : Visibility.Collapsed;
+        AccessTab.Visibility = active == TabBtnAccess ? Visibility.Visible : Visibility.Collapsed;
+        LogTab.Visibility = active == TabBtnLog ? Visibility.Visible : Visibility.Collapsed;
+        TranslitTab.Visibility = active == TabBtnTranslit ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Открыть заданный раздел. Нужно тому, кто приводит сюда человека за конкретной
+    /// настройкой: кнопка на «Сетевых дисках» обещает «Реквизиты», а страница живёт в кэше и
+    /// открылась бы на том разделе, на котором её оставили в прошлый раз.</summary>
+    public void ShowSection(string section) => ShowTab(section switch
+    {
+        HostingSection.Access => TabBtnAccess,
+        HostingSection.Log => TabBtnLog,
+        HostingSection.Translit => TabBtnTranslit,
+        _ => TabBtnState,
+    });
+
+    /// <summary>Имена разделов для перехода со стороны — строкой, потому что зовущий (страница
+    /// «Сетевые диски») знает только IAppHost, а не саму страницу.</summary>
+    public static class HostingSection
+    {
+        public const string State = "state";
+        public const string Access = "access";
+        public const string Log = "log";
+        public const string Translit = "translit";
     }
 
     // ── Состояние хранилища ───────────────────────────────────────────────────
@@ -68,18 +110,18 @@ public partial class HostingView : UserControl
         var s = _services.Cfg.S3();
 
         StorageStateText.Text = !s.HasAddress
-            ? "Адрес хранилища не задан — выкладывать некуда."
+            ? "Адрес хранилища не задан — выкладывать некуда. Вкладка «Реквизиты» рядом."
             : !s.HasCredentials
-                ? "Ключи доступа не загружены. Настройки → Сетевые диски → перетащите файл с ключами. До этого выкладка не делается."
+                ? "Ключи доступа не загружены — перетащите файл с ключами на вкладке «Реквизиты». До этого выкладка не делается."
                 : !s.Enabled
-                    ? "Выкладка выключена в настройках. Реквизиты на месте — включить можно там же."
+                    ? "Выкладка выключена галочкой на вкладке «Реквизиты». Сами реквизиты на месте."
                     : "Выкладка настроена и включена.";
 
         var limit = _services.Cfg.HostingMaxFileMb();
         var mode = _services.Cfg.HostingSizeLimitHard() ? "не выкладываются" : "выкладываются с предупреждением";
-        // Пустой веб-адрес — не редкость (его задают отдельно, в Настройки → Печать), и строка
-        // «адрес для ссылок » с пустотой на конце читается как поломка вёрстки, а не как «не задан».
-        var webUrl = string.IsNullOrWhiteSpace(s.WebUrl) ? "не задан (Настройки → Печать)" : s.WebUrl;
+        // Пустой веб-адрес — не редкость, и строка «адрес для ссылок » с пустотой на конце читается
+        // как поломка вёрстки, а не как «не задан».
+        var webUrl = string.IsNullOrWhiteSpace(s.WebUrl) ? "не задан (вкладка «Реквизиты»)" : s.WebUrl;
         StorageAddressText.Text =
             $"{s.Endpoint} · бакет {s.Bucket} · регион {s.Region} · адрес для ссылок: {webUrl}\n" +
             $"Предел размера файла {limit} МБ, файлы сверх предела {mode}. " +
@@ -139,6 +181,284 @@ public partial class HostingView : UserControl
         HostingLimit_Changed(sender, e);
         // Снимаем фокус, чтобы Enter вёл себя как «применил и закончил», а не оставлял курсор в поле.
         System.Windows.Input.Keyboard.ClearFocus();
+    }
+
+    // ── Реквизиты ─────────────────────────────────────────────────────────────
+    // Переехали сюда со страницы «Сетевые диски»: адрес хранилища и ключи к нему — это и есть
+    // хранилище, а на «Сетевых дисках» они лежали рядом с путями к сетевым папкам, к которым
+    // отношения не имеют. Сохранение — по уходу фокуса и по Enter, отдельной кнопки «Сохранить» на
+    // страницах приложения нет нигде.
+
+    private void LoadAccess()
+    {
+        S3EndpointInput.Text = _services.Cfg.S3Endpoint();
+        S3BucketInput.Text = _services.Cfg.S3Bucket();
+        S3RegionInput.Text = _services.Cfg.S3Region();
+        S3PrefixInput.Text = _services.Cfg.S3Prefix();
+        S3PublishCheck.IsChecked = _services.Cfg.S3Publish();
+        WebUrlInput.Text = _services.Cfg.InstructionBaseUrl();
+        RefreshS3Keys();
+        RefreshS3Status();
+        RefreshWebUrlHint();
+    }
+
+    private void S3Field_LostFocus(object sender, RoutedEventArgs e) => SaveS3Fields();
+
+    private void S3Field_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) SaveS3Fields();
+    }
+
+    private void SaveS3Fields()
+    {
+        var changed =
+            Save(S3EndpointInput.Text, _services.Cfg.S3Endpoint(), _services.Cfg.SetS3Endpoint) |
+            Save(S3BucketInput.Text, _services.Cfg.S3Bucket(), _services.Cfg.SetS3Bucket) |
+            Save(S3RegionInput.Text, _services.Cfg.S3Region(), _services.Cfg.SetS3Region) |
+            Save(S3PrefixInput.Text, _services.Cfg.S3Prefix(), _services.Cfg.SetS3Prefix);
+
+        if (!changed) return;
+        _host.ShowStatus("Реквизиты хранилища сохранены", category: NotificationCategory.Sync);
+        RefreshS3Status();
+        // Ключи объектов считаются от адреса и папки в бакете — список после правки заведомо устарел.
+        ShowStorageState();
+        BuildList();
+
+        static bool Save(string typed, string current, Action<string> set)
+        {
+            var value = typed.Trim();
+            if (string.Equals(value, current, StringComparison.Ordinal)) return false;
+            set(value);
+            return true;
+        }
+    }
+
+    // ── Ключи доступа: файлом, а не руками ────────────────────────────────────
+    // Ключи выдаёт хостинг готовым файлом (просьба Ивана Герасимова от 06.08.2026 — «чтобы просто
+    // файл туда перенести»). Полей ввода здесь нет намеренно: сорок случайных символов,
+    // перепечатанные руками, дают опечатку, которая молчит до первой выкладки, — а файл либо
+    // разбирается, либо честно говорит, что в нём не то.
+
+    private void S3Secrets_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) => PickS3SecretsFile();
+
+    private void S3SecretsBrowse_Click(object sender, RoutedEventArgs e) => PickS3SecretsFile();
+
+    private void S3Secrets_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void S3Secrets_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            ApplyS3SecretsFile(paths[0]);
+    }
+
+    private void PickS3SecretsFile()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл с ключами доступа к хранилищу",
+            // «Все файлы» первым фильтром: имя и расширение файла с ключами задаёт хостинг, и файл
+            // без расширения (так их отдаёт часть панелей) не должен оказаться невидимым в диалоге.
+            Filter = "Все файлы (*.*)|*.*|Файлы с ключами (*.txt;*.csv;*.json;*.env)|*.txt;*.csv;*.json;*.env",
+        };
+        if (dlg.ShowDialog() == true) ApplyS3SecretsFile(dlg.FileName);
+    }
+
+    /// <summary>Читает и применяет файл с ключами. Всё, что может пойти не так (папку перетащили,
+    /// файл занят, внутри не то), заканчивается понятной строкой в состоянии карточки, а не
+    /// исключением: это настройка, которую делает не программист.</summary>
+    private void ApplyS3SecretsFile(string path)
+    {
+        string content;
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                S3Status.Text = "Это папка. Нужен сам файл с ключами, который прислал хостинг.";
+                return;
+            }
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                S3Status.Text = "Файл не найден.";
+                return;
+            }
+            if (info.Length > S3SecretsFile.MaxReasonableBytes)
+            {
+                S3Status.Text = "Файл слишком большой для файла с ключами — похоже, это не он.";
+                return;
+            }
+            content = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            S3Status.Text = $"Не удалось прочитать файл: {ex.Message}";
+            return;
+        }
+
+        var parsed = S3SecretsFile.Parse(content);
+        if (!parsed.Ok)
+        {
+            S3Status.Text = parsed.Error!;
+            return;
+        }
+
+        _services.Cfg.SetS3AccessKey(parsed.AccessKey);
+        _services.Cfg.SetS3SecretKey(parsed.SecretKey);
+
+        // Адрес/бакет/регион в файле бывают не всегда, но если есть — они точнее того, что стоит по
+        // умолчанию: файл выдаёт тот же, кто выдал ключи. Пустые значения не затирают заполненные.
+        var extras = new List<string>();
+        Apply(parsed.Endpoint, _services.Cfg.S3Endpoint(), _services.Cfg.SetS3Endpoint, "адрес хранилища");
+        Apply(parsed.Bucket, _services.Cfg.S3Bucket(), _services.Cfg.SetS3Bucket, "бакет");
+        Apply(parsed.Region, _services.Cfg.S3Region(), _services.Cfg.SetS3Region, "регион");
+
+        S3EndpointInput.Text = _services.Cfg.S3Endpoint();
+        S3BucketInput.Text = _services.Cfg.S3Bucket();
+        S3RegionInput.Text = _services.Cfg.S3Region();
+
+        RefreshS3Keys();
+        RefreshS3Status();
+        ShowStorageState();
+        _host.ShowStatus("Ключи доступа к хранилищу сохранены", category: NotificationCategory.Sync);
+
+        if (extras.Count > 0)
+            S3Status.Text += $" Из файла также взято: {string.Join(", ", extras)}.";
+        if (parsed.OrderGuessed)
+            S3Status.Text += " В файле не было подписей, какой ключ какой, — порядок определён по " +
+                             "виду ключей. Если проверка доступа не пройдёт, ключи в файле шли наоборот.";
+
+        void Apply(string value, string current, Action<string> set, string what)
+        {
+            if (value.Length == 0 || string.Equals(value, current, StringComparison.Ordinal)) return;
+            set(value);
+            extras.Add(what);
+        }
+    }
+
+    private void S3SecretsClear_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_services.Cfg.S3().HasCredentials) return;
+        _services.Cfg.SetS3AccessKey("");
+        _services.Cfg.SetS3SecretKey("");
+        RefreshS3Keys();
+        RefreshS3Status();
+        ShowStorageState();
+        _host.ShowStatus("Ключи доступа к хранилищу убраны", category: NotificationCategory.Sync);
+    }
+
+    /// <summary>Что написано в зоне перетаскивания. Access Key ID показывается целиком — он не
+    /// секрет и по нему видно, те ли ключи стоят; секретный ключ не показывается никогда, включая
+    /// «первые символы»: по ним ключ не опознать, а утечь через плечо они вполне могут.</summary>
+    private void RefreshS3Keys()
+    {
+        var s3 = _services.Cfg.S3();
+        S3SecretsClearButton.IsEnabled = s3.HasCredentials;
+
+        S3SecretsLabel.Text = s3.HasCredentials
+            ? $"Ключи загружены\nAccess Key ID: {s3.AccessKey}\nСекретный ключ сохранён.\n" +
+              "Чтобы заменить — перетащите сюда новый файл"
+            : "Перетащите сюда файл с ключами доступа,\nкоторый прислал хостинг,\nили нажмите, чтобы выбрать его";
+    }
+
+    private void S3Publish_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetS3Publish(S3PublishCheck.IsChecked == true);
+        RefreshS3Status();
+        ShowStorageState();
+    }
+
+    /// <summary>Строка под кнопкой: в каком состоянии выкладка ПРЯМО СЕЙЧАС. Главный случай, ради
+    /// которого она есть, — «адрес есть, ключей нет»: это не поломка, а ожидание файла с ключами, и
+    /// человек должен видеть именно это, а не «ничего не настроено».</summary>
+    private void RefreshS3Status()
+    {
+        var s3 = _services.Cfg.S3();
+        S3CheckButton.IsEnabled = s3.HasAddress && s3.HasCredentials;
+
+        if (!s3.HasAddress)
+        {
+            S3Status.Text = "Не настроено — укажите адрес хранилища и бакет.";
+            return;
+        }
+        if (!s3.HasCredentials)
+        {
+            S3Status.Text = "Осталось загрузить файл с ключами доступа — до этого инструкции на хостинг не выкладываются.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(s3.WebUrl))
+        {
+            S3Status.Text = "Ключи есть, но не задан веб-адрес диска инструкций (ниже) — без него в QR-код нечего положить.";
+            return;
+        }
+        S3Status.Text = s3.Enabled
+            ? "Настроено — копия инструкции уходит на хостинг при загрузке версии."
+            : "Реквизиты заполнены, но выкладка выключена галочкой выше.";
+    }
+
+    private async void S3Check_Click(object sender, RoutedEventArgs e)
+    {
+        SaveS3Fields();
+
+        var s3 = _services.Cfg.S3();
+        S3CheckButton.IsEnabled = false;
+        S3Status.Text = "Проверяем…";
+        try
+        {
+            var result = await new S3Client().CheckAsync(s3);
+            S3Status.Text = result.Ok
+                ? "Доступ есть — хранилище отвечает, ключи подходят. Право на запись проверится первой выложенной инструкцией."
+                : $"Не получилось: {result.Error}";
+            AppendLog(result.Ok ? $"Доступ есть: {result.Url}" : $"Доступа нет: {result.Error}");
+        }
+        finally
+        {
+            S3CheckButton.IsEnabled = true;
+        }
+    }
+
+    // ── Веб-адрес диска инструкций ────────────────────────────────────────────
+    // Та же настройка, что и в Настройки → Печать (instruction_base_url), намеренно показанная в двух
+    // местах: без неё ссылке на хостинг неоткуда взяться, и она же решает, что зашивать в QR.
+
+    private void WebUrl_LostFocus(object sender, RoutedEventArgs e) => SaveWebUrl();
+
+    private void WebUrl_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) SaveWebUrl();
+    }
+
+    private void SaveWebUrl()
+    {
+        var url = (WebUrlInput.Text ?? "").Trim().TrimEnd('/');
+        if (string.Equals(url, _services.Cfg.InstructionBaseUrl(), StringComparison.Ordinal)) return;
+
+        _services.Cfg.SetInstructionBaseUrl(url);
+        WebUrlInput.Text = _services.Cfg.InstructionBaseUrl();
+        _host.ShowStatus(url.Length == 0
+            ? "Веб-адрес диска инструкций очищен — в QR пойдёт сетевой путь"
+            : $"Веб-адрес диска инструкций сохранён: {url}", category: NotificationCategory.Sync);
+
+        RefreshWebUrlHint();
+        RefreshS3Status();
+        ShowStorageState();
+        BuildList();
+    }
+
+    private void RefreshWebUrlHint() =>
+        WebUrlHint.Text = string.IsNullOrWhiteSpace(_services.Cfg.InstructionBaseUrl())
+            ? "Не задан — в QR на наклейке пойдёт сетевой путь к файлу: с компьютера он откроется, с телефона нет."
+            : "Эта же настройка показана в Настройки → Печать.";
+
+    private void OpenWebUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = (WebUrlInput.Text ?? "").Trim();
+        if (url.Length == 0) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { WebUrlHint.Text = $"Не удалось открыть: {ex.Message}"; }
     }
 
     // ── Список ────────────────────────────────────────────────────────────────

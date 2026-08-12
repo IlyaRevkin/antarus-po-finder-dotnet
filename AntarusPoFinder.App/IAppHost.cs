@@ -35,7 +35,10 @@ public interface IAppHost
 
     void ReloadSidebarApps();
     void SwitchRole(string role);
-    void Navigate(string pageId);
+    /// <summary>Перейти на страницу. <paramref name="section"/> — раздел внутри неё (сегодня это
+    /// разделы «Хранилища»): страницы живут в кэше и открываются на том разделе, где их оставили, а
+    /// кнопка, которая обещает конкретную настройку, обязана привести именно к ней.</summary>
+    void Navigate(string pageId, string? section = null);
 
     /// <summary>Restarts the administrator auto-push timer against the current
     /// config_push_interval_min setting — called from NetworkSyncView right after it's saved, so the

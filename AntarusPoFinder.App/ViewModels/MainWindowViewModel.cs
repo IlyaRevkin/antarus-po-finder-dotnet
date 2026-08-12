@@ -1680,7 +1680,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         QuickAppsTopShowLabels = mode == "top_labeled";
     }
 
-    void IAppHost.Navigate(string pageId) => Navigate(pageId);
+    void IAppHost.Navigate(string pageId, string? section)
+    {
+        Navigate(pageId);
+        if (section is null) return;
+        if (_pageCache.TryGetValue(pageId, out var page) && page is HostingView hosting)
+            hosting.ShowSection(section);
+    }
 
     void IAppHost.InvalidateSearchResults()
     {
