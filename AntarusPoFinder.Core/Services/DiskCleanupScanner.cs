@@ -59,19 +59,6 @@ public static class DiskCleanupScanner
 
     public enum Act { None, Rename, Move, Delete }
 
-    /// <summary>Служебные файлы Windows и офиса — закрытый список, только точные имена.</summary>
-    private static readonly string[] JunkNames =
-    {
-        "Thumbs.db", "ehthumbs.db", "desktop.ini", ".DS_Store",
-    };
-
-    /// <summary>Расширения незавершённых/временных файлов. Тоже закрытый список: «.old», «.copy» и
-    /// прочее сюда сознательно НЕ попало — под таким именем на этом диске вполне может лежать
-    /// нужная предыдущая сборка.</summary>
-    private static readonly string[] JunkExtensions =
-    {
-        ".tmp", ".temp", ".part", ".partial", ".crdownload", ".bak",
-    };
 
     public sealed class Finding
     {
@@ -449,24 +436,19 @@ public static class DiskCleanupScanner
     /// <summary>Файл опознан как служебный мусор — возвращается объяснение, иначе null. Проверка
     /// идёт ПОСЛЕ белых списков и ссылок из базы (см. вызовы), поэтому расширение, добавленное
     /// оператором в настройках, всегда перевешивает этот список.</summary>
+    /// <summary>Файл опознан как служебный мусор — возвращается объяснение, иначе null. Список
+    /// общий с тем, по которому программа решает «это не документ» (см. JunkFiles): разъедься эти
+    /// два ответа — и чистильщик предлагал бы удалить файл, который сам же считается инструкцией.
+    /// Проверка идёт ПОСЛЕ белых списков и ссылок из базы (см. вызовы), поэтому расширение,
+    /// добавленное оператором в настройках, всегда перевешивает.</summary>
     private static string? JunkReason(string file)
     {
-        var name = Path.GetFileName(file);
-
-        if (JunkNames.Contains(name, StringComparer.OrdinalIgnoreCase))
-            return $"«{name}» — служебный файл Windows, к структуре диска отношения не имеет.";
-
-        if (name.StartsWith("~$", StringComparison.Ordinal))
-            return $"«{name}» — временный файл Word/Excel, остаётся от незакрытого документа.";
-
-        var ext = Path.GetExtension(name);
-        if (JunkExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-            return $"«{ext}» — недокачанный или временный файл, рабочей копией не является.";
+        if (JunkFiles.Reason(file) is { } reason) return reason;
 
         try
         {
             if (new FileInfo(file).Length == 0)
-                return $"«{name}» — пустой файл (0 байт): при копировании на шару оборвалась запись.";
+                return $"«{Path.GetFileName(file)}» — пустой файл (0 байт): при копировании на шару оборвалась запись.";
         }
         catch (Exception)
         {

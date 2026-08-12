@@ -244,7 +244,7 @@ public sealed class HostingSyncService
         {
             if (!Directory.Exists(folder)) return null;
             return Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault(f => !DocFileResolver.IsShortcut(f));
+                .FirstOrDefault(f => !DocFileResolver.IsNotADocument(f) || InstructionStub.IsStub(f));
         }
         catch (Exception) { return null; }
     }
