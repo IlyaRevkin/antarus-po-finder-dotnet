@@ -220,6 +220,39 @@ public partial class InstructionLabelWindow : Window
         Redraw();
     }
 
+    /// <summary>Подставить в макет то, что уже настроено у принтера: размер листа и непечатаемую
+    /// кромку. Дословная просьба — «чтобы он сам подогнал, отцентровал, отступы настроил те, которые
+    /// у принтера уже настроены, а не с нуля мы это всё выставляли».
+    ///
+    /// Правится ТОЛЬКО форма (размер, поля, сдвиг), настройка по умолчанию — нет: как и любая другая
+    /// подгонка в этом окне, она станет общей лишь после «Сохранить как настройки по умолчанию».
+    /// Драйвер принтера мы при этом не трогаем вовсе — только спрашиваем.</summary>
+    private void ReadFromPrinter_Click(object sender, RoutedEventArgs e)
+    {
+        var probe = PrinterPageProbe.Read(_services.Cfg.LabelPrinter());
+        if (probe.Setup is not { } setup)
+        {
+            ShowPrinterFit($"Не удалось спросить драйвер: {probe.Error}. Размер и поля остались прежними; " +
+                           "принтер выбирается в Настройки → Печать.");
+            return;
+        }
+
+        var fit = PrinterPageFit.Apply(ReadLayout(), setup);
+        _layout = fit.Layout;
+        FillLayoutInputs(_layout);
+        Redraw();
+
+        ShowPrinterFit(fit.Text + "\nЧтобы это осталось и у коллег — «Сохранить как настройки по умолчанию» " +
+                       "(сдвиг останется на этой машине).");
+        _host.ShowStatus($"С принтера считано: наклейка {_layout.SizeCaption()} мм, поля {Num(_layout.MarginMm)} мм");
+    }
+
+    private void ShowPrinterFit(string text)
+    {
+        PrinterFitText.Text = text;
+        PrinterFitText.Visibility = Visibility.Visible;
+    }
+
     private void SaveLayout_Click(object sender, RoutedEventArgs e)
     {
         _layout.SaveTo(_services.Cfg);
@@ -231,6 +264,8 @@ public partial class InstructionLabelWindow : Window
         _layout = new LabelLayout();
         FillLayoutInputs(_layout);
         Redraw();
+        // Отчёт «что считано с принтера» относился к прежним числам — после сброса он врёт.
+        PrinterFitText.Visibility = Visibility.Collapsed;
     }
 
     private void Redraw()

@@ -67,6 +67,16 @@
                         <TextBox x:Name="OffsetYInput" Width="80" TextChanged="Layout_Changed"/>
                     </StackPanel>
 
+                    <!-- Размер наклейки и её кромка уже настроены в свойствах принтера — вбивать их
+                         сюда второй раз и подбирать на глаз по обрезанной печати незачем. Кнопка
+                         спрашивает драйвер и подставляет размер, поля и сдвиг; всё остальное
+                         (кегли, вид кода, подписи) — решение человека, и не трогается. -->
+                    <Button Content="Считать с драйвера принтера" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,0,4" Click="ReadFromPrinter_Click"
+                            ToolTip="Взять у выбранного принтера размер листа и непечатаемые края: размер наклейки, поля и сдвиг подставятся сами. Настройки принтера при этом не меняются."/>
+                    <TextBlock x:Name="PrinterFitText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                               Margin="0,0,0,8" Visibility="Collapsed"/>
+
                     <TextBlock Text="Сторона QR, мм (0 — сам)" Style="{StaticResource MutedText}"/>
                     <TextBox x:Name="QrInput" Width="80" HorizontalAlignment="Left" Margin="0,2,0,8" TextChanged="Layout_Changed"/>
 
