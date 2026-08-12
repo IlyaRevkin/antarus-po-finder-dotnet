@@ -41,6 +41,44 @@ public class ConfigService
     /// AntarusPoFinder.App.Views.LaunchTypeChecks: при его выборе остальные снимаются и блокируются).</summary>
     public const string LaunchTypeNone = "Отсутствует";
 
+    // ── Предустановленные адреса хранилища ───────────────────────────────────────────────────
+    // Вынесены в константы, а не только в Defaults ниже: этими же значениями разовая миграция
+    // (Database.SeedHostingAddressesOnce) заполняет уже установленные базы, чтобы адрес физически
+    // лежал в settings и уезжал в общий конфиг, а не оставался невидимой подстановкой из кода.
+
+    /// <summary>Адрес S3-хранилища Timeweb, выданный компании (Иван Герасимов, 05.08.2026).</summary>
+    public const string DefaultS3Endpoint = "https://s3.twcstorage.ru";
+
+    public const string DefaultS3Bucket = "amperus";
+
+    public const string DefaultS3Region = "ru-1";
+
+    /// <summary>Публичный адрес того же бакета — по нему инструкция открывается с телефона по QR.</summary>
+    public const string DefaultInstructionBaseUrl = "https://fs.elitacompany.ru";
+
+    /// <summary>Ключи, у которых ПУСТОЕ сохранённое значение означает «не настроено», а не «настроено
+    /// пустым»: адреса хранилища и инструкций одни и те же на всю компанию, и правильных пустых
+    /// значений у них не бывает. Из-за этого пустая строка раньше была ловушкой в трёх местах сразу:
+    /// <list type="bullet">
+    /// <item>адрес, ни разу не сохранённый руками, в settings не лежал вовсе — значит и в общий
+    /// конфиг не уезжал, и на соседней машине поле оставалось пустым («не синхронизируется»);</item>
+    /// <item>стоило один раз стереть поле — пустая строка сохранялась настоящим значением и глушила
+    /// предустановку навсегда (умолчание подставляется только при ОТСУТСТВИИ строки);</item>
+    /// <item>та же пустая строка уезжала в общий конфиг и затирала адрес у всех остальных
+    /// (см. ConfigSyncService.ShouldApplySetting — оттуда она теперь и не применяется).</item>
+    /// </list>
+    /// s3_prefix здесь СОЗНАТЕЛЬНО отсутствует: пустой префикс — законное и штатное значение
+    /// («раскладка бакета совпадает с раскладкой диска»).</summary>
+    public static readonly HashSet<string> PresetKeys = new(StringComparer.Ordinal)
+    {
+        "s3_endpoint", "s3_bucket", "s3_region", "instruction_base_url",
+    };
+
+    /// <summary>Предустановки для <see cref="PresetKeys"/> — то, чем разовая миграция заполняет
+    /// пустые/отсутствующие строки в уже существующих базах.</summary>
+    public static IEnumerable<KeyValuePair<string, string>> PresetDefaults =>
+        PresetKeys.Select(k => new KeyValuePair<string, string>(k, Defaults[k]));
+
     private static readonly Dictionary<string, string> Defaults = new()
     {
         ["root_path"] = @"Z:\Software\Antarus Finder",
@@ -50,9 +88,9 @@ public class ConfigService
         // тот момент ещё не было — присланный файл secrets перетаскивается в Настройки → Сетевые
         // диски, и до тех пор выкладка молча не делается (см. S3Settings.CanPublish). Регион у
         // Timeweb — ru-1.
-        ["s3_endpoint"] = "https://s3.twcstorage.ru",
-        ["s3_bucket"] = "amperus",
-        ["s3_region"] = "ru-1",
+        ["s3_endpoint"] = DefaultS3Endpoint,
+        ["s3_bucket"] = DefaultS3Bucket,
+        ["s3_region"] = DefaultS3Region,
         // Префикс внутри бакета. Пусто — раскладка бакета совпадает с раскладкой диска один в один;
         // выданный Иваном Path «/amperus» совпадает с именем бакета и отдельным префиксом НЕ
         // является (иначе ключи вышли бы вида amperus/amperus/…).
@@ -237,10 +275,12 @@ public class ConfigService
         ["app_changelog_history"] = "[]",
         // ── Печать этикеток с QR и наклеек ───────────────────────────────────────────────────
         // Базовый веб-адрес диска инструкций: из него собирается ссылка в QR-коде на этикетке
-        // (LabelLinkBuilder). Пусто — QR несёт сетевой путь к файлу (\\сервер\шара\…), он тоже
-        // открывается с рабочего компьютера, но не с телефона. Синхронизируемый ключ: адрес один на
-        // всю компанию, в отличие от букв дисков.
-        ["instruction_base_url"] = "",
+        // (LabelLinkBuilder) и по нему же открывается выложенный на хостинг файл. Предустановлен
+        // рабочим адресом компании — это тот же адрес, что и у бакета в s3_endpoint выше, только
+        // публичный: без него наклейка ведёт сетевым путём, который с телефона не открыть, а
+        // вспоминать и вписывать его руками на каждой машине незачем (см. PresetKeys ниже — пустое
+        // значение здесь означает «не настроено» и возвращает эту предустановку).
+        ["instruction_base_url"] = DefaultInstructionBaseUrl,
         // Размер этикетки в миллиметрах — под конкретный рулон/лист этикеток предприятия.
         ["label_width_mm"] = "97.5",
         ["label_height_mm"] = "72",
@@ -294,7 +334,16 @@ public class ConfigService
         Directory.CreateDirectory(LocalLoader);
     }
 
-    public string Get(string key) => _db.GetSetting(key, Defaults.GetValueOrDefault(key, ""));
+    public string Get(string key)
+    {
+        var preset = Defaults.GetValueOrDefault(key, "");
+        var stored = _db.GetSetting(key, preset);
+        // Пустая строка у ключей из PresetKeys — это «не настроено», а не значение: возвращаем
+        // предустановку. Так стёртое поле и приехавшая по синхронизации пустота не могут навсегда
+        // погасить адрес, который в компании один и тот же (см. док PresetKeys).
+        return stored.Length == 0 && PresetKeys.Contains(key) ? preset : stored;
+    }
+
     public void Set(string key, string value) => _db.SetSetting(key, value);
 
     public string RootPath() => Get("root_path");
@@ -427,8 +476,9 @@ public class ConfigService
 
     // ── Печать этикеток с QR и наклеек ───────────────────────────────────────────────────────
 
-    /// <summary>Базовый веб-адрес диска инструкций (без хвостового «/»). Пусто — ссылки в QR нет,
-    /// вместо неё в код уходит сетевой путь файла.</summary>
+    /// <summary>Базовый веб-адрес диска инструкций (без хвостового «/»). Предустановлен адресом
+    /// компании и пустым не бывает: стёртое поле возвращает предустановку (см. <see cref="PresetKeys"/>),
+    /// потому что без адреса в QR уходит сетевой путь, который с телефона не открыть.</summary>
     public string InstructionBaseUrl() => Get("instruction_base_url");
     public void SetInstructionBaseUrl(string url) => Set("instruction_base_url", url.Trim().TrimEnd('/'));
 

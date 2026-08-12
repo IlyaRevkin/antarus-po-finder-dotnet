@@ -218,7 +218,19 @@ public partial class HostingView : UserControl
             Save(S3PrefixInput.Text, _services.Cfg.S3Prefix(), _services.Cfg.SetS3Prefix);
 
         if (!changed) return;
-        _host.ShowStatus("Реквизиты хранилища сохранены", category: NotificationCategory.Sync);
+
+        // Адрес, бакет и регион пустыми не бывают: стёртое поле возвращает предустановленный адрес
+        // компании (см. ConfigService.PresetKeys). Поля перечитываются, чтобы в них было видно то,
+        // что реально сохранено, а не пустота, которой в настройках уже нет.
+        var restored = S3EndpointInput.Text.Trim().Length == 0 || S3BucketInput.Text.Trim().Length == 0
+                       || S3RegionInput.Text.Trim().Length == 0;
+        S3EndpointInput.Text = _services.Cfg.S3Endpoint();
+        S3BucketInput.Text = _services.Cfg.S3Bucket();
+        S3RegionInput.Text = _services.Cfg.S3Region();
+
+        _host.ShowStatus(restored
+            ? "Реквизиты хранилища сохранены; пустые поля вернулись к предустановленным"
+            : "Реквизиты хранилища сохранены", category: NotificationCategory.Sync);
         RefreshS3Status();
         // Ключи объектов считаются от адреса и папки в бакете — список после правки заведомо устарел.
         ShowStorageState();
@@ -439,7 +451,7 @@ public partial class HostingView : UserControl
         _services.Cfg.SetInstructionBaseUrl(url);
         WebUrlInput.Text = _services.Cfg.InstructionBaseUrl();
         _host.ShowStatus(url.Length == 0
-            ? "Веб-адрес диска инструкций очищен — в QR пойдёт сетевой путь"
+            ? $"Поле очищено — вернулся предустановленный адрес: {_services.Cfg.InstructionBaseUrl()}"
             : $"Веб-адрес диска инструкций сохранён: {url}", category: NotificationCategory.Sync);
 
         RefreshWebUrlHint();
@@ -448,10 +460,12 @@ public partial class HostingView : UserControl
         BuildList();
     }
 
+    // Пустым адрес больше не бывает (стёртое поле возвращает предустановку), поэтому подсказка «не
+    // задан — в QR пойдёт сетевой путь» ушла: рассказывать про состояние, в которое настройка уже не
+    // приходит, значит врать.
     private void RefreshWebUrlHint() =>
-        WebUrlHint.Text = string.IsNullOrWhiteSpace(_services.Cfg.InstructionBaseUrl())
-            ? "Не задан — в QR на наклейке пойдёт сетевой путь к файлу: с компьютера он откроется, с телефона нет."
-            : "Эта же настройка показана в Настройки → Печать.";
+        WebUrlHint.Text = "Эта же настройка показана в Настройки → Печать. Пустым адрес не остаётся: "
+                          + "стёртое поле вернёт предустановленный адрес компании.";
 
     private void OpenWebUrl_Click(object sender, RoutedEventArgs e)
     {

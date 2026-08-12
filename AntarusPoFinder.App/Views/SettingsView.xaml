@@ -837,7 +837,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" x:Name="InstructionBaseUrlInput" Height="34" Margin="0,0,8,0"
                                              LostFocus="InstructionBaseUrl_LostFocus" KeyDown="PrintingField_KeyDown"
-                                             ToolTip="Напр. https://disk.antarus.su/instructions — корень, соответствующий корню диска инструкций. Пусто — в QR уйдёт сетевой путь к файлу."/>
+                                             ToolTip="Корень, соответствующий корню диска инструкций — напр. https://fs.elitacompany.ru. Предустановлен адресом компании; стёртое поле вернёт его обратно."/>
                                     <Button Grid.Column="1" Content="Проверить ссылку" Style="{StaticResource SecondaryButton}" Click="CheckInstructionUrl_Click"
                                             ToolTip="Запросить собранный адрес и показать, что ответил сервер"/>
                                 </Grid>

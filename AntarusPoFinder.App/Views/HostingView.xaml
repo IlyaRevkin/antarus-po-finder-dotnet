@@ -167,7 +167,7 @@
                                     <TextBlock Text="Адрес хранилища:" Margin="0,0,0,4"/>
                                     <TextBox x:Name="S3EndpointInput" Height="34" Margin="0,0,8,0"
                                              LostFocus="S3Field_LostFocus" KeyDown="S3Field_KeyDown"
-                                             ToolTip="Напр. https://s3.twcstorage.ru"/>
+                                             ToolTip="Напр. https://s3.twcstorage.ru. Предустановлен адресом компании; стёртое поле вернёт его обратно."/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Margin="0,0,8,0">
                                     <TextBlock Text="Бакет:" Margin="0,0,0,4"/>
@@ -240,7 +240,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBox Grid.Column="0" x:Name="WebUrlInput" Height="34" Margin="0,0,8,0"
                                          LostFocus="WebUrl_LostFocus" KeyDown="WebUrl_KeyDown"
-                                         ToolTip="Напр. https://fs.elitacompany.ru — корень, соответствующий корню диска инструкций. Пусто — в QR уйдёт сетевой путь к файлу, который с телефона не открыть."/>
+                                         ToolTip="Корень, соответствующий корню диска инструкций — напр. https://fs.elitacompany.ru. Предустановлен адресом компании; стёртое поле вернёт его обратно."/>
                                 <Button Grid.Column="1" Content="Открыть в браузере" Style="{StaticResource SecondaryButton}"
                                         Click="OpenWebUrl_Click" ToolTip="Проверить глазами, что по адресу и правда лежит диск инструкций"/>
                             </Grid>

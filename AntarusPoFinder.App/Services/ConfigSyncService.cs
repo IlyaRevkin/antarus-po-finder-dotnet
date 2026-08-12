@@ -483,7 +483,9 @@ public static class ConfigSyncService
         foreach (var kv in snap.RootNode)
         {
             if (!IsSetting(kv)) continue;
-            services.Cfg.Set(kv.Key, kv.Value?.GetValue<string>() ?? "");
+            var incoming = kv.Value?.GetValue<string>() ?? "";
+            if (!ShouldApplySetting(services, kv.Key, incoming)) continue;
+            services.Cfg.Set(kv.Key, incoming);
             settingsApplied++;
         }
 
@@ -1000,10 +1002,24 @@ public static class ConfigSyncService
         {
             if (!IsSetting(kv)) continue;
             var incoming = kv.Value?.GetValue<string>() ?? "";
+            if (!ShouldApplySetting(services, kv.Key, incoming)) continue;
             if (services.Cfg.Get(kv.Key) != incoming) changed++;
         }
         return changed;
     }
+
+    /// <summary>Стоит ли вообще применять пришедшее значение настройки. Единственный случай, когда
+    /// нет: ПУСТОЕ значение у ключа, для которого пустота означает «не настроено», а не значение
+    /// (адреса хранилища и диска инструкций — см. ConfigService.PresetKeys). Машина, где адрес ни
+    /// разу не сохраняли руками, отправляла в общий конфиг пустую строку и гасила адрес у всех
+    /// остальных — ровно то же «синхронизация не переносит удаления», что и у справочников: стереть
+    /// адрес у соседей мимо обычного пути нельзя.
+    ///
+    /// Проверка обязана быть ОДНОЙ для применения (ApplyToDatabase) и для подсчёта «что изменилось»
+    /// (CountSettingsChanges): разойдись они — плашка приёма вечно обещала бы изменение, которое
+    /// применение молча пропускает.</summary>
+    private static bool ShouldApplySetting(AppServices services, string key, string incoming) =>
+        incoming.Length > 0 || !ConfigService.PresetKeys.Contains(key);
 
     /// <summary>ConfigFileCrypto.TryDecrypt returns null for a file that isn't in our encrypted
     /// format — that's what a shared config exported by a pre-encryption app version (or, before

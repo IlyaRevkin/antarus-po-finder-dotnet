@@ -726,6 +726,7 @@ public partial class Database : IDisposable
         MigratePlaintextPasswordsToHashesOnce();
         AddNewDefaultManufacturersOnce();
         SeedFwAttachmentKindsOnce();
+        SeedHostingAddressesOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -829,6 +830,25 @@ public partial class Database : IDisposable
 
         foreach (var m in new[] { "Innovert", "Instart", "Chint" })
             AddParamManufacturer(m);
+        SetSetting(doneFlag, "true");
+    }
+
+    /// <summary>Разово записывает предустановленные адреса хранилища и диска инструкций
+    /// (см. ConfigService.PresetKeys) в settings, если строки там нет или она пустая. Умолчание из
+    /// кода читается правильно и без этого — но только на СВОЕЙ машине: в общий конфиг уезжает
+    /// таблица settings (ConfigSyncService.PrepareExport), поэтому адрес, существующий лишь как
+    /// подстановка в коде, до соседей не доезжает, а страница «Хранилище» на новой машине выглядит
+    /// ненастроенной. Здесь он становится обычной строкой настройки и дальше живёт как все: правится
+    /// руками, синхронизируется, показывается в диффе. Разовый флаг — как у миграций выше: если
+    /// адрес потом осознанно сменят, повторный проход его не вернёт.</summary>
+    private void SeedHostingAddressesOnce()
+    {
+        const string doneFlag = "migration_hosting_addresses_seeded";
+        if (GetSetting(doneFlag) == "true") return;
+
+        foreach (var (key, value) in Services.ConfigService.PresetDefaults)
+            if (GetSetting(key) == "")
+                SetSetting(key, value);
         SetSetting(doneFlag, "true");
     }
 

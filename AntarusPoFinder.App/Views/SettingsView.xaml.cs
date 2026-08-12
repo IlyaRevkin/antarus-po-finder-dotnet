@@ -1419,8 +1419,11 @@ public partial class SettingsView : UserControl
         if (url == _services.Cfg.InstructionBaseUrl()) return;
 
         _services.Cfg.SetInstructionBaseUrl(url);
+        // Пустой адрес возвращает предустановку компании (ConfigService.PresetKeys) — поле
+        // перечитывается, чтобы человек видел сохранённое значение, а не пустоту.
+        InstructionBaseUrlInput.Text = _services.Cfg.InstructionBaseUrl();
         _host.ShowStatus(url.Length == 0
-            ? "Веб-адрес диска инструкций очищен — в QR пойдёт сетевой путь"
+            ? $"Поле очищено — вернулся предустановленный адрес: {_services.Cfg.InstructionBaseUrl()}"
             : $"Веб-адрес диска инструкций сохранён: {url}");
     }
 
