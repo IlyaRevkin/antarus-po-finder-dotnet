@@ -34,6 +34,12 @@
             <Button x:Name="TabBtnAccess" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Реквизиты" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- «Файлы» показывают бакет таким, какой он есть, а не таким, каким его считает база:
+                 после переименований и ручных опытов там остаётся то, чего в списке «Состояния» нет
+                 вовсе, и увидеть это было неоткуда. -->
+            <Button x:Name="TabBtnFiles" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Файлы в хранилище" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnLog" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Журнал" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -249,6 +255,75 @@
                     </Border>
                 </StackPanel>
             </ScrollViewer>
+
+            <!-- ═══ Файлы в хранилище ═══════════════════════════════════════════ -->
+            <!-- Ходим по бакету как по папкам: показывается содержимое текущего уровня, вложенное —
+                 «папками» (у S3 папок нет вовсе, их изображают общие префиксы ключей). Ключ у каждой
+                 строки виден целиком — это единственное, что у объекта в бакете есть на самом деле. -->
+            <Grid x:Name="FilesTab" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                           Text="Что лежит в бакете на самом деле. Вкладка «Состояние» рядом показывает, что ТУДА ДОЛЖНО было уехать — по базе и диску; здесь наоборот, спрашивается у самого хранилища. Двойной клик по папке открывает её, по файлу — ссылку в браузере. Строки, помеченные «не значится», программе неизвестны: обычно это остатки после переименований, их и можно убрать руками."/>
+
+                <WrapPanel Grid.Row="1" Margin="0,0,0,10">
+                    <Button x:Name="FilesUpBtn" Content="Вверх" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"
+                            Click="FilesUp_Click" ToolTip="На уровень выше"/>
+                    <Button x:Name="FilesRefreshBtn" Content="Обновить" Margin="0,0,8,8" Click="FilesRefresh_Click"/>
+                    <Button x:Name="FilesDeleteBtn" Content="Удалить из хранилища" Style="{StaticResource DangerButton}"
+                            Margin="0,0,8,8" Click="FilesDelete_Click"
+                            ToolTip="Удаление из бакета безвозвратно: корзины у хранилища нет. Файл на диске при этом остаётся — уедет обратно кнопкой «Выложить недостающее»."/>
+                    <Button x:Name="FilesStopBtn" Content="Остановить" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,8" Click="FilesStop_Click" Visibility="Collapsed"/>
+                    <CheckBox x:Name="FilesFlatCheck" Content="Показать всё вложенное списком" VerticalAlignment="Center"
+                              Margin="8,0,8,8" Checked="FilesFlat_Changed" Unchecked="FilesFlat_Changed"
+                              ToolTip="Без папок: все объекты под текущим адресом подряд. Так видно разом всё, что лежит в ветке."/>
+                    <CheckBox x:Name="FilesOnlyUnknownCheck" Content="Только те, что не значатся у программы"
+                              VerticalAlignment="Center" Margin="0,0,8,8"
+                              Checked="FilesFilter_Changed" Unchecked="FilesFilter_Changed"/>
+                </WrapPanel>
+
+                <TextBlock Grid.Row="2" x:Name="FilesPathText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Margin="0,0,0,8"/>
+
+                <DataGrid Grid.Row="3" x:Name="FilesGrid" Margin="0,0,0,10"
+                          Style="{StaticResource RoomyDataGrid}"
+                          VirtualizingPanel.ScrollUnit="Pixel"
+                          SelectionMode="Extended" MouseDoubleClick="FilesGrid_MouseDoubleClick">
+                    <DataGrid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Открыть" Click="FilesOpen_Click"/>
+                            <MenuItem Header="Скопировать ссылку" Click="FilesCopyUrl_Click"/>
+                            <MenuItem Header="Скопировать ключ объекта" Click="FilesCopyKey_Click"/>
+                            <MenuItem Header="Удалить из хранилища" Click="FilesDelete_Click"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Что" Binding="{Binding KindLabel}" Width="Auto" MinWidth="80"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Имя" Binding="{Binding Name}" Width="2*" MinWidth="220"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Размер" Binding="{Binding SizeLabel}" Width="Auto" MinWidth="90"
+                                            ElementStyle="{StaticResource DataGridCellTextCentered}"
+                                            HeaderStyle="{StaticResource CenteredColumnHeader}"/>
+                        <DataGridTextColumn Header="Изменён" Binding="{Binding ModifiedLabel}" Width="Auto" MinWidth="140"
+                                            ElementStyle="{StaticResource DataGridCellTextCentered}"
+                                            HeaderStyle="{StaticResource CenteredColumnHeader}"/>
+                        <DataGridTextColumn Header="У программы" Binding="{Binding KnownLabel}" Width="Auto" MinWidth="130"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Ключ объекта" Binding="{Binding Key}" Width="*" MinWidth="200"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Grid.Row="4" x:Name="FilesSummaryText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+            </Grid>
 
             <!-- ═══ Журнал ══════════════════════════════════════════════════════ -->
             <Grid x:Name="LogTab" Visibility="Collapsed">

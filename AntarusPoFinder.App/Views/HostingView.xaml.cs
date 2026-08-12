@@ -48,6 +48,7 @@ public partial class HostingView : UserControl
 
         ItemsGrid.ItemsSource = _rows;
         TranslitGrid.ItemsSource = _translit;
+        FilesGrid.ItemsSource = _fileRows;
         RefreshIfActive();
     }
 
@@ -72,14 +73,19 @@ public partial class HostingView : UserControl
 
     private void ShowTab(Button active)
     {
-        foreach (var button in new[] { TabBtnState, TabBtnAccess, TabBtnLog, TabBtnTranslit })
+        foreach (var button in new[] { TabBtnState, TabBtnAccess, TabBtnFiles, TabBtnLog, TabBtnTranslit })
             button.Tag = null;
         active.Tag = "Active";
 
         StateTab.Visibility = active == TabBtnState ? Visibility.Visible : Visibility.Collapsed;
         AccessTab.Visibility = active == TabBtnAccess ? Visibility.Visible : Visibility.Collapsed;
+        FilesTab.Visibility = active == TabBtnFiles ? Visibility.Visible : Visibility.Collapsed;
         LogTab.Visibility = active == TabBtnLog ? Visibility.Visible : Visibility.Collapsed;
         TranslitTab.Visibility = active == TabBtnTranslit ? Visibility.Visible : Visibility.Collapsed;
+
+        // Список файлов запрашивается у хранилища по сети, поэтому сам собой при открытии страницы не
+        // грузится — только когда на вкладку правда зашли, и только в первый раз (дальше «Обновить»).
+        if (active == TabBtnFiles && !_filesEverLoaded) _ = LoadFilesAsync();
     }
 
     /// <summary>Открыть заданный раздел. Нужно тому, кто приводит сюда человека за конкретной
@@ -88,6 +94,7 @@ public partial class HostingView : UserControl
     public void ShowSection(string section) => ShowTab(section switch
     {
         HostingSection.Access => TabBtnAccess,
+        HostingSection.Files => TabBtnFiles,
         HostingSection.Log => TabBtnLog,
         HostingSection.Translit => TabBtnTranslit,
         _ => TabBtnState,
@@ -99,6 +106,7 @@ public partial class HostingView : UserControl
     {
         public const string State = "state";
         public const string Access = "access";
+        public const string Files = "files";
         public const string Log = "log";
         public const string Translit = "translit";
     }
@@ -136,6 +144,12 @@ public partial class HostingView : UserControl
             LimitModeCombo.SelectedIndex = _services.Cfg.HostingSizeLimitHard() ? 0 : 1;
         }
         finally { _fillingLimit = false; }
+
+        // Обзор бакета доступен и при выключенной выкладке (смотреть и убирать мусор она не мешает),
+        // а вот удалять из общего хранилища может только администратор — см. IsAdministrator.
+        FilesDeleteBtn.IsEnabled = IsAdministrator;
+        if (!IsAdministrator)
+            FilesDeleteBtn.ToolTip = "Удалять из общего хранилища может только администратор.";
 
         var ready = s.CanPublish;
         CheckBtn.IsEnabled = ready;
@@ -690,6 +704,370 @@ public partial class HostingView : UserControl
         catch (Exception ex) { AppendLog($"Буфер обмена занят: {ex.Message}"); }
     }
 
+    // ── Файлы в хранилище ─────────────────────────────────────────────────────
+    // Просьба Ильи от 12.08.2026: «сделать взаимодействие с файловой системой во вкладке хранилище,
+    // типа чтобы можно было посмотреть, может удалить что-то — допустим, тот же мусор вручную».
+    //
+    // Вкладка «Состояние» отвечает на вопрос «уехало ли то, что должно», и список для неё строится по
+    // базе и диску. Здесь всё наоборот: спрашивается у самого бакета, что там лежит. Разница между
+    // этими двумя списками — и есть тот самый мусор: объекты, оставшиеся после переименования папки
+    // (ключи считаются от имён, а имена правят люди), выкладки с другой машины и ручные опыты. Раньше
+    // увидеть их из программы было нельзя вовсе, только через сторонний S3-клиент.
+
+    private readonly ObservableCollection<FileRow> _fileRows = new();
+    private List<FileRow> _filesLoaded = new();
+    private string _filesPrefix = "";
+    private bool _filesEverLoaded;
+    private CancellationTokenSource? _filesCancel;
+
+    /// <summary>Предел на один обход: 50 страниц по 1000 ключей. Не «чтобы не тормозило» — чтобы
+    /// ошибка на стороне хостинга (метка продолжения, ведущая на себя же) не крутила запросы вечно.
+    /// Упёрлись — говорим об этом прямо в итоговой строке, а не молчим, будто показали всё.</summary>
+    private const int MaxFilePages = 50;
+
+    /// <summary>Ключи, которые программа считает своими: то, что она выложила бы сама. Всё остальное
+    /// в бакете — «не значится», и именно это человек ищет глазами, когда пришёл убирать мусор.</summary>
+    private HashSet<string> KnownKeys() =>
+        new(_items.Select(i => i.ObjectKey).Where(k => !string.IsNullOrEmpty(k)), StringComparer.Ordinal);
+
+    /// <summary>Корень обзора — папка внутри бакета из реквизитов. Выше неё не поднимаемся: остальное
+    /// в бакете нам не принадлежит (бакет корпоративный, в нём живут и чужие данные).</summary>
+    private string RootPrefix()
+    {
+        var prefix = (_services.Cfg.S3Prefix() ?? "").Trim().Trim('/');
+        return prefix.Length == 0 ? "" : prefix + "/";
+    }
+
+    private async Task LoadFilesAsync()
+    {
+        var settings = _services.Cfg.S3();
+        _fileRows.Clear();
+        _filesLoaded = new List<FileRow>();
+
+        if (!settings.HasAddress || !settings.HasCredentials)
+        {
+            FilesPathText.Text = "";
+            FilesSummaryText.Text = "Хранилище не настроено: нужны адрес, бакет и файл с ключами (вкладка «Реквизиты»).";
+            return;
+        }
+        if (_filesCancel is not null) return;
+
+        var root = RootPrefix();
+        if (!_filesPrefix.StartsWith(root, StringComparison.Ordinal)) _filesPrefix = root;
+
+        var flat = FilesFlatCheck.IsChecked == true;
+        var known = KnownKeys();
+        var rows = new List<FileRow>();
+        var truncated = false;
+
+        _filesCancel = new CancellationTokenSource();
+        SetFilesBusy(true);
+        FilesSummaryText.Text = "Спрашиваем у хранилища…";
+        try
+        {
+            var client = new S3Client();
+            string? token = null;
+            var pages = 0;
+            do
+            {
+                var page = await client.ListAsync(settings, _filesPrefix, grouped: !flat, token,
+                    ct: _filesCancel.Token);
+                if (!page.Ok)
+                {
+                    FilesSummaryText.Text = $"Не удалось получить список: {page.Error}";
+                    AppendLog($"Обзор хранилища ({(_filesPrefix.Length == 0 ? "корень" : _filesPrefix)}): {page.Error}");
+                    return;
+                }
+
+                foreach (var folder in page.Folders)
+                    rows.Add(FileRow.Folder(folder, _filesPrefix, known));
+                foreach (var obj in page.Objects)
+                {
+                    // Объект нулевой длины с именем самой папки — так некоторые клиенты «создают
+                    // папку». Строкой он не нужен: это и есть та папка, в которой мы стоим.
+                    if (string.Equals(obj.Key, _filesPrefix, StringComparison.Ordinal)) continue;
+                    rows.Add(FileRow.File(obj, _filesPrefix, known, S3Client.PublicUrl(settings, obj.Key)));
+                }
+
+                token = page.NextToken;
+                pages++;
+                if (token is not null && pages >= MaxFilePages) { truncated = true; break; }
+            }
+            while (token is not null);
+
+            _filesEverLoaded = true;
+        }
+        catch (OperationCanceledException)
+        {
+            FilesSummaryText.Text = "Обзор остановлен — показано то, что успели получить.";
+        }
+        finally
+        {
+            _filesCancel.Dispose();
+            _filesCancel = null;
+            SetFilesBusy(false);
+        }
+
+        _filesLoaded = rows
+            .OrderBy(r => r.IsFolder ? 0 : 1)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        ApplyFilesFilter(truncated);
+    }
+
+    private void ApplyFilesFilter(bool truncated = false)
+    {
+        var onlyUnknown = FilesOnlyUnknownCheck.IsChecked == true;
+        _fileRows.Clear();
+        foreach (var row in _filesLoaded)
+        {
+            if (onlyUnknown && row.Known) continue;
+            _fileRows.Add(row);
+        }
+
+        var settings = _services.Cfg.S3();
+        var where = _filesPrefix.Length == 0 ? "корень бакета" : _filesPrefix;
+        FilesPathText.Text = $"{settings.Bucket} · {where}";
+
+        var folders = _filesLoaded.Count(r => r.IsFolder);
+        var files = _filesLoaded.Count(r => !r.IsFolder);
+        var unknown = _filesLoaded.Count(r => !r.Known);
+        var bytes = _filesLoaded.Where(r => !r.IsFolder).Sum(r => r.Size);
+
+        var parts = new List<string>();
+        parts.Add(_filesLoaded.Count == 0
+            ? "Здесь пусто."
+            : $"Папок {folders}, файлов {files} ({FileRow.Bytes(bytes)}). Не значится у программы: {unknown}.");
+        if (onlyUnknown && _fileRows.Count == 0 && _filesLoaded.Count > 0)
+            parts.Add("Все показанные объекты программе известны — снимите галочку, чтобы увидеть их.");
+        if (truncated)
+            parts.Add($"Показаны первые {MaxFilePages * 1000} объектов — здесь их больше. " +
+                      "Зайдите в папку поглубже, чтобы увидеть остальное.");
+        FilesSummaryText.Text = string.Join(" ", parts);
+    }
+
+    private void SetFilesBusy(bool busy)
+    {
+        FilesRefreshBtn.IsEnabled = !busy;
+        FilesUpBtn.IsEnabled = !busy;
+        FilesDeleteBtn.IsEnabled = !busy && IsAdministrator;
+        FilesFlatCheck.IsEnabled = !busy;
+        FilesStopBtn.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Удаление из общего хранилища — то же самое, что чистка общего диска: это чужая работа,
+    /// а не своя машина. Поэтому кнопка администраторская, как и «Чистка диска» в настройках.
+    /// Программист, которому страница доступна, смотреть и открывать может, удалять — нет.</summary>
+    private bool IsAdministrator => _services.Cfg.CurrentRole() == "administrator";
+
+    private async void FilesRefresh_Click(object sender, RoutedEventArgs e) => await LoadFilesAsync();
+
+    private void FilesStop_Click(object sender, RoutedEventArgs e) => _filesCancel?.Cancel();
+
+    private async void FilesFlat_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        await LoadFilesAsync();
+    }
+
+    private void FilesFilter_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        ApplyFilesFilter();
+    }
+
+    private async void FilesUp_Click(object sender, RoutedEventArgs e)
+    {
+        var root = RootPrefix();
+        if (_filesPrefix.Length <= root.Length) return;
+
+        var trimmed = _filesPrefix.TrimEnd('/');
+        var slash = trimmed.LastIndexOf('/');
+        var parent = slash < 0 ? "" : trimmed[..(slash + 1)];
+        _filesPrefix = parent.Length < root.Length ? root : parent;
+        await LoadFilesAsync();
+    }
+
+    private async void FilesGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!DataGridClickGuard.IsOverDataRow(e) || FilesGrid.SelectedItem is not FileRow row) return;
+        if (row.IsFolder)
+        {
+            _filesPrefix = row.Key;
+            await LoadFilesAsync();
+            return;
+        }
+        OpenFileRow(row);
+    }
+
+    private void FilesOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilesGrid.SelectedItem is not FileRow row) return;
+        if (row.IsFolder)
+        {
+            _filesPrefix = row.Key;
+            _ = LoadFilesAsync();
+            return;
+        }
+        OpenFileRow(row);
+    }
+
+    private void OpenFileRow(FileRow row)
+    {
+        if (string.IsNullOrEmpty(row.Url)) return;
+        try { Process.Start(new ProcessStartInfo(row.Url) { UseShellExecute = true }); }
+        catch (Exception ex) { AppendLog($"Не удалось открыть ссылку: {ex.Message}"); }
+    }
+
+    private void FilesCopyUrl_Click(object sender, RoutedEventArgs e) =>
+        CopyToClipboard((FilesGrid.SelectedItem as FileRow)?.Url);
+
+    private void FilesCopyKey_Click(object sender, RoutedEventArgs e) =>
+        CopyToClipboard((FilesGrid.SelectedItem as FileRow)?.Key);
+
+    /// <summary>Удаление отмеченного. Порядок такой же, как у чистки диска: сначала собирается точный
+    /// список того, что уйдёт (у папки — все объекты под её адресом, пересчитанные ЗАНОВО, а не по
+    /// показанному списку), потом человек его подтверждает, и только потом что-то удаляется.
+    ///
+    /// Отдельно сказано, сколько среди них тех, что программа считает выложенными: удалить их можно
+    /// (файл остаётся на диске и вернётся кнопкой «Выложить недостающее»), но до этой минуты ссылка с
+    /// наклейки на них работала, а после — нет.</summary>
+    private async void FilesDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsAdministrator)
+        {
+            AppMessageBox.Show("Удалять из хранилища может только администратор.", "Хранилище",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var selected = FilesGrid.SelectedItems.OfType<FileRow>().ToList();
+        if (selected.Count == 0)
+        {
+            AppMessageBox.Show("Выберите строки в списке.", "Хранилище", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (_filesCancel is not null) return;
+
+        var settings = _services.Cfg.S3();
+        var client = new S3Client();
+        var known = KnownKeys();
+
+        _filesCancel = new CancellationTokenSource();
+        SetFilesBusy(true);
+        List<string> keys;
+        try
+        {
+            keys = await CollectKeysAsync(client, settings, selected, _filesCancel.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            keys = new List<string>();
+        }
+        finally
+        {
+            _filesCancel.Dispose();
+            _filesCancel = null;
+            SetFilesBusy(false);
+        }
+
+        if (keys.Count == 0)
+        {
+            FilesSummaryText.Text = "Удалять нечего: под выбранными строками объектов не нашлось.";
+            return;
+        }
+
+        var knownCount = keys.Count(known.Contains);
+        var sample = string.Join("\n• ", keys.Take(8));
+        var reply = AppMessageBox.Show(
+            $"Удалить из хранилища объектов: {keys.Count}?\n\n• {sample}" +
+            (keys.Count > 8 ? $"\n• …и ещё {keys.Count - 8}" : "") + "\n\n" +
+            (knownCount > 0
+                ? $"Из них {knownCount} программа считает выложенными — ссылки с наклеек на них перестанут открываться, " +
+                  "пока их не выложить заново («Выложить недостающее»).\n\n"
+                : "") +
+            "Удаление безвозвратно: корзины у хранилища нет. Файлы на диске не трогаются.",
+            "Удаление из хранилища", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _filesCancel = new CancellationTokenSource();
+        SetFilesBusy(true);
+        var deleted = 0;
+        var failed = 0;
+        try
+        {
+            AppendLog($"— Удаление из хранилища: {keys.Count} объектов —");
+            foreach (var key in keys)
+            {
+                if (_filesCancel.Token.IsCancellationRequested) break;
+                var result = await client.DeleteAsync(settings, key, _filesCancel.Token);
+                if (result.Ok)
+                {
+                    deleted++;
+                    // Наблюдение «лежит на хостинге» после удаления заведомо ложно: карточка прошивки
+                    // и окно QR читают именно его, а не спрашивают сеть на каждую строку выдачи.
+                    _services.Db.SaveHostingCheck(key, present: false, "");
+                }
+                else
+                {
+                    failed++;
+                    AppendLog($"{key}: не удалось удалить — {result.Error}");
+                }
+                FilesSummaryText.Text = $"Удаляем… {deleted + failed} из {keys.Count}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Удаление остановлено вручную. Уже удалённое не вернуть.");
+        }
+        finally
+        {
+            _filesCancel.Dispose();
+            _filesCancel = null;
+            SetFilesBusy(false);
+        }
+
+        var summary = $"Удалено {deleted}" + (failed > 0 ? $", не удалось {failed} (подробности в журнале)" : "");
+        AppendLog(summary);
+        _host.ShowStatus($"Хранилище: {summary}", category: NotificationCategory.Sync);
+        await LoadFilesAsync();
+        FilesSummaryText.Text = summary + ". " + FilesSummaryText.Text;
+    }
+
+    /// <summary>Что именно уйдёт. У файла — он сам, у папки — всё, что лежит под её адресом, спрошенное
+    /// у хранилища прямо сейчас: показанный список мог устареть, а «удалить папку» одним запросом S3 не
+    /// умеет — папок у него нет.</summary>
+    private static async Task<List<string>> CollectKeysAsync(S3Client client, Core.Services.S3Settings settings,
+        IReadOnlyList<FileRow> rows, CancellationToken ct)
+    {
+        var keys = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var row in rows)
+        {
+            if (!row.IsFolder)
+            {
+                if (seen.Add(row.Key)) keys.Add(row.Key);
+                continue;
+            }
+
+            string? token = null;
+            var pages = 0;
+            do
+            {
+                var page = await client.ListAsync(settings, row.Key, grouped: false, token, ct: ct);
+                if (!page.Ok) throw new InvalidOperationException(page.Error);
+                foreach (var obj in page.Objects)
+                    if (seen.Add(obj.Key)) keys.Add(obj.Key);
+                token = page.NextToken;
+                pages++;
+            }
+            while (token is not null && pages < MaxFilePages);
+        }
+
+        return keys;
+    }
+
     // ── Журнал ────────────────────────────────────────────────────────────────
 
     private void AppendLog(string line)
@@ -827,6 +1205,57 @@ public partial class HostingView : UserControl
             : bytes >= 1024 * 1024
                 ? $"{bytes / 1024d / 1024d:0.#} МБ"
                 : $"{Math.Max(1, bytes / 1024)} КБ";
+    }
+
+    /// <summary>Строка обзора бакета: либо «папка» (общий префикс ключей — самих папок у S3 нет),
+    /// либо объект. Имя показывается коротким, от текущего адреса, а ключ — целиком: искать глазами
+    /// удобно по имени, а решать «точно ли этот» — только по ключу.</summary>
+    private sealed class FileRow
+    {
+        public bool IsFolder { get; private init; }
+        public string Key { get; private init; } = "";
+        public string Name { get; private init; } = "";
+        public long Size { get; private init; }
+        public string Url { get; private init; } = "";
+        public bool Known { get; private init; }
+        public DateTime? Modified { get; private init; }
+
+        public string KindLabel => IsFolder ? "папка" : "файл";
+        public string KnownLabel => Known ? "значится" : "не значится";
+        public string SizeLabel => IsFolder ? "" : Bytes(Size);
+        public string ModifiedLabel => Modified?.ToString("dd.MM.yyyy HH:mm") ?? "";
+
+        public static FileRow Folder(string prefix, string parent, IReadOnlySet<string> known) => new()
+        {
+            IsFolder = true,
+            Key = prefix,
+            Name = Shorten(prefix, parent),
+            // Папка «значится», если программа собирается класть в неё хоть что-то: у самой папки
+            // ключа нет, сравнивать нечего.
+            Known = known.Any(k => k.StartsWith(prefix, StringComparison.Ordinal)),
+        };
+
+        public static FileRow File(S3Client.BucketObject obj, string parent, IReadOnlySet<string> known, string url) => new()
+        {
+            Key = obj.Key,
+            Name = Shorten(obj.Key, parent),
+            Size = obj.Size,
+            Modified = obj.Modified,
+            Url = url,
+            Known = known.Contains(obj.Key),
+        };
+
+        /// <summary>Имя от текущего адреса. При показе «всё вложенное списком» это путь с папками —
+        /// так и надо: иначе одинаковые «instruction.pdf» из разных версий не отличить.</summary>
+        private static string Shorten(string key, string parent)
+        {
+            var name = key.StartsWith(parent, StringComparison.Ordinal) ? key[parent.Length..] : key;
+            return name.TrimEnd('/');
+        }
+
+        public static string Bytes(long bytes) => bytes >= 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.#} МБ"
+            : bytes > 0 ? $"{Math.Max(1, bytes / 1024)} КБ" : "0";
     }
 
     private sealed class TranslitRow

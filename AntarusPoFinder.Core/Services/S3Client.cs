@@ -128,6 +128,140 @@ public sealed class S3Client
         }
     }
 
+    // ── Обзор бакета ────────────────────────────────────────────────────────────
+    // Страница «Хранилище» показывает то, что ДОЛЖНО лежать на хостинге (список строится из базы и
+    // диска), и по каждой строке умеет спросить, лежит ли. Чего она не умела вовсе — показать то,
+    // что там лежит НА САМОМ ДЕЛЕ: объекты, оставшиеся после переименований, выкладки с другой
+    // машины, ручных опытов. Просьба Ильи от 12.08.2026: «сделать взаимодействие с файловой системой
+    // во вкладке хранилище, типа чтобы можно было посмотреть, может удалить что-то — допустим, тот
+    // же мусор вручную». Для этого нужны ровно два запроса: перечислить и удалить.
+
+    /// <summary>Объект в бакете таким, каким его показывает хостинг.</summary>
+    public sealed record BucketObject(string Key, long Size, DateTime? Modified);
+
+    /// <summary>Одна страница ответа: объекты, «папки» (общие префиксы) и метка продолжения. Хостинг
+    /// отдаёт список порциями (обычно по тысяче), и продолжение — единственный способ узнать
+    /// остальное; страница ходит по нему сама, но остановиться посреди обхода тоже должна уметь.</summary>
+    public sealed record ListPage(bool Ok, string? Error, IReadOnlyList<BucketObject> Objects,
+        IReadOnlyList<string> Folders, string? NextToken)
+    {
+        public static ListPage Fail(string error) =>
+            new(false, error, Array.Empty<BucketObject>(), Array.Empty<string>(), null);
+    }
+
+    /// <param name="grouped">true — как в проводнике: вложенное скрывается за «папками» (delimiter),
+    /// показывается только содержимое текущего уровня. false — все ключи под префиксом подряд;
+    /// так считается объём «папки» перед её удалением.</param>
+    public async Task<ListPage> ListAsync(S3Settings s, string prefix = "", bool grouped = true,
+        string? continuationToken = null, int maxKeys = 1000, CancellationToken ct = default)
+    {
+        if (!s.HasAddress) return ListPage.Fail("не задан адрес хранилища или бакет");
+        if (!s.HasCredentials) return ListPage.Fail("не заданы ключи доступа");
+
+        var query = new List<(string Name, string Value)>
+        {
+            ("list-type", "2"),
+            ("max-keys", maxKeys.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        if (!string.IsNullOrEmpty(prefix)) query.Add(("prefix", prefix));
+        if (grouped) query.Add(("delimiter", "/"));
+        if (!string.IsNullOrEmpty(continuationToken)) query.Add(("continuation-token", continuationToken));
+
+        try
+        {
+            var request = BuildRequest(s, HttpMethod.Get, "", Array.Empty<byte>(), null, DateTimeOffset.UtcNow, query);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return ListPage.Fail(await DescribeFailureAsync(response, ct));
+            return ParseListing(await response.Content.ReadAsStringAsync(ct));
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return ListPage.Fail("хранилище не ответило вовремя");
+        }
+        catch (Exception ex)
+        {
+            return ListPage.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>Разбор ответа ListObjectsV2. Отдельным методом и публично — чтобы проверялся тестом
+    /// на настоящих ответах: у разных провайдеров (AWS, Ceph у Timeweb) отличаются пространство имён,
+    /// порядок узлов и то, приходит ли <c>NextContinuationToken</c> при <c>IsTruncated=false</c>.
+    /// Имена узлов ищутся БЕЗ учёта пространства имён по этой же причине.</summary>
+    public static ListPage ParseListing(string xml)
+    {
+        try
+        {
+            var root = System.Xml.Linq.XDocument.Parse(xml).Root;
+            if (root is null) return ListPage.Fail("хранилище прислало пустой ответ");
+
+            var objects = new List<BucketObject>();
+            foreach (var node in Elements(root, "Contents"))
+            {
+                var key = Value(node, "Key");
+                if (key.Length == 0) continue;
+                long.TryParse(Value(node, "Size"), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var size);
+                DateTime? modified = DateTime.TryParse(Value(node, "LastModified"),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var when) ? when.ToLocalTime() : null;
+                objects.Add(new BucketObject(key, size, modified));
+            }
+
+            var folders = new List<string>();
+            foreach (var node in Elements(root, "CommonPrefixes"))
+            {
+                var value = Value(node, "Prefix");
+                if (value.Length > 0) folders.Add(value);
+            }
+
+            // Продолжение берём ТОЛЬКО когда список правда обрезан: часть провайдеров присылает метку
+            // и в последнем ответе, и обход по ней ходил бы по кругу.
+            var truncated = string.Equals(Value(root, "IsTruncated"), "true", StringComparison.OrdinalIgnoreCase);
+            var token = truncated ? Value(root, "NextContinuationToken") : "";
+
+            return new ListPage(true, null, objects, folders, token.Length > 0 ? token : null);
+        }
+        catch (Exception ex)
+        {
+            return ListPage.Fail($"не разобрать ответ хранилища — {ex.Message}");
+        }
+
+        static IEnumerable<System.Xml.Linq.XElement> Elements(System.Xml.Linq.XElement parent, string name) =>
+            parent.Elements().Where(e => e.Name.LocalName == name);
+
+        static string Value(System.Xml.Linq.XElement parent, string name) =>
+            parent.Elements().FirstOrDefault(e => e.Name.LocalName == name)?.Value.Trim() ?? "";
+    }
+
+    /// <summary>Удаляет объект. Безвозвратно и мимо всякой корзины — у бакета её нет, и спрашивает об
+    /// этом страница, а не клиент. Удаление того, чего уже нет, у S3 успешно (204), и это правильно:
+    /// цель «в бакете этого нет» достигнута.</summary>
+    public async Task<Result> DeleteAsync(S3Settings s, string key, CancellationToken ct = default)
+    {
+        if (!s.HasAddress) return Result.Fail("не задан адрес хранилища или бакет");
+        if (!s.HasCredentials) return Result.Fail("не заданы ключи доступа");
+        if (string.IsNullOrWhiteSpace(key)) return Result.Fail("не указан ключ объекта");
+
+        try
+        {
+            var request = BuildRequest(s, HttpMethod.Delete, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
+                return Result.Fail(await DescribeFailureAsync(response, ct));
+            return Result.Success(PublicUrl(s, key));
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return Result.Fail("хранилище не ответило вовремя");
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail(ex.Message);
+        }
+    }
+
     /// <summary>Проверка «реквизиты рабочие»: запрашиваем у бакета один объект из списка. Именно
     /// список, а не запись пробного файла, — проверка не должна оставлять за собой мусор в чужом
     /// бакете, и она же честно отвечает на вопрос «а ключи вообще подходят к ЭТОМУ бакету».
@@ -161,13 +295,27 @@ public sealed class S3Client
     /// поднимая сервер: подпись — единственное место, где ошибка не видна ни по коду, ни по логам,
     /// а только по ответу «SignatureDoesNotMatch» от чужого сервера.</summary>
     public static HttpRequestMessage BuildRequest(S3Settings s, HttpMethod method, string key,
-        byte[] content, string? contentType, DateTimeOffset when, string query = "")
+        byte[] content, string? contentType, DateTimeOffset when, string query = "") =>
+        BuildRequest(s, method, key, content, contentType, when, SplitQuery(query));
+
+    /// <summary>То же самое, но параметры приходят парами, а не строкой. Так их и надо передавать,
+    /// когда в значении бывает что угодно: префикс папки — это кириллица со слешами, а метка
+    /// продолжения — набор символов на усмотрение хостинга. Собранные в строку, они разъезжались бы
+    /// с ней при разборе (слеш в значении обязан стать <c>%2F</c>, а разделителем остаться не
+    /// должен).</summary>
+    public static HttpRequestMessage BuildRequest(S3Settings s, HttpMethod method, string key,
+        byte[] content, string? contentType, DateTimeOffset when,
+        IReadOnlyList<(string Name, string Value)> query)
     {
         var endpoint = new Uri(s.Endpoint.TrimEnd('/'));
         var objectPath = string.IsNullOrEmpty(key) ? s.Bucket : $"{s.Bucket}/{key}";
         var canonicalPath = AwsV4Signer.CanonicalPath(objectPath);
+        // В адрес идёт ТА ЖЕ строка параметров, от которой считается подпись. Раньше в адрес уходил
+        // исходный вид, а подписывался закодированный: пока параметрами были «list-type=2» и
+        // «max-keys=1», это одно и то же, но с первым же префиксом с кириллицей подпись не сошлась бы.
+        var canonicalQuery = EncodeQuery(query);
         var url = endpoint.GetLeftPart(UriPartial.Authority) + canonicalPath +
-                  (query.Length > 0 ? "?" + query : "");
+                  (canonicalQuery.Length > 0 ? "?" + canonicalQuery : "");
 
         var payloadHash = content.Length == 0 ? AwsV4Signer.EmptyPayloadHash : AwsV4Signer.Sha256Hex(content);
         var amzDate = AwsV4Signer.AmzDate(when);
@@ -184,7 +332,7 @@ public sealed class S3Client
         };
 
         var canonicalRequest = AwsV4Signer.CanonicalRequest(method.Method, canonicalPath,
-            CanonicalQuery(query), headers, payloadHash);
+            canonicalQuery, headers, payloadHash);
 
         var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("x-amz-content-sha256", payloadHash);
@@ -204,19 +352,30 @@ public sealed class S3Client
     /// <summary>Параметры запроса в каноническом виде: имя=значение, отсортировано по имени. У нас
     /// их всего два (list-type и max-keys), но порядок всё равно обязан быть определённым — иначе
     /// сервер посчитает подпись от другой строки.</summary>
-    public static string CanonicalQuery(string query)
+    public static string CanonicalQuery(string query) => EncodeQuery(SplitQuery(query));
+
+    /// <summary>Параметры строкой — в пары. Значение отделяется по ПЕРВОМУ «=»: у метки продолжения
+    /// внутри бывает и «=», и «/», и в значении они обязаны остаться.</summary>
+    private static List<(string Name, string Value)> SplitQuery(string query)
     {
-        if (string.IsNullOrEmpty(query)) return "";
         var pairs = new List<(string Name, string Value)>();
+        if (string.IsNullOrEmpty(query)) return pairs;
         foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var eq = part.IndexOf('=');
-            pairs.Add(eq < 0
-                ? (AwsV4Signer.UriEncode(part), "")
-                : (AwsV4Signer.UriEncode(part[..eq]), AwsV4Signer.UriEncode(part[(eq + 1)..])));
+            pairs.Add(eq < 0 ? (part, "") : (part[..eq], part[(eq + 1)..]));
         }
-        pairs.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
-        return string.Join("&", pairs.ConvertAll(p => $"{p.Name}={p.Value}"));
+        return pairs;
+    }
+
+    private static string EncodeQuery(IReadOnlyList<(string Name, string Value)> query)
+    {
+        if (query.Count == 0) return "";
+        var encoded = query
+            .Select(p => (Name: AwsV4Signer.UriEncode(p.Name), Value: AwsV4Signer.UriEncode(p.Value)))
+            .ToList();
+        encoded.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+        return string.Join("&", encoded.Select(p => $"{p.Name}={p.Value}"));
     }
 
     /// <summary>Адрес, по которому файл потом откроется снаружи: веб-адрес хостинга + ключ. Если
