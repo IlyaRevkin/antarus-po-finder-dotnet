@@ -45,7 +45,7 @@ installer/*.sha256
 ## Loader creates this local SMLogix copy on demand; it is not a source or installer payload.
 /installer/loader/SMLogix isolated payload/
 
-## Живой GUI-прогон этого раунда: изолированный профиль, тестовый диск, скрипты pywinauto,
+## Живой GUI-прогон перед релизом: изолированный профиль, тестовый диск, скрипты pywinauto,
 ## скриншоты и собранный для прогона портатив — рядом с репозиторием, но не его часть.
 .live/
 .publish-live/
@@ -54,6 +54,3 @@ installer/*.sha256
 docs/screenshots/
 docs/*.pdf
 *.psl
-
-## Рабочие копии фоновых агентов — временные, не часть репозитория.
-.claude/

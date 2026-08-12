@@ -10,9 +10,9 @@ namespace AntarusPoFinder.Tests;
 
 public class DatabaseSmokeTests
 {
-    /// <summary>Used to open a copy of a real user's production DB from a long-gone Claude-session
-    /// temp folder (only ever valid on one developer's machine, until temp cleanup silently deleted
-    /// it) and assert on its exact contents ("ровно 4 модификации PIXEL" etc). PIXEL/SMH4/the "psl"
+    /// <summary>Used to open a copy of a real user's production DB from a long-gone temp folder
+    /// (only ever valid on one developer's machine, until temp cleanup silently deleted it) and
+    /// assert on its exact contents ("ровно 4 модификации PIXEL" etc). PIXEL/SMH4/the "psl"
     /// extension are actually all default seed data (see HierarchyDefaultsData), not anything specific
     /// to that user's uploads — a fresh Database already has them. The "real upload history survives"
     /// half is now a fixture the test seeds and owns itself, instead of an assumption about someone

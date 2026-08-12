@@ -15,7 +15,7 @@ namespace AntarusPoFinder.Tests;
 /// это делалось: отсутствие второй копии файлов на диске.</summary>
 public class ExtraSubtypesLinkTests : IDisposable
 {
-    /// <summary>Реальный .lnk через COM здесь не нужен (и на CI-агенте без WScript.Shell мог бы
+    /// <summary>Реальный .lnk через COM здесь не нужен (и на сборочной машине без WScript.Shell мог бы
     /// упасть) — важно, что вызов происходит с правильными путями.</summary>
     private sealed class FakeShortcuts : IShortcutCreator
     {
