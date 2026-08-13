@@ -80,7 +80,11 @@ public record FwDiskScan(List<FwDiskCandidate> Candidates, int Skipped, List<str
 /// 1:1 port of app/services/hierarchy_service.py.</summary>
 public class HierarchyService
 {
-    private const string FolderPo = "ПО";
+    /// <summary>Верхняя папка дерева прошивок — та самая опора, по которой чужой путь переносится на
+    /// нашу форму диска (<see cref="FirmwarePathLocalizer"/>) и по которой из пути версии вычисляется
+    /// корень (<see cref="VersionDocFolders"/>). Поэтому она открыта наружу: имя «ПО», написанное в
+    /// трёх местах строкой, однажды разъедется.</summary>
+    public const string FolderPo = "ПО";
     private const string FolderParams = "Параметры";
     private const string FolderConfig = "Конфиг";
 

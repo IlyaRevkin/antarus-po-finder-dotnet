@@ -14,6 +14,12 @@ public class HierarchyResult
     public string Name { get; init; } = "";
     public string Controller { get; init; } = "";
     public string EquipmentType { get; init; } = "";
+
+    /// <summary>Имя подтипа само по себе — то, каким оно стоит СЕГМЕНТОМ ПУТИ на диске. В
+    /// <see cref="Name"/> его взять нельзя: там подпись для человека, склеенная из папки подтипа и
+    /// контроллера («ПЖ-FD SMH5»). Нужно, чтобы карточка знала, где лежат документы ЕЁ записи, а не
+    /// того подтипа, чьи файлы она показывает (см. <see cref="VersionDocFolders"/>).</summary>
+    public string SubtypeName { get; init; } = "";
     public string WorkType { get; init; } = "";
     public string IoMapPath { get; init; } = "";
     public string InstructionsPath { get; init; } = "";
@@ -188,6 +194,7 @@ public static class SearchService
             ControllerId = row.ControllerId,
             FwVersionId = row.Id ?? 0,
             Name = name,
+            SubtypeName = row.SubtypeName,
             Controller = row.CtrlName,
             EquipmentType = row.GroupName,
             WorkType = string.Join(", ", row.LaunchTypes),

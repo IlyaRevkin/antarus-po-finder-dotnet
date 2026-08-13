@@ -222,8 +222,12 @@ public partial class EditFirmwareDialog : Window
     {
         var versionDir = ServerStartDirectory();
         if (string.IsNullOrEmpty(versionDir)) return versionDir;
-        return VersionLayout.SlotBestReadFolder(versionDir, VersionLayout.ControllerFolderOf(versionDir), slot)
-               ?? versionDir;
+        // ...и у записи, привязывающей прошивку к дополнительному подтипу шкафа, — из её собственной
+        // папки, а не из папки того подтипа, чьи файлы она показывает (см. VersionDocFolders).
+        var own = _names is { } n
+            ? VersionDocFolders.OwnControllerFolderNear(versionDir, n.GroupName, n.SubtypeName, n.ControllerName)
+            : null;
+        return VersionDocFolders.BestReadFolder(versionDir, own, slot) ?? versionDir;
     }
 
     /// <summary>То же для файлов самой прошивки: «Прошивка\» у перестроенной версии, папка версии у

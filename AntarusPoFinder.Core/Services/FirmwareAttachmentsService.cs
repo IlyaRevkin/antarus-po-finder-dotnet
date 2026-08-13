@@ -180,7 +180,10 @@ public static class FirmwareAttachmentsService
         // измениться между двумя правками одной и той же карточки.
         var versionDir = FirmwarePathLocalizer.Localize(record.DiskPath, root);
         var ctrlFolder = Path.Combine(HierarchyService.GroupSubFolder(root, g, s), c);
-        string SlotFolder(string slot) => VersionLayout.SlotWriteFolder(versionDir, ctrlFolder, slot);
+        // ...а у записи, привязывающей прошивку основного подтипа к дополнительному, — своя папка
+        // контроллера, а не чужая папка версии (VersionDocFolders): документ пишется на ШКАФ, и класть
+        // руководство «ПЖ FD» внутрь папки «ПЖ 2.0» нельзя.
+        string SlotFolder(string slot) => VersionDocFolders.WriteFolder(versionDir, ctrlFolder, slot);
 
         string? ioMap = Resolve("Карта in/out", request.IoMapSourcePath, record.IoMapPath,
             () => SlotFolder(HierarchyFolders.IoMap), applied, warnings);

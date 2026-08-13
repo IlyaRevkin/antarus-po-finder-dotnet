@@ -45,6 +45,25 @@ public sealed record HostingItem(
     public long? Size { get; init; }
     public DateTime? CheckedAt { get; init; }
 
+    /// <summary>Другие версии, у которых ЭТОТ ЖЕ документ и, стало быть, тот же адрес на хостинге, —
+    /// «тип / подтип / контроллер», как их видит человек. Так бывает у прошивки, привязанной сразу к
+    /// нескольким подтипам шкафа (<see cref="FirmwareSubtypeLinkService"/>): файлы у них общие, папка
+    /// на диске одна — основного подтипа, и адрес ссылки у всех ведёт именно в неё.
+    ///
+    /// Пока этого поля не было, список показывал такую прошивку двумя отдельными строками с
+    /// ОДИНАКОВЫМ адресом, и строка «ПЖ / FD / SMH5» с адресом «…/ПЖ/2.0/SMH5/…» читалась как
+    /// перепутанная ссылка — жалоба «вместо прошивки ссылка на ПЖ 2.0, и инструкция туда прицепилась
+    /// некорректно». Теперь строка одна, а общий документ назван общим прямым текстом.</summary>
+    public IReadOnlyList<string> SharedWith { get; init; } = Array.Empty<string>();
+
+    /// <summary>Все записи fw_versions, которым принадлежит этот документ (первая — та, чья папка на
+    /// диске). Нужно правке ссылки вручную: менять её надо у всех сразу, иначе половина версий
+    /// осталась бы с прежним адресом.</summary>
+    public IReadOnlyList<int> VersionIds { get; init; } = Array.Empty<int>();
+
+    /// <summary>Документ общий у нескольких версий.</summary>
+    public bool Shared => SharedWith.Count > 0;
+
     /// <summary>Есть ли смысл предлагать «Выложить» по этой строке.</summary>
     public bool CanPublish => State is HostingState.Missing or HostingState.Failed or HostingState.Unknown or HostingState.Published;
 
@@ -105,15 +124,27 @@ public sealed class HostingSyncService
     /// вовсе — им там нечего делать.</summary>
     public IReadOnlyList<HostingItem> Plan(S3Settings settings, string diskRoot)
     {
-        var items = new List<HostingItem>();
-        if (string.IsNullOrWhiteSpace(diskRoot)) return items;
+        var rows = new List<(HostingItem Item, string Path)>();
+        if (string.IsNullOrWhiteSpace(diskRoot)) return Array.Empty<HostingItem>();
 
         foreach (var version in _db.GetAllFwVersionsWithNames())
         {
             if (version.Id is not int id) continue;
 
-            var file = ResolveInstructionFile(version);
-            var pathOnDisk = file ?? PlannedInstructionPath(version);
+            // Путь, записанный на машине коллеги, приводим к нашей форме диска — тем же способом, что
+            // и всё остальное приложение (см. FirmwarePathLocalizer). Без этого версия, загруженная с
+            // машины, где шара смонтирована иначе, в список не попадала вовсе: относительный путь от
+            // нашего корня не считался. Наклейка при этом печаталась и вела на хостинг по нормальному
+            // адресу — то есть страница «Хранилище» молчала ровно о тех документах, которые уже обещаны
+            // QR-кодом.
+            var versionDir = FirmwarePathLocalizer.Localize(version.DiskPath, diskRoot);
+            var ownControllerFolder = VersionDocFolders.OwnControllerFolder(
+                diskRoot, version.GroupName, version.SubtypeName, version.CtrlName);
+            var folder = InstructionFolderOf(versionDir, ownControllerFolder);
+
+            var file = ResolveInstructionFile(version, folder,
+                linked: VersionDocFolders.IsLinkedCopy(versionDir, ownControllerFolder));
+            var pathOnDisk = file ?? PlannedInstructionPath(version, folder);
             if (pathOnDisk is null) continue;
 
             var relative = LabelLinkBuilder.RelativeTo(diskRoot, pathOnDisk);
@@ -125,7 +156,7 @@ public sealed class HostingSyncService
             var key = settings.KeyFor(InstructionPublisher.AsPublishedName(relative));
             var url = S3Client.PublicUrl(settings, key);
 
-            items.Add(new HostingItem(
+            rows.Add((new HostingItem(
                 VersionId: id,
                 VersionRaw: version.VersionRaw,
                 Where: $"{version.GroupName} / {version.SubtypeName} / {version.CtrlName}",
@@ -138,14 +169,58 @@ public sealed class HostingSyncService
             {
                 State = file is null ? HostingState.NoSource : HostingState.Unknown,
                 Size = SizeOf(file),
-            });
+            }, pathOnDisk));
         }
 
-        return items
+        return Collapse(rows)
             .OrderBy(i => i.Where, StringComparer.OrdinalIgnoreCase)
             .ThenBy(i => i.VersionRaw, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    /// <summary>Схлопывает строки, за которыми стоит ОДИН И ТОТ ЖЕ документ. Так выходит у прошивки,
+    /// привязанной к нескольким подтипам шкафа: записей в базе несколько, а папка на диске одна — та,
+    /// что у основного подтипа, — значит и файл, и его адрес на хостинге общие.
+    ///
+    /// Строк было столько же, сколько записей, и каждая называла СВОЙ подтип при общем адресе: строка
+    /// «ПЖ / FD / SMH5» показывала адрес «…/ПЖ/2.0/SMH5/…» и выглядела перепутанной, хотя всё было
+    /// ровно так, как есть на диске. Заодно выкладка перестала гонять один и тот же файл по разу на
+    /// каждую запись.
+    ///
+    /// Главной берётся запись ТОГО подтипа, в чьей папке документ и лежит (её имя есть в пути), —
+    /// именно её раскладку показывает адрес. Не нашли такую (путь чужой, папку переименовали) — самая
+    /// ранняя по номеру: копии подтипов заводятся после основной.</summary>
+    private static IEnumerable<HostingItem> Collapse(IEnumerable<(HostingItem Item, string Path)> rows) =>
+        rows
+            .GroupBy(r => r.Item.ObjectKey, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var all = group.ToList();
+                if (all.Count == 1) return all[0].Item with { VersionIds = new[] { all[0].Item.VersionId } };
+
+                var main = all.FirstOrDefault(r => PathNames(r.Path).Contains(SubtypeOf(r.Item.Where))).Item
+                           ?? all.OrderBy(r => r.Item.VersionId).First().Item;
+                return main with
+                {
+                    SharedWith = all.Select(r => r.Item).Where(i => i != main).Select(i => i.Where)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    VersionIds = all.Select(r => r.Item).OrderBy(i => i == main ? 0 : 1).ThenBy(i => i.VersionId)
+                        .Select(i => i.VersionId).ToList(),
+                };
+            });
+
+    /// <summary>Подтип из подписи «тип / подтип / контроллер» — средняя часть.</summary>
+    private static string SubtypeOf(string where)
+    {
+        var parts = where.Split('/');
+        return parts.Length >= 2 ? parts[1].Trim() : "";
+    }
+
+    private static IReadOnlyCollection<string> PathNames(string path) =>
+        new HashSet<string>(
+            (path ?? "").Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries),
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Спросить у хостинга, что из списка там действительно есть. По одному объекту, с
     /// отчётом о ходе и проверкой отмены — на сотнях файлов это минуты.</summary>
@@ -225,8 +300,16 @@ public sealed class HostingSyncService
     /// <summary>Файл инструкции этой версии на диске — настоящий документ или заглушка. Путь из базы
     /// может указывать на папку (постраничные сканы) — тогда возвращается она сама: выкладывается
     /// такая инструкция пофайлово, и это забота <see cref="InstructionPublisher"/>.</summary>
-    private static string? ResolveInstructionFile(FwVersionRecord version)
+    /// <param name="linked">Запись привязывает прошивку основного подтипа к дополнительному
+    /// (<see cref="VersionDocFolders"/>). Такой записи путь к инструкции достаётся ПО НАСЛЕДСТВУ от
+    /// основной — её заводят копией (см. FirmwareSubtypeLinkService.LinkExtras), — то есть указывает на
+    /// документ соседнего шкафа. Поэтому свой документ, если он появился, важнее сохранённого пути:
+    /// иначе «ПЖ / FD» до скончания века показывал бы руководство от «ПЖ / 2.0».</param>
+    private static string? ResolveInstructionFile(FwVersionRecord version, string? folder, bool linked)
     {
+        var own = FirstDocumentIn(folder);
+        if (linked && own is not null) return own;
+
         var stored = version.InstructionsPath;
         if (!string.IsNullOrWhiteSpace(stored))
         {
@@ -237,9 +320,12 @@ public sealed class HostingSyncService
             catch (Exception) { /* недоступный путь — считаем, что файла нет */ }
         }
 
-        var folder = InstructionFolderOf(version);
-        if (folder is null) return null;
+        return own;
+    }
 
+    private static string? FirstDocumentIn(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return null;
         try
         {
             if (!Directory.Exists(folder)) return null;
@@ -252,22 +338,24 @@ public sealed class HostingSyncService
     /// <summary>Где инструкция этой версии ДОЛЖНА лежать, даже если её ещё нет. Нужно, чтобы строка
     /// «инструкции нет» всё равно показывала конечный адрес: наклейку с QR печатают заранее, и адрес
     /// обязан быть известен до появления документа.</summary>
-    private static string? PlannedInstructionPath(FwVersionRecord version)
+    private static string? PlannedInstructionPath(FwVersionRecord version, string? folder)
     {
-        var folder = InstructionFolderOf(version);
         if (folder is null) return null;
         var name = InstructionNaming.BuildFileName(version.VersionRaw, ".pdf");
         return name.Length > 0 ? Path.Combine(folder, name) : null;
     }
 
-    private static string? InstructionFolderOf(FwVersionRecord version)
+    /// <summary>Папка инструкции этой записи — ровно та, куда эта же запись свою инструкцию и КЛАДЁТ
+    /// (см. <see cref="VersionDocFolders"/>). Считать её от одного лишь пути версии нельзя: у записи,
+    /// привязывающей прошивку к дополнительному подтипу шкафа, путь ведёт в папку основного, и адрес на
+    /// хостинге получался бы от чужого шкафа.</summary>
+    private static string? InstructionFolderOf(string? versionDir, string? ownControllerFolder)
     {
-        if (string.IsNullOrWhiteSpace(version.DiskPath)) return null;
+        if (string.IsNullOrWhiteSpace(versionDir)) return null;
         try
         {
-            var controller = VersionLayout.ControllerFolderOf(version.DiskPath);
-            return VersionLayout.SlotBestReadFolder(version.DiskPath, controller, HierarchyFolders.Instructions)
-                   ?? VersionLayout.SlotFolder(version.DiskPath, HierarchyFolders.Instructions);
+            return VersionDocFolders.BestReadFolder(versionDir, ownControllerFolder, HierarchyFolders.Instructions)
+                   ?? VersionLayout.SlotFolder(versionDir, HierarchyFolders.Instructions);
         }
         catch (Exception) { return null; }
     }

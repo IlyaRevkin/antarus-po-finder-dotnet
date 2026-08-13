@@ -98,8 +98,18 @@ public static class InstructionRemoval
                       || siblings.Any(s => !string.IsNullOrWhiteSpace(s.InstructionsPath));
 
         var versionDir = FirmwarePathLocalizer.Localize(record.DiskPath, root);
-        var controllerFolder = VersionLayout.ControllerFolderOf(versionDir);
-        var folder = VersionLayout.SlotBestReadFolder(versionDir, controllerFolder, HierarchyFolders.Instructions)
+        // Папка документа берётся так же, как её видит карточка и «Хранилище»: у записи, привязывающей
+        // прошивку к дополнительному подтипу шкафа, это её СОБСТВЕННАЯ папка, а не папка того подтипа,
+        // чьи файлы она показывает (см. VersionDocFolders). Разойдись эти два ответа — кнопка удаления
+        // сносила бы соседний документ вместо своего.
+        var names = db.GetFwVersionNames(id);
+        var ownControllerFolder = names is { } n
+            ? VersionDocFolders.OwnControllerFolder(root, n.GroupName, n.SubtypeName, n.ControllerName)
+            : null;
+        var controllerFolder = VersionDocFolders.IsLinkedCopy(versionDir, ownControllerFolder)
+            ? ownControllerFolder
+            : VersionLayout.ControllerFolderOf(versionDir);
+        var folder = VersionDocFolders.BestReadFolder(versionDir, ownControllerFolder, HierarchyFolders.Instructions)
                      ?? (string.IsNullOrWhiteSpace(versionDir)
                          ? null
                          : VersionLayout.SlotFolder(versionDir, HierarchyFolders.Instructions));
@@ -121,7 +131,7 @@ public static class InstructionRemoval
             UnlinkIds = unlink,
             HasLink = hasLink,
             Folder = folder,
-            UsedAlsoBy = OtherReaders(db, unlink, folder, controllerFolder, document),
+            UsedAlsoBy = OtherReaders(db, unlink, folder, controllerFolder, document, root),
         };
     }
 
@@ -242,7 +252,7 @@ public static class InstructionRemoval
     /// и ручных правок, и такой файл тоже не наш, чтобы его удалять.</description></item>
     /// </list></summary>
     private static IReadOnlyList<string> OtherReaders(Database db, IReadOnlyList<int> unlink,
-        string? folder, string? controllerFolder, string document)
+        string? folder, string? controllerFolder, string document, string root)
     {
         var sharedFolder = !string.IsNullOrWhiteSpace(controllerFolder)
                            && !string.IsNullOrWhiteSpace(folder)
@@ -255,8 +265,13 @@ public static class InstructionRemoval
 
             var pointsHere = !string.IsNullOrWhiteSpace(other.InstructionsPath)
                              && PathsEqual(other.InstructionsPath, document);
-            var underController = sharedFolder && !string.IsNullOrWhiteSpace(other.DiskPath)
-                                  && IsInside(other.DiskPath, controllerFolder!);
+            // Читает эту же общую папку тот, чья папка версии лежит под тем же контроллером, — и тот,
+            // кто просто ПИШЕТ свои документы в неё: у привязки к дополнительному подтипу папка версии
+            // вообще в другом месте (она указывает на файлы основного), а документ у неё именно здесь.
+            var otherOwn = VersionDocFolders.OwnControllerFolder(root, other.GroupName, other.SubtypeName, other.CtrlName);
+            var underController = sharedFolder
+                                  && ((!string.IsNullOrWhiteSpace(other.DiskPath) && IsInside(other.DiskPath, controllerFolder!))
+                                      || (otherOwn is not null && PathsEqual(otherOwn, controllerFolder!)));
 
             if (pointsHere || underController)
                 readers.Add($"{other.CtrlName} {other.VersionRaw}".Trim());

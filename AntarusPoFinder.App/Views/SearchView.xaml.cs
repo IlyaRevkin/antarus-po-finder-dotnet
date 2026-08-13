@@ -828,10 +828,10 @@ public partial class SearchView : UserControl
         // Карта ВВ / инструкция / карта Modbus — есть, только если реально найден файл (путь версии,
         // указывающий на существующий файл, ЛИБО непустая общая папка документа), а не просто
         // заполненное поле в БД. Тот же резолвер потом открывает самый свежий файл (см. OpenMap и др.).
-        var hasIoMap = ResolveDocFile(net, result.IoMapPath, "Карта ВВ") is not null;
+        var hasIoMap = ResolveDocFile(result, net, result.IoMapPath, "Карта ВВ") is not null;
         // Инструкция разбирается детальнее прочих документов: у неё различаются исходный docx (для правки)
         // и pdf (для печати), от чего зависят разные пункты меню карточки (см. FirmwareCard.AddInstructionItems).
-        var instructionFolder = InstructionFolder(net);
+        var instructionFolder = InstructionFolder(result, net);
         var instr = InstructionDocResolver.Resolve(result.InstructionsPath, instructionFolder);
         var hasInstructions = instr.HasAny;
         var hasInstrDocx = instr.Docx is not null;
@@ -841,7 +841,7 @@ public partial class SearchView : UserControl
         // (см. FirmwareCardFlags.HasInstructionStub). Ищем, лишь когда документа нет: иначе это
         // лишний обход папки на сетевом диске у каждой карточки.
         var hasInstrStub = !hasInstructions && InstructionStub.ExistingIn(instructionFolder) is not null;
-        var hasModbus = ResolveDocFile(net, result.ModbusMapPath, "Карта Modbus") is not null;
+        var hasModbus = ResolveDocFile(result, net, result.ModbusMapPath, "Карта Modbus") is not null;
         // Расширение того файла, который реально откроет «Открыть прошивку ПЛК» — считается тем же
         // резолвером, что и само открытие (PlcOpenResolver), поэтому подпись кнопки не может
         // разойтись с тем, что откроется, и работает для ЛЮБОГО проекта, не только .psl/.lfs.
@@ -881,7 +881,7 @@ public partial class SearchView : UserControl
     private static HmiOpenSources HmiSources(HierarchyResult result, string net) => new()
     {
         HmiPath = result.HmiPath,
-        SiblingHmiFolder = FindSiblingFolder(net, "HMI"),
+        SiblingHmiFolder = FindSiblingFolder(result, net, "HMI"),
         ExecutableHint = result.HmiExecutableHint,
         CandidateFolders = CandidateFolders(result, net).ToList(),
         FilteredFolders = new[] { Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name)), net },
@@ -892,17 +892,19 @@ public partial class SearchView : UserControl
     /// <summary>Самый свежий актуальный файл документа (карта ВВ / инструкция / карта Modbus) —
     /// общая папка документа рядом с папкой контроллера, см. DocFileResolver.
     /// Ходит на диск — вызывать из фонового потока (ScanVersionFolder) или по клику, не в отрисовке.</summary>
-    private static string? ResolveDocFile(string net, string? storedPath, string sharedFolderName) =>
-        DocFileResolver.Resolve(storedPath, FindSiblingFolder(net, sharedFolderName));
+    private static string? ResolveDocFile(HierarchyResult result, string net, string? storedPath, string sharedFolderName) =>
+        DocFileResolver.Resolve(storedPath, FindSiblingFolder(result, net, sharedFolderName));
 
     /// <summary>Папка, из которой читается инструкция: общая папка «Инструкция» рядом с папкой
     /// контроллера на первом диске.</summary>
-    private static string? InstructionFolder(string net) => FindSiblingFolder(net, "Инструкция");
+    private static string? InstructionFolder(HierarchyResult result, string net) =>
+        FindSiblingFolder(result, net, "Инструкция");
 
     /// <summary>docx/pdf инструкции этой версии (см. InstructionDocResolver). Ходит на диск — из
     /// фонового обхода или по клику, не в отрисовке.</summary>
     private static InstructionDoc ResolveInstruction(HierarchyResult result) =>
-        InstructionDocResolver.Resolve(result.InstructionsPath, InstructionFolder(ResolvedNetworkDir(result)));
+        InstructionDocResolver.Resolve(result.InstructionsPath,
+            InstructionFolder(result, ResolvedNetworkDir(result)));
 
     /// <summary>Дорисовывает карточки признаками с диска, потом запускает автосинхронизацию тех, у
     /// кого нет локальной копии. Последовательно и с проверкой поколения выдачи — по тем же причинам,
@@ -1748,10 +1750,15 @@ public partial class SearchView : UserControl
     /// одинаково. Заодно чинится ОПЦ новой раскладки: её родитель — папка «ОПЦ», а не контроллер,
     /// и прежний Directory.GetParent искал документы внутри «ОПЦ» (ControllerFolderOf знает про
     /// лишний уровень).</summary>
-    private static string? FindSiblingFolder(string versionDir, string folderName)
+    private static string? FindSiblingFolder(HierarchyResult result, string versionDir, string folderName)
     {
         if (!Directory.Exists(versionDir)) return null;
-        return VersionLayout.SlotBestReadFolder(versionDir, VersionLayout.ControllerFolderOf(versionDir), folderName);
+        // Папка контроллера считается по именам иерархии САМОЙ записи, а не по её пути на диске: у
+        // прошивки, привязанной сразу к нескольким подтипам шкафа, путь ведёт в папку основного
+        // подтипа, и карточка «ПЖ / FD» показывала документы «ПЖ / 2.0» (см. VersionDocFolders).
+        var own = VersionDocFolders.OwnControllerFolderNear(
+            versionDir, result.EquipmentType, result.SubtypeName, result.Controller);
+        return VersionDocFolders.BestReadFolder(versionDir, own, folderName);
     }
 
     // ── Card actions ──────────────────────────────────────────────────────
@@ -2098,7 +2105,7 @@ public partial class SearchView : UserControl
 
     private void OpenMap(HierarchyResult result)
     {
-        var path = ResolveDocFile(ResolvedNetworkDir(result), result.IoMapPath, "Карта ВВ");
+        var path = ResolveDocFile(result, ResolvedNetworkDir(result), result.IoMapPath, "Карта ВВ");
         if (path is null)
         {
             AppMessageBox.Show($"Файл карты не найден.\nПуть: {result.IoMapPath}", "Карта in/out", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2109,7 +2116,7 @@ public partial class SearchView : UserControl
 
     private void OpenModbusMap(HierarchyResult result)
     {
-        var path = ResolveDocFile(ResolvedNetworkDir(result), result.ModbusMapPath, "Карта Modbus");
+        var path = ResolveDocFile(result, ResolvedNetworkDir(result), result.ModbusMapPath, "Карта Modbus");
         if (path is null)
         {
             AppMessageBox.Show($"Файл карты Modbus не найден.\nПуть: {result.ModbusMapPath}", "Карта modbus", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2155,7 +2162,7 @@ public partial class SearchView : UserControl
 
     private void OpenInstructions(HierarchyResult result)
     {
-        var path = ResolveDocFile(ResolvedNetworkDir(result), result.InstructionsPath, "Инструкция");
+        var path = ResolveDocFile(result, ResolvedNetworkDir(result), result.InstructionsPath, "Инструкция");
         if (path is null)
         {
             AppMessageBox.Show($"Файл инструкций не найден.\nПуть: {result.InstructionsPath}", "Инструкции", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -2217,7 +2224,7 @@ public partial class SearchView : UserControl
     /// подвешивать оператора запуском Word — берём то, что на диске уже лежит.</summary>
     private void ShowInstructionLabel(HierarchyResult result)
     {
-        var instructionFolder = InstructionFolder(ResolvedNetworkDir(result));
+        var instructionFolder = InstructionFolder(result, ResolvedNetworkDir(result));
         var doc = InstructionDocResolver.Resolve(result.InstructionsPath, instructionFolder);
         // Документа ещё нет — берём заглушку: она лежит ровно по тому пути, по которому потом ляжет
         // настоящая инструкция, поэтому напечатанный сейчас QR не придётся переклеивать
