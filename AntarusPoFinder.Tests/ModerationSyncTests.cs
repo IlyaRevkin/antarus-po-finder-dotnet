@@ -230,7 +230,7 @@ public class ModerationSyncTests
         Assert.Equal(0, m.DbB.GetUnreleasedFwVersionsCount());
     }
 
-    /// <summary>То же самое, но для удаления — и это ровно то, на что жаловался владелец. Версию
+    /// <summary>То же самое, но для удаления — и это ровно то, на что была жалоба. Версию
     /// переназначили другому контроллеру, потом удалили: у B надгробие обязано найти ТУ ЖЕ строку.</summary>
     [Fact]
     public void ControllerReassignedThenDeleted_TombstoneReachesSameRowOnOtherMachine()

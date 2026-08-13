@@ -36,8 +36,8 @@
                      the settings drawer below, right next to the auto-cleanup interval it's a manual
                      override of, which is a more natural place for it than the main toolbar. -->
                 <!-- Кнопка «Паспорт по шаблону» отсюда УБРАНА. Одно и то же окно открывалось из
-                     четырёх мест под тремя разными именами, и Илья на это пожаловался: «по
-                     паспортам почему-то 2 кнопки, а не так как я просил». Осталась одна точка
+                     четырёх мест под тремя разными именами — две кнопки на паспорт там, где
+                     задумывалась одна. Осталась одна точка
                      входа — «Сформировать паспорт» в секции «ДЛЯ НАЛАДЧИКА» бокового меню, оттуда
                      она доступна и во время осмотра. -->
                 <Button Grid.Column="5" x:Name="InspectionSettingsToggle" Content="⚙ Настройки осмотра" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="InspectionSettingsToggle_Click"

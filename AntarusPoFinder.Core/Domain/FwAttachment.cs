@@ -54,7 +54,7 @@ public class FwAttachment
 
 /// <summary>Виды доп. материалов, которыми справочник заполняется при первом запуске. Дальше список
 /// живёт в БД (fw_attachment_kinds) и правится людьми — здесь только стартовый набор, согласованный
-/// с Ильёй.</summary>
+/// заранее.</summary>
 public static class FwAttachmentKinds
 {
     public const string SetupGuide = "Руководство наладчика";

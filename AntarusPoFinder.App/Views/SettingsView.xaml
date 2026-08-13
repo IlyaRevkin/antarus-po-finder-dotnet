@@ -59,7 +59,7 @@
             <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
             </Button>
-            <!-- «Чистка диска» была отдельным пунктом бокового меню и переехала сюда по просьбе Ильи:
+            <!-- «Чистка диска» была отдельным пунктом бокового меню и переехала сюда намеренно:
                  это разовая уборка общего диска, а не рабочий экран. Вкладка последняя в полосе и
                  видна только администратору (ApplyRoleVisibility) — ровно как раньше пункт меню. -->
             <Button x:Name="TabBtnCleanup" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">

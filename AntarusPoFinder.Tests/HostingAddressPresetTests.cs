@@ -8,7 +8,7 @@ using Xunit;
 namespace AntarusPoFinder.Tests;
 
 /// <summary>Адреса хранилища и диска инструкций (s3_endpoint/s3_bucket/s3_region/
-/// instruction_base_url — см. ConfigService.PresetKeys). Жалоба Ильи: «не синхронизируется настройка
+/// instruction_base_url — см. ConfigService.PresetKeys). Жалоба: «не синхронизируется настройка
 /// ссылки для хранилища, а также ссылка инструкции, плюс оно должно быть предустановлено по
 /// умолчанию».
 ///

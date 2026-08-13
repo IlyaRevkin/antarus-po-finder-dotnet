@@ -321,7 +321,7 @@ public class ConfigService
         // наладчика свой привычный, и навязывать чужой выбор незачем.
         ["passport_template_last"] = "",
         // Паспорт печатается с двух сторон, разворот относительно КОРОТКОГО края — прямая просьба
-        // Ильи (см. DuplexPrinting). Синхронизируемая: как оформляется паспорт, идущий заказчику, —
+        // (см. DuplexPrinting). Синхронизируемая: как оформляется паспорт, идущий заказчику, —
         // политика предприятия, а не привычка машины. Выключать штатно неоткуда (в интерфейсе этого
         // переключателя нет) — ключ оставлен на случай принтера, который двусторонней не умеет.
         ["passport_duplex_short_edge"] = "true",
@@ -562,7 +562,7 @@ public class ConfigService
     public void SetPassportTemplateLast(string name) => Set("passport_template_last", name.Trim());
 
     /// <summary>Печатать паспорт с двух сторон с переворотом относительно короткого края (см.
-    /// DuplexPrinting). По умолчанию включено — так просил Илья.</summary>
+    /// DuplexPrinting). По умолчанию включено — так и задумано.</summary>
     public bool PassportDuplexShortEdge() => Get("passport_duplex_short_edge").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetPassportDuplexShortEdge(bool value) => Set("passport_duplex_short_edge", value ? "true" : "false");
 
