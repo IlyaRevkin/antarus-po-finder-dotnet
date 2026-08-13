@@ -34,6 +34,11 @@ public class AppServices
     public IInstructionPublisher? Publisher() =>
         InstructionPublisher.For(Cfg.S3(), new Services.DocxToPdfConverter.Adapter());
 
+    /// <summary>Кто убирает выложенное с хостинга (удаление инструкции). Тот же самый объект, что и
+    /// <see cref="Publisher"/>: выкладка и снятие — две стороны одного клиента, и null у них означает
+    /// ровно одно и то же — «хостинг не настроен».</summary>
+    public IInstructionUnpublisher? Unpublisher() => Publisher() as IInstructionUnpublisher;
+
     /// <summary>Рисовальщик заглушек «Инструкция в разработке» с текущим макетом. Через одну точку
     /// по той же причине, что и выкладчик выше: макет настраивается, и забудь его подставить в одном
     /// из шести вызовов — с той страницы заглушки поедут в старом виде, а заметит это заказчик.</summary>

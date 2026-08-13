@@ -16,6 +16,22 @@ public interface IInstructionPublisher
     string? Publish(string actualPath, string pathOnFirstDisk, string firstDiskRoot, List<string> warnings);
 }
 
+/// <summary>Кто убирает выложенное с хостинга — обратная сторона <see cref="IInstructionPublisher"/> и
+/// отдельным интерфейсом по той же причине: удаление инструкции должно проверяться тестом на машине
+/// без ключей и без сети, а на машине без настроенного хостинга этот слой не участвует вовсе (null).</summary>
+public interface IInstructionUnpublisher
+{
+    /// <summary>Под каким ключом этот путь на первом диске лежит (или лёг бы) в бакете. Нужен, чтобы
+    /// поправить локальное наблюдение «лежит ли на хостинге» — оно живёт по ключу, а не по адресу.
+    /// null — считать ключ не от чего (файл вне диска прошивок либо адрес хранилища не задан).</summary>
+    string? KeyOf(string pathOnFirstDisk, string firstDiskRoot);
+
+    /// <summary>Убрать с хостинга то, что соответствует этому пути на первом диске. Возвращает
+    /// удалённые ключи (у папки сканов их столько, сколько было файлов); о неудачах сообщает через
+    /// <paramref name="warnings"/> — удаление с диска они не отменяют, оно уже произошло.</summary>
+    IReadOnlyList<string> Unpublish(string pathOnFirstDisk, string firstDiskRoot, bool folder, List<string> warnings);
+}
+
 /// <summary>Выкладка инструкции в бакет хостинга (см. <see cref="S3Settings"/>).
 ///
 /// Ключ объекта считается от пути НА ПЕРВОМ ДИСКЕ, а не от того места, где файл физически лежит:
@@ -30,7 +46,7 @@ public interface IInstructionPublisher
 ///
 /// Неудача выкладки — предупреждение, а не ошибка: файл к этому моменту уже лежит на диске, версия
 /// уже создана, и отменять всё это из-за недоступного хостинга нельзя.</summary>
-public sealed class InstructionPublisher : IInstructionPublisher
+public sealed class InstructionPublisher : IInstructionPublisher, IInstructionUnpublisher
 {
     private readonly S3Settings _settings;
     private readonly S3Client _client;
@@ -61,6 +77,12 @@ public sealed class InstructionPublisher : IInstructionPublisher
     /// проверил бы не то. null здесь — штатное состояние, а не отсутствие возможности.</summary>
     public static IInstructionPublisher? For(S3Settings settings, IDocumentToPdf? pdf = null) =>
         settings.CanPublish ? new InstructionPublisher(settings, client: null, pdf) : null;
+
+    /// <summary>Сколько страниц перечисления забираем, разбирая «папку» сканов перед её удалением.
+    /// Столько же, сколько берёт обзор бакета: тысяча ключей на страницу, двадцать страниц — это
+    /// заведомо больше, чем бывает у одной инструкции (см. <see cref="MaxFilesPerFolder"/>), и
+    /// одновременно защита от бесконечного хождения по битому продолжению.</summary>
+    private const int MaxListPages = 20;
 
     /// <summary>Адрес, по которому файл БУДЕТ доступен после выкладки, — без самой выкладки. Нужен
     /// там, где адрес требуется знать заранее: на наклейке с QR, в списке «что должно лежать на
@@ -200,6 +222,71 @@ public sealed class InstructionPublisher : IInstructionPublisher
             try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }
             catch (Exception) { /* временная папка — уберётся уборкой Windows */ }
         }
+    }
+
+    // ── Обратная сторона: снять выложенное ──────────────────────────────────────
+    // Удаление инструкции обязано доставать и до хостинга. Иначе получается худшее из состояний:
+    // программа говорит «инструкции нет», а наклейка на шкафу продолжает открывать удалённый
+    // документ — и прав оказывается шкаф (см. InstructionRemoval).
+
+    public string? KeyOf(string pathOnFirstDisk, string firstDiskRoot)
+    {
+        var relative = LabelLinkBuilder.RelativeTo(firstDiskRoot, pathOnFirstDisk);
+        if (relative is null || !_settings.HasAddress) return null;
+        return _settings.KeyFor(AsPublishedName(relative));
+    }
+
+    public IReadOnlyList<string> Unpublish(string pathOnFirstDisk, string firstDiskRoot, bool folder,
+        List<string> warnings)
+    {
+        var removed = new List<string>();
+        if (!_settings.CanPublish) return removed;
+
+        var relative = LabelLinkBuilder.RelativeTo(firstDiskRoot, pathOnFirstDisk);
+        // Файл вне диска прошивок — ключа на хостинге у него никогда и не было, убирать нечего.
+        if (relative is null) return removed;
+
+        var keys = folder
+            ? KeysUnder(_settings.KeyFor(relative), warnings)
+            : new List<string> { _settings.KeyFor(AsPublishedName(relative)) };
+
+        foreach (var key in keys)
+        {
+            var result = _client.DeleteAsync(_settings, key, CancellationToken.None).GetAwaiter().GetResult();
+            if (result.Ok) removed.Add(key);
+            else warnings.Add($"«{key}»: с хостинга не убран — {result.Error}");
+        }
+
+        return removed;
+    }
+
+    /// <summary>Все ключи под префиксом — «папка» сканов целиком. Считается запросом, а не по тому,
+    /// что мы когда-то выкладывали: часть страниц могла уехать с другой машины или остаться от
+    /// прошлой редакции, и удалять надо то, что там лежит на самом деле.</summary>
+    private List<string> KeysUnder(string prefix, List<string> warnings)
+    {
+        var keys = new List<string>();
+        var normalized = prefix.EndsWith("/", StringComparison.Ordinal) ? prefix : prefix + "/";
+        string? token = null;
+        var pages = 0;
+
+        do
+        {
+            var page = _client.ListAsync(_settings, normalized, grouped: false, token, ct: CancellationToken.None)
+                .GetAwaiter().GetResult();
+            if (!page.Ok)
+            {
+                warnings.Add($"Хостинг: не удалось перечислить «{normalized}» — {page.Error}");
+                return keys;
+            }
+
+            keys.AddRange(page.Objects.Select(o => o.Key));
+            token = page.NextToken;
+            pages++;
+        }
+        while (token is not null && pages < MaxListPages);
+
+        return keys;
     }
 
     private string? PublishFolder(string folderPath, string relative, List<string> warnings)

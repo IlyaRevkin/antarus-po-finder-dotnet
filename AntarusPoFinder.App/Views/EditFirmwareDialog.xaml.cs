@@ -172,6 +172,14 @@ public partial class EditFirmwareDialog : Window
                 InstructionsInput.Text = v.InstructionsPath;
                 HmiInput.Text = v.HmiPath;
                 AttachmentsPanel.Visibility = Visibility.Visible;
+                // Удаление инструкции уносит документ с ОБЩЕГО диска и из ОБЩЕГО бакета, и корзины
+                // нет ни там, ни там — то же правило, что и у удаления из хранилища: администратору.
+                // Модератору отбирать нечего: положить правильный документ поверх неправильного он
+                // по-прежнему может, имя у него каноническое (см. InstructionNaming).
+                InstructionsDeleteBtn.IsEnabled = IsAdministrator;
+                if (!IsAdministrator)
+                    InstructionsDeleteBtn.ToolTip = "Удалять инструкцию может только администратор. " +
+                        "Заменить её можно, выбрав правильный документ в поле слева.";
                 BuildSubtypeChecks();
                 BuildConfigs();
                 BuildExtraFiles();
@@ -706,6 +714,94 @@ public partial class EditFirmwareDialog : Window
     private void InstructionsBrowseFile_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFile();
     private void InstructionsBrowseFolder_Click(object sender, RoutedEventArgs e) => _instrPicker.BrowseFolder();
     private void InstructionsClear_Click(object sender, RoutedEventArgs e) => _instrPicker.Clear();
+
+    /// <summary>Удаление из общего хранилища и с общего диска — право администратора, как и на
+    /// странице «Хранилище» (см. HostingView.IsAdministrator).</summary>
+    private bool IsAdministrator => _services.Cfg.CurrentRole() == "administrator";
+
+    /// <summary>«Удалить инструкцию» — просьба владельца, которой до сих пор не было: очистка поля
+    /// снимала только ССЫЛКУ, а документ оставался и на диске, и на хостинге. Карточка при этом
+    /// продолжала показывать «инструкция ✓» (она смотрит на файлы в папке, а не в базу), и по QR со
+    /// шкафа открывался «удалённый» документ.
+    ///
+    /// Действует сразу, а не по «Сохранить»: диалог можно закрыть крестиком, и обещать возможность
+    /// передумать там, где её нет, нельзя. Поэтому и подтверждение показывает целиком, что именно
+    /// исчезнет, — план считается до вопроса (см. <see cref="InstructionRemoval.Plan"/>).</summary>
+    private void InstructionsDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_record.Id is null || _names is null) return;
+
+        var root = _services.Cfg.RootPath();
+        var plan = InstructionRemoval.Plan(_db, _record, root);
+
+        if (plan.NothingToDo)
+        {
+            AppMessageBox.Show(plan.OnlyStub
+                    ? "Инструкции у этой версии нет — в папке лежит только заглушка «Инструкция в разработке». Удалять нечего."
+                    : "Инструкции у этой версии нет — ни документа на диске, ни ссылки в базе.",
+                "Удаление инструкции", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(ConfirmRemovalText(plan), "Удаление инструкции",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var result = InstructionRemoval.Apply(_db, _record, root, plan,
+            _services.StubWriter(), _services.Publisher(), _services.Unpublisher());
+
+        // Поле показывает то, что теперь записано в базе: иначе сохранение диалога положило бы
+        // ссылку обратно тем, что осталось в текстовом поле от прошлого состояния.
+        InstructionsInput.Text = _record.InstructionsPath;
+
+        var report = string.Join("\n", result.Applied.Select(a => "• " + a));
+        if (result.Warnings.Count > 0)
+            report = (report.Length > 0 ? report + "\n\n" : "") + string.Join("\n", result.Warnings);
+
+        AppMessageBox.Show(report.Length > 0 ? report : "Ничего не изменилось.", "Удаление инструкции",
+            MessageBoxButton.OK, result.Warnings.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+    }
+
+    /// <summary>Текст подтверждения. Пишется по плану, а не общими словами: удаление идёт по общему
+    /// диску и общему бакету, и человек должен видеть конкретный путь и конкретные последствия — в
+    /// том числе то, что файл могут читать соседние версии и тогда он останется на месте.</summary>
+    private string ConfirmRemovalText(InstructionRemovalPlan plan)
+    {
+        var text = new System.Text.StringBuilder();
+        text.AppendLine($"Удалить инструкцию у «{_title}»?").AppendLine();
+
+        if (plan.DiskPath is not null)
+            text.AppendLine(plan.IsFolder ? $"Папка сканов: {plan.DiskPath}" : $"Документ: {plan.DiskPath}").AppendLine();
+
+        if (plan.Shared)
+        {
+            text.AppendLine("Этот документ читают и другие версии — папка «Инструкция» у них общая:")
+                .AppendLine(string.Join(", ", plan.UsedAlsoBy.Take(5)) +
+                            (plan.UsedAlsoBy.Count > 5 ? $" и ещё {plan.UsedAlsoBy.Count - 5}" : ""))
+                .AppendLine()
+                .AppendLine("С диска он удалён НЕ будет — иначе инструкция пропала бы у всех сразу. " +
+                            "У этой версии будет снята только ссылка.");
+        }
+        else if (plan.DeletesFile)
+        {
+            text.AppendLine(_services.Unpublisher() is null
+                ? "Документ будет удалён с диска. Хостинг не настроен — там ничего не трогаем."
+                : "Документ будет удалён с диска и убран с хостинга — ссылка с наклейки перестанет открывать его.");
+            text.AppendLine("На его место ляжет заглушка «Инструкция в разработке», чтобы ссылка с наклейки " +
+                            "продолжала открываться.");
+            text.AppendLine().AppendLine("Отменить нельзя: корзины нет ни на диске, ни в хранилище.");
+        }
+        else
+        {
+            text.AppendLine("Документа на диске нет — будет снята только ссылка в базе.");
+        }
+
+        if (plan.UnlinkIds.Count > 1)
+            text.AppendLine().AppendLine($"Ссылка снимется у {plan.UnlinkIds.Count} записей: у этой версии и у её " +
+                                         "копий по подтипам шкафа и конфигураций — файлы у них общие.");
+
+        return text.ToString().TrimEnd();
+    }
 
     private void HmiBrowseFile_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFile();
     private void HmiBrowseFolder_Click(object sender, RoutedEventArgs e) => _hmiPicker.BrowseFolder();
