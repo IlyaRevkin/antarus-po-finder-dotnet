@@ -36,6 +36,7 @@ public partial class HostingView : UserControl
 
     private readonly ObservableCollection<Row> _rows = new();
     private readonly ObservableCollection<TranslitRow> _translit = new();
+    private readonly List<TranslitRow> _translitAll = new();
     private List<HostingItem> _items = new();
     private readonly StringBuilder _log = new();
     private CancellationTokenSource? _cancel;
@@ -49,6 +50,17 @@ public partial class HostingView : UserControl
         ItemsGrid.ItemsSource = _rows;
         TranslitGrid.ItemsSource = _translit;
         FilesGrid.ItemsSource = _fileRows;
+
+        // Обзор бакета обновляется сам, пока его вкладка открыта, — кнопки «Обновить» больше нет
+        // (просьба Ильи от 13.08.2026). Тик редкий и тихий: в хранилище пишут не каждую секунду, а
+        // каждый тик — это запрос по сети, за который платит рабочий канал конторы.
+        _filesTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(20),
+        };
+        _filesTimer.Tick += (_, _) => _filesTask = LoadFilesAsync(quiet: true);
+
+        Unloaded += (_, _) => _filesTimer.Stop();
         RefreshIfActive();
     }
 
@@ -61,6 +73,9 @@ public partial class HostingView : UserControl
         LoadAccess();
         LoadTranslit();
         BuildList();
+        // Вернулись на страницу, оставленную на обзоре бакета, — он тоже обязан быть свежим, а не
+        // тем, что показывал полчаса назад.
+        if (FilesTab.Visibility == Visibility.Visible) StartFilesWatch();
     }
 
     // ── Разделы страницы ──────────────────────────────────────────────────────
@@ -84,8 +99,22 @@ public partial class HostingView : UserControl
         TranslitTab.Visibility = active == TabBtnTranslit ? Visibility.Visible : Visibility.Collapsed;
 
         // Список файлов запрашивается у хранилища по сети, поэтому сам собой при открытии страницы не
-        // грузится — только когда на вкладку правда зашли, и только в первый раз (дальше «Обновить»).
-        if (active == TabBtnFiles && !_filesEverLoaded) _ = LoadFilesAsync();
+        // грузится — только когда на вкладку правда зашли. Зато с этой минуты он живой: перечитывается
+        // при каждом заходе и обновляется по таймеру, пока вкладка открыта.
+        if (active == TabBtnFiles) StartFilesWatch();
+        else _filesTimer.Stop();
+
+        // Имена для перевода собираются сами при заходе на вкладку — раньше для этого была кнопка, и
+        // до её нажатия таблица показывала только уже переопределённые строки, то есть у большинства
+        // была пустой.
+        if (active == TabBtnTranslit) CollectNames();
+    }
+
+    /// <summary>Перечитать обзор бакета и держать его свежим, пока вкладка открыта.</summary>
+    private void StartFilesWatch()
+    {
+        _filesTimer.Start();
+        _filesTask = LoadFilesAsync(quiet: _filesEverLoaded);
     }
 
     /// <summary>Открыть заданный раздел. Нужно тому, кто приводит сюда человека за конкретной
@@ -503,11 +532,25 @@ public partial class HostingView : UserControl
 
     private void ApplyFilter()
     {
-        var onlyProblems = OnlyProblemsCheck.IsChecked == true;
+        var words = SearchWords(SearchInput?.Text);
+        var wanted = StateFilterCombo?.SelectedIndex switch
+        {
+            1 => HostingState.Missing,
+            2 => HostingState.Published,
+            3 => HostingState.NoSource,
+            4 => HostingState.Failed,
+            5 => HostingState.Unknown,
+            _ => (HostingState?)null,
+        };
+        var onlyShared = OnlySharedCheck?.IsChecked == true;
+
         _rows.Clear();
         foreach (var item in _items)
         {
-            if (onlyProblems && item.State == HostingState.Published) continue;
+            if (wanted is { } state && item.State != state) continue;
+            if (onlyShared && !item.Shared) continue;
+            if (!Matches(words, item.VersionRaw, item.Where, item.Kind, item.Url, item.Error,
+                    item.SourcePath, string.Join(" ", item.SharedWith))) continue;
             _rows.Add(new Row(item));
         }
 
@@ -516,14 +559,43 @@ public partial class HostingView : UserControl
         var noSource = _items.Count(i => i.State == HostingState.NoSource);
         var failed = _items.Count(i => i.State == HostingState.Failed);
         var unknown = _items.Count(i => i.State == HostingState.Unknown);
+        var shared = _items.Count(i => i.Shared);
 
-        SummaryText.Text = _items.Count == 0
+        var summary = _items.Count == 0
             ? "Показывать нечего: у версий нет папок инструкций либо не задан путь к диску прошивок."
             : $"Всего {_items.Count}. На хостинге {published}, нет {missing}, нет файла на диске {noSource}, " +
-              $"ошибок {failed}, не проверено {unknown}.";
+              $"ошибок {failed}, не проверено {unknown}." +
+              (shared > 0 ? $" Общих с другим подтипом: {shared}." : "");
+        if (_rows.Count != _items.Count)
+            summary += $" Отбором показано {_rows.Count}.";
+        SummaryText.Text = summary;
     }
 
-    private void OnlyProblems_Changed(object sender, RoutedEventArgs e) => ApplyFilter();
+    /// <summary>Слова отбора. Их несколько и найтись должны все: «ПЖ SMH5» отбирает пересечение, а не
+    /// объединение, — иначе второе слово только расширяло бы выдачу, что человеку в отборе не нужно.</summary>
+    private static string[] SearchWords(string? typed) =>
+        (typed ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static bool Matches(string[] words, params string?[] fields)
+    {
+        if (words.Length == 0) return true;
+        var haystack = string.Join(" ", fields.Where(f => !string.IsNullOrEmpty(f)));
+        return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void Search_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        ApplyFilter();
+    }
+
+    private void ResetFilter_Click(object sender, RoutedEventArgs e)
+    {
+        SearchInput.Text = "";
+        StateFilterCombo.SelectedIndex = 0;
+        OnlySharedCheck.IsChecked = false;
+        ApplyFilter();
+    }
 
     // ── Долгие операции ───────────────────────────────────────────────────────
 
@@ -693,6 +765,63 @@ public partial class HostingView : UserControl
         catch (Exception ex) { AppendLog($"Не удалось показать файл: {ex.Message}"); }
     }
 
+    /// <summary>«Поправить ссылку вручную…» — сказать, какой файл считать документом этой версии.
+    ///
+    /// Просьба Ильи от 13.08.2026. Отдельного поля «ссылка» в базе нет и заводить его нельзя: адрес на
+    /// хостинге ПОВТОРЯЕТ путь документа на диске, и он же уходит в QR на наклейке (см.
+    /// <see cref="HostingLinkDialog"/>). Поэтому правится не адрес, а документ.
+    ///
+    /// Главный случай — развести общий документ у прошивки, привязанной к нескольким подтипам шкафа:
+    /// пока у «ПЖ / FD» своего руководства нет, оно читается у «ПЖ / 2.0», и здесь ему можно указать
+    /// собственное. Правит только администратор — запись уезжает в общий конфиг, то есть меняет ссылку
+    /// у всех сразу.</summary>
+    private void EditLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (Selected is not { } row)
+        {
+            AppMessageBox.Show("Выберите строку в списке.", "Хранилище", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (!IsAdministrator)
+        {
+            AppMessageBox.Show("Менять документ версии может только администратор.", "Хранилище",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var ids = row.Item.VersionIds.Count > 0 ? row.Item.VersionIds : new[] { row.Item.VersionId };
+        var targets = ids
+            .Select(id => (Id: id, Label: LabelForVersion(id, row.Item.VersionRaw)))
+            .ToList();
+
+        var dialog = new HostingLinkDialog(row.Item, targets, _services.Cfg.S3(), _services.Cfg.RootPath())
+        {
+            Owner = Window.GetWindow(this),
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        foreach (var id in dialog.ChosenIds)
+            _services.Db.UpdateFwVersionAttachments(id, instructionsPath: dialog.ChosenPath);
+
+        AppendLog(dialog.ChosenPath.Length == 0
+            ? $"Снята ссылка на документ у версий: {string.Join(", ", dialog.ChosenIds)}"
+            : $"Документом версий {string.Join(", ", dialog.ChosenIds)} назначен {dialog.ChosenPath}");
+        _host.PushCatalogChange("Изменён документ инструкции у версии");
+        _host.ShowStatus("Документ версии изменён", category: NotificationCategory.Sync);
+
+        BuildList();
+    }
+
+    /// <summary>Подпись записи в списке правки: «тип / подтип / контроллер · версия». Имена берутся из
+    /// базы, а не из строки списка: строка схлопнута по общему документу и называет только тот подтип,
+    /// в чьей папке документ лежит.</summary>
+    private string LabelForVersion(int id, string versionRaw)
+    {
+        var names = _services.Db.GetFwVersionNames(id);
+        var where = names is { } n ? $"{n.GroupName} / {n.SubtypeName} / {n.ControllerName}" : $"версия №{id}";
+        return $"{where} · {versionRaw}";
+    }
+
     private void CopyToClipboard(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
@@ -719,6 +848,11 @@ public partial class HostingView : UserControl
     private string _filesPrefix = "";
     private bool _filesEverLoaded;
     private CancellationTokenSource? _filesCancel;
+    private readonly System.Windows.Threading.DispatcherTimer _filesTimer;
+
+    /// <summary>Идущий обход бакета — чтобы переход по папкам мог его дождаться, а не начинать
+    /// второй поверх первого.</summary>
+    private Task _filesTask = Task.CompletedTask;
 
     /// <summary>Предел на один обход: 50 страниц по 1000 ключей. Не «чтобы не тормозило» — чтобы
     /// ошибка на стороне хостинга (метка продолжения, ведущая на себя же) не крутила запросы вечно.
@@ -738,14 +872,25 @@ public partial class HostingView : UserControl
         return prefix.Length == 0 ? "" : prefix + "/";
     }
 
-    private async Task LoadFilesAsync()
+    /// <summary>Перечитать содержимое текущего адреса в бакете.
+    ///
+    /// <paramref name="quiet"/> — обновление «само собой» (по таймеру или при возврате на вкладку): в
+    /// этом случае таблица не мигает и выделение не пропадает. Раньше список чистился ПЕРЕД запросом,
+    /// и на медленной сети вкладка на секунду становилась пустой — терпимо для нажатой кнопки, но не
+    /// для обновления, которое человек не заказывал: он в этот момент как раз выбирает строки.</summary>
+    private async Task LoadFilesAsync(bool quiet = false)
     {
         var settings = _services.Cfg.S3();
-        _fileRows.Clear();
-        _filesLoaded = new List<FileRow>();
+        if (!quiet)
+        {
+            _fileRows.Clear();
+            _filesLoaded = new List<FileRow>();
+        }
 
         if (!settings.HasAddress || !settings.HasCredentials)
         {
+            _fileRows.Clear();
+            _filesLoaded = new List<FileRow>();
             FilesPathText.Text = "";
             FilesSummaryText.Text = "Хранилище не настроено: нужны адрес, бакет и файл с ключами (вкладка «Реквизиты»).";
             return;
@@ -762,7 +907,7 @@ public partial class HostingView : UserControl
 
         _filesCancel = new CancellationTokenSource();
         SetFilesBusy(true);
-        FilesSummaryText.Text = "Спрашиваем у хранилища…";
+        if (!quiet) FilesSummaryText.Text = "Спрашиваем у хранилища…";
         try
         {
             var client = new S3Client();
@@ -818,12 +963,30 @@ public partial class HostingView : UserControl
     private void ApplyFilesFilter(bool truncated = false)
     {
         var onlyUnknown = FilesOnlyUnknownCheck.IsChecked == true;
+        var words = SearchWords(FilesSearchInput?.Text);
+
+        // Что было выделено — то и останется выделенным после тихого обновления по таймеру: строки
+        // пересоздаются каждым обходом, и без этого отметки слетали бы сами собой ровно в тот момент,
+        // когда человек их расставляет.
+        var selected = new HashSet<string>(FilesGrid.SelectedItems.OfType<FileRow>().Select(r => r.Key),
+            StringComparer.Ordinal);
+
         _fileRows.Clear();
+        // «..» — подъём на уровень выше строкой в самой таблице, как в проводнике (просьба Ильи от
+        // 13.08.2026: «кнопку вверх сделай в таблице 2 точками»). Отбором она не убирается: строка
+        // отбора не должна отрезать путь назад.
+        if (_filesPrefix.Length > RootPrefix().Length) _fileRows.Add(FileRow.Up(ParentPrefix()));
         foreach (var row in _filesLoaded)
         {
             if (onlyUnknown && row.Known) continue;
+            if (!Matches(words, row.Name, row.Key)) continue;
             _fileRows.Add(row);
         }
+
+        if (selected.Count > 0)
+            foreach (var row in _fileRows)
+                if (selected.Contains(row.Key))
+                    FilesGrid.SelectedItems.Add(row);
 
         var settings = _services.Cfg.S3();
         var where = _filesPrefix.Length == 0 ? "корень бакета" : _filesPrefix;
@@ -840,6 +1003,9 @@ public partial class HostingView : UserControl
             : $"Папок {folders}, файлов {files} ({FileRow.Bytes(bytes)}). Не значится у программы: {unknown}.");
         if (onlyUnknown && _fileRows.Count == 0 && _filesLoaded.Count > 0)
             parts.Add("Все показанные объекты программе известны — снимите галочку, чтобы увидеть их.");
+        var shown = _fileRows.Count(r => !r.IsUp);
+        if (shown != _filesLoaded.Count)
+            parts.Add($"Отбором показано {shown}.");
         if (truncated)
             parts.Add($"Показаны первые {MaxFilePages * 1000} объектов — здесь их больше. " +
                       "Зайдите в папку поглубже, чтобы увидеть остальное.");
@@ -848,9 +1014,8 @@ public partial class HostingView : UserControl
 
     private void SetFilesBusy(bool busy)
     {
-        FilesRefreshBtn.IsEnabled = !busy;
-        FilesUpBtn.IsEnabled = !busy;
         FilesDeleteBtn.IsEnabled = !busy && IsAdministrator;
+        FilesUploadBtn.IsEnabled = !busy && IsAdministrator;
         FilesFlatCheck.IsEnabled = !busy;
         FilesStopBtn.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -859,8 +1024,6 @@ public partial class HostingView : UserControl
     /// а не своя машина. Поэтому кнопка администраторская, как и «Чистка диска» в настройках.
     /// Программист, которому страница доступна, смотреть и открывать может, удалять — нет.</summary>
     private bool IsAdministrator => _services.Cfg.CurrentRole() == "administrator";
-
-    private async void FilesRefresh_Click(object sender, RoutedEventArgs e) => await LoadFilesAsync();
 
     private void FilesStop_Click(object sender, RoutedEventArgs e) => _filesCancel?.Cancel();
 
@@ -876,37 +1039,62 @@ public partial class HostingView : UserControl
         ApplyFilesFilter();
     }
 
-    private async void FilesUp_Click(object sender, RoutedEventArgs e)
+    /// <summary>Адрес на уровень выше текущего, но не выше корня обзора.</summary>
+    private string ParentPrefix()
     {
         var root = RootPrefix();
-        if (_filesPrefix.Length <= root.Length) return;
+        if (_filesPrefix.Length <= root.Length) return root;
 
         var trimmed = _filesPrefix.TrimEnd('/');
         var slash = trimmed.LastIndexOf('/');
         var parent = slash < 0 ? "" : trimmed[..(slash + 1)];
-        _filesPrefix = parent.Length < root.Length ? root : parent;
-        await LoadFilesAsync();
+        return parent.Length < root.Length ? root : parent;
+    }
+
+    /// <summary>Перейти по адресу в бакете (вглубь по папке или вверх по «..»).
+    ///
+    /// Идущее обновление сначала останавливается и дожидается: с тех пор как список обновляется сам,
+    /// клик по папке вполне может прийтись на секунду, когда тихий обход уже начался, — а второй раз
+    /// <see cref="LoadFilesAsync"/> не входит и переход просто не срабатывал бы. Дожидаться
+    /// обязательно, а не только отменять: иначе прерванный обход дорисовал бы содержимое прежней папки
+    /// поверх новой.</summary>
+    private async Task GoToPrefixAsync(string prefix)
+    {
+        _filesPrefix = prefix;
+        if (_filesCancel is not null)
+        {
+            _filesCancel.Cancel();
+            try { await _filesTask; } catch (Exception) { /* прерванный обход — обычное дело */ }
+        }
+        _filesTask = LoadFilesAsync();
+        await _filesTask;
+    }
+
+    /// <summary>Backspace — на уровень выше, как в проводнике. Тот же смысл, что у строки «..».</summary>
+    private async void FilesGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Back) return;
+        e.Handled = true;
+        await GoToPrefixAsync(ParentPrefix());
     }
 
     private async void FilesGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!DataGridClickGuard.IsOverDataRow(e) || FilesGrid.SelectedItem is not FileRow row) return;
-        if (row.IsFolder)
-        {
-            _filesPrefix = row.Key;
-            await LoadFilesAsync();
-            return;
-        }
-        OpenFileRow(row);
+        await OpenRowAsync(row);
     }
 
-    private void FilesOpen_Click(object sender, RoutedEventArgs e)
+    private async void FilesOpen_Click(object sender, RoutedEventArgs e)
     {
         if (FilesGrid.SelectedItem is not FileRow row) return;
-        if (row.IsFolder)
+        await OpenRowAsync(row);
+    }
+
+    private async Task OpenRowAsync(FileRow row)
+    {
+        if (row.IsUp || row.IsFolder)
         {
-            _filesPrefix = row.Key;
-            _ = LoadFilesAsync();
+            await GoToPrefixAsync(row.Key);
             return;
         }
         OpenFileRow(row);
@@ -941,7 +1129,8 @@ public partial class HostingView : UserControl
             return;
         }
 
-        var selected = FilesGrid.SelectedItems.OfType<FileRow>().ToList();
+        // «..» — не объект хранилища, а способ подняться на уровень выше: удалять по ней нечего.
+        var selected = FilesGrid.SelectedItems.OfType<FileRow>().Where(r => !r.IsUp).ToList();
         if (selected.Count == 0)
         {
             AppMessageBox.Show("Выберите строки в списке.", "Хранилище", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1034,6 +1223,155 @@ public partial class HostingView : UserControl
         FilesSummaryText.Text = summary + ". " + FilesSummaryText.Text;
     }
 
+    // ── Ручная укладка файла в хранилище ──────────────────────────────────────
+    // Просьба Ильи от 13.08.2026: «возможность вручную подправить что-то — файл или привязки, удалить,
+    // загрузить и т. п.». Удаление тут было с самого начала, а положить файл обратно было нечем: любая
+    // ошибка правилась только через сторонний S3-клиент, которого на рабочей машине нет.
+    //
+    // Программа НЕ считает такой файл документом какой-либо версии: она узнаёт свои объекты по ключу,
+    // а ключ считается от пути на диске (см. HostingSyncService.Plan). Об этом сказано прямо в
+    // подтверждении — иначе положенный руками файл выглядел бы как выложенная инструкция.
+
+    private void FilesUpload_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsAdministrator)
+        {
+            AppMessageBox.Show("Класть файлы в общее хранилище может только администратор.", "Хранилище",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл для хранилища",
+            Multiselect = true,
+            Filter = "Все файлы (*.*)|*.*",
+        };
+        if (dialog.ShowDialog() == true) _ = UploadFilesAsync(dialog.FileNames);
+    }
+
+    private void FilesGrid_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = IsAdministrator && e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void FilesGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (!IsAdministrator) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            _ = UploadFilesAsync(paths);
+    }
+
+    private async Task UploadFilesAsync(IReadOnlyList<string> paths)
+    {
+        var files = paths.Where(p => { try { return File.Exists(p); } catch (Exception) { return false; } }).ToList();
+        if (files.Count == 0)
+        {
+            FilesSummaryText.Text = "Класть в хранилище можно только файлы — папку целиком перетащить нельзя.";
+            return;
+        }
+        if (_filesCancel is not null) return;
+
+        var settings = _services.Cfg.S3();
+        var where = _filesPrefix.Length == 0 ? "корень бакета" : _filesPrefix;
+        var sample = string.Join("\n• ", files.Select(Path.GetFileName).Take(8));
+        var reply = AppMessageBox.Show(
+            $"Положить в хранилище файлов: {files.Count}?\n\n• {sample}" +
+            (files.Count > 8 ? $"\n• …и ещё {files.Count - 8}" : "") +
+            $"\n\nАдрес: {settings.Bucket} · {where}\n\n" +
+            "Файл с таким же именем по этому адресу будет заменён. Документом какой-либо версии " +
+            "программа его не считает: свои объекты она узнаёт по адресу, который повторяет путь файла " +
+            "на диске прошивок.",
+            "Загрузка в хранилище", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        _filesCancel = new CancellationTokenSource();
+        SetFilesBusy(true);
+        var client = new S3Client();
+        int done = 0, failed = 0;
+        try
+        {
+            AppendLog($"— Загрузка в хранилище: {files.Count} файлов в {where} —");
+            foreach (var path in files)
+            {
+                if (_filesCancel.Token.IsCancellationRequested) break;
+                var key = _filesPrefix + Path.GetFileName(path);
+                var result = await client.PutFileAsync(settings, key, path, _filesCancel.Token);
+                if (result.Ok)
+                {
+                    done++;
+                    // Наблюдение «лежит на хостинге» правится и здесь: если этим файлом закрыли дыру
+                    // по правильному адресу, карточка обязана это увидеть, не дожидаясь проверки.
+                    _services.Db.SaveHostingCheck(key, present: true, result.Url ?? "");
+                }
+                else
+                {
+                    failed++;
+                    AppendLog($"{key}: не удалось положить — {result.Error}");
+                }
+                FilesSummaryText.Text = $"Кладём… {done + failed} из {files.Count}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Загрузка остановлена вручную.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Загрузка сорвалась: {ex.Message}");
+        }
+        finally
+        {
+            _filesCancel.Dispose();
+            _filesCancel = null;
+            SetFilesBusy(false);
+        }
+
+        var summary = $"Положено {done}" + (failed > 0 ? $", не удалось {failed} (подробности в журнале)" : "");
+        AppendLog(summary);
+        _host.ShowStatus($"Хранилище: {summary}", category: NotificationCategory.Sync);
+        await LoadFilesAsync();
+        FilesSummaryText.Text = summary + ". " + FilesSummaryText.Text;
+    }
+
+    /// <summary>«Чей это документ» — перейти на «Состояние» с отбором по этому объекту. Именно переход,
+    /// а не всплывающее окно с ответом: узнав версию, человек тут же хочет с ней что-то сделать —
+    /// открыть, выложить заново, поправить ссылку, — и всё это живёт на той вкладке.</summary>
+    private void FilesWhose_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilesGrid.SelectedItem is not FileRow row || row.IsUp)
+        {
+            AppMessageBox.Show("Выберите строку в списке.", "Хранилище", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var owner = _items.FirstOrDefault(i => string.Equals(i.ObjectKey, row.Key, StringComparison.Ordinal));
+        if (owner is null && !row.IsFolder)
+        {
+            AppMessageBox.Show(
+                $"Этот объект программе неизвестен — ни одна версия не считает его своим документом.\n\n{row.Key}\n\n" +
+                "Обычно так остаются файлы после переименования папок на диске: адрес считается от имён, " +
+                "а имена правят люди. Такой объект можно удалить — на диске он не тронут.",
+                "Чей это документ", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // У папки точной строки нет — отбираем по её адресу: покажет всё, что лежит в этой ветке.
+        SearchInput.Text = owner?.Url ?? row.Name;
+        StateFilterCombo.SelectedIndex = 0;
+        OnlySharedCheck.IsChecked = false;
+        ShowTab(TabBtnState);
+        ApplyFilter();
+        if (_rows.Count > 0)
+        {
+            ItemsGrid.SelectedItem = _rows[0];
+            ItemsGrid.ScrollIntoView(_rows[0]);
+        }
+    }
+
     /// <summary>Что именно уйдёт. У файла — он сам, у папки — всё, что лежит под её адресом, спрошенное
     /// у хранилища прямо сейчас: показанный список мог устареть, а «удалить папку» одним запросом S3 не
     /// умеет — папок у него нет.</summary>
@@ -1097,22 +1435,25 @@ public partial class HostingView : UserControl
 
     // ── Написание в адресах ───────────────────────────────────────────────────
 
+    /// <summary>Таблица написаний живёт в двух списках: <c>_translitAll</c> — всё, что есть (он и
+    /// сохраняется), <c>_translit</c> — то, что показано после отбора. Разделять обязательно: сохранять
+    /// показанное значило бы терять переопределения, отрезанные строкой отбора.</summary>
     private void LoadTranslit()
     {
         var map = _services.Cfg.Translit();
-        _translit.Clear();
+        _translitAll.Clear();
         foreach (var (source, latin) in map.Overrides.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-            _translit.Add(new TranslitRow(source, latin, manual: true));
-        UpdateTranslitHint();
+            _translitAll.Add(new TranslitRow(source, latin, manual: true));
+        CollectNames();
     }
 
     /// <summary>Собрать имена, у которых перевод вообще нужен: справочник иерархии (типы, подтипы,
     /// контроллеры) и постоянные папки раскладки. Имена без кириллицы («SMH5», номера версий) в
     /// таблицу не попадают — переводить там нечего, и строки-пустышки только мешали бы найти те, что
     /// действительно стоит проверить глазами.</summary>
-    private void CollectNames_Click(object sender, RoutedEventArgs e)
+    private void CollectNames()
     {
-        var known = new HashSet<string>(_translit.Select(r => r.Source), StringComparer.OrdinalIgnoreCase);
+        var known = new HashSet<string>(_translitAll.Select(r => r.Source), StringComparer.OrdinalIgnoreCase);
         var names = new List<string>();
 
         foreach (var g in _services.Db.GetAllEquipmentGroups()) names.Add(g.Name);
@@ -1127,18 +1468,45 @@ public partial class HostingView : UserControl
         names.Add(HierarchyFolders.Opc);
         names.Add(HierarchyFolders.Passports);
 
-        var added = 0;
         foreach (var name in names.Where(Transliteration.HasCyrillic).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!known.Add(name)) continue;
-            _translit.Add(new TranslitRow(name, Transliteration.Auto(name), manual: false));
-            added++;
+            _translitAll.Add(new TranslitRow(name, Transliteration.Auto(name), manual: false));
         }
 
         UpdateTranslitHint();
-        TranslitHintText.Text = added > 0
-            ? $"Добавлено имён: {added}. Поправьте нужные и нажмите «Сохранить»."
-            : "Новых имён с кириллицей не нашлось — все уже в таблице.";
+        ApplyTranslitFilter();
+
+        var manual = _translitAll.Count(IsManual);
+        TranslitHintText.Text = $"Имён с кириллицей: {_translitAll.Count}" +
+                                (manual > 0 ? $", из них задано вручную: {manual}." : ". Все переводятся сами.");
+    }
+
+    /// <summary>Написание отличается от автоперевода, то есть его задали руками. Считается сравнением, а
+    /// не флагом строки: строку могли только что поправить в таблице, и флаг из момента загрузки врал
+    /// бы отбору.</summary>
+    private static bool IsManual(TranslitRow row) =>
+        !string.IsNullOrWhiteSpace(row.Latin)
+        && !string.Equals(row.Latin.Trim(), Transliteration.Auto(row.Source), StringComparison.Ordinal);
+
+    private void TranslitFilter_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        ApplyTranslitFilter();
+    }
+
+    private void ApplyTranslitFilter()
+    {
+        var words = SearchWords(TranslitSearchInput?.Text);
+        var onlyManual = TranslitOnlyManualCheck?.IsChecked == true;
+
+        _translit.Clear();
+        foreach (var row in _translitAll.OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase))
+        {
+            if (onlyManual && !IsManual(row)) continue;
+            if (!Matches(words, row.Source, row.Latin)) continue;
+            _translit.Add(row);
+        }
     }
 
     private void TranslitGrid_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e) =>
@@ -1158,9 +1526,10 @@ public partial class HostingView : UserControl
         // В справочник уходят ТОЛЬКО отличия от автоперевода. Записывать совпадающие значило бы
         // намертво зафиксировать сегодняшнюю таблицу звучаний: поправь её потом — и старые записи
         // молча продолжили бы переопределять новое поведение.
-        var pairs = _translit
-            .Where(r => !string.IsNullOrWhiteSpace(r.Latin))
-            .Where(r => !string.Equals(r.Latin.Trim(), Transliteration.Auto(r.Source), StringComparison.Ordinal))
+        // Перебирается ПОЛНЫЙ список, а не показанный: строка отбора не должна стирать переопределения,
+        // которых в этот момент не видно.
+        var pairs = _translitAll
+            .Where(IsManual)
             .Select(r => new KeyValuePair<string, string>(r.Source, r.Latin.Trim()));
 
         var map = TranslitMap.FromPairs(pairs);
@@ -1175,7 +1544,7 @@ public partial class HostingView : UserControl
 
     private void UpdateTranslitHint()
     {
-        foreach (var row in _translit)
+        foreach (var row in _translitAll)
         {
             var auto = Transliteration.Auto(row.Source);
             row.Origin = string.Equals(row.Latin?.Trim(), auto, StringComparison.Ordinal) ? "автоперевод" : "задано вручную";
@@ -1200,6 +1569,10 @@ public partial class HostingView : UserControl
         public string Url => Item.Url;
         public string? Error => Item.Error;
 
+        /// <summary>Другие подтипы, у которых тот же самый документ. Пусто — документ только этой
+        /// версии; так у подавляющего большинства строк, и столбец им не мешает.</summary>
+        public string SharedWith => string.Join(", ", Item.SharedWith);
+
         public string SizeLabel => Item.Size is not { } bytes
             ? ""
             : bytes >= 1024 * 1024
@@ -1213,6 +1586,11 @@ public partial class HostingView : UserControl
     private sealed class FileRow
     {
         public bool IsFolder { get; private init; }
+
+        /// <summary>Строка «..» — не объект бакета, а подъём на уровень выше (в Key лежит адрес
+        /// родителя). Отличать её обязательно: удалять, отбирать и считать её нельзя.</summary>
+        public bool IsUp { get; private init; }
+
         public string Key { get; private init; } = "";
         public string Name { get; private init; } = "";
         public long Size { get; private init; }
@@ -1220,10 +1598,23 @@ public partial class HostingView : UserControl
         public bool Known { get; private init; }
         public DateTime? Modified { get; private init; }
 
-        public string KindLabel => IsFolder ? "папка" : "файл";
-        public string KnownLabel => Known ? "значится" : "не значится";
-        public string SizeLabel => IsFolder ? "" : Bytes(Size);
+        public string KindLabel => IsUp ? "" : IsFolder ? "папка" : "файл";
+        public string KnownLabel => IsUp ? "" : Known ? "значится" : "не значится";
+        public string SizeLabel => IsFolder || IsUp ? "" : Bytes(Size);
         public string ModifiedLabel => Modified?.ToString("dd.MM.yyyy HH:mm") ?? "";
+
+        /// <summary>Подъём на уровень выше — первой строкой таблицы, как в проводнике.</summary>
+        public static FileRow Up(string parentPrefix) => new()
+        {
+            IsUp = true,
+            IsFolder = true,
+            Key = parentPrefix,
+            Name = "..",
+            // «Значится» — чтобы строка не пропадала при отборе «только те, что не значатся»: путь
+            // назад отбором отрезать нельзя (ApplyFilesFilter добавляет её до перебора, но и здесь
+            // ошибиться не стоит).
+            Known = true,
+        };
 
         public static FileRow Folder(string prefix, string parent, IReadOnlySet<string> known) => new()
         {

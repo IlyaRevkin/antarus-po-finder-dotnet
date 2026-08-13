@@ -1,6 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:conv="clr-namespace:AntarusPoFinder.App.Converters">
+                    xmlns:conv="clr-namespace:AntarusPoFinder.App.Converters"
+                    xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
 
     <!-- Declared here (not App.xaml) because StaticResource lookups inside a merged dictionary
          can't see keys defined in the outer dictionary that merges it in — only DynamicResource
@@ -752,6 +753,13 @@
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="TextWrapping" Value="NoWrap"/>
         <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        <!-- Полный текст подсказкой — но только у ячейки, где он не поместился (см. CellTextTip:
+             подсказку обязательно задать здесь, иначе WPF не станет её открывать и отменять будет
+             нечего). Длинный адрес на хостинге или причина отказа читались раньше только после
+             растягивания столбца. -->
+        <Setter Property="ToolTip" Value="{Binding RelativeSource={RelativeSource Self}, Path=Text}"/>
+        <Setter Property="views:CellTextTip.OnlyWhenTrimmed" Value="True"/>
+        <Setter Property="ToolTipService.ShowDuration" Value="30000"/>
     </Style>
 
     <!-- Тот же вид, но по центру — для коротких/числовых полей (короткие коды, даты, статусы),

@@ -1,0 +1,63 @@
+<Window x:Class="AntarusPoFinder.App.Views.HostingLinkDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Документ и ссылка" Width="720" Height="520" MinWidth="560" MinHeight="420"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="HeaderText" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <TextBlock Grid.Row="1" Text="Файл документа на диске:" Margin="0,0,0,4"/>
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0" x:Name="PathInput" Height="32" VerticalContentAlignment="Center"
+                     Margin="0,0,8,0" TextChanged="Path_Changed"
+                     ToolTip="Путь можно и вписать руками — например, скопировав его из проводника."/>
+            <Button Grid.Column="1" Content="Выбрать…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                    Click="Browse_Click"/>
+            <Button Grid.Column="2" Content="Очистить" Style="{StaticResource SecondaryButton}" Click="Clear_Click"
+                    ToolTip="Убрать ссылку на конкретный файл: документ снова будет искаться в папке «Инструкция» этой версии, как у всех остальных."/>
+        </Grid>
+
+        <!-- Список записей нужен только у общего документа (одна прошивка на несколько подтипов
+             шкафа). Там же и главное, ради чего диалог заведён: снять галочку с чужого подтипа и
+             задать этой версии СВОЙ документ — то есть развести то, что было общим. -->
+        <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" x:Name="TargetsHeader" TextWrapping="Wrap" Style="{StaticResource MutedText}"
+                       Margin="0,0,0,6"/>
+            <ListBox Grid.Row="1" x:Name="TargetsList">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox IsChecked="{Binding Selected, Mode=TwoWay}" Content="{Binding Label}" Margin="0,2"/>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <TextBlock Grid.Row="4" x:Name="PreviewText" TextWrapping="Wrap" Style="{StaticResource MutedText}"
+                   Margin="0,10,0,0"/>
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="100" Margin="0,0,8,0"/>
+            <Button x:Name="ApplyButton" Content="Применить" Width="120" IsDefault="True" Click="Apply_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

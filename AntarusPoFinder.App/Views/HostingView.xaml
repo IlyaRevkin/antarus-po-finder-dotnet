@@ -56,6 +56,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
@@ -105,11 +106,35 @@
                             ToolTip="Выложить заново ВСЁ, включая уже лежащее — нужно, когда документы правили на диске, а на хостинге осталась прошлая редакция."/>
                     <Button x:Name="StopBtn" Content="Остановить" Style="{StaticResource SecondaryButton}"
                             Margin="0,0,8,8" Click="Stop_Click" Visibility="Collapsed"/>
-                    <CheckBox x:Name="OnlyProblemsCheck" Content="Только те, что не на хостинге" VerticalAlignment="Center"
-                              Margin="8,0,8,8" Checked="OnlyProblems_Changed" Unchecked="OnlyProblems_Changed"/>
                 </WrapPanel>
 
-                <Grid Grid.Row="2" Margin="0,0,0,10">
+                <!-- Отбор строк. На сотне версий список читается только через него: искать глазами
+                     нужную версию среди одинаковых с виду строк — это то же самое, что искать её в
+                     проводнике. Поиск идёт по всем видимым полям сразу (версия, тип/подтип/контроллер,
+                     адрес, причина отказа), потому что человек помнит что-то одно из них, а какое
+                     именно — заранее неизвестно. -->
+                <WrapPanel Grid.Row="2" Margin="0,0,0,10" VerticalAlignment="Center">
+                    <TextBlock Text="Отбор:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="SearchInput" Width="260" Height="28" VerticalContentAlignment="Center"
+                             Margin="0,0,8,8" TextChanged="Search_Changed"
+                             ToolTip="Искать по версии, типу/подтипу/контроллеру, адресу и причине отказа. Несколько слов — все должны найтись."/>
+                    <ComboBox x:Name="StateFilterCombo" Width="230" Height="28" Margin="0,0,8,8"
+                              SelectionChanged="Search_Changed">
+                        <ComboBoxItem Content="Любое состояние" IsSelected="True"/>
+                        <ComboBoxItem Content="Нет на хостинге"/>
+                        <ComboBoxItem Content="На хостинге"/>
+                        <ComboBoxItem Content="Нет файла на диске"/>
+                        <ComboBoxItem Content="С ошибкой"/>
+                        <ComboBoxItem Content="Не проверено"/>
+                    </ComboBox>
+                    <CheckBox x:Name="OnlySharedCheck" Content="Только общие с другим подтипом" VerticalAlignment="Center"
+                              Margin="0,0,8,8" Checked="Search_Changed" Unchecked="Search_Changed"
+                              ToolTip="Одна и та же прошивка, привязанная к нескольким подтипам шкафа: документ у них общий и адрес один на всех."/>
+                    <Button x:Name="ResetFilterBtn" Content="Сбросить отбор" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,8" Click="ResetFilter_Click"/>
+                </WrapPanel>
+
+                <Grid Grid.Row="3" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
@@ -119,9 +144,15 @@
                                VerticalAlignment="Center"/>
                 </Grid>
 
-                <DataGrid Grid.Row="3" x:Name="ItemsGrid" Margin="0,0,0,10"
+                <!-- CanUserResizeColumns задан явно, хотя это и значение по умолчанию: ширины столбцов
+                     здесь подобраны под обычный случай, а адрес и причина отказа у всех разные, и
+                     растягивать их человеку приходится руками (просьба Ильи от 13.08.2026). MinWidth
+                     у столбцов заметно меньше прежних: столбец, который нельзя сузить, «не меняет
+                     ширину» ровно так же, как и тот, что не тянется вовсе. -->
+                <DataGrid Grid.Row="4" x:Name="ItemsGrid" Margin="0,0,0,10"
                           Style="{StaticResource RoomyDataGrid}"
                           VirtualizingPanel.ScrollUnit="Pixel"
+                          CanUserResizeColumns="True" CanUserSortColumns="True"
                           SelectionMode="Extended" MouseDoubleClick="ItemsGrid_MouseDoubleClick">
                     <DataGrid.ContextMenu>
                         <ContextMenu>
@@ -129,29 +160,37 @@
                             <MenuItem Header="Открыть ссылку в браузере" Click="OpenUrl_Click"/>
                             <MenuItem Header="Скопировать ссылку" Click="CopyUrl_Click"/>
                             <MenuItem Header="Скопировать ключ объекта" Click="CopyKey_Click"/>
+                            <Separator/>
                             <MenuItem Header="Показать файл на диске" Click="ShowOnDisk_Click"/>
+                            <MenuItem Header="Поправить ссылку вручную…" Click="EditLink_Click"
+                                      ToolTip="Выбрать другой документ для этой версии. Адрес на хостинге повторяет путь файла на диске, поэтому меняется он вместе с документом."/>
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Состояние" Binding="{Binding StateLabel}" Width="Auto" MinWidth="130"
+                        <DataGridTextColumn Header="Состояние" Binding="{Binding StateLabel}" Width="Auto" MinWidth="90"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Версия" Binding="{Binding VersionRaw}" Width="Auto" MinWidth="170"
+                        <DataGridTextColumn Header="Версия" Binding="{Binding VersionRaw}" Width="Auto" MinWidth="100"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Где" Binding="{Binding Where}" Width="Auto" MinWidth="180"
+                        <DataGridTextColumn Header="Где" Binding="{Binding Where}" Width="Auto" MinWidth="100"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Что" Binding="{Binding Kind}" Width="Auto" MinWidth="150"
+                        <!-- «Общий с» — столбец, которого не хватало ровно для случая «ПЖ / FD / SMH5
+                             показывает адрес ПЖ / 2.0 / SMH5»: одна прошивка на два подтипа шкафа, файл
+                             один, адрес один, и без этой подписи строка выглядела перепутанной. -->
+                        <DataGridTextColumn Header="Общий с" Binding="{Binding SharedWith}" Width="Auto" MinWidth="80"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Размер" Binding="{Binding SizeLabel}" Width="Auto" MinWidth="80"
+                        <DataGridTextColumn Header="Что" Binding="{Binding Kind}" Width="Auto" MinWidth="90"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Размер" Binding="{Binding SizeLabel}" Width="Auto" MinWidth="70"
                                             ElementStyle="{StaticResource DataGridCellTextCentered}"
                                             HeaderStyle="{StaticResource CenteredColumnHeader}"/>
-                        <DataGridTextColumn Header="Адрес на хостинге" Binding="{Binding Url}" Width="*" MinWidth="200"
+                        <DataGridTextColumn Header="Адрес на хостинге" Binding="{Binding Url}" Width="*" MinWidth="120"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Ошибка" Binding="{Binding Error}" Width="Auto" MinWidth="200"
+                        <DataGridTextColumn Header="Ошибка" Binding="{Binding Error}" Width="Auto" MinWidth="100"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <TextBlock Grid.Row="4" x:Name="SummaryText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="5" x:Name="SummaryText" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
             </Grid>
 
             <!-- ═══ Реквизиты ═══════════════════════════════════════════════════ -->
@@ -270,15 +309,21 @@
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
-                           Text="Что лежит в бакете на самом деле. Вкладка «Состояние» рядом показывает, что ТУДА ДОЛЖНО было уехать — по базе и диску; здесь наоборот, спрашивается у самого хранилища. Двойной клик по папке открывает её, по файлу — ссылку в браузере. Строки, помеченные «не значится», программе неизвестны: обычно это остатки после переименований, их и можно убрать руками."/>
+                           Text="Что лежит в бакете на самом деле. Вкладка «Состояние» рядом показывает, что ТУДА ДОЛЖНО было уехать — по базе и диску; здесь наоборот, спрашивается у самого хранилища. Двойной клик по папке открывает её, по файлу — ссылку в браузере, по строке «..» — уровень выше (то же делает клавиша Backspace). Список обновляется сам. Строки, помеченные «не значится», программе неизвестны: обычно это остатки после переименований, их и можно убрать руками."/>
 
                 <WrapPanel Grid.Row="1" Margin="0,0,0,10">
-                    <Button x:Name="FilesUpBtn" Content="Вверх" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"
-                            Click="FilesUp_Click" ToolTip="На уровень выше"/>
-                    <Button x:Name="FilesRefreshBtn" Content="Обновить" Margin="0,0,8,8" Click="FilesRefresh_Click"/>
+                    <!-- Кнопки «Обновить» здесь больше нет: список обновляется сам — при каждом заходе
+                         на вкладку, после любой своей операции и раз в 20 секунд, пока вкладка открыта
+                         (см. _filesTimer). Кнопка, которую надо не забыть нажать, чтобы увидеть правду,
+                         — это ровно то, на что и жаловались. -->
+                    <Button x:Name="FilesUploadBtn" Content="Загрузить файл…" Margin="0,0,8,8" Click="FilesUpload_Click"
+                            ToolTip="Положить файл в хранилище по текущему адресу. Файлы можно и просто перетащить на таблицу."/>
                     <Button x:Name="FilesDeleteBtn" Content="Удалить из хранилища" Style="{StaticResource DangerButton}"
                             Margin="0,0,8,8" Click="FilesDelete_Click"
                             ToolTip="Удаление из бакета безвозвратно: корзины у хранилища нет. Файл на диске при этом остаётся — уедет обратно кнопкой «Выложить недостающее»."/>
+                    <Button x:Name="FilesWhoseBtn" Content="Чей это документ" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,8" Click="FilesWhose_Click"
+                            ToolTip="Показать эту строку на вкладке «Состояние» — там видно, какой версии принадлежит документ, и там же правится привязка."/>
                     <Button x:Name="FilesStopBtn" Content="Остановить" Style="{StaticResource SecondaryButton}"
                             Margin="0,0,8,8" Click="FilesStop_Click" Visibility="Collapsed"/>
                     <CheckBox x:Name="FilesFlatCheck" Content="Показать всё вложенное списком" VerticalAlignment="Center"
@@ -287,37 +332,48 @@
                     <CheckBox x:Name="FilesOnlyUnknownCheck" Content="Только те, что не значатся у программы"
                               VerticalAlignment="Center" Margin="0,0,8,8"
                               Checked="FilesFilter_Changed" Unchecked="FilesFilter_Changed"/>
+                    <TextBox x:Name="FilesSearchInput" Width="220" Height="28" VerticalContentAlignment="Center"
+                             Margin="8,0,8,8" TextChanged="FilesFilter_Changed"
+                             ToolTip="Отбор по имени и ключу объекта."/>
                 </WrapPanel>
 
                 <TextBlock Grid.Row="2" x:Name="FilesPathText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
 
+                <!-- AllowDrop — файл можно просто перетащить на таблицу, и он ляжет по текущему адресу:
+                     тот же жест, каким его положили бы в папку проводника. -->
                 <DataGrid Grid.Row="3" x:Name="FilesGrid" Margin="0,0,0,10"
                           Style="{StaticResource RoomyDataGrid}"
                           VirtualizingPanel.ScrollUnit="Pixel"
+                          CanUserResizeColumns="True"
+                          AllowDrop="True" Drop="FilesGrid_Drop" DragOver="FilesGrid_DragOver"
+                          PreviewKeyDown="FilesGrid_PreviewKeyDown"
                           SelectionMode="Extended" MouseDoubleClick="FilesGrid_MouseDoubleClick">
                     <DataGrid.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Открыть" Click="FilesOpen_Click"/>
                             <MenuItem Header="Скопировать ссылку" Click="FilesCopyUrl_Click"/>
                             <MenuItem Header="Скопировать ключ объекта" Click="FilesCopyKey_Click"/>
+                            <Separator/>
+                            <MenuItem Header="Загрузить файл сюда…" Click="FilesUpload_Click"/>
+                            <MenuItem Header="Чей это документ" Click="FilesWhose_Click"/>
                             <MenuItem Header="Удалить из хранилища" Click="FilesDelete_Click"/>
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Что" Binding="{Binding KindLabel}" Width="Auto" MinWidth="80"
+                        <DataGridTextColumn Header="Что" Binding="{Binding KindLabel}" Width="Auto" MinWidth="60"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Имя" Binding="{Binding Name}" Width="2*" MinWidth="220"
+                        <DataGridTextColumn Header="Имя" Binding="{Binding Name}" Width="2*" MinWidth="120"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Размер" Binding="{Binding SizeLabel}" Width="Auto" MinWidth="90"
+                        <DataGridTextColumn Header="Размер" Binding="{Binding SizeLabel}" Width="Auto" MinWidth="70"
                                             ElementStyle="{StaticResource DataGridCellTextCentered}"
                                             HeaderStyle="{StaticResource CenteredColumnHeader}"/>
-                        <DataGridTextColumn Header="Изменён" Binding="{Binding ModifiedLabel}" Width="Auto" MinWidth="140"
+                        <DataGridTextColumn Header="Изменён" Binding="{Binding ModifiedLabel}" Width="Auto" MinWidth="90"
                                             ElementStyle="{StaticResource DataGridCellTextCentered}"
                                             HeaderStyle="{StaticResource CenteredColumnHeader}"/>
-                        <DataGridTextColumn Header="У программы" Binding="{Binding KnownLabel}" Width="Auto" MinWidth="130"
+                        <DataGridTextColumn Header="У программы" Binding="{Binding KnownLabel}" Width="Auto" MinWidth="90"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Ключ объекта" Binding="{Binding Key}" Width="*" MinWidth="200"
+                        <DataGridTextColumn Header="Ключ объекта" Binding="{Binding Key}" Width="*" MinWidth="120"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                     </DataGrid.Columns>
                 </DataGrid>
@@ -354,7 +410,7 @@
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
-                           Text="Диск у нас русский, а в адресе на хостинге кириллицы быть не должно — иначе ссылку покорёжит по дороге к телефону. Перевод считается сам; здесь его можно поправить там, где у имени есть принятое английское написание. Таблица общая для всех машин: ссылку печатает одна, а файл выкладывает другая, и перевод у них обязан совпадать."/>
+                           Text="Диск у нас русский, а в адресе на хостинге кириллицы быть не должно — иначе ссылку покорёжит по дороге к телефону. Имена собираются сами — все, что есть в справочнике иерархии и в раскладке папок; перевод тоже считается сам, а здесь его можно поправить там, где у имени есть принятое английское написание. Таблица общая для всех машин: ссылку печатает одна, а файл выкладывает другая, и перевод у них обязан совпадать."/>
 
                 <!-- IsReadOnly="False" обязателен: общий стиль DataGrid (Themes/Styles.xaml) ставит
                      таблицам приложения режим только для чтения, и без этого колонка «В адресе» не
@@ -362,24 +418,32 @@
                 <DataGrid Grid.Row="1" x:Name="TranslitGrid" Margin="0,0,0,10"
                           Style="{StaticResource RoomyDataGrid}" IsReadOnly="False"
                           VirtualizingPanel.ScrollUnit="Pixel"
+                          CanUserResizeColumns="True"
                           CellEditEnding="TranslitGrid_CellEditEnding">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Имя на диске" Binding="{Binding Source}" Width="Auto" MinWidth="220"
+                        <DataGridTextColumn Header="Имя на диске" Binding="{Binding Source}" Width="Auto" MinWidth="120"
                                             IsReadOnly="True" ElementStyle="{StaticResource DataGridCellText}"/>
                         <DataGridTextColumn Header="В адресе" Binding="{Binding Latin, UpdateSourceTrigger=PropertyChanged}"
-                                            Width="Auto" MinWidth="220" ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Откуда" Binding="{Binding Origin}" Width="Auto" MinWidth="130"
+                                            Width="Auto" MinWidth="120" ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Откуда" Binding="{Binding Origin}" Width="Auto" MinWidth="100"
                                             IsReadOnly="True" ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Пример адреса" Binding="{Binding Example}" Width="*" MinWidth="180"
+                        <DataGridTextColumn Header="Пример адреса" Binding="{Binding Example}" Width="*" MinWidth="120"
                                             IsReadOnly="True" ElementStyle="{StaticResource DataGridCellText}"/>
                     </DataGrid.Columns>
                 </DataGrid>
 
                 <WrapPanel Grid.Row="2">
-                    <Button Content="Собрать имена с диска" Margin="0,0,8,0" Click="CollectNames_Click"
-                            ToolTip="Обойти справочник иерархии и папки версий, собрать все имена с кириллицей и показать, как они переведутся."/>
+                    <!-- Кнопки «Собрать имена с диска» здесь больше нет: имена собираются сами при
+                         каждом открытии вкладки. Кнопка означала, что таблица по умолчанию показывает
+                         не всё, а только уже переопределённое, — и человек, зашедший поправить
+                         написание, видел пустую таблицу и решал, что переводить нечего. -->
                     <Button Content="Сбросить строку к автопереводу" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetRow_Click"/>
-                    <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveTranslit_Click"/>
+                    <Button Content="Сохранить" Margin="0,0,8,0" Click="SaveTranslit_Click"/>
+                    <TextBox x:Name="TranslitSearchInput" Width="200" Height="28" VerticalContentAlignment="Center"
+                             Margin="0,0,8,0" TextChanged="TranslitFilter_Changed"
+                             ToolTip="Отбор по имени на диске и по написанию в адресе."/>
+                    <CheckBox x:Name="TranslitOnlyManualCheck" Content="Только заданные вручную" VerticalAlignment="Center"
+                              Margin="0,0,8,0" Checked="TranslitFilter_Changed" Unchecked="TranslitFilter_Changed"/>
                     <TextBlock x:Name="TranslitHintText" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
                 </WrapPanel>
             </Grid>
