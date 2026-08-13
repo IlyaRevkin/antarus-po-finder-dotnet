@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:AntarusPoFinder.App.Views"
         Icon="/Assets/icon.ico"
+        Title="Модерация прошивки"
         Width="560" SizeToContent="Height" MaxHeight="860"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
