@@ -107,6 +107,29 @@ public class VersionAndOpcLayoutTests
             VersionLayout.SlotBestReadFolder(dir, ctrl, HierarchyFolders.Instructions));
     }
 
+    /// <summary>Служебный мусор не делает папку «непустой». Это второе лицо жалобы «сделал ссылку на
+    /// Thumbs.db вместо заглушки»: там мусор притворялся ДОКУМЕНТОМ, здесь он притворяется поводом
+    /// выбрать ПАПКУ. Проводник заводит Thumbs.db в любой папке, куда заглянули за эскизами, — и
+    /// пустая «Инструкция» версии от одного такого файла перебивала общую папку контроллера с
+    /// настоящим документом, после чего программа честно сообщала «инструкции нет».</summary>
+    [Fact]
+    public void SlotBestReadFolder_JunkDoesNotMakeAFolderLookOccupied()
+    {
+        using var root = new TempRoot();
+        var ctrl = Path.Combine(root.Path, "SMH5");
+        var dir = Path.Combine(ctrl, "1.0.0004.0003");
+        var shared = Path.Combine(ctrl, HierarchyFolders.Instructions);
+        Touch(shared, "общая.pdf");
+        Touch(VersionLayout.SlotFolder(dir, HierarchyFolders.Instructions), "Thumbs.db");
+
+        Assert.Equal(shared, VersionLayout.SlotBestReadFolder(dir, ctrl, HierarchyFolders.Instructions));
+
+        // А настоящий документ рядом с мусором папку по-прежнему выигрывает.
+        Touch(VersionLayout.SlotFolder(dir, HierarchyFolders.Instructions), "своя.pdf");
+        Assert.Equal(VersionLayout.SlotFolder(dir, HierarchyFolders.Instructions),
+            VersionLayout.SlotBestReadFolder(dir, ctrl, HierarchyFolders.Instructions));
+    }
+
     /// <summary>Писать внутрь версии можно только после её перестройки: положив документ в ещё не
     /// переехавшую версию, мы спрятали бы его от всех коллег со старым клиентом.</summary>
     [Fact]

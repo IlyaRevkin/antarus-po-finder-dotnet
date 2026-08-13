@@ -200,9 +200,24 @@ public static class VersionLayout
         return candidates.Count > 0 ? candidates[0] : null;
     }
 
+    /// <summary>В папке есть файлы, ради которых её стоит выбрать. Служебный мусор файловой системы
+    /// не считается — это тот же <c>Thumbs.db</c> из жалобы «сделал ссылку на Thumbs.db вместо
+    /// заглушки», только ломающий не выбор ФАЙЛА, а выбор ПАПКИ: проводник заводит его в любой папке,
+    /// куда заглянули за эскизами, и своя пустая «Инструкция» версии от одного такого файла
+    /// становилась «непустой». Дальше документ искали в ней, не находили и говорили «инструкции нет»
+    /// — при том, что в общей папке контроллера она лежит (см. <see cref="JunkFiles"/>).
+    ///
+    /// Заглушка при этом файлом считается НАМЕРЕННО, в отличие от <see cref="DocFileResolver.IsNotADocument"/>:
+    /// она лежит ровно там, куда эта версия пишет свои документы, и означает «здесь документа пока
+    /// нет», а не «смотри в другом месте». Перестань её учитывать — и версия с заглушкой начала бы
+    /// показывать инструкцию контроллера, то есть чужой документ вместо честного «в разработке».</summary>
     private static bool HasFiles(string folder)
     {
-        try { return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Any(f => !DocFileResolver.IsShortcut(f)); }
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Any(f => !DocFileResolver.IsShortcut(f) && !JunkFiles.IsJunk(f));
+        }
         catch (Exception) { return false; }
     }
 
