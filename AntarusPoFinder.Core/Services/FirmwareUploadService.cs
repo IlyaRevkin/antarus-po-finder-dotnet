@@ -19,6 +19,24 @@ public class FirmwareUploadRequest
     /// <summary>File or folder path picked/dropped in the main drop zone.</summary>
     public string SourcePath { get; set; } = "";
 
+    /// <summary>Относительный путь файла прошивки ВНУТРИ выбранной папки — тот, который оператор
+    /// отметил как саму прошивку (см. FolderContentsDialog). Он ложится в «Прошивка» под каноническим
+    /// именем (FirmwareNaming.BuildFirmwareFilename), ровно как одиночный выбранный файл: раньше выбор
+    /// файла в папке был ТОЛЬКО подсказкой «чем открывать», имя оставалось прежним, а рядом ложилось
+    /// всё остальное содержимое папки.
+    ///
+    /// Пусто — прежнее поведение: папка копируется целиком, как есть. Игнорируется, если источник —
+    /// одиночный файл.</summary>
+    public string SourceMainFile { get; set; } = "";
+
+    /// <summary>Что ещё взять из выбранной папки, относительными путями от неё: файлы проекта, без
+    /// которых прошивка не открывается (драйверы, ресурсы, подпапки plc/hmi у KINCO). Копируются в
+    /// «Прошивка» с сохранением вложенности и со своими именами — каноническое имя носит только сам
+    /// файл прошивки. Пустой список при заданном <see cref="SourceMainFile"/> означает «взять ТОЛЬКО
+    /// прошивку» — то, ради чего это и делалось: остальное содержимое папки больше не едет на диск
+    /// само собой.</summary>
+    public List<string> SourceFolderFiles { get; set; } = new();
+
     public EquipmentGroup? Group { get; set; }
     public EquipmentSubType? Subtype { get; set; }
     public ControllerModification? Modification { get; set; }
@@ -213,6 +231,15 @@ public class FirmwareUploadPlan
     /// <summary>Источник — папка (копируем содержимое) или один файл (копируем с новым именем).</summary>
     public bool SourceIsDirectory { get; init; }
 
+    /// <summary>Отмеченный оператором файл прошивки внутри папки-источника, относительным путём и уже
+    /// проверенный на выход за её пределы (см. FirmwareUploadRequest.SourceMainFile). Пусто — папку
+    /// копируем целиком, как раньше.</summary>
+    public string MainFileInFolder { get; init; } = "";
+
+    /// <summary>Что ещё берём из папки-источника, относительными путями — уже без самого файла
+    /// прошивки и без того, чего на диске нет.</summary>
+    public IReadOnlyList<string> ExtraFilesInFolder { get; init; } = Array.Empty<string>();
+
     public string DestinationFolder { get; init; } = "";
 
     /// <summary>Версия заводится по новой раскладке: пять своих папок, прошивка внутри «Прошивка»
@@ -253,6 +280,12 @@ public class FirmwareUploadPlan
 public class FirmwareUploadCopyResult
 {
     public string DestinationFilename { get; init; } = "";
+
+    /// <summary>Чем открывать прошивку — заполняется только там, где копирование САМО решило, как
+    /// будет называться файл: выбранный в папке файл прошивки переименовывается в каноническое имя,
+    /// и подсказка, набранная интерфейсом до копирования, указывала бы на старое имя. Пусто —
+    /// подсказку задаёт вызывающий, как и раньше (см. Register).</summary>
+    public string ExecutableHint { get; init; } = "";
     public string IoMapStored { get; init; } = "";
     public string InstructionsStored { get; init; } = "";
     public string ModbusMapStored { get; init; } = "";
@@ -331,9 +364,17 @@ public static class FirmwareUploadService
         var mod = request.Modification;
 
         bool isDir = Directory.Exists(request.SourcePath);
-        if (!isDir)
+        // Расширение проверяется у того файла, который СТАНЕТ прошивкой: у одиночного источника это
+        // он сам, у папки — отмеченный оператором файл внутри неё (FirmwareUploadRequest.SourceMainFile).
+        // Раньше папка не проверялась вовсе — «какой из файлов главный, здесь однозначно не
+        // выбирается»; теперь выбирается, и повод молчать пропал.
+        var mainRelative = isDir ? ExecutableHintResolver.Normalize(request.SourceMainFile) : null;
+        var checkedFile = isDir
+            ? (mainRelative is null ? null : Path.Combine(request.SourcePath, mainRelative))
+            : request.SourcePath;
+        if (checkedFile is not null)
         {
-            var ext = Path.GetExtension(request.SourcePath).TrimStart('.').ToLowerInvariant();
+            var ext = Path.GetExtension(checkedFile).TrimStart('.').ToLowerInvariant();
             var allowed = new HashSet<string>(db.GetAllowedExtensions().Select(x => x.ToLowerInvariant()));
             if (allowed.Count > 0 && !allowed.Contains(ext) && !request.ConfirmUnknownExtension)
             {
@@ -460,6 +501,8 @@ public static class FirmwareUploadService
             LaunchTypes = launchTypes,
             Tags = tags,
             SourceIsDirectory = isDir,
+            MainFileInFolder = mainRelative ?? "",
+            ExtraFilesInFolder = ExtraFilesToCopy(request.SourcePath, mainRelative, request.SourceFolderFiles),
             DestinationFolder = dstFolder,
             NewLayout = request.NewDiskLayout,
             IoMapFolder = SlotFolder(HierarchyFolders.IoMap),
@@ -512,7 +555,19 @@ public static class FirmwareUploadService
                 fwFolder = VersionLayout.FirmwareFolder(plan.DestinationFolder);
             }
 
-            if (plan.SourceIsDirectory)
+            if (plan.SourceIsDirectory && plan.MainFileInFolder.Length > 0)
+            {
+                // Оператор указал, ЧТО в папке является прошивкой (FolderContentsDialog): она ложится
+                // так же, как одиночный выбранный файл — под каноническим именем в «Прошивка». Всё
+                // остальное едет только если отмечено явно; раньше папка копировалась целиком, и
+                // рядом с прошивкой оказывался весь мусор, который лежал в ней у программиста.
+                var ext = Path.GetExtension(plan.MainFileInFolder);
+                dstName = FirmwareNaming.BuildFirmwareFilename(plan.Version, ext, plan.RequestNum, plan.CabinetSn);
+                File.Copy(Path.Combine(request.SourcePath, plan.MainFileInFolder),
+                    Path.Combine(fwFolder, dstName), overwrite: true);
+                CopySelectedFiles(request.SourcePath, fwFolder, plan.ExtraFilesInFolder);
+            }
+            else if (plan.SourceIsDirectory)
             {
                 CopyDirectoryContents(request.SourcePath, fwFolder);
                 dstName = Path.GetFileName(request.SourcePath.TrimEnd(Path.DirectorySeparatorChar));
@@ -583,6 +638,7 @@ public static class FirmwareUploadService
         return new FirmwareUploadCopyResult
         {
             DestinationFilename = dstName,
+            ExecutableHint = plan.MainFileInFolder.Length > 0 ? dstName : "",
             IoMapStored = ioMapStored,
             InstructionsStored = instrStored,
             ModbusMapStored = modbusStored,
@@ -627,7 +683,7 @@ public static class FirmwareUploadService
             InstructionsPath = copy.InstructionsStored,
             ModbusMapPath = copy.ModbusMapStored,
             HmiPath = copy.HmiStored,
-            ExecutableHint = request.ExecutableHint ?? "",
+            ExecutableHint = copy.ExecutableHint.Length > 0 ? copy.ExecutableHint : request.ExecutableHint ?? "",
             HmiExecutableHint = request.HmiEnabled ? request.HmiExecutableHint ?? "" : "",
             IsOpc = plan.IsOpc,
             RequestNum = plan.RequestNum,
@@ -742,6 +798,49 @@ public static class FirmwareUploadService
         var trimmed = raw.Trim();
         if (trimmed.Length == 0) return "";
         return int.TryParse(trimmed, out var n) && n is >= 0 and <= 99999 ? n.ToString("D5") : trimmed;
+    }
+
+    /// <summary>Список «что ещё взять из папки», приведённый к тому, что реально можно копировать:
+    /// нормализованные относительные пути (без абсолютных и «..» — их мог принести чужой конфиг),
+    /// без самого файла прошивки, без повторов и без того, чего на диске нет. Отдельный метод, потому
+    /// что считается он в первой фазе (проверки и БД), а пользуется им дисковая — та не должна
+    /// заниматься разбором того, что ввёл интерфейс.</summary>
+    internal static List<string> ExtraFilesToCopy(string sourceFolder, string? mainRelative, IEnumerable<string>? selected)
+    {
+        var result = new List<string>();
+        if (selected is null) return result;
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (mainRelative is not null) seen.Add(mainRelative);
+
+        foreach (var raw in selected)
+        {
+            var normalized = ExecutableHintResolver.Normalize(raw);
+            if (normalized is null || !seen.Add(normalized)) continue;
+            try
+            {
+                if (File.Exists(Path.Combine(sourceFolder, normalized))) result.Add(normalized);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                // Нечитаемый путь просто не берём: копирование не должно падать из-за одного файла,
+                // который оператор отметил, а тот исчез между выбором и нажатием «Загрузить».
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Копирует отмеченные файлы, сохраняя вложенность относительно папки-источника: проект,
+    /// у которого прошивка лежит в подпапке рядом с драйверами, должен доехать в том же виде.</summary>
+    private static void CopySelectedFiles(string srcDir, string dstDir, IReadOnlyList<string> relativePaths)
+    {
+        foreach (var relative in relativePaths)
+        {
+            var target = Path.Combine(dstDir, relative);
+            var targetDir = Path.GetDirectoryName(target);
+            if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
+            File.Copy(Path.Combine(srcDir, relative), target, overwrite: true);
+        }
     }
 
     private static void CopyDirectoryContents(string srcDir, string dstDir)

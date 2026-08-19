@@ -22,6 +22,13 @@ public partial class UploadView : UserControl
     private string? _srcPath;
     private int? _autoDetectedModId;
     private string? _executableHint;
+
+    /// <summary>Что оператор выбрал в папке-источнике (FolderContentsDialog): относительный путь
+    /// файла прошивки и что взять рядом с ним. Пусто — источником была не папка либо выбор не
+    /// делался, и папка копируется целиком, как раньше (см. FirmwareUploadRequest.SourceMainFile).</summary>
+    private string? _folderMainFile;
+    private List<string> _folderExtraFiles = new();
+
     private string? _hmiPath;
     private string? _hmiExecutableHint;
 
@@ -240,6 +247,8 @@ public partial class UploadView : UserControl
         _srcPath = null;
         _autoDetectedModId = null;
         _executableHint = null;
+        _folderMainFile = null;
+        _folderExtraFiles = new List<string>();
         DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
         StatusLabel.Text = "";
         UpdatePreview();
@@ -724,7 +733,8 @@ public partial class UploadView : UserControl
             Multiselect = true,
         };
         if (dlg.ShowDialog() != true) return;
-        OnFileDropped(dlg.FileNames.Length > 1 ? StageMultiple(dlg.FileNames, "прошивки") : dlg.FileName);
+        OnFileDropped(dlg.FileNames.Length > 1 ? StageMultiple(dlg.FileNames, "прошивки") : dlg.FileName,
+            takeAllByDefault: dlg.FileNames.Length > 1);
     }
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e)
@@ -743,7 +753,8 @@ public partial class UploadView : UserControl
     private void DropZone_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
-            OnFileDropped(paths.Length > 1 ? StageMultiple(paths, "прошивки") : paths[0]);
+            OnFileDropped(paths.Length > 1 ? StageMultiple(paths, "прошивки") : paths[0],
+                takeAllByDefault: paths.Length > 1);
     }
 
     // ── Перетаскивание нескольких файлов сразу ────────────────────────────────
@@ -779,12 +790,17 @@ public partial class UploadView : UserControl
         _stagedPaths.Clear();
     }
 
-    private void OnFileDropped(string path)
+    /// <param name="takeAllByDefault">Папка собрана из НАБОРА выбранных/бро́шенных файлов
+    /// (StageMultiple) — там оператор уже перечислил, что берёт, и умолчание «только прошивка» было
+    /// бы отменой его же выбора. У обычной папки умолчание остаётся строгим.</param>
+    private void OnFileDropped(string path, bool takeAllByDefault = false)
     {
         _srcPath = path;
         IoMapInput.Text = "";
         InstructionsInput.Text = "";
         _executableHint = null;
+        _folderMainFile = null;
+        _folderExtraFiles = new List<string>();
         StatusLabel.Text = $"Файл: {Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar))}";
         _autoDetectedModId = null;
         DropZoneLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
@@ -799,18 +815,32 @@ public partial class UploadView : UserControl
         }
         else
         {
-            _executableHint = PromptExecutableHint(path, MainExecutableExts, "прошивки");
-            if (!string.IsNullOrEmpty(_executableHint))
+            // Папка: спрашиваем не «чем открывать», а «что отсюда взять» — ответ определяет, что
+            // реально ляжет на диск (см. FolderContentsDialog). Отменённый выбор отменяет и саму
+            // папку: молча скопировать её целиком — ровно то поведение, на которое жаловались.
+            var pick = FolderContentsDialog.Pick(Window.GetWindow(this), path, MainExecutableExts, takeAllByDefault,
+                "Отметьте, какой файл в папке является прошивкой, и что взять вместе с ним. " +
+                "Прошивка ляжет в папку «Прошивка» под именем версии, отмеченные файлы — рядом, " +
+                "остальное не поедет.");
+            if (pick is null)
             {
-                StatusLabel.Text += $"  —  исполняемый: {_executableHint}";
-                // Папка (в т.ч. собранная из набора перетащенных файлов) с .psl внутри — контроллер
-                // определяется по содержимому ровно так же, как у одиночного файла; раньше выбор папки
-                // отключал автоопределение целиком, хотя нужный файл уже был известен.
-                var hintPath = Path.Combine(path, _executableHint);
-                if (string.Equals(Path.GetExtension(hintPath), ".psl", StringComparison.OrdinalIgnoreCase)
-                    && File.Exists(hintPath))
-                    TryPslAutodetect(hintPath);
+                ClearUnifiedPlc();
+                return;
             }
+
+            _folderMainFile = pick.MainFile;
+            _folderExtraFiles = pick.ExtraFiles;
+            _executableHint = pick.MainFile;
+            StatusLabel.Text += $"  —  прошивка: {pick.MainFile}" +
+                                (pick.ExtraFiles.Count > 0 ? $", файлов рядом: {pick.ExtraFiles.Count}" : "");
+
+            // Папка (в т.ч. собранная из набора перетащенных файлов) с .psl внутри — контроллер
+            // определяется по содержимому ровно так же, как у одиночного файла; раньше выбор папки
+            // отключал автоопределение целиком, хотя нужный файл уже был известен.
+            var hintPath = Path.Combine(path, pick.MainFile);
+            if (string.Equals(Path.GetExtension(hintPath), ".psl", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(hintPath))
+                TryPslAutodetect(hintPath);
         }
 
         UpdatePreview();
@@ -1119,6 +1149,8 @@ public partial class UploadView : UserControl
         return new FirmwareUploadRequest
         {
             SourcePath = _srcPath ?? "",
+            SourceMainFile = _folderMainFile ?? "",
+            SourceFolderFiles = _folderExtraFiles.ToList(),
             Group = group,
             Subtype = SubtypesSelect.MainSubtype,
             ExtraSubtypes = SubtypesSelect.ExtraSubtypes,
@@ -1135,10 +1167,15 @@ public partial class UploadView : UserControl
             // Копия инструкции на хостинге — та самая, которую открывает QR-код с наклейки. null,
             // пока не вписаны ключи доступа: загрузка версии от этого не меняется вовсе.
             InstructionPublisher = _services.Publisher(),
-            // Перестроен ли диск под «пять папок внутри версии»: флаг ставит перестройка диска и
-            // уносит синхронизацией всем — новые версии обязаны рождаться в той же раскладке, в
-            // которой лежат остальные (см. ConfigService.DiskLayoutV2).
-            NewDiskLayout = _services.Cfg.DiskLayoutV2(),
+            // Новая версия ВСЕГДА заводится с пятью своими папками, а прошивка ложится в «Прошивка».
+            // Раньше это зависело от ConfigService.DiskLayoutV2 — флага «диск уже перестроен», — и
+            // получалась ловушка: на диске, где перестраивать нечего (все версии заведены программой
+            // и уже канонические, либо диск вообще новый), флаг не ставился никогда, и прошивка
+            // продолжала ложиться в корень папки версии. Ровно жалоба «кладёт прошивку в корень, а не
+            // в папку „Прошивка“». Смешанный диск поддерживается с самого начала (VersionLayout —
+            // режим совместимости), так что новые версии могут быть в новой раскладке независимо от
+            // того, дошли ли руки перестроить старые.
+            NewDiskLayout = true,
             IoMapSourcePath = IoMapInput.Text,
             InstructionsSourcePath = InstructionsInput.Text,
             ModbusMapSourcePath = ModbusMapInput.Text,
@@ -1159,6 +1196,8 @@ public partial class UploadView : UserControl
         _srcPath = null;
         _autoDetectedModId = null;
         _executableHint = null;
+        _folderMainFile = null;
+        _folderExtraFiles = new List<string>();
         _hmiExecutableHint = null;
         DropZoneLabel.Text = "Перетащите файл, папку или несколько файлов сюда\n\nили нажмите для выбора";
         SubtypesSelect.ClearAll();
