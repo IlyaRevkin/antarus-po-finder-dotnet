@@ -73,8 +73,12 @@ public static class DiskLayoutMigrator
     public sealed class Op
     {
         public OpKind Kind { get; init; }
-        public string Source { get; init; } = "";
-        public string Target { get; init; } = "";
+
+        /// <summary>Что переименовываем/переносим. Изменяемое ради одного случая — многофайловой
+        /// папки версии, где файл прошивки указывает человек уже после планирования
+        /// (см. <see cref="NeedsChoice"/>); у всех остальных операций задаётся планом и не меняется.</summary>
+        public string Source { get; set; } = "";
+        public string Target { get; set; } = "";
 
         /// <summary>Человеческое пояснение — что это за файл и почему операция нужна. Изменяемое:
         /// папочные операции (переименование инструкций) узнают, что именно они сделали, только в
@@ -95,9 +99,30 @@ public static class DiskLayoutMigrator
         public string OldName => Path.GetFileName(Source);
         public string NewName => Path.GetFileName(Target);
 
-        /// <summary>ok / skip / error — заполняется в Apply.</summary>
+        /// <summary>ok / skip / error / off — заполняется в Apply. «off» значит «оператор снял
+        /// галочку», то есть операция не выполнялась вовсе: план собирается программой, но решает,
+        /// что из него делать, человек.</summary>
         public string Status { get; set; } = "";
         public string Error { get; set; } = "";
+
+        /// <summary>Делать ли эту операцию. План — предложение, а не приговор: до этого выбор был
+        /// только категориями («переименовать всё» / «не переименовывать»), и одна спорная строка
+        /// заставляла отключать весь пункт целиком.</summary>
+        public bool Selected { get; set; } = true;
+
+        /// <summary>Файлы папки версии, из которых оператор выбирает прошивку вручную (см.
+        /// <see cref="NeedsChoice"/>). Относительными путями от <see cref="VersionDir"/>.</summary>
+        public IReadOnlyList<string> Candidates { get; init; } = Array.Empty<string>();
+
+        /// <summary>Операция ждёт ручного выбора: в папке версии несколько файлов, и какой из них
+        /// прошивка — программа не знает. Раньше такая папка просто уходила в Skipped и переименовать
+        /// её было нечем; теперь строка остаётся в плане, а файл указывает человек.</summary>
+        public bool NeedsChoice => Kind == OpKind.RenameFirmware && Source.Length == 0;
+
+        /// <summary>Номер заявки и заводской SN — нужны, чтобы построить каноническое имя после
+        /// ручного выбора файла (у ОПЦ они входят в имя, см. FirmwareNaming.BuildFirmwareFilename).</summary>
+        public string RequestNum { get; init; } = "";
+        public string CabinetSn { get; init; } = "";
 
         /// <summary>Id записи fw_versions, чей disk_path надо переписать после удачного переноса
         /// (только <see cref="OpKind.MoveOpc"/>). 0 — правка БД этой операции не нужна.</summary>
@@ -109,7 +134,7 @@ public static class DiskLayoutMigrator
 
         public string KindLabel => Kind switch
         {
-            OpKind.RenameFirmware => "Переименовать прошивку",
+            OpKind.RenameFirmware => NeedsChoice ? "Указать файл прошивки" : "Переименовать прошивку",
             OpKind.FoldIntoVersion => "Файлы прошивки → «Прошивка»",
             OpKind.MoveOpc => "ОПЦ → внутрь контроллера",
             OpKind.RenameInstruction => "Переименовать инструкцию",
@@ -370,16 +395,38 @@ public static class DiskLayoutMigrator
         {
             var files = FirmwareFilesIn(dir);
             if (files.Count == 0) continue;
+
+            var number0 = FwVersionNumber.Parse(v.VersionRaw);
             if (files.Count > 1)
             {
                 // Многофайловая папка (проект с ресурсами, ПЛК + панель рядом): какое из имён
-                // «главное», знает только executable_hint, а он у коллег не обновится — не трогаем.
-                skipped.Add($"{v.VersionRaw}: в папке {files.Count} файла — переименование пропущено " +
-                            "(в многофайловой папке имя файла привязано к подсказке «чем открывать»)");
+                // «главное», программа не знает — это знает executable_hint, а он у коллег не
+                // обновится. Раньше такая папка молча уходила в Skipped и переименовать её было
+                // нечем вовсе. Теперь строка остаётся в плане и ждёт, пока файл укажет человек
+                // (Op.NeedsChoice); не указал — операция просто не выполняется.
+                if (number0 is null)
+                {
+                    skipped.Add($"{v.VersionRaw}: номер версии не разбирается — каноническое имя не построить");
+                    continue;
+                }
+                ops.Add(new Op
+                {
+                    Kind = OpKind.RenameFirmware,
+                    Source = "",
+                    Target = "",
+                    VersionDir = dir,
+                    VersionRaw = v.VersionRaw,
+                    RequestNum = v.RequestNum,
+                    CabinetSn = v.CabinetSn,
+                    RecordPaths = dbPaths.Count > 0 ? dbPaths : new List<string> { dir },
+                    Candidates = files.Select(f => Path.GetRelativePath(dir, f)).ToList(),
+                    Selected = false,
+                    Note = $"{v.VersionRaw}: в папке файлов {files.Count} — укажите, какой из них прошивка",
+                });
                 continue;
             }
 
-            var number = FwVersionNumber.Parse(v.VersionRaw);
+            var number = number0;
             if (number is null)
             {
                 skipped.Add($"{v.VersionRaw}: номер версии не разбирается — каноническое имя не построить");
@@ -433,12 +480,16 @@ public static class DiskLayoutMigrator
 
         foreach (var op in plan.Ops)
         {
+            // Снятая галочка — не «пропущено», а «не запускали»: в журнале это разные вещи, и
+            // повторный прогон обязан показать такую строку снова, а не считать её сделанной.
+            if (!op.Selected) { op.Status = "off"; progress?.Invoke(++done, total); continue; }
+
             try
             {
                 switch (op.Kind)
                 {
                     case OpKind.RenameFirmware:
-                        op.Status = RenameFile(op.Source, op.Target) ? "ok" : "skip";
+                        op.Status = op.NeedsChoice ? "skip" : RenameFile(op.Source, op.Target) ? "ok" : "skip";
                         if (op.Status == "ok") renamed?.Invoke(op);
                         break;
 
@@ -678,6 +729,9 @@ public static class DiskLayoutMigrator
                 var files = Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
                     .Where(f => !NonFirmwareNames.Contains(Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
                     .Where(f => !DocFileResolver.IsShortcut(f))
+                    // Служебный мусор проводника файлом прошивки не бывает, а раньше делал папку
+                    // «многофайловой» — и переименование в ней пропускалось целиком (см. JunkFiles).
+                    .Where(f => !JunkFiles.IsJunk(f))
                     .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 if (files.Count > 0) return files;

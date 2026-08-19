@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using AntarusPoFinder.Core.Domain;
@@ -26,21 +28,57 @@ public partial class DiskMigrationDialog : Window
     private readonly AppServices _services;
     private readonly IAppHost _host;
     private DiskLayoutMigrator.MigrationPlan? _plan;
+    private List<OpRow> _rows = new();
     private bool _applied;
 
-    private sealed class OpRow
+    private sealed class OpRow : INotifyPropertyChanged
     {
         public DiskLayoutMigrator.Op Op { get; init; } = null!;
         public string KindLabel => Op.KindLabel;
         public string Note => Op.Note;
-        public string Source => Op.Source;
+
+        /// <summary>Где это происходит: у обычной операции — сам файл/папка, у строки, ждущей
+        /// ручного выбора, — папка версии (файла-то ещё нет).</summary>
+        public string Source => Op.Source.Length > 0 ? Op.Source : Op.VersionDir;
+
+        /// <summary>Строку, ждущую ручного выбора файла, отметить нельзя: сначала файл, потом
+        /// галочка. Иначе «Выполнить» тихо пропускала бы её и человек считал бы, что сделано.</summary>
+        public bool CanRun => !Op.NeedsChoice;
+
+        public bool Selected
+        {
+            get => Op.Selected;
+            set
+            {
+                if (Op.Selected == value) return;
+                Op.Selected = value;
+                OnPropertyChanged();
+            }
+        }
+
         public string StatusLabel => Op.Status switch
         {
             "ok" => "готово",
             "skip" => "пропущено",
             "error" => "ошибка",
+            "off" => "не выбрано",
             _ => "",
         };
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public void Refresh()
+        {
+            OnPropertyChanged(nameof(KindLabel));
+            OnPropertyChanged(nameof(Note));
+            OnPropertyChanged(nameof(Source));
+            OnPropertyChanged(nameof(CanRun));
+            OnPropertyChanged(nameof(Selected));
+            OnPropertyChanged(nameof(StatusLabel));
+        }
+
+        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public DiskMigrationDialog(AppServices services, IAppHost host)
@@ -82,21 +120,32 @@ public partial class DiskMigrationDialog : Window
         ShowPlan(plan);
         // «Создать недостающие папки» — самостоятельная работа: она бывает нужна и тогда, когда
         // двигать/переименовывать нечего (диск уже канонический, но папок под новые подтипы нет).
-        RunButton.IsEnabled = plan.Ops.Count > 0 || FoldersCheck.IsChecked == true;
+        RunButton.IsEnabled = plan.Ops.Any(o => o.Selected) || FoldersCheck.IsChecked == true;
     }
 
     private void ShowPlan(DiskLayoutMigrator.MigrationPlan plan)
     {
-        OpsGrid.ItemsSource = plan.Ops.Select(op => new OpRow { Op = op }).ToList();
+        _rows = plan.Ops.Select(op => new OpRow { Op = op }).ToList();
+        OpsGrid.ItemsSource = _rows;
 
         var parts = new List<string>();
         if (plan.Ops.Count == 0)
             parts.Add(_applied ? "Всё выполнено." : "Менять нечего — диск уже соответствует правилам.");
+        else if (_applied)
+        {
+            var line = $"Выполнено: {plan.Ops.Count(o => o.Status == "ok")}, пропущено: {plan.Ops.Count(o => o.Status == "skip")}, " +
+                       $"ошибок: {plan.Ops.Count(o => o.Status == "error")}";
+            var off = plan.Ops.Count(o => o.Status == "off");
+            parts.Add(off > 0 ? $"{line}, не выбрано: {off}." : line + ".");
+        }
         else
-            parts.Add(_applied
-                ? $"Выполнено: {plan.Ops.Count(o => o.Status == "ok")}, пропущено: {plan.Ops.Count(o => o.Status == "skip")}, " +
-                  $"ошибок: {plan.Ops.Count(o => o.Status == "error")}."
-                : $"Операций в плане: {plan.Ops.Count}. Ничего ещё не изменено.");
+        {
+            var waiting = plan.Ops.Count(o => o.NeedsChoice);
+            parts.Add($"Операций в плане: {plan.Ops.Count}, отмечено: {plan.Ops.Count(o => o.Selected)}. Ничего ещё не изменено." +
+                      (waiting > 0
+                          ? $"\nЖдут ручного выбора файла: {waiting} — выделите строку и нажмите «Указать файл прошивки…»."
+                          : ""));
+        }
 
         if (plan.Skipped.Count > 0)
             parts.Add("Пропущено при планировании:\n• " + string.Join("\n• ", plan.Skipped.Take(15)) +
@@ -106,6 +155,28 @@ public partial class DiskMigrationDialog : Window
         if (errors.Count > 0) parts.Add("Ошибки:\n• " + string.Join("\n• ", errors));
 
         SummaryText.Text = string.Join("\n\n", parts);
+        if (!_applied) RunButton.IsEnabled = plan.Ops.Any(o => o.Selected) || FoldersCheck.IsChecked == true;
+    }
+
+    /// <summary>Галочку строки сняли/поставили — пересчитать «отмечено: N» и доступность «Выполнить».
+    /// Иначе кнопка оставалась бы активной у плана, где не отмечено ничего, и нажатие тихо ничего
+    /// не делало бы.</summary>
+    private void RowSelection_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_plan is null || _applied) return;
+        ShowPlanSummaryOnly(_plan);
+    }
+
+    /// <summary>Пересчёт подписи и кнопки без пересборки таблицы: пересобрать её прямо из обработчика
+    /// галочки значит выдернуть у этой галочки её же строку посреди события.</summary>
+    private void ShowPlanSummaryOnly(DiskLayoutMigrator.MigrationPlan plan)
+    {
+        var waiting = plan.Ops.Count(o => o.NeedsChoice);
+        SummaryText.Text = $"Операций в плане: {plan.Ops.Count}, отмечено: {plan.Ops.Count(o => o.Selected)}. Ничего ещё не изменено." +
+                           (waiting > 0
+                               ? $"\nЖдут ручного выбора файла: {waiting} — выделите строку и нажмите «Указать файл прошивки…»."
+                               : "");
+        RunButton.IsEnabled = plan.Ops.Any(o => o.Selected) || FoldersCheck.IsChecked == true;
     }
 
     // ── Выполнение ──────────────────────────────────────────────────────────
@@ -113,10 +184,11 @@ public partial class DiskMigrationDialog : Window
     private async void Run_Click(object sender, RoutedEventArgs e)
     {
         if (_plan is null) return;
-        if (_plan.Ops.Count == 0 && FoldersCheck.IsChecked != true) return;
+        var chosen = _plan.Ops.Count(o => o.Selected);
+        if (chosen == 0 && FoldersCheck.IsChecked != true) return;
 
         var reply = AppMessageBox.Show(
-            $"Будет выполнено операций: {_plan.Ops.Count}." +
+            $"Будет выполнено операций: {chosen} из {_plan.Ops.Count}." +
             (FoldersCheck.IsChecked == true ? "\nПлюс создание недостающих папок структуры." : "") + "\n\n" +
             "Запускать нужно на ОДНОЙ машине и когда коллеги не заливают прошивки. " +
             "Журнал операций сохранится на диск в папку «Конфиг».\n\nПродолжить?",
@@ -200,6 +272,94 @@ public partial class DiskMigrationDialog : Window
             result = await Task.Run(() => HierarchyService.ApplyStructurePlan(plan, stubs));
         if (result.CreatedCount > 0)
             _host.ShowStatus($"Создано папок: {result.CreatedCount}", category: NotificationCategory.Sync);
+    }
+
+    // ── Ручной разбор плана ─────────────────────────────────────────────────
+
+    private void SelectAll_Click(object sender, RoutedEventArgs e) => SetAllSelected(true);
+    private void SelectNone_Click(object sender, RoutedEventArgs e) => SetAllSelected(false);
+
+    private void SetAllSelected(bool value)
+    {
+        foreach (var row in _rows)
+        {
+            // Строку, ждущую выбора файла, «отметить всё» не включает: делать в ней пока нечего.
+            if (value && !row.CanRun) continue;
+            row.Selected = value;
+        }
+        if (_plan is not null) ShowPlan(_plan);
+    }
+
+    /// <summary>Ручной выбор файла прошивки в многофайловой папке версии. Раньше такая папка
+    /// пропускалась целиком («в многофайловой папке имя файла привязано к подсказке „чем открывать“»),
+    /// и привести её имя к норме было нечем вовсе. Теперь оператор указывает файл сам — и ровно этот
+    /// файл переименовывается, а подсказка «чем открывать» правится вместе с ним (Op.RecordPaths).</summary>
+    private void PickFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        if (OpsGrid.SelectedItem is not OpRow row)
+        {
+            AppMessageBox.Show("Выделите в таблице строку «Указать файл прошивки».", "Перестроить структуру",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        PickFirmwareFor(row);
+    }
+
+    private void OpsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (OpsGrid.SelectedItem is not OpRow row) return;
+        if (row.Op.NeedsChoice) { PickFirmwareFor(row); return; }
+
+        // Обычная строка — просто показать, о чём речь: открыть папку версии в проводнике.
+        var folder = row.Op.VersionDir.Length > 0 ? row.Op.VersionDir : Path.GetDirectoryName(row.Op.Source);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _host.ShowStatus($"Не удалось открыть папку: {ex.Message}");
+        }
+    }
+
+    private void PickFirmwareFor(OpRow row)
+    {
+        var op = row.Op;
+        if (!op.NeedsChoice)
+        {
+            AppMessageBox.Show("У этой строки файл выбирать не нужно.", "Перестроить структуру",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var picked = PickFileDialog.Pick(this, "Какой файл здесь прошивка",
+            $"В папке версии {op.VersionRaw} несколько файлов. Укажите файл прошивки — он будет " +
+            "переименован по норме, остальные останутся как есть:",
+            op.VersionDir);
+        if (string.IsNullOrEmpty(picked)) return;
+
+        var source = Path.Combine(op.VersionDir, picked);
+        var number = FwVersionNumber.Parse(op.VersionRaw);
+        if (number is null || !File.Exists(source)) return;
+
+        var canonical = FirmwareNaming.BuildFirmwareFilename(number, Path.GetExtension(source),
+            op.RequestNum, op.CabinetSn);
+        var target = Path.Combine(Path.GetDirectoryName(source)!, canonical);
+        if (string.Equals(source, target, StringComparison.Ordinal))
+        {
+            AppMessageBox.Show($"«{Path.GetFileName(source)}» уже назван по норме — переименовывать нечего.",
+                "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        op.Source = source;
+        op.Target = target;
+        op.Note = $"{Path.GetFileName(source)} → {canonical}";
+        op.Selected = true;
+        row.Refresh();
+        if (_plan is not null) ShowPlan(_plan);
     }
 
     // ── Журнал ──────────────────────────────────────────────────────────────

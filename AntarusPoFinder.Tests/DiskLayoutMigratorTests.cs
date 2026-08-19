@@ -123,8 +123,12 @@ public class DiskLayoutMigratorTests
         Assert.Equal("1.0.0004.0003.psl", name);
     }
 
+    /// <summary>Многофайловая папка версии больше не выпадает из плана молча: строка остаётся, но
+    /// ждёт, пока файл прошивки укажет человек (Op.NeedsChoice). Сама по себе она ничего не делает —
+    /// имя файла в такой папке единственный носитель подсказки «чем открывать», и угадывать его
+    /// программа по-прежнему не имеет права.</summary>
     [Fact]
-    public void Plan_MultiFileVersionFolder_IsSkippedWithReason()
+    public void Plan_MultiFileVersionFolder_WaitsForAManualChoice()
     {
         using var root = new TempRoot();
         var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "ПРОЕКТ.PSL", executableHint: "ПРОЕКТ.PSL");
@@ -132,11 +136,78 @@ public class DiskLayoutMigratorTests
 
         var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
 
-        // Имя файла в такой папке — единственный носитель подсказки «чем открывать», а она у коллег
-        // при импорте конфига не обновляется: переименуем — сломаем им «Открыть прошивку ПЛК».
-        Assert.Empty(plan.Ops);
-        Assert.Contains(plan.Skipped, s => s.Contains("в папке 2 файла"));
+        var op = Assert.Single(plan.Ops);
+        Assert.True(op.NeedsChoice);
+        Assert.False(op.Selected);
+        Assert.Equal("Указать файл прошивки", op.KindLabel);
+        Assert.Equal(dir, op.VersionDir);
+        Assert.Equal(2, op.Candidates.Count);
+        Assert.Contains("ПРОЕКТ.PSL", op.Candidates);
+
+        // Пока файл не указан, прогон её не трогает.
+        DiskLayoutMigrator.Apply(plan, renamed: null);
         Assert.True(File.Exists(Path.Combine(dir, "ПРОЕКТ.PSL")));
+        Assert.Equal("off", op.Status);
+    }
+
+    /// <summary>Оператор указал файл руками (окно перестройки заполняет Source/Target и ставит
+    /// галочку) — и папка приводится к норме, чего раньше нельзя было добиться никак.</summary>
+    [Fact]
+    public void Apply_ManuallyChosenFirmwareFile_IsRenamed()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "ПРОЕКТ.PSL", executableHint: "ПРОЕКТ.PSL");
+        Touch(dir, "ресурсы.bin");
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+        var op = Assert.Single(plan.Ops);
+        op.Source = Path.Combine(dir, "ПРОЕКТ.PSL");
+        op.Target = Path.Combine(dir, "1.0.0004.0003.psl");
+        op.Selected = true;
+
+        var renamed = new List<DiskLayoutMigrator.Op>();
+        DiskLayoutMigrator.Apply(plan, renamed: renamed.Add);
+
+        Assert.Equal("ok", op.Status);
+        Assert.True(File.Exists(Path.Combine(dir, "1.0.0004.0003.psl")));
+        Assert.True(File.Exists(Path.Combine(dir, "ресурсы.bin")));
+        // Подсказка «чем открывать» правится вызывающим по этому же колбэку.
+        Assert.Equal("ПРОЕКТ.PSL", Assert.Single(renamed).OldName);
+    }
+
+    /// <summary>Снятая галочка — «не запускали», а не «сделано»: без этого повторный прогон считал бы
+    /// такую строку выполненной.</summary>
+    [Fact]
+    public void Apply_UnselectedOp_IsNotRun()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "ПРОЕКТ.PSL", executableHint: "ПРОЕКТ.PSL");
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+        var op = Assert.Single(plan.Ops);
+        op.Selected = false;
+
+        DiskLayoutMigrator.Apply(plan, renamed: null);
+
+        Assert.Equal("off", op.Status);
+        Assert.True(File.Exists(Path.Combine(dir, "ПРОЕКТ.PSL")));
+    }
+
+    /// <summary>Служебный мусор не делает папку многофайловой: раньше один Thumbs.db рядом с
+    /// прошивкой отменял переименование всей папки (см. JunkFiles).</summary>
+    [Fact]
+    public void Plan_JunkFileNextToFirmware_DoesNotBlockTheRename()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "ПРОЕКТ.PSL");
+        Touch(dir, "Thumbs.db");
+
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+
+        var op = Assert.Single(plan.Ops);
+        Assert.False(op.NeedsChoice);
+        DiskLayoutMigrator.Apply(plan, renamed: null);
+        Assert.True(File.Exists(Path.Combine(dir, "1.0.0004.0003.psl")));
     }
 
     [Fact]

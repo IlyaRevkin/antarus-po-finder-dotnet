@@ -48,12 +48,31 @@
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="PlanButton" Content="Показать план" Width="150" Margin="0,0,8,0" Click="Plan_Click"/>
             <Button x:Name="RunButton" Content="Выполнить" Width="130" Margin="0,0,8,0" IsEnabled="False" Click="Run_Click"/>
-            <Button Content="Сохранить план в файл" Style="{StaticResource SecondaryButton}" Click="SavePlan_Click"/>
+            <Button Content="Сохранить план в файл" Style="{StaticResource SecondaryButton}" Margin="0,0,16,0" Click="SavePlan_Click"/>
+            <!-- Ручной разбор плана: делать не «всё, что предложено», а то, что оператор отметил.
+                 До этого выбор был только категориями, и одна спорная строка заставляла выключать
+                 весь пункт целиком. -->
+            <Button Content="Отметить все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SelectAll_Click"/>
+            <Button Content="Снять все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SelectNone_Click"/>
+            <Button x:Name="PickFileButton" Content="Указать файл прошивки…" Style="{StaticResource SecondaryButton}"
+                    Click="PickFirmware_Click"
+                    ToolTip="Для строки, где в папке версии несколько файлов: указать, какой из них прошивка, — и она будет переименована по норме."/>
         </StackPanel>
 
         <DataGrid Grid.Row="3" x:Name="OpsGrid" AutoGenerateColumns="False" IsReadOnly="True"
-                  Style="{StaticResource RoomyDataGrid}">
+                  Style="{StaticResource RoomyDataGrid}" CanUserResizeColumns="True"
+                  MouseDoubleClick="OpsGrid_MouseDoubleClick">
             <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Делать" Width="Auto" MinWidth="60">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEnabled="{Binding CanRun}"
+                                      Checked="RowSelection_Changed" Unchecked="RowSelection_Changed"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Что" Binding="{Binding KindLabel}" Width="Auto" MinWidth="170"
                                     ElementStyle="{StaticResource DataGridCellText}"/>
                 <DataGridTextColumn Header="Подробности" Binding="{Binding Note}" Width="*" MinWidth="220"
