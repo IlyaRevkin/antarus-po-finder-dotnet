@@ -9,10 +9,12 @@ using AntarusPoFinder.Tests.TestHelpers;
 
 namespace AntarusPoFinder.Tests;
 
-/// <summary>Одна прошивка / один файл параметров, подходящие сразу нескольким подтипам шкафа:
-/// запись заводится каждому подтипу, а файлы на диск кладутся ОДИН раз — остальным подтипам ярлык
-/// (FirmwareUploadRequest.ExtraSubtypes и ParamFileLinkService). Проверяется именно то, ради чего
-/// это делалось: отсутствие второй копии файлов на диске.</summary>
+/// <summary>Одна прошивка / один файл параметров, подходящие сразу нескольким подтипам шкафа.
+///
+/// У ПРОШИВОК ярлыков больше нет: каждый отмеченный подтип получает свою папку, настоящую копию
+/// файлов и свой номер версии — с префиксом своего подтипа (FirmwareSubtypeLinkService). У ФАЙЛОВ
+/// ПАРАМЕТРОВ прежний порядок сохранён: файл один, остальным подтипам ярлык (ParamFileLinkService) —
+/// про них разговора не было, а параметры и правда один и тот же файл, а не сборка под шкаф.</summary>
 public class ExtraSubtypesLinkTests : IDisposable
 {
     /// <summary>Реальный .lnk через COM здесь не нужен (и на сборочной машине без WScript.Shell мог бы
@@ -69,7 +71,7 @@ public class ExtraSubtypesLinkTests : IDisposable
     // ── прошивки ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Firmware_ExtraSubtypes_CreateRecordsSharingOneCopyOnDisk()
+    public void Firmware_ExtraSubtypes_GetTheirOwnFolderCopyAndNumber()
     {
         var (group, subtypes) = SeedPj();
         var mod = _db.GetAllModifications().First(m => m.ControllerName == "SMH5");
@@ -85,71 +87,78 @@ public class ExtraSubtypesLinkTests : IDisposable
                 ExtraSubtypes = new List<EquipmentSubType> { subtypes[1], subtypes[2] },
                 Modification = mod,
                 LaunchTypes = new() { "УПП" },
-                Description = "общая для трёх подтипов",
+                Description = "одна прошивка на три шкафа",
                 IncludeDateInVersion = false,
                 RootPath = Root,
+                NewDiskLayout = true,
                 AuthorUserName = "tester",
             }, shortcuts);
 
             Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
             Assert.Equal(2, result.ExtraFwVersionIds.Count);
 
-            // Записи есть у каждого подтипа, номер версии и путь у всех один и тот же.
-            foreach (var id in result.ExtraFwVersionIds)
+            foreach (var (id, extraSubtype) in result.ExtraFwVersionIds.Zip(new[] { subtypes[1], subtypes[2] }))
             {
                 var extra = _db.GetFwVersionById(id);
                 Assert.NotNull(extra);
-                Assert.Equal(result.Record!.VersionRaw, extra!.VersionRaw);
-                Assert.Equal(result.Record.DiskPath, extra.DiskPath);
-                Assert.Equal(result.Record.Filename, extra.Filename);
-            }
-            Assert.Equal(new[] { subtypes[1].Id, subtypes[2].Id }.OrderBy(x => x),
-                         result.ExtraFwVersionIds.Select(id => _db.GetFwVersionById(id)!.SubtypeId).OrderBy(x => x).Cast<int?>());
 
-            // Главное: файл прошивки лежит на диске ровно один раз.
-            var copies = Directory.GetFiles(Root, result.DestinationFilename!, SearchOption.AllDirectories);
-            Assert.Single(copies);
+                // Своя папка — в папке контроллера СВОЕГО подтипа, а не соседнего.
+                var expectedFolder = _hierarchy.FwPath(Root, group.Name, extraSubtype.Name,
+                    mod.ControllerName, extra!.VersionRaw);
+                Assert.Equal(expectedFolder, extra.DiskPath);
+                Assert.NotEqual(result.Record!.DiskPath, extra.DiskPath);
 
-            // Ярлык — в папке контроллера каждого дополнительного подтипа, на папку основной версии.
-            Assert.Equal(2, shortcuts.Created.Count);
-            Assert.All(shortcuts.Created, c => Assert.Equal(result.DestinationFolder, c.Target));
-            foreach (var extra in new[] { subtypes[1], subtypes[2] })
-            {
-                var expected = Path.Combine(
-                    _hierarchy.ControllerFolder(Root, group.Name, extra.Name, mod.ControllerName),
-                    $"{result.Record!.VersionRaw}.lnk");
-                Assert.Contains(shortcuts.Created, c => c.Shortcut == expected);
+                // Свой номер: префикс подтипа — его собственный.
+                var number = FwVersionNumber.Parse(extra.VersionRaw)!;
+                Assert.Equal(extraSubtype.Prefix, number.SubPrefix);
+                Assert.Equal(extraSubtype.Prefix, extra.SubPrefix);
+                Assert.NotEqual(result.Record.VersionRaw, extra.VersionRaw);
+
+                // И настоящий файл прошивки под именем СВОЕЙ версии.
+                Assert.Equal(FirmwareNaming.BuildFirmwareFilename(number, ".psl"), extra.Filename);
+                Assert.True(File.Exists(Path.Combine(VersionLayout.FirmwareFolder(extra.DiskPath), extra.Filename)));
             }
+
+            // Ярлыков больше нет ни одного — ни через IShortcutCreator, ни файлами на диске.
+            Assert.Empty(shortcuts.Created);
+            Assert.Empty(Directory.GetFiles(Root, "*.lnk", SearchOption.AllDirectories));
         }
         finally { File.Delete(src); }
     }
 
+    /// <summary>Жалоба дословно: «попробовал 2.0 и FD залить по отдельности, но почему-то у них один
+    /// номер прошивки 1.1.0005.0001, хотя по иерархии 2.0 это 0, а FD это 1». Номер копии строился
+    /// копированием полей основной записи, поэтому и префикс подтипа был чужой.</summary>
     [Fact]
-    public void Firmware_ShortcutFailure_DowngradesToWarningAndKeepsRecords()
+    public void Firmware_ExtraSubtype_NumberUsesItsOwnSubtypePrefix()
     {
         var (group, subtypes) = SeedPj();
+        var pj20 = subtypes.Single(s => s.Name == "2.0");
+        var fd = subtypes.Single(s => s.Name == "FD");
         var mod = _db.GetAllModifications().First(m => m.ControllerName == "SMH5");
         var src = WriteTempFile(".psl");
-        var shortcuts = new FakeShortcuts { Throw = new InvalidOperationException("WScript.Shell недоступен") };
         try
         {
             var result = FirmwareUploadService.Upload(_db, _hierarchy, new FirmwareUploadRequest
             {
                 SourcePath = src,
                 Group = group,
-                Subtype = subtypes[0],
-                ExtraSubtypes = new List<EquipmentSubType> { subtypes[1] },
+                Subtype = pj20,
+                ExtraSubtypes = new List<EquipmentSubType> { fd },
                 Modification = mod,
                 LaunchTypes = new() { "УПП" },
-                Description = "ярлык не создался",
+                Description = "2.0 и FD",
                 IncludeDateInVersion = false,
                 RootPath = Root,
+                NewDiskLayout = true,
                 AuthorUserName = "tester",
-            }, shortcuts);
+            });
 
-            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
-            Assert.Single(result.ExtraFwVersionIds);
-            Assert.Contains(result.Warnings, w => w.Contains(subtypes[1].Name) && w.Contains("Ярлык"));
+            var main = result.Record!;
+            var copy = _db.GetFwVersionById(result.ExtraFwVersionIds.Single())!;
+
+            Assert.Equal($"{group.Prefix}.{pj20.Prefix}.{mod.HwVersion:D4}.0001", main.VersionRaw);
+            Assert.Equal($"{group.Prefix}.{fd.Prefix}.{mod.HwVersion:D4}.0001", copy.VersionRaw);
         }
         finally { File.Delete(src); }
     }
@@ -180,7 +189,6 @@ public class ExtraSubtypesLinkTests : IDisposable
 
             Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
             Assert.Single(result.ExtraFwVersionIds);
-            Assert.Single(shortcuts.Created);
         }
         finally { File.Delete(src); }
     }

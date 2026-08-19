@@ -17,18 +17,19 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status,sync_id,config_name)
+                upload_date,tags,author_id,status,sync_id,config_name,copy_of)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status,@sync_id,@config_name)
+                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of)
             """, cmd =>
         {
             // Пусто у обычной загрузки; непустым его заводит только FirmwareConfigService (вариант
             // шкафа) — см. столбец config_name в Database.cs.
             cmd.Parameters.AddWithValue("@config_name", v.ConfigName ?? "");
+            cmd.Parameters.AddWithValue("@copy_of", v.CopyOf ?? "");
             // sync_id проставляется сразу при заведении строки, а не откладывается до ближайшего
             // BackfillSyncIds на старте приложения: между загрузкой прошивки и следующим запуском
             // помещается и синхронизация, и вывод из модерации, и удаление — всё то, чему этот
@@ -451,6 +452,38 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Та же самая сборка, залитая в ДРУГИЕ подтипы шкафа отдельными версиями (см.
+    /// FirmwareSubtypeLinkService.LinkExtras: с уходом от ярлыков копия получает свою папку, свои
+    /// файлы и свой номер). Общего disk_path у них больше нет, родство хранится явно — в столбце
+    /// copy_of лежит sync_id исходной версии.
+    ///
+    /// Возвращается вся семья, кроме самой переданной записи: и копии этой версии, и — если передана
+    /// копия — её оригинал вместе с остальными копиями. Спрашивать «кто ещё есть» может любая из них.</summary>
+    public List<FwVersionRecord> GetFwVersionSiblings(int versionId)
+    {
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader($"""
+            WITH me AS (SELECT sync_id, copy_of FROM fw_versions WHERE id = @id),
+                 root AS (SELECT CASE WHEN (SELECT copy_of FROM me) <> ''
+                                      THEN (SELECT copy_of FROM me)
+                                      ELSE (SELECT sync_id FROM me) END AS sync_id)
+            SELECT * FROM fw_versions
+            WHERE id <> @id AND archived = 0 AND {NotConfig()} AND {NotDeleted()}
+              AND (SELECT sync_id FROM root) <> ''
+              AND (copy_of = (SELECT sync_id FROM root) OR sync_id = (SELECT sync_id FROM root))
+            ORDER BY id
+            """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
+        while (reader.Read())
+            result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>sync_id записи — им копия ссылается на оригинал (столбец copy_of). Пусто, если строки
+    /// нет: вызывающий в этом случае просто не проставляет родство.</summary>
+    public string GetFwVersionSyncId(int versionId) =>
+        ExecuteScalar("SELECT sync_id FROM fw_versions WHERE id = @id",
+            cmd => cmd.Parameters.AddWithValue("@id", versionId)) as string ?? "";
+
     /// <summary>Строки-КОНФИГУРАЦИИ этой прошивки — заранее заготовленные варианты одного и того же
     /// ПО под разные комплектации шкафа (см. столбец config_name в Database.cs и FirmwareConfigService).
     /// Опознаются той же парой disk_path + version_raw, что и все записи, делящие файлы, но в отличие
@@ -536,6 +569,20 @@ public partial class Database
               AND disk_path   = (SELECT disk_path   FROM fw_versions WHERE id = @id)
               AND version_raw = (SELECT version_raw FROM fw_versions WHERE id = @id)
             """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
+
+        // С отказом от ярлыков копия под другой подтип — это отдельная версия со своей папкой и
+        // своим номером, общего disk_path у неё больше нет (см. FirmwareSubtypeLinkService). Родство
+        // хранится явно, в copy_of. Без этого жалоба «отметил подтип — прошивка снова прилетела на
+        // модерацию» вернулась бы в прежнем виде: проверять в копии нечего, это та же самая сборка.
+        ExecuteNonQuery($"""
+            WITH me AS (SELECT sync_id, copy_of FROM fw_versions WHERE id = @id),
+                 root AS (SELECT CASE WHEN (SELECT copy_of FROM me) <> ''
+                                      THEN (SELECT copy_of FROM me)
+                                      ELSE (SELECT sync_id FROM me) END AS sync_id)
+            UPDATE fw_versions SET released = 1
+            WHERE {NotDeleted()} AND (SELECT sync_id FROM root) <> ''
+              AND (copy_of = (SELECT sync_id FROM root) OR sync_id = (SELECT sync_id FROM root))
+            """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
     }
 
     /// <summary>id самой записи и всех её копий-ссылок на те же файлы (та же прошивка, заведённая под
@@ -546,11 +593,22 @@ public partial class Database
     public List<int> GetFwVersionIdsSharingFiles(int versionId)
     {
         var ids = new List<int> { versionId };
+        // Два вида «той же прошивки под другим подтипом»: прежние записи-ссылки (общий disk_path) и
+        // нынешние самостоятельные копии со своим номером — у тех родство лежит в copy_of. Решение
+        // модерации касается всех разом, значит и доехать должно до всех.
         using var reader = ExecuteReader($"""
+            WITH me AS (SELECT sync_id, copy_of, disk_path, version_raw FROM fw_versions WHERE id = @id),
+                 root AS (SELECT CASE WHEN (SELECT copy_of FROM me) <> ''
+                                      THEN (SELECT copy_of FROM me)
+                                      ELSE (SELECT sync_id FROM me) END AS sync_id)
             SELECT id FROM fw_versions
-            WHERE {NotDeleted()} AND disk_path <> '' AND id <> @id
-              AND disk_path   = (SELECT disk_path   FROM fw_versions WHERE id = @id)
-              AND version_raw = (SELECT version_raw FROM fw_versions WHERE id = @id)
+            WHERE {NotDeleted()} AND id <> @id
+              AND (
+                    (disk_path <> '' AND disk_path = (SELECT disk_path FROM me)
+                     AND version_raw = (SELECT version_raw FROM me))
+                 OR ((SELECT sync_id FROM root) <> ''
+                     AND (copy_of = (SELECT sync_id FROM root) OR sync_id = (SELECT sync_id FROM root)))
+                  )
             ORDER BY id
             """, cmd => cmd.Parameters.AddWithValue("@id", versionId));
         while (reader.Read())
@@ -1054,6 +1112,7 @@ public partial class Database
             ManualCurrent = GetBool(r, "manual_current"),
             SyncId = GetString(r, "sync_id"),
             ConfigName = GetString(r, "config_name"),
+            CopyOf = GetString(r, "copy_of"),
         };
     }
 }

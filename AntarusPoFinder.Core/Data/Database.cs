@@ -107,7 +107,10 @@ public partial class Database : IDisposable
                  sync_id           TEXT    NOT NULL DEFAULT '',
                  -- Имя КОНФИГУРАЦИИ шкафа: '' — обычная запись прошивки, непустое — заранее
                  -- заготовленный вариант той же самой прошивки. См. EnsureColumnsExist ниже.
-                 config_name       TEXT    NOT NULL DEFAULT ''
+                 config_name       TEXT    NOT NULL DEFAULT '',
+                 -- sync_id исходной версии, если эта запись — её копия под другой подтип шкафа.
+                 -- '' у обычной загрузки. См. EnsureColumnsExist ниже.
+                 copy_of           TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -589,6 +592,16 @@ public partial class Database : IDisposable
         // конфигурации одной прошивки выглядели бы для приёмника ОДНОЙ И ТОЙ ЖЕ строкой и схлопывались
         // в неё с объединением тегов (см. FindFwVersionRow в Database.ConfigExchange.cs).
         AddColumnsIfMissing("fw_versions", ("config_name", "TEXT NOT NULL DEFAULT ''"));
+
+        // copy_of: sync_id ИСХОДНОЙ версии у копии под другой подтип шкафа. Пусто у обычной загрузки.
+        //
+        // Появился вместе с отказом от ярлыков: раньше копия делила с оригиналом disk_path и
+        // version_raw, и по ним же опознавалась («те же файлы — та же прошивка»). Теперь у копии своя
+        // папка, свои файлы и свой номер, общего не осталось ничего — а знать про родство по-прежнему
+        // надо: иначе модерация предложит скопировать прошивку в подтип, где она уже есть, а вывод из
+        // модерации выпустит только одну запись из семьи. Ссылка на sync_id, а не на id: id у коллеги
+        // другой, а sync_id — тот же самый.
+        AddColumnsIfMissing("fw_versions", ("copy_of", "TEXT NOT NULL DEFAULT ''"));
 
         // Задел (Задача 7): «сохранить у себя, не выгружать» — строка с is_local_only=1 просто
         // пропускается ExportHierarchyData (см. Database.ConfigExchange.cs), т.е. никогда не попадёт

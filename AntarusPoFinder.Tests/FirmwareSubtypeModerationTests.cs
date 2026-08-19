@@ -12,12 +12,13 @@ namespace AntarusPoFinder.Tests;
 
 /// <summary>Набор подтипов шкафов у УЖЕ загруженной прошивки — то, что раньше задавалось только в
 /// момент загрузки (FirmwareUploadRequest.ExtraSubtypes) и переделывалось только повторной заливкой.
-/// Модерация правит его через FirmwareSubtypeLinkService.Apply: отметил подтип — завелась запись и
-/// ярлык, снял — запись помечена удалённой и ярлык убран.
+/// Модерация правит его через FirmwareSubtypeLinkService.Apply: отметил подтип — прошивка в него
+/// СКОПИРОВАЛАСЬ (своя папка, свои файлы, свой номер с его префиксом).
 ///
-/// Главное, что здесь проверяется, — файлы прошивки на диске лежат ОДИН раз и общие для всех этих
-/// записей, поэтому отвязка подтипа не имеет права их трогать: ни на этой машине, ни на соседней,
-/// куда tombstone приезжает синхронизацией.</summary>
+/// Прежние записи-ссылки (общий disk_path плюс ярлык) программа больше не создаёт, но на дисках их
+/// накоплено много, и всё, что с ними работает, обязано работать как раньше: снять такую галочку
+/// можно, а файлы при этом не трогаются — ни на этой машине, ни на соседней, куда tombstone
+/// приезжает синхронизацией. Такие связки тесты заводят руками (TestHelpers.LegacySubtypeLink).</summary>
 public class FirmwareSubtypeModerationTests : IDisposable
 {
     private sealed class FakeShortcuts : IShortcutCreator
@@ -97,7 +98,7 @@ public class FirmwareSubtypeModerationTests : IDisposable
             groupSubtypes, desired.Select(s => s.Id!.Value).ToList(), _shortcuts);
 
     [Fact]
-    public void AddSubtype_CreatesRecordAndShortcut_WithoutCopyingFilesOnDisk()
+    public void AddSubtype_CopiesFirmwareIntoItsOwnFolderWithItsOwnNumber()
     {
         var (group, subtypes, mod) = SeedPj();
         var uploaded = UploadPrimary(group, subtypes[0], mod);
@@ -111,26 +112,64 @@ public class FirmwareSubtypeModerationTests : IDisposable
         Assert.Empty(result.Warnings);
         Assert.Single(result.Added);
 
-        // Запись у нового подтипа — та же версия и те же файлы, второй копии на диске не появилось.
-        var linked = _db.GetFwVersions(subtypes[1].Id).Single();
-        Assert.Equal(primary.VersionRaw, linked.VersionRaw);
-        Assert.Equal(primary.DiskPath, linked.DiskPath);
-        Assert.Single(Directory.GetFiles(Root, uploaded.DestinationFilename!, SearchOption.AllDirectories));
+        // Своя папка, свой номер, своя настоящая копия файла.
+        var copy = _db.GetFwVersions(subtypes[1].Id).Single();
+        Assert.NotEqual(primary.VersionRaw, copy.VersionRaw);
+        Assert.NotEqual(primary.DiskPath, copy.DiskPath);
+        Assert.Equal(subtypes[1].Prefix, copy.SubPrefix);
+        Assert.Equal(_hierarchy.FwPath(Root, group.Name, subtypes[1].Name, mod.ControllerName, copy.VersionRaw),
+            copy.DiskPath);
+        // Раскладка (файл в корне версии или в «Прошивка») тут не проверяется — она наследуется от
+        // исходной папки, а её задаёт загрузка; важно, что файл в копии есть и назван по её версии.
+        Assert.Single(Directory.GetFiles(copy.DiskPath, copy.Filename, SearchOption.AllDirectories));
 
-        // Ярлык — в папке контроллера этого подтипа, на папку версии основного подтипа.
-        var expected = Path.Combine(
-            _hierarchy.ControllerFolder(Root, group.Name, subtypes[1].Name, mod.ControllerName),
-            $"{primary.VersionRaw}.lnk");
-        Assert.True(File.Exists(expected));
-        Assert.Contains(_shortcuts.Created, c => c.Shortcut == expected && c.Target == primary.DiskPath);
+        // Ни ярлыков, ни файла с чужим именем.
+        Assert.Empty(_shortcuts.Created);
+        Assert.Empty(Directory.GetFiles(Root, "*.lnk", SearchOption.AllDirectories));
+        Assert.Single(Directory.GetFiles(Root, uploaded.DestinationFilename!, SearchOption.AllDirectories));
+    }
+
+    /// <summary>Повторно предлагать подтип, у которого копия уже есть, нельзя: получилась бы вторая
+    /// копия той же сборки под тем же шкафом. Родство хранится в fw_versions.copy_of.</summary>
+    [Fact]
+    public void Coverage_ShowsTheCopyAsAnOwnVersion_AndApplyDoesNotDuplicateIt()
+    {
+        var (group, subtypes, mod) = SeedPj();
+        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
+        Apply(group, mod, primary, subtypes, new[] { subtypes[1] });
+
+        var coverage = FirmwareSubtypeLinkService.Coverage(_db, primary);
+        var copy = Assert.Single(coverage, c => c.SubtypeId == subtypes[1].Id);
+        Assert.True(copy.IsOwnVersion);
+        Assert.Equal(_db.GetFwVersions(subtypes[1].Id).Single().VersionRaw, copy.VersionRaw);
+
+        var again = Apply(group, mod, primary, subtypes, new[] { subtypes[1] });
+        Assert.False(again.Changed);
+        Assert.Single(_db.GetFwVersions(subtypes[1].Id));
+    }
+
+    /// <summary>Копия — самостоятельная версия, и снять её этой галочкой нельзя: файлы у неё свои,
+    /// «отвязка» унесла бы запись, оставив папку сиротой.</summary>
+    [Fact]
+    public void RemovingASubtypeThatHasItsOwnCopy_DoesNothing()
+    {
+        var (group, subtypes, mod) = SeedPj();
+        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
+        Apply(group, mod, primary, subtypes, new[] { subtypes[1] });
+
+        var result = Apply(group, mod, primary, subtypes, Array.Empty<EquipmentSubType>());
+
+        Assert.False(result.Changed);
+        Assert.Single(_db.GetFwVersions(subtypes[1].Id));
     }
 
     [Fact]
     public void RemoveSubtype_TombstonesRecordAndShortcut_ButKeepsFirmwareFilesOnDisk()
     {
         var (group, subtypes, mod) = SeedPj();
-        var uploaded = UploadPrimary(group, subtypes[0], mod, new[] { subtypes[1] });
+        var uploaded = UploadPrimary(group, subtypes[0], mod);
         var primary = uploaded.Record!;
+        LegacySubtypeLink.Create(_db, _hierarchy, Root, primary, subtypes[1], group.Name, mod.ControllerName, _shortcuts);
         var shortcut = Path.Combine(
             _hierarchy.ControllerFolder(Root, group.Name, subtypes[1].Name, mod.ControllerName),
             $"{primary.VersionRaw}.lnk");
@@ -181,23 +220,11 @@ public class FirmwareSubtypeModerationTests : IDisposable
     }
 
     [Fact]
-    public void Apply_IsIdempotent_SecondRunWithSameSetChangesNothing()
-    {
-        var (group, subtypes, mod) = SeedPj();
-        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
-
-        Assert.True(Apply(group, mod, primary, subtypes, new[] { subtypes[1] }).Changed);
-        var again = Apply(group, mod, primary, subtypes, new[] { subtypes[1] });
-
-        Assert.False(again.Changed);
-        Assert.Single(_db.GetFwVersions(subtypes[1].Id));
-    }
-
-    [Fact]
     public void CurrentLinks_ListsEverySubtypeTheFirmwareIsVisibleUnder_MarkingThePrimary()
     {
         var (group, subtypes, mod) = SeedPj();
-        var primary = UploadPrimary(group, subtypes[0], mod, new[] { subtypes[1] }).Record!;
+        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
+        LegacySubtypeLink.Create(_db, _hierarchy, Root, primary, subtypes[1], group.Name, mod.ControllerName);
 
         var links = FirmwareSubtypeLinkService.CurrentLinks(_db, primary);
 
@@ -214,7 +241,8 @@ public class FirmwareSubtypeModerationTests : IDisposable
     public void IsDiskPathSharedByOtherVersions_TrueWhileLinkExists_FalseAfterItIsRemoved()
     {
         var (group, subtypes, mod) = SeedPj();
-        var primary = UploadPrimary(group, subtypes[0], mod, new[] { subtypes[1] }).Record!;
+        var primary = UploadPrimary(group, subtypes[0], mod).Record!;
+        LegacySubtypeLink.Create(_db, _hierarchy, Root, primary, subtypes[1], group.Name, mod.ControllerName, _shortcuts);
         var link = _db.GetFwVersions(subtypes[1].Id).Single();
 
         Assert.True(_db.IsDiskPathSharedByOtherVersions(primary.DiskPath, primary.Id!.Value));
@@ -242,8 +270,9 @@ public class FirmwareSubtypeModerationTests : IDisposable
     public void UnlinkingSubtype_SyncedToAnotherMachine_DoesNotDeleteTheSharedFirmwareFolder()
     {
         var (group, subtypes, mod) = SeedPj();
-        var uploaded = UploadPrimary(group, subtypes[0], mod, new[] { subtypes[1] });
+        var uploaded = UploadPrimary(group, subtypes[0], mod);
         var primary = uploaded.Record!;
+        LegacySubtypeLink.Create(_db, _hierarchy, Root, primary, subtypes[1], group.Name, mod.ControllerName, _shortcuts);
 
         using var otherDbFile = new TempDb();
         using var other = new Database(otherDbFile.Path);

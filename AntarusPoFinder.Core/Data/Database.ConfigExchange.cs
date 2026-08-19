@@ -116,7 +116,7 @@ public partial class Database
                    fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
-                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name,
+                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -139,7 +139,7 @@ public partial class Database
                     HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
                     HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
                     DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
-                    ConfigName = GetString(r, "config_name"),
+                    ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
                     GroupName = GetString(r, "group_name"),
                     SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                     CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1370,15 +1370,18 @@ public partial class Database
                     dt_str, version_raw, filename, disk_path, local_path, description, changelog,
                     launch_types, io_map_path, instructions_path, hmi_path, executable_hint, hmi_executable_hint,
                     modbus_map_path, is_opc, request_num,
-                    upload_date, archived, tags, status, released, sync_id, config_name)
+                    upload_date, archived, tags, status, released, sync_id, config_name, copy_of)
                 VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                     @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                     @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                     @modbus_map_path,@is_opc,@request_num,
-                    @upload_date,@archived,@tags,@status,@released,@sync_id,@config_name)
+                    @upload_date,@archived,@tags,@status,@released,@sync_id,@config_name,@copy_of)
                 """, cmd =>
             {
                 cmd.Parameters.AddWithValue("@config_name", fv.ConfigName ?? "");
+                // Родство копий (см. столбец fw_versions.copy_of) едет вместе с записью: оно указано
+                // через sync_id, то есть у коллеги значит ровно то же самое, что у автора.
+                cmd.Parameters.AddWithValue("@copy_of", fv.CopyOf ?? "");
                 // Прошивка заводится с ТЕМ ЖЕ sync_id, что у отправителя, — иначе строка «та же
                 // самая», но связать её с оригиналом было бы уже нечем. Пустой (старый экспорт) —
                 // заводим свой: он ничего не ломает, а следующая синхронизация с обновлённой машины

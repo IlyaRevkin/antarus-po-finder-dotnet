@@ -403,9 +403,17 @@ public partial class EditFirmwareDialog : Window
     private List<EquipmentSubType> _groupSubtypes = new();
 
     /// <summary>Чекбоксы по всем подтипам ГРУППЫ этой прошивки: отмечены те, под которыми она уже
-    /// заведена. Основной (в чьей папке лежат сами файлы) отмечен и выключен — снять его значило бы
-    /// удалить саму прошивку, а не ссылку на неё, и это делается отдельной кнопкой «Удалить прошивку».
-    /// Блок не показывается вовсе, если у версии нет папки на диске: связывать тогда нечего.</summary>
+    /// есть. Отметить чистый подтип — значит СКОПИРОВАТЬ в него прошивку по-настоящему: своя папка,
+    /// свои файлы, свой номер версии с префиксом этого подтипа (см. FirmwareSubtypeLinkService).
+    ///
+    /// Выключены две отметки, и по разным причинам. Основной подтип — потому что в его папке лежат
+    /// сами файлы, снять его значило бы удалить прошивку, а не ссылку (для этого есть «Удалить
+    /// прошивку»). Подтип, у которого уже есть СВОЯ копия, — потому что это самостоятельная версия со
+    /// своим номером, и убирают её как обычную версию, а не галочкой здесь; подпись показывает её
+    /// номер, чтобы было видно, куда смотреть. Снимать можно только старые записи-ссылки (общие файлы
+    /// плюс ярлык) — их и заводили галочкой.
+    ///
+    /// Блок не показывается вовсе, если у версии нет папки на диске: копировать тогда нечего.</summary>
     private void BuildSubtypeChecks()
     {
         if (_record.Id is null || string.IsNullOrWhiteSpace(_record.DiskPath)) return;
@@ -416,25 +424,35 @@ public partial class EditFirmwareDialog : Window
         _groupSubtypes = _db.GetSubtypesForGroup(subtype.GroupId).Where(s => s.Id is not null).ToList();
         if (_groupSubtypes.Count <= 1) return; // выбирать не из чего — один подтип в группе
 
-        var linked = FirmwareSubtypeLinkService.CurrentLinks(_db, _record)
-            .Select(l => l.SubtypeId).ToHashSet();
+        var coverage = FirmwareSubtypeLinkService.Coverage(_db, _record)
+            .GroupBy(c => c.SubtypeId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         foreach (var candidate in _groupSubtypes)
         {
             var id = candidate.Id!.Value;
             var isPrimary = id == _record.SubtypeId;
+            coverage.TryGetValue(id, out var covered);
+            var ownVersion = covered is { IsOwnVersion: true };
+
             var label = candidate.Name == "—" ? candidate.FolderName : $"{candidate.FolderName} ({candidate.Name})";
+            var suffix = isPrimary ? "  —  основной"
+                : ownVersion ? $"  —  своя версия {covered!.VersionRaw}"
+                : "";
             var cb = new CheckBox
             {
                 Tag = id,
-                Content = isPrimary ? $"{label}  —  основной" : label,
+                Content = label + suffix,
                 FontWeight = isPrimary ? FontWeights.SemiBold : FontWeights.Normal,
-                IsChecked = isPrimary || linked.Contains(id),
-                IsEnabled = !isPrimary,
+                IsChecked = isPrimary || covered is not null,
+                IsEnabled = !isPrimary && !ownVersion,
                 Margin = new Thickness(4),
                 ToolTip = isPrimary
                     ? "Файлы прошивки лежат в папке этого подтипа — отвязать его нельзя"
-                    : null,
+                    : ownVersion
+                        ? $"У этого подтипа уже есть своя копия прошивки — версия {covered!.VersionRaw}. " +
+                          "Это самостоятельная версия: убирают её откатом или удалением, а не отсюда."
+                        : "Отметить — скопировать прошивку в этот подтип: своя папка, свои файлы, свой номер версии.",
             };
             _subtypeChecks[id] = cb;
             SubtypesCheckPanel.Children.Add(cb);
@@ -703,7 +721,7 @@ public partial class EditFirmwareDialog : Window
         var desired = _subtypeChecks.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList();
         var result = FirmwareSubtypeLinkService.Apply(_db, _services.Hierarchy, _services.Cfg.RootPath(),
             _record, _names.Value.GroupName, _names.Value.ControllerName,
-            _groupSubtypes, desired, new Services.ShortcutCreator());
+            _groupSubtypes, desired);
         if (result.Changed || result.Warnings.Count > 0) SubtypeLinkResult = result;
     }
 

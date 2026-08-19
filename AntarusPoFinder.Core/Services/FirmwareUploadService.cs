@@ -41,11 +41,11 @@ public class FirmwareUploadRequest
     public EquipmentSubType? Subtype { get; set; }
     public ControllerModification? Modification { get; set; }
 
-    /// <summary>Подтипы, которым эта же прошивка подходит один-в-один. Файлы для них НЕ дублируются:
-    /// в папке контроллера каждого такого подтипа создаётся ярлык на папку версии основного подтипа
-    /// (Subtype выше), а запись в fw_versions заводится своя — со ссылкой на тот же путь. Так
-    /// прошивка находится поиском под каждым типом шкафа, но на диске лежит один раз (по прямому
-    /// пожеланию: «чтобы не занимало много памяти — ярлыками раскидывать»).</summary>
+    /// <summary>Подтипы, которым эта же прошивка подходит один-в-один. Каждому заводится СВОЯ
+    /// полноценная версия: своя папка в папке его контроллера, скопированные туда файлы и свой номер
+    /// версии — с префиксом своего подтипа (см. FirmwareSubtypeLinkService). Ярлыков и общего
+    /// disk_path больше нет: «уходим от ярлыков, кладём всегда саму прошивку, даже если подходит
+    /// нескольким».</summary>
     public List<EquipmentSubType> ExtraSubtypes { get; set; } = new();
 
     public List<string> LaunchTypes { get; set; } = new();
@@ -724,7 +724,7 @@ public static class FirmwareUploadService
 
         var extraIds = FirmwareSubtypeLinkService.LinkExtras(db, hierarchy, request.RootPath,
                 request.Group!.Name, request.Modification!.ControllerName, request.Subtype!, record,
-                request.ExtraSubtypes, shortcuts, warnings)
+                request.ExtraSubtypes, warnings)
             .Select(x => x.FwVersionId).ToList();
 
         return new FirmwareUploadResult

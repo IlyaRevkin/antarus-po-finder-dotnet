@@ -40,7 +40,7 @@
         <StackPanel x:Name="SubtypesPanel" Visibility="Collapsed" Margin="0,0,0,16">
             <TextBlock Text="ПОДТИПЫ ШКАФОВ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
             <TextBlock x:Name="SubtypesHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
-                       Text="Каким подтипам подходит эта прошивка. Файлы на диске не дублируются — в папке отмеченного подтипа появляется ярлык, а в поиске прошивка находится и под ним."/>
+                       Text="Каким подтипам шкафа подходит эта прошивка. Отмеченный подтип получает НАСТОЯЩУЮ копию: свою папку, свои файлы и свой номер версии — с префиксом этого подтипа. Ярлыков больше нет. Подтип, у которого копия уже есть, отмечен и выключен: это самостоятельная версия, убирают её откатом или удалением."/>
             <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
                     BorderThickness="1" CornerRadius="6" Padding="8">
                 <ScrollViewer MaxHeight="130" VerticalScrollBarVisibility="Auto">

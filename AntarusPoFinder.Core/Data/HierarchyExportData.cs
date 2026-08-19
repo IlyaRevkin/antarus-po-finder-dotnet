@@ -79,6 +79,11 @@ public class ExportedFwVersion
     /// схлопывал бы заготовленные варианты в один. Пусто в снимке со старой версии приложения — тогда
     /// поведение ровно прежнее.</summary>
     [JsonPropertyName("config_name")] public string ConfigName { get; set; } = "";
+
+    /// <summary>sync_id исходной версии, если эта запись — её копия под другой подтип шкафа
+    /// (fw_versions.copy_of). Пусто у обычной загрузки и у снимков со старых версий приложения —
+    /// тогда родство просто неизвестно, и всё работает как раньше.</summary>
+    [JsonPropertyName("copy_of")] public string CopyOf { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }

@@ -87,22 +87,24 @@ public class SubtypeLinkDocumentsTests : IDisposable
                 SourcePath = src,
                 Group = group,
                 Subtype = subtypes[0],
-                ExtraSubtypes = new List<EquipmentSubType> { subtypes[1] },
                 Modification = mod,
                 LaunchTypes = new() { "УПП" },
                 Description = "одна прошивка на два шкафа",
                 IncludeDateInVersion = false,
                 RootPath = Root,
                 AuthorUserName = "tester",
-            }, _shortcuts);
+            });
         }
         finally { File.Delete(src); }
 
         Assert.Equal(FirmwareUploadOutcome.Success, uploaded.Outcome);
 
         var primary = uploaded.Record!;
-        var linked = _db.GetFwVersions(subtypes[1].Id).Single();
-        // Именно то, с чего началась жалоба: у записи второго подтипа путь ведёт в папку первого.
+        // Связка СТАРОГО образца — та, из-за которой всё и ломалось: запись второго подтипа ведёт в
+        // папку первого. Программа таких больше не создаёт (каждый подтип получает свою копию), но на
+        // дисках их накоплено много, и читаться они обязаны как раньше.
+        var linked = LegacySubtypeLink.Create(_db, _hierarchy, Root, primary, subtypes[1],
+            group.Name, mod.ControllerName, _shortcuts);
         Assert.Equal(primary.DiskPath, linked.DiskPath);
 
         return (group, subtypes[0], subtypes[1], mod, primary, linked);
