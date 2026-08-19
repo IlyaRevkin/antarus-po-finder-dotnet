@@ -1,0 +1,138 @@
+<Window x:Class="AntarusPoFinder.App.Views.LegacyImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Разобрать старый диск"
+        Width="1180" Height="720" MinWidth="820" MinHeight="520"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="Обход папки со старой раскладкой: что похоже на прошивку и куда это, скорее всего, относится. Всё угаданное — предложение: тип, подтип, контроллер и заявку можно поправить прямо в таблице, а отмеченное перенесётся обычной загрузкой — со своим номером версии, папкой «Прошивка» и записью в базе."/>
+
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Папка:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox Grid.Column="1" x:Name="SourceInput" VerticalAlignment="Center"/>
+            <Button Grid.Column="2" Content="Обзор…" Style="{StaticResource SecondaryButton}" Width="90"
+                    Margin="8,0,0,0" Click="Browse_Click"/>
+            <Button Grid.Column="3" x:Name="ScanButton" Content="Найти прошивки" Width="150"
+                    Margin="8,0,0,0" Click="Scan_Click"/>
+        </Grid>
+
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="Общее для всех переносимых версий" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Тип пуска *:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <WrapPanel x:Name="LaunchTypesPanel" VerticalAlignment="Center"/>
+                </StackPanel>
+                <CheckBox x:Name="DateFromFileCheck" IsChecked="True"
+                          Content="Дата в номере версии — из даты файла, а не из момента переноса"
+                          ToolTip="Сборка 2019 года не должна выглядеть сегодняшней. Снять — номер получит текущие дату и время."/>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="Отметить распознанное" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                    Click="SelectRecognized_Click"
+                    ToolTip="Отмечает строки, где узнаны тип, подтип и контроллер, кроме лежащих в «Архиве» и похожих на документы."/>
+            <Button Content="Снять все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SelectNone_Click"/>
+            <Button Content="Взять файлы из архива…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                    Click="Unpack_Click"
+                    ToolTip="Распаковать архив выделенной строки во временную папку и выбрать, что из него брать. .rar распаковать нельзя — такой архив перенесётся как есть."/>
+            <Button Content="Показать в проводнике" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                    Click="Reveal_Click"/>
+        </StackPanel>
+
+        <DataGrid Grid.Row="4" x:Name="FoundGrid" AutoGenerateColumns="False" IsReadOnly="False"
+                  Style="{StaticResource RoomyDataGrid}" CanUserResizeColumns="True">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Брать" Width="Auto" MinWidth="55">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Take, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Checked="RowSelection_Changed" Unchecked="RowSelection_Changed"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Что нашли" Width="3*" MinWidth="220" SortMemberPath="RelativePath" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding RelativePath}" ToolTip="{Binding FullPath}"
+                                       Style="{StaticResource DataGridCellText}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Тип" Width="Auto" MinWidth="90">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding GroupOptions}" DisplayMemberPath="Name" Margin="2"
+                                      SelectedItem="{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Подтип" Width="Auto" MinWidth="90">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding SubtypeOptions}" DisplayMemberPath="Name" Margin="2"
+                                      SelectedItem="{Binding Subtype, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Контроллер" Width="Auto" MinWidth="120">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding ControllerOptions}" DisplayMemberPath="DisplayName" Margin="2"
+                                      SelectedItem="{Binding Modification, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Заявка" Binding="{Binding RequestNum, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="Auto" MinWidth="70" ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="SN шкафа" Binding="{Binding CabinetSn, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTemplateColumn Header="Что берём" Width="*" MinWidth="150" SortMemberPath="SourceLabel" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding SourceLabel}" ToolTip="{Binding SourceLabel}"
+                                       Style="{StaticResource DataGridCellText}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Итог" Width="*" MinWidth="150" SortMemberPath="Result" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Result}" ToolTip="{Binding Result}"
+                                       Style="{StaticResource DataGridCellText}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Grid.Row="5" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,10,0,10"/>
+
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="ImportButton" Content="Перенести отмеченные" Width="200" Margin="0,0,8,0"
+                    IsEnabled="False" Click="Import_Click"/>
+            <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="110" IsCancel="True" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

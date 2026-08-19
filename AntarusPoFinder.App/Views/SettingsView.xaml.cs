@@ -2751,6 +2751,17 @@ public partial class SettingsView : UserControl
         LoadFirmwareTab();
     }
 
+    /// <summary>Разбор «дофайндеровского» диска (LegacyImportDialog): обход выбранной папки, поиск
+    /// прошивок и построчный перенос отмеченного в структуру Финдера. Отдельно от перестройки выше:
+    /// та приводит к правилам СВОЙ диск, а эта забирает чужое накопленное, ничего в нём не меняя.
+    /// После закрытия перечитываем вкладку «Прошивки» — версий могло прибавиться.</summary>
+    private void LegacyImport_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new LegacyImportDialog(_services, _host) { Owner = Window.GetWindow(this) };
+        dlg.ShowDialog();
+        LoadFirmwareTab();
+    }
+
     /// <summary>Локальная починка путей ОПЦ после переноса их внутрь контроллера
     /// (docs/hierarchy-rework-plan.md, этап 5 — единственный переезд, меняющий disk_path). Нужна на
     /// каждой машине отдельно, потому что путь у совпавшей записи импортом общего конфига не

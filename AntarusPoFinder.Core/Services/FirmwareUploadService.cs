@@ -54,6 +54,12 @@ public class FirmwareUploadRequest
     /// <summary>"Дата/время в номере версии" checkbox.</summary>
     public bool IncludeDateInVersion { get; set; } = true;
 
+    /// <summary>Какое время ставить в номер версии вместо «сейчас». Нужно разбору старого диска
+    /// (LegacyDiskScanner): у найденной там прошивки дата сборки — это дата ФАЙЛА, и подставлять
+    /// момент переноса значило бы объявить сборку 2019 года сегодняшней. null — как раньше,
+    /// DateTime.Now. Учитывается только вместе с <see cref="IncludeDateInVersion"/>.</summary>
+    public DateTime? VersionDate { get; set; }
+
     /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
     /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
     /// версия этой группы. Полезно, когда сама программа ПЛК не менялась, а обновился только
@@ -422,12 +428,14 @@ public static class FirmwareUploadService
             // обычно: GetNextSwVersion всё равно вернёт 1 в этом случае.
             var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
-            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, includeDate: request.IncludeDateInVersion);
+            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
+                includeDate: request.IncludeDateInVersion);
         }
         else
         {
             swInt = db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
-            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, includeDate: request.IncludeDateInVersion);
+            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
+                includeDate: request.IncludeDateInVersion);
         }
 
         // Заявка и заводской SN попадают в ИМЯ папки ОПЦ-версии (этап 5): ОПЦ заводят под конкретный
