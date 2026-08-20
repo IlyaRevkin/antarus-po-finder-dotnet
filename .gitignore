@@ -54,3 +54,8 @@ installer/*.sha256
 docs/screenshots/
 docs/*.pdf
 *.psl
+
+## Ящик агента: зеркало Nextcloud и реквизиты доступа к нему — секреты и чужие скриншоты,
+## в историю репозитория им нельзя.
+.inbox/
+tools/inbox/.env
