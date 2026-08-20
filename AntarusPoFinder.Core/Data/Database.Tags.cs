@@ -28,23 +28,71 @@ public partial class Database
         MarkFlatListAlive(FlatKindTag, name);
     }
 
+    /// <summary>Чем закончилось переименование тега — нужно вызывающему, чтобы сказать человеку
+    /// правду. Раньше интерфейс рапортовал «переименован» даже там, где не менялось ничего.</summary>
+    public enum TagRenameOutcome
+    {
+        /// <summary>Ничего не поменялось: пустое имя, такое же имя или тега уже нет.</summary>
+        Unchanged,
+        /// <summary>Обычное переименование, имя свободно.</summary>
+        Renamed,
+        /// <summary>Имя было занято — старый тег влит в существующий.</summary>
+        Merged,
+    }
+
+    /// <summary>Итог переименования вместе с именем, которое реально получилось. При слиянии это
+    /// написание УЖЕ СУЩЕСТВУЮЩЕГО тега, а не то, что набрал пользователь.</summary>
+    public readonly record struct TagRenameResult(TagRenameOutcome Outcome, string Name);
+
     /// <summary>Renames a tag everywhere it's used — the tags table entry, every fw_versions.tags
     /// AND every param_files.tags space-separated string that contains it as a whole word. The tag
-    /// pool is shared between firmware and ПЧ/УПП parameter files.</summary>
-    public void RenameTag(string oldName, string newName)
+    /// pool is shared between firmware and ПЧ/УПП parameter files.
+    ///
+    /// Занятое имя — это не ошибка, а слияние: два тега про одно и то же становятся одним. Голый
+    /// UPDATE тут падал в «UNIQUE constraint failed: tags.name» и выдавал оператору отчёт о сбое.
+    ///
+    /// Всё сравнение имён — в .NET и по загруженному списку, а НЕ через SQL. Причина в том, что
+    /// COLLATE NOCASE у SQLite сворачивает только ASCII: для базы «ПИ» и «пи» — разные строки и
+    /// обе спокойно живут в таблице, хотя для StringComparer.OrdinalIgnoreCase они равны. Из-за
+    /// этого расхождения прежний код на «пи» → «ПИ» молча выходил, ничего не переименовав.</summary>
+    public TagRenameResult RenameTag(string oldName, string newName)
     {
-        oldName = oldName.Trim();
-        newName = newName.Trim();
-        if (newName.Length == 0 || string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase)) return;
+        // Та же нормализация, что в AddTag: иначе «шкаф  управления» с двумя пробелами разъедется
+        // со справочником.
+        oldName = Services.TagString.Decode(Services.TagString.Encode(oldName ?? ""));
+        newName = Services.TagString.Decode(Services.TagString.Encode(newName ?? ""));
+        if (oldName.Length == 0 || newName.Length == 0) return new TagRenameResult(TagRenameOutcome.Unchanged, oldName);
+        if (string.Equals(oldName, newName, StringComparison.Ordinal)) return new TagRenameResult(TagRenameOutcome.Unchanged, oldName);
 
-        ExecuteNonQuery("UPDATE tags SET name = @n WHERE name = @o COLLATE NOCASE",
-            cmd => { cmd.Parameters.AddWithValue("@n", newName); cmd.Parameters.AddWithValue("@o", oldName); });
+        var all = GetAllTags();
+        // Приводим к тому написанию, которое реально лежит в таблице, — дальше сравниваем точно.
+        var stored = all.FirstOrDefault(t => string.Equals(t, oldName, StringComparison.Ordinal))
+                     ?? all.FirstOrDefault(t => string.Equals(t, oldName, StringComparison.OrdinalIgnoreCase));
+        if (stored is null) return new TagRenameResult(TagRenameOutcome.Unchanged, oldName);
+        oldName = stored;
+
+        // Занято ли новое имя ДРУГИМ тегом. Сам переименовываемый тег из проверки исключён:
+        // «пи» → «ПИ» при единственном «пи» — это смена регистра, а не столкновение.
+        var existing = all.FirstOrDefault(t =>
+            !string.Equals(t, oldName, StringComparison.Ordinal) &&
+            string.Equals(t, newName, StringComparison.OrdinalIgnoreCase));
+
+        var target = existing ?? newName;
+        if (existing is not null)
+            ExecuteNonQuery("DELETE FROM tags WHERE name = @o", cmd => cmd.Parameters.AddWithValue("@o", oldName));
+        else
+            ExecuteNonQuery("UPDATE tags SET name = @n WHERE name = @o",
+                cmd => { cmd.Parameters.AddWithValue("@n", target); cmd.Parameters.AddWithValue("@o", oldName); });
+
         // Переименование = старого больше нет, новый появился — обе отметки нужны, иначе импорт с
         // машины, ещё не знающей о переименовании, вернёт старое имя обратно.
         MarkFlatListDeleted(FlatKindTag, oldName);
-        MarkFlatListAlive(FlatKindTag, newName);
-        ReplaceTagInColumn("fw_versions", oldName, newName);
-        ReplaceTagInColumn("param_files", oldName, newName);
+        MarkFlatListAlive(FlatKindTag, target);
+        // Повтор внутри одной строки тегов схлопнет TagString.Join — строка, у которой были и
+        // старый, и новый тег, не получит его дважды.
+        ReplaceTagInColumn("fw_versions", oldName, target);
+        ReplaceTagInColumn("param_files", oldName, target);
+        return new TagRenameResult(existing is not null ? TagRenameOutcome.Merged : TagRenameOutcome.Renamed, target);
     }
 
     /// <summary>Deletes a tag from the shared list and strips it out of every fw_versions.tags and

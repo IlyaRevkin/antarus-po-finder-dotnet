@@ -471,12 +471,21 @@ public partial class SettingsView : UserControl
             Text = tag, Width = 100, Height = 24, VerticalContentAlignment = VerticalAlignment.Center,
             BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0),
         };
+        // Enter пересобирает панель, поле теряет фокус — и LostFocus заходил бы на переименование
+        // второй раз. Один пузырь = одна фиксация.
+        var committed = false;
+        void CommitOnce()
+        {
+            if (committed) return;
+            committed = true;
+            CommitTagRename(tag, input.Text);
+        }
         input.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter) { CommitTagRename(tag, input.Text); e.Handled = true; }
-            else if (e.Key == Key.Escape) { _renamingTag = null; RenderTagsTab(); e.Handled = true; }
+            if (e.Key == Key.Enter) { CommitOnce(); e.Handled = true; }
+            else if (e.Key == Key.Escape) { committed = true; _renamingTag = null; RenderTagsTab(); e.Handled = true; }
         };
-        input.LostFocus += (_, _) => CommitTagRename(tag, input.Text);
+        input.LostFocus += (_, _) => CommitOnce();
         input.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
         return new Border { Style = (Style)FindResource("TagBubbleBorder"), Child = input, Margin = new Thickness(0, 0, 6, 6) };
     }
@@ -485,10 +494,20 @@ public partial class SettingsView : UserControl
     {
         _renamingTag = null;
         var newText = newTextRaw.Trim();
-        if (newText.Length == 0 || newText.Equals(oldTag, StringComparison.OrdinalIgnoreCase)) { RenderTagsTab(); return; }
-        _services.Db.RenameTag(oldTag, newText);
+        // Сравнение точное, а не без учёта регистра: «пи» → «ПИ» — осмысленная правка, и раньше
+        // она молча отваливалась здесь, а интерфейс всё равно рапортовал об успехе.
+        if (newText.Length == 0 || newText.Equals(oldTag, StringComparison.Ordinal)) { RenderTagsTab(); return; }
+
+        var result = _services.Db.RenameTag(oldTag, newText);
         LoadTagsTab();
-        _host.ShowStatus($"Тег переименован: «{oldTag}» → «{newText}»", category: NotificationCategory.FirmwareAndParams);
+        var message = result.Outcome switch
+        {
+            Database.TagRenameOutcome.Renamed => $"Тег переименован: «{oldTag}» → «{result.Name}»",
+            Database.TagRenameOutcome.Merged => $"Тег «{oldTag}» объединён с существующим «{result.Name}»",
+            _ => null,
+        };
+        if (message is not null)
+            _host.ShowStatus(message, category: NotificationCategory.FirmwareAndParams);
     }
 
     private Border MakeTagAddButtonBubble()
@@ -2971,8 +2990,10 @@ public partial class SettingsView : UserControl
         }
 
         _host.ShowStatus(release
-            ? $"Версия выведена из модерации: {v.VersionRaw}" + (delivered ? " (отправлено коллегам)" : "")
-            : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+            // Названием прошивки, а не голым номером версии: по «2.0.0042.0003» невозможно понять,
+            // к чему относится сообщение (тикет коллеги — «не номер прошивки, а название её»).
+            ? $"Версия выведена из модерации: {title}" + (delivered ? " (отправлено коллегам)" : "")
+            : $"Теги обновлены: {title}", category: NotificationCategory.FirmwareAndParams);
         LoadModerationTab();
     }
 
