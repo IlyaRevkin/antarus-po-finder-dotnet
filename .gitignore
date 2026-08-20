@@ -59,3 +59,7 @@ docs/*.pdf
 ## в историю репозитория им нельзя.
 .inbox/
 tools/inbox/.env
+
+## Служба обмена: собранный бинарник и рабочие настройки с ключами — не исходники.
+tools/sync-server/*.exe
+tools/sync-server/antarus-sync.json
