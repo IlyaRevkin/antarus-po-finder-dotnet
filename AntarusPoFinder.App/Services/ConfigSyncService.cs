@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -96,7 +96,25 @@ public static class ConfigSyncService
     /// GetValue&lt;string&gt;() («An element of type 'True' cannot be converted to a 'System.String'»).
     private static bool IsSetting(KeyValuePair<string, JsonNode?> kv) =>
         (kv.Value is null || (kv.Value is JsonValue v && v.TryGetValue<string>(out _)))
-        && !SkipKeys.Contains(kv.Key) && !SkipSettingsKeys.Contains(kv.Key);
+        && !SkipKeys.Contains(kv.Key) && !IsPerMachineSetting(kv.Key);
+
+    /// <summary>Настройка, которая никогда не уезжает в общий конфиг и никогда из него не читается:
+    /// либо она перечислена в <see cref="SkipSettingsKeys"/>, либо это отметка о выполненной разовой
+    /// миграции.
+    ///
+    /// <b>Про отметки миграций.</b> Каждая из них (Database.RunDataMigrations) означает «на ЭТОЙ
+    /// базе разовая правка уже сделана» и обязана оставаться местной. Уехав в общий конфиг, такая
+    /// отметка приезжает на машину, где миграция ещё НЕ выполнялась, и отменяет её навсегда: флаг
+    /// стоит, работа не сделана, и повторить её нечем — миграции по построению одноразовые.
+    /// Проверка по префиксу, а не списком: список пришлось бы дополнять руками при каждой новой
+    /// миграции, а забытое имя — это молча пропущенная миграция на чужой машине, то есть ровно та
+    /// поломка, которую заметят в последнюю очередь.</summary>
+    private static bool IsPerMachineSetting(string key) =>
+        SkipSettingsKeys.Contains(key) || key.StartsWith(MigrationFlagPrefix, StringComparison.Ordinal);
+
+    /// <summary>Префикс отметок выполненных разовых миграций — см. <see cref="IsPerMachineSetting"/>
+    /// и Database.RunDataMigrations, где они и заводятся.</summary>
+    public const string MigrationFlagPrefix = "migration_";
 
     /// <summary>Настройки, которые НИКОГДА не уезжают в общий конфиг — то, что у каждой машины
     /// действительно своё: пароли/хеши, локальные пути и буквы дисков, выбор шнурка/адаптера у
@@ -326,7 +344,7 @@ public static class ConfigSyncService
         // else: ReadShared уже отфильтровал случай «ревизия не выросла» — сюда попадают только
         // снимки строго новее последнего применённого этой машиной маркера.
 
-        var settingsChanged = CountSettingsChanges(services, snap.RootNode);
+        var settingsChanged = CountSettingsChanges(services, snap.RootNode, snap.ExportedAt);
         var diff = services.Db.PreviewImportHierarchyData(snap.Hierarchy, snap.Authoritative);
 
         var incomingSchema = ParseSchemaVersion(snap.RootNode);
@@ -494,12 +512,17 @@ public static class ConfigSyncService
         var oldRoot = snap.RootNode["source_root_path"]?.GetValue<string>() ?? "";
 
         int settingsApplied = 0;
+        var localEdits = services.Db.LocalSettingEdits();
         foreach (var kv in snap.RootNode)
         {
             if (!IsSetting(kv)) continue;
             var incoming = kv.Value?.GetValue<string>() ?? "";
             if (!ShouldApplySetting(services, kv.Key, incoming)) continue;
+            if (EditedHereLater(localEdits, kv.Key, snap.ExportedAt)) continue;
             services.Cfg.Set(kv.Key, incoming);
+            // Отметку снимаем: приехавший снимок новее правки и уже её перекрыл. Держать её дальше
+            // значило бы сравнивать с заведомо устаревшим временем каждый следующий приём.
+            if (localEdits.ContainsKey(kv.Key)) services.Db.ClearLocalSettingEdit(kv.Key);
             settingsApplied++;
         }
 
@@ -793,7 +816,7 @@ public static class ConfigSyncService
         // passwords in plaintext) onto the shared drive for every other machine to see.
         foreach (var kv in services.Db.GetAllSettings())
         {
-            if (SkipSettingsKeys.Contains(kv.Key)) continue;
+            if (IsPerMachineSetting(kv.Key)) continue;
             payload[kv.Key] = kv.Value;
         }
 
@@ -1009,14 +1032,18 @@ public static class ConfigSyncService
         catch { return false; }
     }
 
-    private static int CountSettingsChanges(AppServices services, JsonObject rootNode)
+    private static int CountSettingsChanges(AppServices services, JsonObject rootNode, string exportedAt)
     {
         var changed = 0;
+        var localEdits = services.Db.LocalSettingEdits();
         foreach (var kv in rootNode)
         {
             if (!IsSetting(kv)) continue;
             var incoming = kv.Value?.GetValue<string>() ?? "";
             if (!ShouldApplySetting(services, kv.Key, incoming)) continue;
+            // Тот же отсев, что и в применении, — иначе плашка приёма вечно обещала бы изменение,
+            // которое применение теперь сознательно пропускает.
+            if (EditedHereLater(localEdits, kv.Key, exportedAt)) continue;
             if (services.Cfg.Get(kv.Key) != incoming) changed++;
         }
         return changed;
@@ -1034,6 +1061,41 @@ public static class ConfigSyncService
     /// применение молча пропускает.</summary>
     private static bool ShouldApplySetting(AppServices services, string key, string incoming) =>
         incoming.Length > 0 || !ConfigService.PresetKeys.Contains(key);
+
+    /// <summary>Правил ли эту настройку человек ЗДЕСЬ и позже, чем был снят приехавший конфиг.
+    ///
+    /// <b>Зачем.</b> До этого приём писал чужое значение поверх своего вслепую — ни времени, ни
+    /// ревизии, ничего. Для справочников это терпимо (они сливаются отдельно и по-другому), а для
+    /// синхронизируемых настроек означало вот что: подтяжка идёт сама, у всех ролей, каждые
+    /// sync_interval_min (по умолчанию 5 минут), а ОТПРАВЛЯЕТ общий конфиг только администратор и
+    /// по умолчанию не отправляет вовсе (config_push_interval_min = 0). То есть сохранённое
+    /// оформление этикетки на любой машине жило до ближайшей подтяжки и возвращалось к чужому —
+    /// дословно «не сохраняются настройки дизайна».
+    ///
+    /// Правило простое и одностороннее: правка НЕ СТАРШЕ снимка — снимок этот ключ не трогает;
+    /// правка старше или её нет — всё как раньше, приезжее значение побеждает. Так администратор
+    /// по-прежнему может задать оформление один раз и разослать его всем (его экспорт свежее любой
+    /// давней местной правки), но чужой конфиг больше не отменяет то, что человек сохранил минуту
+    /// назад.
+    ///
+    /// <b>Совпали до секунды — верх берёт местное.</b> И время правки, и exported_at хранятся с
+    /// точностью до секунды; равенство означает, что снимок готовили не позже той же секунды, в
+    /// которую человек нажал «Сохранить», то есть его значения в снимке заведомо нет. Разрешать
+    /// такому снимку затирать правку — значит воспроизводить исходную жалобу раз в ту секунду, когда
+    /// не повезло.
+    ///
+    /// <b>У снимка без exported_at</b> (очень старая версия программы на отправителе) времени нет —
+    /// сравнивать не с чем, и любая местная правка считается свежее: лучше сохранить своё, чем молча
+    /// принять неизвестно когда снятое чужое.
+    ///
+    /// Отметки ставятся только там, где значение задал ЧЕЛОВЕК (ConfigService.MarkEditedHere), —
+    /// служебные записи и watermark'и сюда не попадают и продолжают приниматься как раньше.</summary>
+    private static bool EditedHereLater(Dictionary<string, string> localEdits, string key, string exportedAt)
+    {
+        if (!localEdits.TryGetValue(key, out var editedAt) || editedAt.Length == 0) return false;
+        if (string.IsNullOrEmpty(exportedAt)) return true;
+        return string.CompareOrdinal(editedAt, exportedAt) >= 0;
+    }
 
     /// <summary>ConfigFileCrypto.TryDecrypt returns null for a file that isn't in our encrypted
     /// format — that's what a shared config exported by a pre-encryption app version (or, before

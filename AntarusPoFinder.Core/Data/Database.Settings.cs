@@ -1,4 +1,4 @@
-namespace AntarusPoFinder.Core.Data;
+﻿namespace AntarusPoFinder.Core.Data;
 
 public partial class Database
 {
@@ -33,4 +33,49 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@k", key);
                 cmd.Parameters.AddWithValue("@v", value);
             });
+
+    // ── «Это правили здесь и вот когда» ──────────────────────────────────────
+    // Зачем нужно — см. таблицу settings_local_edits в Database.cs. Коротко: приём общего конфига
+    // писал чужое значение поверх своего вслепую, и сохранённое оформление этикетки жило до
+    // ближайшей автоматической подтяжки — то есть минуты. Отметка даёт приёму основание отличить
+    // свою свежую правку от своей же устаревшей.
+
+    /// <summary>Формат отметки — тот же, что у exported_at в общем конфиге
+    /// (ConfigSyncService.PrepareExport). Строки в нём сравниваются как строки и совпадают с
+    /// порядком времени, поэтому приёму достаточно обычного сравнения строк.</summary>
+    public const string LocalEditStampFormat = "yyyy-MM-ddTHH:mm:ss";
+
+    /// <summary>Отметить, что перечисленные настройки только что сохранил человек на этой машине.
+    /// Вызывать ТОЛЬКО из мест, где значение задал человек: служебные записи (watermark'и
+    /// синхронизации, счётчики) отмечать не надо и незачем — они и так per-machine.</summary>
+    public void MarkSettingsEditedLocally(IEnumerable<string> keys, DateTime at)
+    {
+        var stamp = at.ToString(LocalEditStampFormat);
+        foreach (var key in keys)
+            ExecuteNonQuery(
+                "INSERT INTO settings_local_edits(key,edited_at) VALUES(@k,@t) " +
+                "ON CONFLICT(key) DO UPDATE SET edited_at=excluded.edited_at",
+                cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@k", key);
+                    cmd.Parameters.AddWithValue("@t", stamp);
+                });
+    }
+
+    /// <summary>Все отметки разом: приём перебирает сотни ключей, и спрашивать базу по каждому
+    /// отдельно незачем.</summary>
+    public Dictionary<string, string> LocalSettingEdits()
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        using var reader = ExecuteReader("SELECT key, edited_at FROM settings_local_edits");
+        while (reader.Read())
+            result[GetString(reader, "key")] = GetString(reader, "edited_at");
+        return result;
+    }
+
+    /// <summary>Снять отметку — её уже перекрыл более свежий общий конфиг, и держать её дальше
+    /// значило бы сравнивать с ней каждый следующий приём впустую.</summary>
+    public void ClearLocalSettingEdit(string key) =>
+        ExecuteNonQuery("DELETE FROM settings_local_edits WHERE key=@k",
+            cmd => cmd.Parameters.AddWithValue("@k", key));
 }

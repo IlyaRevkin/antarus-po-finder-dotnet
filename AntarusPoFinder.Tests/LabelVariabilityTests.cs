@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Services;
+﻿using AntarusPoFinder.Core.Services;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -147,7 +147,12 @@ public class LabelVariabilityTests
     {
         // Поправка: «кст текст не инструкция, а руководство по эксплуатации» — это читает заказчик.
         Assert.Equal("Руководство по эксплуатации", LabelLayout.DefaultHeadline);
-        Assert.Equal("РЭ", LabelLayout.DefaultHoleText);
         Assert.Equal("Руководство по эксплуатации", new LabelLayout().EffectiveHeadline());
+
+        // В центре кода — имя предприятия, и просили именно так: «в центре QR написано в 2 строки
+        // AMPE / RUS». Разбиение считает QrHoleText (длиннее четырёх знаков — в строки), и то, что
+        // семёрка ложится именно надвое, а не в три строки, — часть просьбы, а не побочный эффект.
+        Assert.Equal("AMPERUS", LabelLayout.DefaultHoleText);
+        Assert.Equal(new[] { "AMPE", "RUS" }, QrHoleText.Wrap(LabelLayout.DefaultHoleText));
     }
 }

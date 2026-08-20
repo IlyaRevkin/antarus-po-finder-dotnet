@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -215,7 +215,16 @@ public class QrReadabilityAndHeadlineTests
     [Fact]
     public void Headline_IsItsOwnBlockAboveTheTitle()
     {
-        var layout = new LabelLayout { HeadlineText = LabelLayout.DefaultHeadline, ShowHeadline = true };
+        var layout = LabelLayout.Default with
+        {
+            HeadlineText = LabelLayout.DefaultHeadline,
+            ShowHeadline = true,
+            // Проверка именно про «сам»: подпись садится первой строкой в текстовую колонку и не
+            // отнимает места у кода. Умолчание с тех пор — полоса сверху (так попросили), и
+            // полагаться здесь на него значило бы проверять другую раскладку под старым названием.
+            HeadlinePlace = HeadlinePlacement.Auto,
+            QrPlace = QrPlacement.Auto,
+        };
         var plan = LabelPlanner.Plan(layout, "ЩУН-3", "2.1.0042.0001", Url);
 
         Assert.True(plan.HasHeadline);
@@ -265,11 +274,14 @@ public class QrReadabilityAndHeadlineTests
     [Fact]
     public void LongHeadline_ShrinksThenWarns_ButNeverOverflows()
     {
-        var layout = new LabelLayout
+        var layout = LabelLayout.Default with
         {
             WidthMm = 40, HeightMm = 30,
             HeadlineText = "Инструкция по эксплуатации шкафа управления для заказчика",
             ShowHeadline = true,
+            // «Сам» — та раскладка, на которой ужимание подписи и писалось (см. соседний тест).
+            HeadlinePlace = HeadlinePlacement.Auto,
+            QrPlace = QrPlacement.Auto,
         };
 
         var plan = LabelPlanner.Plan(layout, "ЩУН-3", "2.1.0042.0001", Url);
@@ -357,22 +369,27 @@ public class QrReadabilityAndHeadlineTests
         using var database = new Database(db.Path);
         var cfg = new ConfigService(database);
 
+        // Чистая база — это умолчания программы, и сверяемся мы именно с ними, а не с их копией
+        // числами: список умолчаний живёт в одном месте (LabelLayout.Default), и повторять его
+        // здесь значило бы завести второй, который однажды разойдётся с первым.
         var fresh = LabelLayout.FromConfig(cfg);
-        Assert.Equal(QrPlacement.Auto, fresh.QrPlace);
-        Assert.Equal(QrStyle.Rounded, fresh.Style);
-        Assert.Equal(HeadlinePlacement.Auto, fresh.HeadlinePlace);
-        Assert.Equal(HeadlineAlignment.Center, fresh.HeadlineAlign);
+        Assert.Equal(LabelLayout.Default.QrPlace, fresh.QrPlace);
+        Assert.Equal(LabelLayout.Default.Style, fresh.Style);
+        Assert.Equal(LabelLayout.Default.HeadlinePlace, fresh.HeadlinePlace);
+        Assert.Equal(LabelLayout.Default.HeadlineAlign, fresh.HeadlineAlign);
 
+        // Сохраняем ЗАВЕДОМО не умолчания — иначе тест прошёл бы и на настройке, которая никуда не
+        // записалась: прочиталось бы то же самое умолчание.
         (fresh with
         {
-            QrPlace = QrPlacement.Right,
+            QrPlace = QrPlacement.Left,
             Style = QrStyle.Dots,
             HeadlinePlace = HeadlinePlacement.Bottom,
             HeadlineAlign = HeadlineAlignment.Left,
         }).SaveTo(cfg);
 
         var back = LabelLayout.FromConfig(cfg);
-        Assert.Equal(QrPlacement.Right, back.QrPlace);
+        Assert.Equal(QrPlacement.Left, back.QrPlace);
         Assert.Equal(QrStyle.Dots, back.Style);
         Assert.Equal(HeadlinePlacement.Bottom, back.HeadlinePlace);
         Assert.Equal(HeadlineAlignment.Left, back.HeadlineAlign);
@@ -409,7 +426,7 @@ public class QrReadabilityAndHeadlineTests
 
         cfg.SetLabelText("label_qr_place", "ПоДиагонали");
         cfg.SetLabelText("label_headline_place", "");
-        Assert.Equal(QrPlacement.Auto, LabelLayout.FromConfig(cfg).QrPlace);
-        Assert.Equal(HeadlinePlacement.Auto, LabelLayout.FromConfig(cfg).HeadlinePlace);
+        Assert.Equal(LabelLayout.Default.QrPlace, LabelLayout.FromConfig(cfg).QrPlace);
+        Assert.Equal(LabelLayout.Default.HeadlinePlace, LabelLayout.FromConfig(cfg).HeadlinePlace);
     }
 }

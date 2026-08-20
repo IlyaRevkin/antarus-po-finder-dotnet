@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Services;
@@ -23,6 +23,23 @@ public class LabelPlanTests
     private const string Url = "https://disk.antarus.su/cloud/ПО/ПЖ%20ПИ/SMH5/1.0.0004.0003/инструкция.pdf";
     private const string Title = "SMH5 · ПЖ ПИ";
     private const string Subtitle = "1.0.0004.0003 от 01.01.2026";
+
+    /// <summary>Макет, на котором писались проверки компоновки: код и текстовая колонка РЯДОМ
+    /// (положение «сам»), ссылка печатается своим блоком внизу, рамка есть.
+    ///
+    /// Умолчания программы с тех пор поменялись — по просьбе Ильи код теперь справа, ссылки текстом
+    /// и рамки нет (см. LabelLayout.Default). Проверки ниже про это не знают и знать не должны: они
+    /// описывают, как раскладка делит место между кодом, текстом и ссылкой, а не какая раскладка
+    /// стоит из коробки. Поэтому нужная им форма задана здесь явно — иначе следующая смена умолчания
+    /// молча превратила бы половину этого файла в проверку совсем другой этикетки, и падение
+    /// показывало бы не то, что сломалось.</summary>
+    private static readonly LabelLayout Beside = LabelLayout.Default with
+    {
+        QrPlace = QrPlacement.Auto,
+        HeadlinePlace = HeadlinePlacement.Auto,
+        ShowLink = true,
+        ShowFrame = true,
+    };
 
     // ── Главный инвариант ────────────────────────────────────────────────────
 
@@ -74,7 +91,7 @@ public class LabelPlanTests
         foreach (var qr in new[] { 0.0, 25.0, 85.0 })
         {
             var plan = LabelPlanner.Plan(
-                new LabelLayout { WidthMm = w, HeightMm = h, QrMm = qr }, Title, Subtitle, Url);
+                Beside with { WidthMm = w, HeightMm = h, QrMm = qr }, Title, Subtitle, Url);
             var what = $"{w}×{h}, QR {qr}";
 
             if (plan.HasTitle)
@@ -161,7 +178,7 @@ public class LabelPlanTests
     public void Plan_CaptionReservesExactlyTheHeightItPrints()
     {
         var plan = LabelPlanner.Plan(
-            new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }, Title, Subtitle, Url);
+            Beside with { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }, Title, Subtitle, Url);
 
         Assert.True(plan.HasCaption);
         Assert.InRange(plan.CaptionLines, 1, LabelPlanner.MaxCaptionLines);
@@ -182,7 +199,7 @@ public class LabelPlanTests
         // Мелкая наклейка. При доле 0.4 здесь получалось 14.3 мм — почти нижний предел (12 мм),
         // с которого код и перестаёт браться телефоном; при 0.3 остаётся 15.6 мм.
         var small = LabelPlanner.Plan(
-            new LabelLayout { WidthMm = 40, HeightMm = 30, MarginMm = 2 }, Title, Subtitle, Url);
+            Beside with { WidthMm = 40, HeightMm = 30, MarginMm = 2 }, Title, Subtitle, Url);
 
         Assert.True(small.FitsInsideBand(), "содержимое вышло за печатную область на 40×30");
         Assert.True(small.Qr.W >= 15,
@@ -196,7 +213,7 @@ public class LabelPlanTests
         // Стандартная этикетка: раскладка обязана остаться ТОЙ ЖЕ, что была при доле 0.4, — ссылка
         // укладывается в две строки заданным кеглем задолго до предела доли, и доля её не трогает.
         var standard = LabelPlanner.Plan(
-            new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }, Title, Subtitle, Url);
+            Beside with { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 }, Title, Subtitle, Url);
 
         Assert.True(standard.HasCaption);
         Assert.Equal(2, standard.CaptionLines);
@@ -209,7 +226,7 @@ public class LabelPlanTests
     [Fact]
     public void Plan_WithoutLink_GivesTheRoomToTheCode()
     {
-        var layout = new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 };
+        var layout = Beside with { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 };
         var withLink = LabelPlanner.Plan(layout, Title, Subtitle, Url);
         var without = LabelPlanner.Plan(layout with { ShowLink = false }, Title, Subtitle, Url);
 
@@ -251,7 +268,7 @@ public class LabelPlanTests
     [Fact]
     public void Plan_Frame_RunsAlongThePrintableArea_AndContentStaysInsideIt()
     {
-        var layout = new LabelLayout { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 };
+        var layout = Beside with { WidthMm = 97.5, HeightMm = 72, MarginMm = 3 };
         var framed = LabelPlanner.Plan(layout, Title, Subtitle, Url);
         var bare = LabelPlanner.Plan(layout with { ShowFrame = false }, Title, Subtitle, Url);
 
@@ -280,15 +297,26 @@ public class LabelPlanTests
     }
 
     /// <summary>На настройках по умолчанию предупреждать не о чем: если стандартная этикетка уже
-    /// требует пояснений, значит, сломаны сами умолчания.</summary>
+    /// требует пояснений, значит, сломаны сами умолчания.
+    ///
+    /// Заодно здесь заперты сами умолчания — те, о которых просили дословно: подпись назначения
+    /// полосой сверху, рамки нет, ссылки текстом нет, код справа. Меняются они редко и осознанно, и
+    /// смена должна ронять именно этот тест, а не десяток проверок компоновки по всему файлу.</summary>
     [Fact]
     public void Plan_Defaults_ProduceNoWarnings()
     {
-        var plan = LabelPlanner.Plan(new LabelLayout(), Title, Subtitle, Url);
+        Assert.Equal(QrPlacement.Right, LabelLayout.Default.QrPlace);
+        Assert.Equal(HeadlinePlacement.Top, LabelLayout.Default.HeadlinePlace);
+        Assert.False(LabelLayout.Default.ShowFrame);
+        Assert.False(LabelLayout.Default.ShowLink);
+
+        var plan = LabelPlanner.Plan(LabelLayout.Default, Title, Subtitle, Url);
 
         Assert.Empty(plan.Warnings);
         Assert.True(plan.HasTitle);
-        Assert.True(plan.HasCaption);
+        Assert.True(plan.HasHeadline);
+        // Ссылки текстом по умолчанию нет — её место уходит коду, ради чего выключение и делалось.
+        Assert.False(plan.HasCaption);
         Assert.True(plan.Qr.W >= 40, "на стандартной этикетке 97.5×72 коду есть где развернуться");
     }
 
@@ -448,7 +476,7 @@ public class LabelPlanTests
 
         // А в режиме «сам» та же перестановка — штатный ход, и предупреждать не о чем.
         var auto = LabelPlanner.Plan(
-            new LabelLayout { WidthMm = 30, HeightMm = 60, MarginMm = 2 }, Title, Subtitle, Url);
+            Beside with { WidthMm = 30, HeightMm = 60, MarginMm = 2 }, Title, Subtitle, Url);
         Assert.True(auto.Stacked);
         Assert.DoesNotContain(auto.Warnings, w => w.Contains("переставлен", StringComparison.OrdinalIgnoreCase));
     }

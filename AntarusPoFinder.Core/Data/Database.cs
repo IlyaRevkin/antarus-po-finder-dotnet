@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Infrastructure;
@@ -213,6 +213,22 @@ public partial class Database : IDisposable
              CREATE TABLE IF NOT EXISTS settings (
                  key   TEXT PRIMARY KEY,
                  value TEXT NOT NULL DEFAULT ''
+             );
+
+             -- Когда ту или иную настройку последний раз правил ЧЕЛОВЕК на ЭТОЙ машине.
+             -- Приём общего конфига (ConfigSyncService.ApplyToDatabase) писал чужое значение поверх
+             -- любого своего, ничего не сравнивая, — и сохранённое оформление этикетки возвращалось
+             -- к чужому в ближайшую же автоматическую подтяжку, то есть максимум через пять минут.
+             -- Здесь лежит отметка времени, по которой приём отличает «моё, свежее» от «моё,
+             -- устаревшее»: правка новее того экспорта, что приехал, — остаётся; старше —
+             -- заменяется, как и раньше.
+             --
+             -- ОТДЕЛЬНОЙ ТАБЛИЦЕЙ, а не ключом в settings: settings целиком уезжает в общий конфиг
+             -- (PrepareExport), и отметка «когда правили здесь» уехала бы вместе с ним, начав
+             -- защищать чужие правки на чужих машинах. Таблицы синхронизация не трогает вовсе.
+             CREATE TABLE IF NOT EXISTS settings_local_edits (
+                 key       TEXT PRIMARY KEY,
+                 edited_at TEXT NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS tags (
@@ -741,6 +757,7 @@ public partial class Database : IDisposable
         SeedFwAttachmentKindsOnce();
         SeedHostingAddressesOnce();
         RenameLabelInstructionTextsOnce();
+        ApplyLabelDesignDefaultsOnce();
 
         // Remove '—' subtypes for groups that also have real subtypes (groups like НГР always
         // have real subtypes; a leftover '—' entry would put controllers directly under the
@@ -890,6 +907,46 @@ public partial class Database : IDisposable
             if (GetSetting(key) == legacy) SetSetting(key, fresh);
         }
 
+        SetSetting(doneFlag, "true");
+    }
+
+    /// <summary>Разовое приведение ОФОРМЛЕНИЯ этикетки к новым умолчаниям — и защита местного
+    /// оформления от чужого общего конфига.
+    ///
+    /// Просьба была такая: по умолчанию «Руководство по эксплуатации» полосой сверху, рамки нет,
+    /// ссылки текстом нет, код справа, в центре кода AMPERUS (ложится в две строки: AMPE / RUS).
+    /// Новые умолчания стоят в LabelLayout.Default, но их одних мало: на машине, которая эти
+    /// настройки хоть раз сохраняла, в settings уже лежат прежние значения, и умолчание из кода до
+    /// неё не доедет никогда. Поэтому здесь прежние умолчания переписываются новыми — и ТОЛЬКО
+    /// прежние умолчания: то, что человек подобрал сам, не трогается.
+    ///
+    /// <b>И отдельно — отметка «правили здесь».</b> Она ставится на ВСЕ ключи оформления, включая
+    /// те, что мы не переписывали. Без неё эта миграция бессмысленна: приём общего конфига идёт сам
+    /// каждые несколько минут, и первый же приехавший снимок (снятый до всего этого, с прежним
+    /// оформлением) вернул бы всё назад — ровно тот механизм, из-за которого «не сохраняются
+    /// настройки дизайна» (см. ConfigSyncService.EditedHereLater). Общий конфиг это не отменяет:
+    /// экспорт администратора, сделанный ПОСЛЕ обновления, свежее отметки и по-прежнему
+    /// раскатывает единое оформление на всех.</summary>
+    private void ApplyLabelDesignDefaultsOnce()
+    {
+        const string doneFlag = "migration_label_design_defaults";
+        if (GetSetting(doneFlag) == "true") return;
+
+        // (ключ, прежнее умолчание, новое умолчание). Пары читаются как «если тут до сих пор стоит
+        // то, чего никто не выбирал, — поставить то, о чём попросили».
+        foreach (var (key, was, now) in new[]
+                 {
+                     ("label_qr_place", "Auto", Services.QrPlacement.Right.ToString()),
+                     ("label_headline_place", "Auto", Services.HeadlinePlacement.Top.ToString()),
+                     ("label_show_frame", "true", "false"),
+                     ("label_show_link", "true", "false"),
+                     ("label_hole_text", Services.LabelLayout.LegacyHoleTextRe, Services.LabelLayout.DefaultHoleText),
+                 })
+        {
+            if (HasSetting(key) && GetSetting(key) == was) SetSetting(key, now);
+        }
+
+        MarkSettingsEditedLocally(Services.LabelLayout.SyncedKeys, DateTime.Now);
         SetSetting(doneFlag, "true");
     }
 

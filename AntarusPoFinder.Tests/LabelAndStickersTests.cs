@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -243,8 +243,11 @@ public class LabelAndStickersTests
         var layout = new LabelLayout();
 
         Assert.Equal(3, layout.MarginMm);
+        // Ссылка текстом по умолчанию ВЫКЛЮЧЕНА (так попросили: место нужнее коду), но кегль всё
+        // равно обязан оставаться читаемым — её включают на крупных наклейках, и включённая она
+        // должна печататься, а не разваливаться.
+        Assert.False(layout.ShowLink);
         Assert.True(layout.CaptionPt >= 9, "кегль ссылки ниже 9 pt на 203 dpi кириллицей разваливается");
-        Assert.True(layout.ShowLink);
     }
 
     /// <summary>Значения приводятся к рабочему диапазону при КАЖДОМ чтении — в настройки может

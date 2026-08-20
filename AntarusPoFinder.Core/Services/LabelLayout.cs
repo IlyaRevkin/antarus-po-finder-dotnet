@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -148,12 +148,18 @@ public sealed record LabelLayout
     public double CaptionPt { get; init; } = 9;
 
     /// <summary>Печатать ли ссылку текстом под QR. Она нужна, когда телефон код не берёт, но на
-    /// узкой этикетке иногда важнее заголовок — поэтому выключаемо.</summary>
-    public bool ShowLink { get; init; } = true;
+    /// узкой этикетке иногда важнее заголовок — поэтому выключаемо.
+    ///
+    /// По умолчанию ВЫКЛЮЧЕНА (см. <see cref="Default"/>): длинный адрес хостинга кеглем в 9 пт
+    /// занимает у наклейки три строки, читать его с шкафа всё равно никто не будет, а место он
+    /// отнимает у кода — то есть у единственного, чем этой наклейкой пользуются.</summary>
+    public bool ShowLink { get; init; }
 
     /// <summary>Рамка по краю этикетки. На листах с высечкой она помогает попасть в границы, на
-    /// рулоне — только тратит тонер.</summary>
-    public bool ShowFrame { get; init; } = true;
+    /// рулоне — только тратит тонер. По умолчанию ВЫКЛЮЧЕНА: наклейки печатаются рулоном, и там
+    /// граница уже задана высечкой, а нарисованная рамка при малейшем уходе ленты печатается
+    /// кривой относительно края — то есть аккуратнее без неё.</summary>
+    public bool ShowFrame { get; init; }
 
     /// <summary>Вид кода: скруглённый (по умолчанию), классическая матрица или точки. Читается во
     /// всех трёх видах: форма клетки не меняет ни её центр, ни размер, а уровень коррекции Q
@@ -165,8 +171,10 @@ public sealed record LabelLayout
     /// окошка под подпись в центре.</summary>
     public bool FancyQr => Style != QrStyle.Classic;
 
-    /// <summary>Где стоит код относительно текста. По умолчанию «сам» — прежнее поведение.</summary>
-    public QrPlacement QrPlace { get; init; } = QrPlacement.Auto;
+    /// <summary>Где стоит код относительно текста. По умолчанию — СПРАВА: наклейку на шкафу читают
+    /// слева направо, сначала название установки, потом наводят телефон, и код под правой рукой
+    /// удобнее. Прежнее умолчание («сам», код слева) осталось отдельным пунктом списка.</summary>
+    public QrPlacement QrPlace { get; init; } = QrPlacement.Right;
 
     /// <summary>Строка над кодом, объясняющая, ЗАЧЕМ этот QR.
     ///
@@ -181,9 +189,11 @@ public sealed record LabelLayout
     /// подпись на мелкой наклейке и стереть заготовленный текст — разные намерения.</summary>
     public bool ShowHeadline { get; init; } = true;
 
-    /// <summary>Где печатать подпись назначения. По умолчанию «сам» — прежнее поведение (первой
-    /// строкой в области текста, у кода она при этом ничего не забирает).</summary>
-    public HeadlinePlacement HeadlinePlace { get; init; } = HeadlinePlacement.Auto;
+    /// <summary>Где печатать подпись назначения. По умолчанию — ПОЛОСОЙ СВЕРХУ: «Руководство по
+    /// эксплуатации» должно читаться первым, до названия установки и до кода, иначе заказчик видит
+    /// «просто QR и непонятные цифры» — ровно ту жалобу, ради которой подпись и появилась. Прежнее
+    /// умолчание («сам», первой строкой в колонке текста) осталось отдельным пунктом списка.</summary>
+    public HeadlinePlacement HeadlinePlace { get; init; } = HeadlinePlacement.Top;
 
     /// <summary>Выравнивание подписи назначения в её строке.</summary>
     public HeadlineAlignment HeadlineAlign { get; init; } = HeadlineAlignment.Center;
@@ -209,14 +219,19 @@ public sealed record LabelLayout
     /// синхронизация, и переименование сломало бы и то и другое.</summary>
     public const string DefaultHeadline = "Руководство по эксплуатации";
 
-    /// <summary>«РЭ» — общепринятое сокращение руководства по эксплуатации; оно же и короче, то есть
-    /// печатается в плашке крупнее, чем прежнее «ИНСТ».</summary>
-    public const string DefaultHoleText = "РЭ";
+    /// <summary>Подпись в окошке кода — имя предприятия. Наклейка уходит заказчику, и в центре
+    /// кода читается ровно то, чьё это оборудование; «что это за документ» уже сказано подписью
+    /// назначения полосой сверху. Семь знаков ложатся в две строки (AMPE / RUS, см.
+    /// <see cref="QrHoleText"/>) — то есть квадратом, а не полоской, и кегль от этого только
+    /// выигрывает.</summary>
+    public const string DefaultHoleText = "AMPERUS";
 
-    /// <summary>Прежние умолчания. Нужны разовой миграции (Database.RenameLabelInstructionTextsOnce):
-    /// переписать текст можно только там, где его не правили руками.</summary>
+    /// <summary>Прежние умолчания. Нужны разовым миграциям (Database.RenameLabelInstructionTextsOnce,
+    /// Database.ApplyLabelDesignDefaultsOnce): переписать текст можно только там, где его не правили
+    /// руками. «РЭ» — умолчание, стоявшее между «ИНСТ» и нынешним.</summary>
     public const string LegacyHeadline = "Инструкция для заказчика";
     public const string LegacyHoleText = "ИНСТ";
+    public const string LegacyHoleTextRe = "РЭ";
 
     /// <summary>Столько знаков в подписи центра помещается в плашку в 20 % стороны кода, если верстать
     /// её в три строки. Больше — кегль падает ниже различимого на 203 dpi, поэтому лишнее отсекается.</summary>
@@ -312,6 +327,16 @@ public sealed record LabelLayout
 
     // ── Настройки ────────────────────────────────────────────────────────────
 
+    /// <summary>Макет «из коробки» — та самая запись, которую даёт <c>new LabelLayout()</c>.
+    ///
+    /// Существует отдельным полем, чтобы <see cref="FromConfig"/> брал запасные значения ИЗ НЕЁ, а
+    /// не повторял их числами и словами у себя. Повторял он их ровно до этой правки — и разошёлся:
+    /// у записи «положение кода» умолчание одно, а в чтении настроек рядом стояло своё, зашитое.
+    /// Пока умолчания совпадали, разницы не было видно; в тот день, когда умолчание поменяли в
+    /// одном месте из двух, кнопка «Вернуть исходный макет» и первый запуск на чистой машине стали
+    /// давать РАЗНЫЕ этикетки. Теперь источник один.</summary>
+    public static readonly LabelLayout Default = new();
+
     public static LabelLayout FromConfig(ConfigService cfg) => new LabelLayout
     {
         WidthMm = cfg.LabelWidthMm(),
@@ -320,32 +345,32 @@ public sealed record LabelLayout
         // ключ — иначе обновление программы обнулило бы подобранный отступ и «верх обрезается»
         // вернулось бы в первый же день.
         Margins = ReadMargins(cfg),
-        Rotation = ReadEnum(cfg.LabelText("label_rotation", ""), LabelRotation.None),
-        OffsetXMm = cfg.LabelNumber("label_offset_x_mm", 0),
-        OffsetYMm = cfg.LabelNumber("label_offset_y_mm", 0),
-        QrMm = cfg.LabelNumber("label_qr_mm", 0),
-        TitlePt = cfg.LabelNumber("label_title_pt", 16),
-        CaptionPt = cfg.LabelNumber("label_caption_pt", 9),
-        ShowLink = cfg.LabelFlag("label_show_link", true),
-        ShowFrame = cfg.LabelFlag("label_show_frame", true),
+        Rotation = ReadEnum(cfg.LabelText("label_rotation", ""), Default.Rotation),
+        OffsetXMm = cfg.LabelNumber("label_offset_x_mm", Default.OffsetXMm),
+        OffsetYMm = cfg.LabelNumber("label_offset_y_mm", Default.OffsetYMm),
+        QrMm = cfg.LabelNumber("label_qr_mm", Default.QrMm),
+        TitlePt = cfg.LabelNumber("label_title_pt", Default.TitlePt),
+        CaptionPt = cfg.LabelNumber("label_caption_pt", Default.CaptionPt),
+        ShowLink = cfg.LabelFlag("label_show_link", Default.ShowLink),
+        ShowFrame = cfg.LabelFlag("label_show_frame", Default.ShowFrame),
         // Вид кода раньше был галочкой «фирменный QR» (label_fancy_qr). На машинах, где её снимали,
         // ключ так и лежит — новый ключ читается с оглядкой на него, иначе снятая когда-то галочка
         // молча вернулась бы после обновления.
-        Style = ReadStyle(cfg.LabelText("label_qr_style", ""), cfg.LabelFlag("label_fancy_qr", true)),
-        QrPlace = ReadEnum(cfg.LabelText("label_qr_place", ""), QrPlacement.Auto),
-        HeadlineText = cfg.LabelText("label_headline", DefaultHeadline),
-        ShowHeadline = cfg.LabelFlag("label_show_headline", true),
-        HeadlinePlace = ReadEnum(cfg.LabelText("label_headline_place", ""), HeadlinePlacement.Auto),
-        HeadlineAlign = ReadEnum(cfg.LabelText("label_headline_align", ""), HeadlineAlignment.Center),
-        NoteText = cfg.LabelText("label_note", ""),
-        HoleText = cfg.LabelText("label_hole_text", DefaultHoleText),
+        Style = ReadStyle(cfg.LabelText("label_qr_style", ""), cfg.LabelFlag("label_fancy_qr", Default.FancyQr)),
+        QrPlace = ReadEnum(cfg.LabelText("label_qr_place", ""), Default.QrPlace),
+        HeadlineText = cfg.LabelText("label_headline", Default.HeadlineText),
+        ShowHeadline = cfg.LabelFlag("label_show_headline", Default.ShowHeadline),
+        HeadlinePlace = ReadEnum(cfg.LabelText("label_headline_place", ""), Default.HeadlinePlace),
+        HeadlineAlign = ReadEnum(cfg.LabelText("label_headline_align", ""), Default.HeadlineAlign),
+        NoteText = cfg.LabelText("label_note", Default.NoteText),
+        HoleText = cfg.LabelText("label_hole_text", Default.HoleText),
     }.Clamped();
 
     /// <summary>Поля по сторонам, а если их ни разу не сохраняли — прежнее единое поле со всех
     /// четырёх сторон.</summary>
     private static LabelMargins ReadMargins(ConfigService cfg)
     {
-        var all = cfg.LabelNumber("label_margin_mm", 3);
+        var all = cfg.LabelNumber("label_margin_mm", Default.Margins.Min);
         return new LabelMargins(
             cfg.LabelNumber("label_margin_left_mm", all),
             cfg.LabelNumber("label_margin_top_mm", all),
@@ -385,7 +410,44 @@ public sealed record LabelLayout
         cfg.SetLabelText("label_headline_align", v.HeadlineAlign.ToString());
         cfg.SetLabelText("label_note", v.NoteText);
         cfg.SetLabelText("label_hole_text", v.HoleText);
+
+        // Дословная жалоба: «не сохраняются настройки дизайна QR-инструкции». Сохранялись они
+        // исправно — их затирал ПРИЁМ общего конфига: оформление синхронизируется (и должно), а
+        // применялось оно вслепую, чужое поверх своего, без единого сравнения. Подтяжка идёт сама и
+        // у всех ролей, раз в sync_interval_min (по умолчанию 5 минут), а ОТПРАВЛЯЕТ конфиг только
+        // администратор и по умолчанию не отправляет вовсе — то есть подобранное оформление жило
+        // максимум до следующей подтяжки и уехать к коллегам не могло в принципе.
+        //
+        // Отметка «это правил человек здесь и вот когда» ставится ровно на те ключи, что уезжают в
+        // общий конфиг: приём теперь не трогает их, пока не приедет снимок НОВЕЕ этой правки.
+        // Ключи железа (размер, поля, поворот, сдвиг, принтер) отмечать не нужно — они и так
+        // per-machine и приёмом никогда не читаются.
+        cfg.MarkEditedHere(SyncedKeys);
     }
+
+    /// <summary>Ключи оформления — то из <see cref="SaveTo"/>, что УЕЗЖАЕТ в общий конфиг: вид и
+    /// положение кода, кегли, подпись назначения с положением и выравниванием, своя строка, подпись
+    /// в центре, рамка, печать ссылки. Ровно дополнение к списку железа в
+    /// ConfigSyncService.SkipSettingsKeys, и это сверяется тестом
+    /// (LabelSettingsSyncTests) — забытый здесь ключ означал бы настройку, которая снова
+    /// возвращается к чужой через пять минут после сохранения.</summary>
+    public static readonly IReadOnlyList<string> SyncedKeys = new[]
+    {
+        "label_qr_mm",
+        "label_title_pt",
+        "label_caption_pt",
+        "label_show_link",
+        "label_show_frame",
+        "label_qr_style",
+        "label_fancy_qr",
+        "label_qr_place",
+        "label_headline",
+        "label_show_headline",
+        "label_headline_place",
+        "label_headline_align",
+        "label_note",
+        "label_hole_text",
+    };
 
     /// <summary>Значение перечисления из настройки. Нечитаемое значение (пусто, чужая версия
     /// программы записала неизвестное слово) — это не повод падать: берётся значение по умолчанию.</summary>
