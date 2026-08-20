@@ -654,11 +654,19 @@
                 </StackPanel>
 
                 <!-- Пилюля статуса СИНХРОНИЗАЦИИ — отдельный от Busy индикатор (тикет коллеги: отделить
-                     анимацию синхронизации конфига от анимации поиска). Скруглённые стрелки ⟳ крутятся,
-                     пока идёт синхра; ⚠ оранжевым — ошибка; стрелки акцентом — есть неотправленное
-                     (правки/теги/тикеты в очереди); приглушённые стрелки — всё синхронизировано.
+                     анимацию синхронизации конфига от анимации поиска). Скруглённые стрелки крутятся,
+                     пока идёт синхра; восклицательный знак в оранжевом треугольнике — ошибка; стрелки
+                     акцентом — есть неотправленное (правки/теги/тикеты в очереди); приглушённые
+                     стрелки — всё синхронизировано.
                      Клик открывает «Сетевые диски» с таймстемпами и подробным режимом. Состояние —
-                     одна строка SyncStatusState, разбирается триггерами ниже. -->
+                     одна строка SyncStatusState, разбирается триггерами ниже.
+
+                     Значок — векторный Path из Themes/Icons.xaml, а не текстовый символ: шрифтовые
+                     ⟳ и ⚠ рисуются разной гарнитурой в разных темах и системах, у них своя базовая
+                     линия, и рядом с полоской поиска они читались как «ещё один текст». Иконка
+                     формой отличается от неё сразу, чего тикет и просил. Цвет у Path задаётся
+                     Stroke (не Foreground) — это разные свойства, поэтому и триггеры ниже правят
+                     именно Stroke. -->
                 <Button Grid.Column="2" Command="{Binding ShowSyncDetailsCommand}" Cursor="Hand"
                         VerticalAlignment="Center" Margin="0,0,14,0"
                         ToolTip="{Binding SyncStatusTooltip}">
@@ -666,19 +674,22 @@
                         <ControlTemplate TargetType="Button">
                             <Border Background="Transparent" Padding="4,1">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <TextBlock x:Name="Glyph" Text="&#x27F3;" FontSize="14" VerticalAlignment="Center"
-                                               RenderTransformOrigin="0.5,0.5" Foreground="{DynamicResource TextMutedBrush}">
-                                        <TextBlock.RenderTransform>
+                                    <Path x:Name="Glyph" Data="{StaticResource Icon.Refresh}" Stretch="Uniform"
+                                          Width="13" Height="13" VerticalAlignment="Center"
+                                          Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1.9"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          RenderTransformOrigin="0.5,0.5">
+                                        <Path.RenderTransform>
                                             <RotateTransform x:Name="GlyphRotate" Angle="0"/>
-                                        </TextBlock.RenderTransform>
-                                    </TextBlock>
+                                        </Path.RenderTransform>
+                                    </Path>
                                     <TextBlock x:Name="Caption" Text="" FontSize="10" Margin="5,0,0,0"
                                                VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
                                 </StackPanel>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <DataTrigger Binding="{Binding SyncStatusState}" Value="syncing">
-                                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                    <Setter TargetName="Glyph" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
                                     <Setter TargetName="Caption" Property="Text" Value="Синхр…"/>
                                     <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                                     <DataTrigger.EnterActions>
@@ -696,13 +707,13 @@
                                     </DataTrigger.ExitActions>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding SyncStatusState}" Value="error">
-                                    <Setter TargetName="Glyph" Property="Text" Value="&#x26A0;"/>
-                                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                                    <Setter TargetName="Glyph" Property="Data" Value="{StaticResource Icon.Alert}"/>
+                                    <Setter TargetName="Glyph" Property="Stroke" Value="{DynamicResource WarningBrush}"/>
                                     <Setter TargetName="Caption" Property="Text" Value="Ошибка"/>
                                     <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource WarningBrush}"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding SyncStatusState}" Value="pending">
-                                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                    <Setter TargetName="Glyph" Property="Stroke" Value="{DynamicResource AccentBrush}"/>
                                     <Setter TargetName="Caption" Property="Text" Value="К отправке"/>
                                     <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                                 </DataTrigger>
