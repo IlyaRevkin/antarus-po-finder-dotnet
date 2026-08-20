@@ -493,9 +493,19 @@ public partial class ParamsView : UserControl
         if (dlg.ShowDialog() != true) return;
 
         _services.Db.UpdateParamFileTags(row.Id, dlg.ResultTags);
-        _host.ShowStatus($"Теги обновлены: {row.Filename}", category: NotificationCategory.FirmwareAndParams);
+
+        // Перечислением, а не просто «теги обновлены»: по одному имени файла невозможно понять,
+        // что именно уедет коллегам (тикет — «какие теги и куда добавились»).
+        var change = Services.TagChangeText.Describe(
+            Core.Services.TagString.Parse(row.Tags),
+            Core.Services.TagString.Parse(dlg.ResultTags));
+        var what = change.Length == 0
+            ? $"«{row.Filename}»: теги без изменений"
+            : $"«{row.Filename}»: {change}";
+
+        _host.ShowStatus(what, category: NotificationCategory.FirmwareAndParams);
         // См. DeleteRow_Click: правки параметров тоже обязаны поднимать плашку «готово к отправке».
-        _host.PushCatalogChange($"Теги файла параметров «{row.Filename}» изменены", $"param:{row.Id}");
+        _host.PushCatalogChange($"Файл параметров {what}", $"param:{row.Id}");
         ReloadTable();
     }
 

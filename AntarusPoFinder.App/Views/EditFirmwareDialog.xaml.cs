@@ -990,18 +990,8 @@ public partial class EditFirmwareDialog : Window
     /// увидев там одну строку, невозможно было понять, что именно уедет коллегам.
     ///
     /// Порядок сохраняется алфавитный — набор тегов множество, «как ввели» тут смысла не несёт.</summary>
-    private static string DescribeTagChange(HashSet<string> before, HashSet<string> after)
-    {
-        var added = after.Except(before, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase).ToList();
-        var removed = before.Except(after, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase).ToList();
-
-        var bits = new List<string>();
-        if (added.Count > 0) bits.Add("добавлены: " + string.Join(", ", added));
-        if (removed.Count > 0) bits.Add("убраны: " + string.Join(", ", removed));
-        return "теги " + string.Join("; ", bits);
-    }
+    private static string DescribeTagChange(HashSet<string> before, HashSet<string> after) =>
+        Services.TagChangeText.Describe(before, after);
 
     /// <summary>Итог правки доп. материалов. Кладётся и в накопитель синхронизации: вложение уезжает
     /// коллегам своей секцией общего конфига, и пока накопитель не отправлен, у них его нет — та же

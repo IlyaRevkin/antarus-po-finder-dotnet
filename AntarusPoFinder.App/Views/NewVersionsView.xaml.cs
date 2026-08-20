@@ -74,9 +74,11 @@ public partial class NewVersionsView : UserControl
                 _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
         }
 
+        // Названием прошивки, а не голым номером версии: по «2.0.0042.0003» невозможно понять, к
+        // чему относится сообщение (тикет коллеги — «не номер прошивки, а название её»).
         _host.ShowStatus(release
-            ? $"Версия выведена из модерации: {v.VersionRaw}" + (delivered ? " (отправлено коллегам)" : "")
-            : $"Теги обновлены: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+            ? $"Версия выведена из модерации: {title}" + (delivered ? " (отправлено коллегам)" : "")
+            : $"Теги обновлены: {title}", category: NotificationCategory.FirmwareAndParams);
         LoadData();
     }
 }
