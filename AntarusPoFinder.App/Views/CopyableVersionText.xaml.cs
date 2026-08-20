@@ -29,12 +29,10 @@ public partial class CopyableVersionText : UserControl
     {
         e.Handled = true; // don't let the click bubble into the DataGrid row (selection/double-click)
         if (string.IsNullOrEmpty(Text)) return;
-        // Clipboard.SetText can throw if another process is holding the clipboard open right at this
-        // instant (COMException, notoriously flaky on Windows) — skipping the success-color flash
-        // below is itself the feedback that nothing was copied; a message box for a one-click copy
-        // gesture the operator can just retry would be disproportionate.
-        try { Clipboard.SetText(Text); }
-        catch { return; }
+        // Буфер обмена может быть занят другим процессом — ClipboardSafe сам повторит попытку, а
+        // если так и не вышло, пропущенная вспышка успеха ниже и есть обратная связь: окно с
+        // ошибкой на жест в один клик, который человек просто повторит, было бы несоразмерно.
+        if (!Services.ClipboardSafe.TrySetText(Text)) return;
 
         // Every use of this control is inside a DataGrid cell (Прошивки/Модерация/Резервация номеров/
         // NewVersionsView/HistoryDialog) — clicking to copy on an already-SELECTED row was flashing the

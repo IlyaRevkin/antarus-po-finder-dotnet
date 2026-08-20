@@ -44,17 +44,11 @@ public partial class ConnectionStatusDialog : Window
             StatusText.Text = "Проверка ещё идёт";
             return;
         }
-        try
-        {
-            Clipboard.SetText(ConnectionStatusService.BuildReport(_lastResults));
-            StatusText.Text = "Скопировано в буфер обмена";
-        }
-        catch (Exception ex)
-        {
-            // Буфер обмена может быть временно занят другим приложением — это не повод показывать
-            // окно ошибки поверх диагностического экрана.
-            StatusText.Text = $"Не удалось скопировать: {ex.Message}";
-        }
+        // Буфер обмена может быть временно занят другим приложением — это не повод показывать
+        // окно ошибки поверх диагностического экрана.
+        StatusText.Text = Services.ClipboardSafe.TrySetText(ConnectionStatusService.BuildReport(_lastResults))
+            ? "Скопировано в буфер обмена"
+            : "Буфер обмена занят другим приложением";
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

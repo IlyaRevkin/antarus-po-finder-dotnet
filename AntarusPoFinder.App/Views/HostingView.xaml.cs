@@ -825,12 +825,10 @@ public partial class HostingView : UserControl
     private void CopyToClipboard(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
-        try
-        {
-            Clipboard.SetText(text);
+        if (Services.ClipboardSafe.TrySetText(text))
             _host.ShowStatus("Скопировано", category: NotificationCategory.General);
-        }
-        catch (Exception ex) { AppendLog($"Буфер обмена занят: {ex.Message}"); }
+        else
+            AppendLog("Буфер обмена занят другим приложением, скопировать не удалось.");
     }
 
     // ── Файлы в хранилище ─────────────────────────────────────────────────────

@@ -381,15 +381,10 @@ public partial class InstructionLabelWindow : Window
     private void CopyLink_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_qrContent)) return;
-        try
-        {
-            Clipboard.SetText(_qrContent);
+        // Буфер обмена может быть занят другим приложением — ClipboardSafe повторит попытку, а
+        // молчаливый отказ здесь не повод показывать окно ошибки.
+        if (Services.ClipboardSafe.TrySetText(_qrContent))
             _host.ShowStatus("Ссылка скопирована");
-        }
-        catch (Exception)
-        {
-            // Буфер обмена занят другим приложением — не повод показывать ошибку.
-        }
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

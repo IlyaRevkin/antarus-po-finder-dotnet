@@ -2253,8 +2253,9 @@ public partial class SearchView : UserControl
     private void CopyName(HierarchyResult result)
     {
         var text = result.VersionRaw.ToUpperInvariant();
-        Clipboard.SetText(text);
-        _host.ShowStatus($"Скопировано: {text}");
+        _host.ShowStatus(ClipboardSafe.TrySetText(text)
+            ? $"Скопировано: {text}"
+            : "Буфер обмена занят другим приложением — попробуйте ещё раз");
     }
 
     private static void TryOpen(string path) => PrintableDocActions.Open(path);

@@ -12,7 +12,7 @@ public partial class ReserveVersionDialog : Window
         LabelText.Text = label;
     }
 
-    private void Copy_Click(object sender, RoutedEventArgs e) => Clipboard.SetText(LabelText.Text);
+    private void Copy_Click(object sender, RoutedEventArgs e) => Services.ClipboardSafe.TrySetText(LabelText.Text);
 
     private void Close_Click(object sender, RoutedEventArgs e) => DialogResult = true;
 }
