@@ -774,24 +774,37 @@
 
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
-                            <TextBlock Text="ОБМЕН ДАННЫМИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Справочник, тикеты и решения модерации ездят через сетевую папку — пока это единственный работающий способ. Адрес сервера можно записать заранее."
+                            <!-- Здесь стоял переключатель «Сетевая папка / Сервер» и поле адреса, которые
+                                 не были подключены ни к чему: выбор ничего не менял, а поля ключа не было
+                                 вовсе. Осталось только то, что действительно работает со службой
+                                 antarus-sync (tools/sync-server): адрес, ключ этой машины и проверка связи
+                                 по её же протоколу. -->
+                            <TextBlock Text="СЛУЖБА ОБМЕНА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Адрес службы обмена на сервере конторы и ключ ЭТОЙ машины. Ключ у каждой машины свой: по нему служба узнаёт, кто пришёл, и решает, можно ли отправлять справочник. Пока адрес пуст, обмен идёт через сетевую папку, как раньше."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                            <ComboBox x:Name="TransportCombo" Height="34" Margin="0,0,0,10" SelectionChanged="Transport_Changed"
-                                      ToolTip="Серверного обмена (HTTP + живые уведомления по WebSocket) ещё нет: сервер не поднят и клиент к нему не написан. Сегодня данные при любом положении переключателя идут через папку."/>
                             <StackPanel x:Name="ServerSection">
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Адрес службы" VerticalAlignment="Center" Margin="0,0,12,0" Width="110"/>
+                                    <TextBox Grid.Column="1" x:Name="ServerUrlInput" Height="34"
+                                             LostFocus="ServerUrl_LostFocus" KeyDown="ServerUrl_KeyDown"
+                                             ToolTip="Напр. https://ant-srv:8443 — порт по умолчанию 8443, его задаёт ИТ при установке службы."/>
+                                </Grid>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Адрес сервера" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                                    <TextBox Grid.Column="1" x:Name="ServerUrlInput" Height="34"
-                                             LostFocus="ServerUrl_LostFocus" KeyDown="ServerUrl_KeyDown"
-                                             ToolTip="Напр. https://finder.antarus.su — живые уведомления пойдут по тому же адресу (wss://…/ws)."/>
+                                    <TextBlock Grid.Column="0" Text="Ключ доступа" VerticalAlignment="Center" Margin="0,0,12,0" Width="110"/>
+                                    <PasswordBox Grid.Column="1" x:Name="ServerKeyInput" Height="34"
+                                                 PasswordChanged="ServerKey_Changed"
+                                                 ToolTip="Выдаётся на сервере командой antarus-sync.exe addkey. Хранится зашифрованным и не уезжает на другие машины."/>
                                 </Grid>
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                    <Button Content="Проверить сервер" Style="{StaticResource SecondaryButton}" Click="CheckServer_Click"/>
+                                    <Button Content="Проверить связь" Style="{StaticResource SecondaryButton}" Click="CheckServer_Click"/>
                                 </StackPanel>
                                 <TextBlock x:Name="ServerCheckResultText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>

@@ -1142,11 +1142,6 @@ public partial class SettingsView : UserControl
         public override string ToString() => Caption;
     }
 
-    private sealed record TransportOption(string Value, string Caption)
-    {
-        public override string ToString() => Caption;
-    }
-
     private bool _connectionTabFilling;
 
     private void LoadConnectionTab()
@@ -1179,17 +1174,8 @@ public partial class SettingsView : UserControl
             OidcClientIdInput.Text = _services.Cfg.OidcClientId();
             OidcGroupsClaimInput.Text = _services.Cfg.OidcGroupsClaim();
 
-            if (TransportCombo.Items.Count == 0)
-            {
-                TransportCombo.Items.Add(new TransportOption("fileshare", "Сетевая папка (как сейчас)"));
-                // Подпись честно говорит, что сервера ещё нет: выбрать пункт можно (адрес и проверка
-                // пригодятся в день запуска), но обмен от этого сегодня не меняется — см. текст
-                // раздела в SettingsView.xaml и предупреждение в Transport_Changed.
-                TransportCombo.Items.Add(new TransportOption("server", "Сервер: HTTP + WebSocket (сервера ещё нет)"));
-            }
-            var transport = _services.Cfg.SyncTransport();
-            TransportCombo.SelectedItem = TransportCombo.Items.Cast<TransportOption>().First(o => o.Value == transport);
             ServerUrlInput.Text = _services.Cfg.ServerUrl();
+            ServerKeyInput.Password = _services.Cfg.ServerKey();
         }
         finally
         {
@@ -1209,8 +1195,9 @@ public partial class SettingsView : UserControl
         // Домен и группы при корпоративном входе не используются (роль считается по claim из токена),
         // но и там остаются заполнимыми — приглушаем так же, как SSO при доменном входе.
         AdSection.Opacity = oidc ? 0.6 : 1.0;
-        var server = (TransportCombo.SelectedItem as TransportOption)?.Value == "server";
-        ServerSection.Opacity = server ? 1.0 : 0.6;
+        // Служба обмена: пока адрес не задан, раздел приглушён — но остаётся заполнимым, потому что
+        // именно в этот момент его и заполняют.
+        ServerSection.Opacity = string.IsNullOrWhiteSpace(ServerUrlInput.Text) ? 0.6 : 1.0;
     }
 
     private void AuthKind_Changed(object sender, SelectionChangedEventArgs e)
@@ -1274,46 +1261,23 @@ public partial class SettingsView : UserControl
         OidcCheckResultText.Text = result.Message;
     }
 
-    private void Transport_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (_connectionTabFilling || TransportCombo.SelectedItem is not TransportOption option) return;
-
-        if (option.Value == "server")
-        {
-            if (string.IsNullOrWhiteSpace(ServerUrlInput.Text))
-            {
-                AppMessageBox.Show("Сначала укажите адрес сервера.", "Обмен данными",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                LoadConnectionTab();
-                return;
-            }
-            // Клиента к серверу ещё нет (docs/client-server-plan.md — план, а не реализация), поэтому
-            // предупреждение говорит ровно две вещи: сегодня выбор ничего не меняет, а в день запуска
-            // сервера он отрежет от общих данных машины со старой версией.
-            var answer = AppMessageBox.Show(
-                "Сервера пока нет, и обмен с ним в программе ещё не написан: данные и после переключения\n" +
-                "продолжат ездить через сетевую папку. Настройка запомнится на будущее.\n\n" +
-                "Когда сервер поднимут, этот выбор отрежет от общих данных машины со старой версией —\n" +
-                "они умеют только папку.\n\nЗапомнить выбор?",
-                "Обмен данными", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (answer != MessageBoxResult.Yes)
-            {
-                LoadConnectionTab();
-                return;
-            }
-        }
-
-        _services.Cfg.SetSyncTransport(option.Value);
-        UpdateConnectionSections();
-        _host.ShowStatus($"Обмен данными: {option.Caption}", category: NotificationCategory.Sync);
-    }
-
     private void ServerUrl_LostFocus(object sender, RoutedEventArgs e)
     {
         var url = ServerUrlInput.Text.Trim().TrimEnd('/');
         if (url == _services.Cfg.ServerUrl()) return;
         _services.Cfg.SetServerUrl(url);
-        _host.ShowStatus("Адрес сервера сохранён");
+        UpdateConnectionSections();
+        _host.ShowStatus("Адрес службы обмена сохранён");
+    }
+
+    /// <summary>Ключ сохраняется по мере ввода, а не по потере фокуса: его вставляют из буфера и
+    /// сразу жмут «Проверить связь», не уводя фокус, — и проверка уходила бы со старым ключом.</summary>
+    private void ServerKey_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_connectionTabFilling) return;
+        var key = ServerKeyInput.Password.Trim();
+        if (key == _services.Cfg.ServerKey()) return;
+        _services.Cfg.SetServerKey(key);
     }
 
     private void ServerUrl_KeyDown(object sender, KeyEventArgs e)
@@ -1321,16 +1285,17 @@ public partial class SettingsView : UserControl
         if (e.Key == Key.Enter) ServerUrl_LostFocus(sender, e);
     }
 
+    /// <summary>Проверка идёт по протоколу самой службы (GET /ping с ключом), а не «отвечает ли
+    /// адрес»: ответ обязан сказать, признала ли служба эту машину и что ей разрешено — иначе
+    /// «проверено» означало бы только «что-то по адресу есть».</summary>
     private async void CheckServer_Click(object sender, RoutedEventArgs e)
     {
-        var url = ServerUrlInput.Text.Trim().TrimEnd('/');
-        if (url.Length == 0)
-        {
-            ServerCheckResultText.Text = "Адрес сервера не задан.";
-            return;
-        }
-        ServerCheckResultText.Text = "Проверяем сервер…";
-        var result = await ServerEndpointCheck.CheckAsync(url);
+        var settings = new SyncServerSettings(
+            ServerUrlInput.Text.Trim().TrimEnd('/'),
+            ServerKeyInput.Password.Trim());
+
+        ServerCheckResultText.Text = "Проверяем связь…";
+        var result = await SyncServerProbe.CheckAsync(settings);
         ServerCheckResultText.Text = result.Message;
     }
 

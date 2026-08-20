@@ -244,6 +244,7 @@ public class ConfigService
         ["oidc_client_id"] = "",
         ["oidc_groups_claim"] = "groups",
         ["sync_transport"] = "fileshare",
+        ["server_key"] = "",
         ["server_url"] = "",
         ["loader_connection_mode"] = "",
         ["loader_plc_ip"] = "",
@@ -853,10 +854,50 @@ public class ConfigService
     public string SyncTransport() => Get("sync_transport") == "server" ? "server" : "fileshare";
     public void SetSyncTransport(string kind) => Set("sync_transport", kind == "server" ? "server" : "fileshare");
 
-    /// <summary>Базовый адрес сервера приложения (когда он появится). От него же строится адрес
-    /// живых уведомлений: та же машина и путь /ws, схема http→ws, https→wss.</summary>
+    /// <summary>Базовый адрес службы обмена (antarus-sync на сервере конторы), например
+    /// https://ant-srv:8443. Пустой адрес — штатное состояние «служба не настроена»: обмен идёт
+    /// через сетевую папку, как раньше.</summary>
     public string ServerUrl() => Get("server_url");
     public void SetServerUrl(string url) => Set("server_url", url.Trim().TrimEnd('/'));
+
+    /// <summary>Ключ доступа этой машины к службе обмена (заголовок X-Antarus-Key).
+    ///
+    /// Хранится зашифрованным тем же способом, что секрет S3 (см. S3SecretKey): защита от
+    /// случайного взгляда в файл базы, а не от того, у кого есть exe. Здесь это важнее обычного —
+    /// по этому ключу служба узнаёт машину и решает, можно ли ей перезаписывать общий каталог.
+    ///
+    /// В отличие от ключей S3, НЕ синхронизируется между машинами (см. SkipSettingsKeys): ключ у
+    /// каждой машины свой, в этом весь смысл — иначе в журнале службы не различить, кто пришёл, и
+    /// отозвать доступ у одной машины было бы нельзя.</summary>
+    public string ServerKey()
+    {
+        var stored = Get("server_key");
+        if (string.IsNullOrEmpty(stored)) return "";
+        if (!stored.StartsWith(EncryptedPrefix, StringComparison.Ordinal)) return stored;
+        try
+        {
+            var data = Convert.FromBase64String(stored[EncryptedPrefix.Length..]);
+            return ConfigFileCrypto.TryDecrypt(data) ?? "";
+        }
+        catch (FormatException)
+        {
+            // Испорченная строка ведёт себя как незаданный ключ: служба ответит «ключ не опознан»,
+            // и это понятнее, чем падение при каждом обращении к настройкам.
+            return "";
+        }
+    }
+
+    public void SetServerKey(string key)
+    {
+        var value = (key ?? "").Trim();
+        Set("server_key", value.Length == 0
+            ? ""
+            : EncryptedPrefix + Convert.ToBase64String(ConfigFileCrypto.Encrypt(value)));
+    }
+
+    /// <summary>Адрес и ключ службы обмена одной парой — в том виде, в каком их ждёт
+    /// HttpSyncTransport.</summary>
+    public SyncServerSettings SyncServer() => new(ServerUrl(), ServerKey());
 
     /// <summary>Базовый URL внутреннего веб-сервера компании для способа №2 (HTTP-проверка пароля,
     /// см. HttpAdCredentialValidator). По умолчанию предустановлен рабочий адрес диска предприятия

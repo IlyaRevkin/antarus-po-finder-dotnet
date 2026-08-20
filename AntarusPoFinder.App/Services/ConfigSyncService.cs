@@ -170,7 +170,7 @@ public static class ConfigSyncService
         // синхронизируется (см. doc-комментарий поля выше). Локальными остаются только транспорт
         // обмена и лоадер: свой шнурок/переходник в шкаф, свой экземпляр Loader, выбор fileshare/
         // сервер. Уехав в общий конфиг, любая из них ломала бы соседей.
-        "sync_transport", "server_url",
+        "sync_transport", "server_url", "server_key",
         "loader_exe_path", "loader_connection_mode", "loader_plc_ip", "loader_network_adapter",
         "loader_check_link", "loader_link_timeout_ms", "loader_format_default",
         "loader_update_kernel_default", "loader_last_target",
