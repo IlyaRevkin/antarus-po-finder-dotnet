@@ -113,6 +113,11 @@ public partial class App : Application
                 if (sender is Window w) DarkTitleBar.Apply(w, ThemeManager.Current == "dark");
             }));
 
+        // Колесо мыши над закрытым выпадающим списком больше не меняет его значение — см.
+        // ComboBoxWheelGuard. Ставится здесь же и по той же причине, что и заголовок окна выше:
+        // одним обработчиком на весь класс, а не по строчке в каждом из десятков окон.
+        ComboBoxWheelGuard.Install();
+
         var services = new AppServices();
         _services = services;
 
