@@ -86,7 +86,7 @@ public partial class LoaderDialog : Window
 
         AdvancedExpander.Expanded += (_, _) => AdvancedArrow.Text = "▾";
         AdvancedExpander.Collapsed += (_, _) => AdvancedArrow.Text = "▸";
-        DetailsExpander.Expanded += (_, _) => DetailsArrow.Text = "▾";
+        DetailsExpander.Expanded += (_, _) => { DetailsArrow.Text = "▾"; ScrollLogToEnd(); };
         DetailsExpander.Collapsed += (_, _) => DetailsArrow.Text = "▸";
 
         RefreshSourceLabels();
@@ -666,8 +666,25 @@ public partial class LoaderDialog : Window
             _ => "TextBrush",
         });
         LogDocument.Blocks.Add(paragraph);
-        LogBox.ScrollToEnd();
+        ScrollLogToEnd();
         SaveLogItem.IsEnabled = true;
+    }
+
+    /// <summary>Прокрутить лог к последней строке.
+    ///
+    /// Почему через Dispatcher, а не сразу после Blocks.Add: ScrollToEnd отталкивается от высоты
+    /// содержимого, а она на этот момент ещё не пересчитана — прокрутка уезжает на конец
+    /// ПРЕДЫДУЩЕЙ строки, и свежее сообщение остаётся под нижней кромкой. Отсюда и жалоба: лог
+    /// отстаёт ровно на одну строку, а при заливке ПЛК важна как раз последняя. Отложенный на
+    /// DispatcherPriority.Loaded вызов приходит уже после перерасчёта вёрстки.
+    ///
+    /// Пока «Подробности» свёрнуты, LogBox не измерен вовсе и прокручивать нечего — поэтому
+    /// прокрутка повторяется при раскрытии панели: иначе оператор, открывший её посреди работы,
+    /// видит начало лога вместо того, что происходит сейчас.</summary>
+    private void ScrollLogToEnd()
+    {
+        if (!DetailsExpander.IsExpanded) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => LogBox.ScrollToEnd()));
     }
 
     private void SaveLogToWorkspace()
