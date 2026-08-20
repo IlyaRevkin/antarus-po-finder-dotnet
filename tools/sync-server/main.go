@@ -44,6 +44,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		cmdRun(os.Args[2:])
+	case "setup":
+		cmdSetup(os.Args[2:])
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "uninstall":
@@ -69,6 +71,7 @@ func usage() {
 	fmt.Print(`antarus-sync — служба обмена каталогом прошивок Antarus ПО Finder.
 
 Команды:
+  setup [-config ФАЙЛ]     задать параметры вопрос-ответ (порт, папки, первый ключ)
   install [-config ФАЙЛ]   зарегистрировать службу Windows (автозапуск)
   uninstall                удалить службу
   start | stop             управление службой
@@ -77,8 +80,9 @@ func usage() {
   keys                     показать выданные ключи
 
 Файл настроек по умолчанию — antarus-sync.json рядом с exe.
-При первом запуске он создаётся сам, вместе с ключом для первой машины.
-Порт по умолчанию 8443, меняется полем "listen".
+Если его нет, install и run сами спросят параметры; на каждый вопрос Enter
+подставляет значение по умолчанию (порт 8443 и прочее). Когда спросить некого
+(запуск скриптом, служба), молча берутся умолчания.
 `)
 }
 
@@ -131,17 +135,17 @@ func setupLogger(path string, alsoStdout bool) (*log.Logger, io.Closer, error) {
 }
 
 // buildServer поднимает всё, что нужно для работы, и возвращает готовый http.Server.
-func buildServer(cfgFile string, console bool) (*http.Server, *Config, *log.Logger, io.Closer, error) {
-	cfg, created, err := LoadConfig(cfgFile)
+//
+// interactive — можно ли спрашивать человека, если настроек ещё нет. У службы нельзя: она
+// стартует без консоли, и вопрос в пустоту навсегда подвесил бы её запуск.
+func buildServer(cfgFile string, console, interactive bool) (*http.Server, *Config, *log.Logger, io.Closer, error) {
+	cfg, err := ensureConfig(cfgFile, interactive)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	logger, closer, err := setupLogger(cfg.LogFile, console)
 	if err != nil {
 		return nil, nil, nil, nil, err
-	}
-	if created {
-		logger.Printf("создан файл настроек %s — впишите туда свои ключи и порт", cfgFile)
 	}
 	store, err := NewStore(cfg.DataDir)
 	if err != nil {
@@ -181,7 +185,7 @@ func cmdRun(args []string) {
 	cfgFlag := fs.String("config", "", "путь к файлу настроек")
 	_ = fs.Parse(args)
 
-	srv, cfg, logger, closer, err := buildServer(configPath(*cfgFlag), true)
+	srv, cfg, logger, closer, err := buildServer(configPath(*cfgFlag), true, true)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ошибка запуска:", err)
 		os.Exit(1)
@@ -210,7 +214,7 @@ func (windowsService) Execute(args []string, req <-chan svc.ChangeRequest, statu
 		}
 	}
 
-	srv, cfg, logger, closer, err := buildServer(configPath(cfgFile), false)
+	srv, cfg, logger, closer, err := buildServer(configPath(cfgFile), false, false)
 	if err != nil {
 		// Печатать некуда, консоли нет: сообщаем код выхода, подробности — в журнале, если он поднялся.
 		status <- svc.Status{State: svc.Stopped}
@@ -255,6 +259,28 @@ func runService() {
 	_ = svc.Run(serviceName, windowsService{})
 }
 
+// cmdSetup — перенастроить уже поставленную службу, не переустанавливая её.
+func cmdSetup(args []string) {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	cfgFlag := fs.String("config", "", "путь к файлу настроек")
+	_ = fs.Parse(args)
+
+	path := configPath(*cfgFlag)
+	if _, err := os.Stat(path); err == nil {
+		fmt.Printf("Файл настроек уже есть: %s\n", path)
+		fmt.Println("Мастер перезапишет его целиком, включая список выданных ключей.")
+		if !newPrompter().askYesNo("Продолжить?", false) {
+			fmt.Println("Отменено, файл не тронут.")
+			return
+		}
+	}
+	if _, err := RunSetupWizard(path); err != nil {
+		fmt.Fprintln(os.Stderr, "настройка:", err)
+		os.Exit(1)
+	}
+	fmt.Println("Если служба уже запущена, перезапустите её: stop, затем start.")
+}
+
 func cmdInstall(args []string) {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	cfgFlag := fs.String("config", "", "путь к файлу настроек")
@@ -267,7 +293,7 @@ func cmdInstall(args []string) {
 	}
 	// Настройки создаём до регистрации: пусть человек увидит ключ сразу, а не после первого сбоя.
 	cfgFile := configPath(*cfgFlag)
-	if _, _, err := LoadConfig(cfgFile); err != nil {
+	if _, err := ensureConfig(cfgFile, true); err != nil {
 		fmt.Fprintln(os.Stderr, "настройки:", err)
 		os.Exit(1)
 	}
