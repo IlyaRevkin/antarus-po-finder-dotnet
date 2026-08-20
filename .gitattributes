@@ -1,0 +1,2 @@
+# core.autocrlf=true подсунул бы shell-скриптам CRLF, и bash спотыкается о  в каждой строке.
+*.sh text eol=lf
