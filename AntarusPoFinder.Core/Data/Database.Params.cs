@@ -133,18 +133,44 @@ public partial class Database
     {
         var result = new List<ParamFile>();
         if (string.IsNullOrWhiteSpace(diskPath) || string.IsNullOrWhiteSpace(filename)) return result;
+
+        var wantedFolder = FileKey(diskPath);
+        var wantedName = FileKey(filename);
+        // Отбор в .NET, а не в SQL: см. FileKey — двоичное сравнение путей и имён и было причиной
+        // расплодившихся записей. Строк тут сотни, полный проход дешевле неверного ответа.
         using var reader = ExecuteReader($"""
             {ParamFileSelect}
-            WHERE pf.archived = 0 AND pf.disk_path = @d AND pf.filename = @f
+            WHERE pf.archived = 0
             ORDER BY pf.id
-            """, cmd =>
-        {
-            cmd.Parameters.AddWithValue("@d", diskPath);
-            cmd.Parameters.AddWithValue("@f", filename);
-        });
+            """);
         while (reader.Read())
-            result.Add(ReadParamFile(reader));
+        {
+            var row = ReadParamFile(reader);
+            if (FileKey(row.DiskPath) == wantedFolder && FileKey(row.Filename) == wantedName)
+                result.Add(row);
+        }
         return result;
+    }
+
+    /// <summary>Имя файла, папки или производителя, приведённое к виду, в котором их МОЖНО
+    /// сравнивать. Регистр свёрнут, пробелы по краям убраны, повторы пробелов схлопнуты, хвостовой
+    /// слеш у пути отброшен.
+    ///
+    /// Тикет: «Создаются дубликаты файлов параметров. Пример: x2 XL Chint». Причина — сравнение
+    /// было двоичным (в схеме у param_files.filename и .manufacturer нет COLLATE NOCASE), а
+    /// файловая система Windows регистр не различает. Оператор перезаливает тот же файл, назвав
+    /// его «Chint XL.par» вместо «chint xl.par»: на диске это ОДИН файл, прежний уезжает в
+    /// «Прежние редакции», а в базе поиск существующей записи промахивается и заводит вторую
+    /// живую строку на тот же файл.
+    ///
+    /// Свёртка регистра сделана через ToUpperInvariant, а не COLLATE NOCASE в SQL, намеренно:
+    /// NOCASE у SQLite сворачивает только ASCII, и на кириллических именах («Параметры X2.par»)
+    /// он бы снова промахнулся. Это та же ловушка, что описана у Database.ConfigExchange.ImportFlatList.</summary>
+    internal static string FileKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        var collapsed = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.TrimEnd('\\', '/').ToUpperInvariant();
     }
 
     /// <summary>Живая (не архивная) запись по натуральному ключу «подтип + производитель + имя
@@ -152,17 +178,24 @@ public partial class Database
     /// которому перезаливка находит запись, чтобы ОБНОВИТЬ её вместо заведения дубля.</summary>
     public ParamFile? FindLiveParamFile(int subtypeId, string manufacturer, string filename)
     {
+        var wantedManufacturer = FileKey(manufacturer);
+        var wantedName = FileKey(filename);
+        if (wantedName.Length == 0) return null;
+
+        // Сужаем по подтипу в SQL, а производителя и имя сверяем в .NET через FileKey: именно
+        // двоичное сравнение этих двух полей и плодило дубликаты (см. FileKey).
         using var reader = ExecuteReader($"""
             {ParamFileSelect}
-            WHERE pf.archived = 0 AND pf.subtype_id = @s AND pf.manufacturer = @m AND pf.filename = @f
+            WHERE pf.archived = 0 AND pf.subtype_id = @s
             ORDER BY pf.id
-            """, cmd =>
+            """, cmd => cmd.Parameters.AddWithValue("@s", subtypeId));
+        while (reader.Read())
         {
-            cmd.Parameters.AddWithValue("@s", subtypeId);
-            cmd.Parameters.AddWithValue("@m", manufacturer);
-            cmd.Parameters.AddWithValue("@f", filename);
-        });
-        return reader.Read() ? ReadParamFile(reader) : null;
+            var row = ReadParamFile(reader);
+            if (FileKey(row.Manufacturer) == wantedManufacturer && FileKey(row.Filename) == wantedName)
+                return row;
+        }
+        return null;
     }
 
     /// <summary>Запись по её межмашинному идентификатору — основной путь импорта конфига (см.

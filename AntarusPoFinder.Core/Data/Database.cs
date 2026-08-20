@@ -799,7 +799,9 @@ public partial class Database : IDisposable
             while (r.Read())
             {
                 if (r.IsDBNull(1)) continue;
-                var key = (r.GetInt32(1), r.GetString(2), r.GetString(3));
+                // Ключ через FileKey, а не по сырым строкам: иначе «Chint XL.par» и «chint xl.par»
+                // — один файл на диске — так и остаются двумя группами, и чистка их не сводит.
+                var key = (r.GetInt32(1), FileKey(r.GetString(2)), FileKey(r.GetString(3)));
                 if (!groups.TryGetValue(key, out var list)) groups[key] = list = new();
                 list.Add((r.GetInt32(0), GetString(r, "tags"), GetString(r, "upload_date"), GetString(r, "description")));
             }
