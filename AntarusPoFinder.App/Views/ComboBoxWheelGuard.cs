@@ -15,26 +15,39 @@ namespace AntarusPoFinder.App.Views;
 /// молча меняется. Заметить это можно только по перерисованному предпросмотру, а на печати —
 /// вообще никогда.
 ///
-/// Ставится ОДИН раз на весь класс ComboBox (App.OnStartup), а не по одному обработчику на каждый
+/// Ставится ОДИН раз на всё приложение (App.OnStartup), а не по одному обработчику на каждый
 /// список в каждом окне: списков в приложении десятки, и забытый — это ровно та же испорченная
 /// настройка. Раскрытый список ведёт себя как раньше: там колесо листает пункты, потому что человек
 /// сам его открыл и смотрит именно на него.
 ///
 /// Событие не просто гасится, а передаётся выше: иначе прокрутка панели «залипала» бы каждый раз,
 /// когда курсор оказывается над списком. Родителю отправляется тот же поворот колеса, и внешний
-/// ScrollViewer листает форму дальше, как будто списка под курсором нет.</summary>
+/// ScrollViewer листает форму дальше, как будто списка под курсором нет.
+///
+/// ПОЧЕМУ ОБРАБОТЧИК ВИСИТ НА ОКНЕ, А НЕ НА ComboBox. Так и было сделано сначала — и не работало:
+/// жалоба вернулась на живой сборке. PreviewMouseWheel — туннелирующее событие, а внутри одного
+/// элемента WPF вызывает обработчики классов в порядке от базового к производному. Штатное
+/// перещёлкивание пункта сидит в ComboBox.OnPreviewMouseWheel, куда ведёт класс-обработчик,
+/// зарегистрированный ещё на UIElement, — и он отрабатывает РАНЬШЕ любого обработчика,
+/// зарегистрированного на typeof(ComboBox). К моменту нашей проверки пункт уже переключён, а
+/// событие помечено обработанным. Экземплярный обработчик на самом списке не помог бы по той же
+/// причине: обработчики классов всегда идут перед экземплярными.
+///
+/// Окно — корень туннеля, оно получает событие первым и заведомо раньше списка. Отсюда и проверка
+/// «под курсором закрытый ComboBox?» по визуальному дереву от OriginalSource: когда список
+/// раскрыт, его пункты живут в отдельном дереве Popup, подъём до ComboBox не доходит, и колесо
+/// внутри раскрытого списка работает штатно само собой.</summary>
 public static class ComboBoxWheelGuard
 {
     /// <summary>Включить на всё приложение. Вызывается из App.OnStartup до создания окон.</summary>
     public static void Install() =>
-        EventManager.RegisterClassHandler(typeof(ComboBox), UIElement.PreviewMouseWheelEvent,
-            new MouseWheelEventHandler(OnPreviewMouseWheel), handledEventsToo: true);
+        EventManager.RegisterClassHandler(typeof(Window), UIElement.PreviewMouseWheelEvent,
+            new MouseWheelEventHandler(OnPreviewMouseWheel));
 
     private static void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (sender is not ComboBox combo || e.Handled) return;
-        // Раскрытый список человек открыл сам и смотрит именно в него — там колесо работает штатно.
-        if (combo.IsDropDownOpen) return;
+        if (e.Handled || e.OriginalSource is not DependencyObject source) return;
+        if (FindClosedComboBox(source) is not { } combo) return;
 
         e.Handled = true;
 
@@ -46,5 +59,29 @@ public static class ComboBoxWheelGuard
             RoutedEvent = UIElement.MouseWheelEvent,
             Source = combo,
         });
+    }
+
+    /// <summary>Закрытый ComboBox над курсором, или null. Поднимаемся по визуальному дереву:
+    /// курсор почти всегда стоит не на самом списке, а на его внутренностях — тексте, стрелке,
+    /// рамке.
+    ///
+    /// Шаг вверх разный для разных узлов не для красоты: OriginalSource бывает и текстовым
+    /// элементом (Run внутри TextBlock), а VisualTreeHelper.GetParent на таком бросает
+    /// исключение — уронили бы приложение ровно там, где чинили порчу настройки.</summary>
+    private static ComboBox? FindClosedComboBox(DependencyObject source)
+    {
+        for (var node = source; node is not null;)
+        {
+            if (node is ComboBox combo)
+                return combo.IsDropDownOpen ? null : combo;
+
+            node = node switch
+            {
+                Visual or System.Windows.Media.Media3D.Visual3D => VisualTreeHelper.GetParent(node),
+                FrameworkContentElement content => content.Parent,
+                _ => null,
+            };
+        }
+        return null;
     }
 }
