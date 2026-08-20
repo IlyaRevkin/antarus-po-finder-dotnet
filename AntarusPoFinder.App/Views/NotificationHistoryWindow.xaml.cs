@@ -1,6 +1,9 @@
+using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
@@ -17,13 +20,64 @@ public partial class NotificationHistoryWindow : Window
     private readonly ObservableCollection<NotificationEntry> _entries;
     private readonly ConfigService _cfg;
 
+    /// <summary>Показывать ли уже прочитанные записи. Живёт только на время одного открытия окна:
+    /// «показать прочитанные» — разовый жест, а не настройка.</summary>
+    private bool _showRead;
+
     public NotificationHistoryWindow(ObservableCollection<NotificationEntry> entries, ConfigService cfg)
     {
         InitializeComponent();
         _entries = entries;
         _cfg = cfg;
-        ListBoxHistory.ItemsSource = entries;
+
+        // Список идёт через представление с фильтром, а не напрямую по коллекции: прочитанные
+        // записи надо СКРЫТЬ, но оставить в истории (см. NotificationEntry.IsRead).
+        var view = CollectionViewSource.GetDefaultView(entries);
+        view.Filter = o => _showRead || o is not NotificationEntry entry || !entry.IsRead;
+        ListBoxHistory.ItemsSource = view;
+
+        RefreshShowReadToggle();
         LoadNotificationCategories();
+    }
+
+    /// <summary>Кнопка «Показать прочитанные (N)» — только когда таких записей действительно
+    /// сколько-то есть.</summary>
+    private void RefreshShowReadToggle()
+    {
+        var readCount = _entries.Count(x => x.IsRead);
+        if (readCount == 0 && !_showRead)
+        {
+            ShowReadToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ShowReadToggle.Visibility = Visibility.Visible;
+        ShowReadToggle.Content = _showRead ? "Скрыть прочитанные" : $"Показать прочитанные ({readCount})";
+    }
+
+    private void ShowReadToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _showRead = !_showRead;
+        CollectionViewSource.GetDefaultView(_entries).Refresh();
+        RefreshShowReadToggle();
+    }
+
+    /// <summary>Всё, что оператор мог прочитать за этот заход, помечается прочитанным — при
+    /// следующем открытии останется только новое. Момент выбран на закрытии окна, а не на
+    /// открытии: пометить заранее значило бы спрятать запись у человека из-под курсора.
+    ///
+    /// Записи — record'ы, поэтому «пометить» это замена элемента коллекции. Коллекция та же
+    /// самая, что живёт в MainWindowViewModel, так что признак переживает закрытие окна.</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            if (_entries[i].IsRead) continue;
+            _entries[i] = _entries[i] with { IsRead = true };
+        }
+        // Представление у коллекции одно на всё приложение, и фильтр на нём переживёт это окно.
+        // Снимаем — следующее открытие поставит свой.
+        CollectionViewSource.GetDefaultView(_entries).Filter = null;
+        base.OnClosed(e);
     }
 
     /// <summary>Built in code, not XAML-bound — one row per NotificationCategoryInfo.All entry, with
@@ -118,5 +172,6 @@ public partial class NotificationHistoryWindow : Window
             MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
         _entries.Clear();
+        RefreshShowReadToggle();
     }
 }

@@ -26,6 +26,9 @@ public static class NotificationHistoryOps
                 When = now,
                 Reopen = reopen ?? history[i].Reopen,
                 Repeats = history[i].Repeats + 1,
+                // Случилось снова — значит это снова новость, и в «прочитанных» запись залипнуть
+                // не должна (см. NotificationEntry.IsRead).
+                IsRead = false,
             };
             history.RemoveAt(i);
             history.Insert(0, bumped);

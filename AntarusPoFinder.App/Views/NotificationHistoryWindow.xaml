@@ -78,6 +78,10 @@
              time it opened), crowding the one thing the window is mostly opened for: reading the
              history. -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
+            <!-- Прочитанные по умолчанию скрыты (см. NotificationEntry.IsRead) — кнопка появляется,
+                 только когда им есть что показать, иначе она была бы вечной пустой заглушкой. -->
+            <Button x:Name="ShowReadToggle" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Visibility="Collapsed" Click="ShowReadToggle_Click"/>
             <Button x:Name="CategorySettingsToggle" Content="⚙ Настройки" Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0" Click="CategorySettingsToggle_Click"/>
             <Button Content="Очистить уведомления" Style="{StaticResource SecondaryButton}"
