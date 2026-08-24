@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.MainWindow"
+﻿<Window x:Class="AntarusPoFinder.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:AntarusPoFinder.App.ViewModels"
@@ -239,22 +239,25 @@
                          constantly). Purely a placement change — every item here has exactly the same
                          role access/visibility as before (RolesConfig.RoleAccess for the page items,
                          SettingsVisible for Настройки), nothing here changes WHO can use it, only where
-                         its button lives. "Уведомления" deliberately stays OUTSIDE this block, full-size —
-                         it carries an unread-count badge and wasn't named as something to compact.
+                         its button lives. Кнопка «Уведомления» раньше стояла ниже этого блока во всю ширину; с 1.74.0.1
+                         она переехала значком-колокольчиком в блок пользователя наверху — см.
+                         комментарий там.
 
                          Collapsed by default (MoreSectionToggle.IsChecked starts unset/false) — the whole
                          point was to stop this from being permanently visible clutter; clicking the
                          "› ДОПОЛНИТЕЛЬНО" header expands it downward, in place, standard accordion/
                          disclosure pattern. Not persisted across restarts — always starts collapsed. -->
                     <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,0">
-                        <Separator/>
+                        <!-- Отступ полосы такой же, как у секции «ДЛЯ НАЛАДЧИКА» выше: обе секции
+                             одинаковы по смыслу и обязаны выглядеть одинаково. -->
+                        <Separator Margin="0,8,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <ToggleButton x:Name="MoreSectionToggle" Grid.Column="0" HorizontalAlignment="Left"
-                                          Style="{StaticResource SidebarExpanderHeader}"/>
+                                          Content="ДОПОЛНИТЕЛЬНО" Style="{StaticResource SidebarSectionHeader}"/>
                             <!-- Счётчик непросмотренных из спрятанных пунктов (Тикеты) — виден, только пока
                                  секция свёрнута: раскрыл — виден сам бейдж пункта, заголовочный прячется. -->
                             <Border Grid.Column="1" CornerRadius="8" Padding="6,0" MinWidth="16" Margin="6,0,0,0"
@@ -360,23 +363,9 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <Button x:Name="NotificationsNavButton" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryButton}"
-                            Margin="12,4,12,0" Command="{Binding ShowNotificationHistoryCommand}"
-                            ToolTip="История сообщений из нижней строки и настройка их категорий">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <TextBlock Text="Уведомления"/>
-                            <Border Background="{DynamicResource AccentBrush}" CornerRadius="8"
-                                    Padding="6,0" MinWidth="16" Margin="6,0,0,0"
-                                    Visibility="{Binding UnseenNotificationsCount, Converter={StaticResource CountToVis}}">
-                                <TextBlock Text="{Binding UnseenNotificationsCount}" FontSize="10" FontWeight="Bold"
-                                           HorizontalAlignment="Center"
-                                           Foreground="{DynamicResource TextOnAccentBrush}"/>
-                            </Border>
-                        </StackPanel>
-                    </Button>
-
-                    <Separator DockPanel.Dock="Bottom" Margin="0,8,0,0"/>
-
+                    <!-- Полосы здесь больше нет: она отделяла кнопку «Уведомления», которая стояла
+                         между ней и блоком ДОПОЛНИТЕЛЬНО. Кнопка уехала в строку состояния, и полоса
+                         осталась висеть впритык ко второй такой же — отделяя пустоту от пустоты. -->
                     <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,4,0,0">
@@ -642,6 +631,8 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <!-- Колокольчик уведомлений — см. ниже, последним в ряду показателей. -->
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Left" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
@@ -724,6 +715,34 @@
 
                 <TextBlock Grid.Column="3" Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Right" VerticalAlignment="Center"/>
+
+                <!-- Уведомления. Раньше это была широкая кнопка в сайдбаре — единственная там в своём
+                     роде, из-за чего и была жалоба «отличается от всех остальных». Место нашлось
+                     здесь, и оно не случайное: история уведомлений — это история ровно этой строки,
+                     кнопка стоит там, где показывается то, что она хранит.
+
+                     Значок мелкий сознательно: рядом стоят показатели, а не кнопки, и колокольчик
+                     не должен перетягивать взгляд — он нужен, только когда на нём есть счётчик. -->
+                <Grid Grid.Column="4" Margin="14,0,0,0" VerticalAlignment="Center">
+                    <Button x:Name="NotificationsNavButton" Style="{StaticResource IconButton}"
+                            Width="20" Height="20" Padding="0"
+                            Command="{Binding ShowNotificationHistoryCommand}"
+                            ToolTip="История сообщений этой строки и настройка их категорий">
+                        <Path Data="{StaticResource Icon.Bell}" Stretch="Uniform" Width="12" Height="12"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.4" StrokeLineJoin="Round"/>
+                    </Button>
+                    <!-- IsHitTestVisible=False — иначе бейдж перехватывал бы клик по колокольчику. -->
+                    <Border Background="{DynamicResource AccentBrush}" CornerRadius="6"
+                            Padding="3,0" MinWidth="12" Height="12"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,-2,-4,0" IsHitTestVisible="False"
+                            Visibility="{Binding UnseenNotificationsCount, Converter={StaticResource CountToVis}}">
+                        <TextBlock Text="{Binding UnseenNotificationsCount}" FontSize="8" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextOnAccentBrush}"/>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
 

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -129,7 +129,18 @@ public static class AppUpdateService
     /// GitHub-релизов/имени exe. Единственный источник форматирования версии для отображения —
     /// используется и в Настройках (постоянная строка версии), и в сайдбаре, чтобы оба места
     /// гарантированно показывали одно и то же.</summary>
-    public static string CurrentVersionText => CurrentVersion.ToString(3);
+    public static string CurrentVersionText => Format(CurrentVersion);
+
+    /// <summary>Версия так, как её видит человек. Четвёртая цифра показывается ТОЛЬКО когда она не
+    /// ноль, и это принципиально: с 24.08.2026 она перестала быть локальным номером сборки и несёт
+    /// смысл — «мелкая правка» (см. CLAUDE.md про нумерацию). Печатать её всегда значило бы
+    /// переписать «1.74.0» в «1.74.0.0» во всех уже вышедших версиях; не печатать никогда — значило
+    /// бы, что 1.74.0 и 1.74.0.1 на экране неразличимы, а именно по этой строке человек и говорит,
+    /// что у него стоит. Двухкомпонентный тег («v1.2») ToString(3) роняет — отсюда проверка Build.</summary>
+    public static string Format(Version version) =>
+        version.Revision > 0 ? version.ToString(4)
+        : version.Build >= 0 ? version.ToString(3)
+        : version.ToString();
 
     /// <summary>Единая точка проверки обновлений: папка, если указана и доступна, иначе GitHub.
     /// Возвращает источник (для отображения пользователю) и все найденные релизы по убыванию
@@ -259,7 +270,7 @@ public static class AppUpdateService
     {
         var lines = new List<string>
         {
-            $"Установлена версия: {report.CurrentVersion.ToString(3)}",
+            $"Установлена версия: {Format(report.CurrentVersion)}",
         };
 
         lines.Add(report.Folder.Configured
@@ -287,10 +298,10 @@ public static class AppUpdateService
             ? "версий не найдено"
             : $"последняя версия {FormatVersion(status.LatestVersion)} (всего версий: {status.ReleaseCount})";
 
-    /// <summary>Трёхкомпонентный вид, как у <see cref="CurrentVersionText"/>, но безопасный: тег
-    /// релиза в принципе может разобраться в двухкомпонентную версию («v1.2»), а Version.ToString(3)
+    /// <summary>То же, что <see cref="Format"/> — оставлено отдельным именем, потому что зовётся из
+    /// разбора имён файлов релиза, где версия приходит из чужой строки:
     /// на такой бросает исключение — отчёт о состоянии не должен падать из-за формата чужого тега.</summary>
-    private static string FormatVersion(Version version) => version.Build >= 0 ? version.ToString(3) : version.ToString();
+    private static string FormatVersion(Version version) => Format(version);
 
     private static List<UpdateRelease> ListFolderReleases(string updatePath)
     {
