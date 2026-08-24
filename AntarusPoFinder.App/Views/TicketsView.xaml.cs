@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -238,7 +238,11 @@ public partial class TicketsView : UserControl
         var root = _services.Cfg.RootPath();
         var shareAvailable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
 
-        var options = new TicketExportDialog(visible.Count, active.Count, selected is not null, shareAvailable)
+        // Хранилище настроено (адрес, бакет, ключи) — тогда доступна отправка прямо туда; без него
+        // остаётся прежний путь «сохранить файлом».
+        var s3 = _services.Cfg.S3();
+        var options = new TicketExportDialog(visible.Count, active.Count, selected is not null, shareAvailable,
+            s3.CanPublish)
         { Owner = Window.GetWindow(this) };
         if (options.ShowDialog() != true) return;
 
@@ -256,20 +260,31 @@ public partial class TicketsView : UserControl
         }
 
         var at = DateTime.Now;
-        var save = new Microsoft.Win32.SaveFileDialog
+        var toStorage = options.SelectedDestination == TicketExportDialog.Destination.Storage;
+        string path;
+        if (toStorage)
         {
-            Title = "Куда сохранить выгрузку тикетов",
-            FileName = TicketExportService.SuggestedFileName(at),
-            Filter = "Архив (*.zip)|*.zip",
-            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-        };
-        if (save.ShowDialog() != true) return;
+            // Архив собирается во временную папку: в хранилище уезжает содержимое, а на рабочей
+            // машине после отправки оставаться нечему.
+            path = Path.Combine(Path.GetTempPath(), TicketExportService.SuggestedFileName(at));
+        }
+        else
+        {
+            var save = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Куда сохранить выгрузку тикетов",
+                FileName = TicketExportService.SuggestedFileName(at),
+                Filter = "Архив (*.zip)|*.zip",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            };
+            if (save.ShowDialog() != true) return;
+            path = save.FileName;
+        }
 
         var meta = new TicketExportService.Meta(
             AppUpdateService.CurrentVersionText, Environment.MachineName, _services.CurrentUserName,
             RolesConfig.RoleLabel(_services.Cfg.CurrentRole()), scopeLabel, at);
         var withAttachments = options.WithAttachments && shareAvailable;
-        var path = save.FileName;
 
         // Вложения читаются с сетевой шары — на десятке скриншотов это заметные секунды, а окно всё
         // это время не должно висеть замороженным.
@@ -281,11 +296,17 @@ public partial class TicketsView : UserControl
                 withAttachments ? id => TicketSyncService.AttachmentsDir(root, id) : null));
 
             var summary = $"Выгружено тикетов: {result.Tickets}" +
-                          (result.Attachments > 0 ? $", вложений: {result.Attachments}" : "") +
-                          $"\nФайл: {path} ({TicketExportService.SizeLabel(result.Bytes)})";
+                          (result.Attachments > 0 ? $", вложений: {result.Attachments}" : "");
             if (result.Warnings.Count > 0)
                 summary += "\n\nНе попало в архив:\n" + string.Join("\n", result.Warnings);
 
+            if (toStorage)
+            {
+                await SendArchiveToStorageAsync(s3, path, at, result, summary);
+                return;
+            }
+
+            summary += $"\nФайл: {path} ({TicketExportService.SizeLabel(result.Bytes)})";
             _host.ShowStatus($"Тикеты выгружены: {path}", category: NotificationCategory.General);
             if (AppMessageBox.Show(summary + "\n\nПоказать файл в папке?", "Выгрузка тикетов",
                     MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
@@ -302,7 +323,41 @@ public partial class TicketsView : UserControl
         finally
         {
             ExportBtn.IsEnabled = true;
+            // Временный архив нужен был только чтобы его отправить. Не удалился — не беда, папку
+            // временных файлов Windows чистит сама.
+            if (toStorage)
+            {
+                try { if (File.Exists(path)) File.Delete(path); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
         }
+    }
+
+    /// <summary>Кладёт собранный архив в бакет и показывает, куда именно он лёг.
+    ///
+    /// Ключ содержит случайный хвост (см. <see cref="TicketExportService.StorageObjectName"/>):
+    /// бакет отдаётся наружу по публичному веб-адресу, а тикеты — это внутренняя переписка о
+    /// поломках со скриншотами рабочих экранов, и предсказуемый адрес открыл бы кто угодно.</summary>
+    private async System.Threading.Tasks.Task SendArchiveToStorageAsync(S3Settings s3, string path,
+        DateTime at, TicketExportService.Result result, string summary)
+    {
+        var key = TicketExportService.StorageKey(s3, at, TicketExportService.NewToken());
+        var sent = await new S3Client().PutFileAsync(s3, key, path);
+
+        if (!sent.Ok)
+        {
+            AppMessageBox.Show($"{summary}\n\nВ хранилище не отправлено: {sent.Error}\n\n" +
+                               "Архив можно собрать заново кнопкой «Сохранить…» и передать иначе.",
+                "Выгрузка тикетов", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _host.ShowStatus($"Тикеты отправлены в хранилище: {key}", category: NotificationCategory.General);
+        AppMessageBox.Show(
+            summary + $"\nРазмер: {TicketExportService.SizeLabel(result.Bytes)}" +
+            $"\n\nЛежит в хранилище: {key}\n\n" +
+            "Адрес неугадываемый — в имени случайный хвост, но бакет общий, так что ссылку не публиковать.",
+            "Выгрузка тикетов", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     // ── Detail view (full text + attachments) ────────────────────────────────

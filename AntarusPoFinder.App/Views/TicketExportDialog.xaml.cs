@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -17,14 +17,29 @@ public partial class TicketExportDialog : Window
         Selected,
     }
 
+    /// <summary>Куда уедет архив. Раньше был один путь — «сохранить файл», а дальше человек нёс его
+    /// сам. Хранилище добавлено как второй путь, потому что оно уже настроено, уже проходит
+    /// корпоративный фаервол и открыто в самой программе: не надо ни флешки, ни почты.</summary>
+    public enum Destination
+    {
+        /// <summary>Сохранить файлом на этой машине — прежнее поведение.</summary>
+        File,
+        /// <summary>Положить в бакет (см. TicketExportService.StorageKey).</summary>
+        Storage,
+    }
+
     public Scope SelectedScope { get; private set; } = Scope.Active;
     public bool WithAttachments { get; private set; } = true;
+    public Destination SelectedDestination { get; private set; } = Destination.File;
 
     /// <param name="visibleCount">Сколько тикетов видно на странице сейчас.</param>
     /// <param name="activeCount">Из них открытых и в работе.</param>
     /// <param name="hasSelection">Выделен ли тикет в списке.</param>
     /// <param name="shareAvailable">Доступен ли сетевой диск — вложения лежат только там.</param>
-    public TicketExportDialog(int visibleCount, int activeCount, bool hasSelection, bool shareAvailable)
+    /// <param name="storageAvailable">Настроено ли хранилище (адрес и ключи). Не настроено — кнопка
+    /// отправки гаснет с пояснением: молча пропадающая кнопка выглядит как поломка.</param>
+    public TicketExportDialog(int visibleCount, int activeCount, bool hasSelection, bool shareAvailable,
+        bool storageAvailable)
     {
         InitializeComponent();
 
@@ -49,10 +64,22 @@ public partial class TicketExportDialog : Window
             WithAttachmentsCheck.IsEnabled = false;
             AttachmentsHint.Text = "Сетевой диск сейчас недоступен, поэтому вложения взять неоткуда — уедут только тексты тикетов.";
         }
+
+        if (!storageAvailable)
+        {
+            SendToStorageBtn.IsEnabled = false;
+            SendToStorageBtn.ToolTip = "Хранилище не настроено — нужны адрес, бакет и файл с ключами " +
+                                       "(страница «Хранилище» → «Реквизиты»).";
+        }
     }
 
-    private void Ok_Click(object sender, RoutedEventArgs e)
+    private void Ok_Click(object sender, RoutedEventArgs e) => Accept(Destination.File);
+
+    private void SendToStorage_Click(object sender, RoutedEventArgs e) => Accept(Destination.Storage);
+
+    private void Accept(Destination destination)
     {
+        SelectedDestination = destination;
         SelectedScope = ScopeSelected.IsChecked == true ? Scope.Selected
             : ScopeAll.IsChecked == true ? Scope.AllVisible
             : Scope.Active;

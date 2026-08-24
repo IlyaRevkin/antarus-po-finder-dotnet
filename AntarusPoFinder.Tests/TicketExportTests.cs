@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -225,5 +225,60 @@ public class TicketExportTests
         var name = TicketExportService.SuggestedFileName(At);
 
         Assert.Equal("tickets_20260812_1830.zip", name);
+    }
+
+    // ── Отправка через хранилище ──────────────────────────────────────────────
+
+    private static S3Settings Bucket(string prefix = "") =>
+        new("https://s3.twcstorage.ru", "amperus", "ru-1", prefix, "AK", "SK",
+            "https://fs.elitacompany.ru", Enabled: true);
+
+    /// <summary>Имя объекта несёт дату выгрузки — по списку в бакете должно быть видно, что за чем
+    /// шло, без открывания архивов.</summary>
+    [Fact]
+    public void StorageObjectName_KeepsTheTimestamp()
+    {
+        var name = TicketExportService.StorageObjectName(new DateTime(2026, 8, 24, 15, 30, 0), "a1b2c3d4");
+
+        Assert.Equal("tickets_20260824_1530_a1b2c3d4.zip", name);
+    }
+
+    /// <summary>Случайный хвост в имени — не про уникальность, а вместо замка: бакет отдаётся наружу
+    /// по публичному веб-адресу, и «tickets_20260824_1530.zip» открыл бы любой, кто подставит дату.
+    /// Тикеты — это внутренняя переписка о поломках со скриншотами рабочих экранов.</summary>
+    [Fact]
+    public void StorageObjectName_IsNotGuessableFromTheTimestampAlone()
+    {
+        var at = new DateTime(2026, 8, 24, 15, 30, 0);
+
+        var first = TicketExportService.StorageObjectName(at, TicketExportService.NewToken());
+        var second = TicketExportService.StorageObjectName(at, TicketExportService.NewToken());
+
+        Assert.NotEqual(first, second);
+        Assert.All(new[] { first, second }, n => Assert.DoesNotContain("tickets_20260824_1530.zip", n));
+    }
+
+    /// <summary>Выгрузки лежат своей папкой, а не вперемешку с инструкциями, которые кладёт в тот же
+    /// бакет выкладка. И префикс из настроек хранилища при этом соблюдается.</summary>
+    [Fact]
+    public void StorageKey_GoesIntoItsOwnFolder_UnderTheConfiguredPrefix()
+    {
+        var at = new DateTime(2026, 8, 24, 15, 30, 0);
+
+        var plain = TicketExportService.StorageKey(Bucket(), at, "a1b2c3d4");
+        var prefixed = TicketExportService.StorageKey(Bucket("antarus"), at, "a1b2c3d4");
+
+        Assert.Equal("tickets/tickets_20260824_1530_a1b2c3d4.zip", plain);
+        Assert.Equal("antarus/tickets/tickets_20260824_1530_a1b2c3d4.zip", prefixed);
+    }
+
+    /// <summary>Хвост берётся из Guid и на глаз не читается как счётчик.</summary>
+    [Fact]
+    public void NewToken_IsShortAndHex()
+    {
+        var token = TicketExportService.NewToken();
+
+        Assert.Equal(8, token.Length);
+        Assert.All(token, c => Assert.Contains(c, "0123456789abcdef"));
     }
 }

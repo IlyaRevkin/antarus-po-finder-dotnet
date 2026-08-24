@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
@@ -38,6 +38,37 @@ public static class TicketExportService
     };
 
     public static string SuggestedFileName(DateTime at) => $"tickets_{at:yyyyMMdd_HHmm}.zip";
+
+    // ── Отправка через хранилище ──────────────────────────────────────────────
+    // Архив можно унести флешкой или почтой, но с рабочей машины проще всего дотянуться до бакета:
+    // он уже настроен, уже проходит корпоративный фаервол и уже открыт в самой программе. Отдельная
+    // папка, а не корень: тикеты соседствовали бы с инструкциями, которые туда кладёт выкладка.
+
+    /// <summary>Папка в бакете под выгрузки тикетов. Латиницей и без пробелов намеренно — ключ
+    /// объекта попадает в адрес, и разбирать его глазами придётся именно там.</summary>
+    public const string StorageFolder = "tickets";
+
+    /// <summary>Длина случайного хвоста в имени объекта.</summary>
+    private const int TokenLength = 8;
+
+    /// <summary>Случайный хвост для имени. Отдельным методом, чтобы имя можно было проверить тестом:
+    /// в <see cref="StorageObjectName"/> он приходит параметром, а не берётся изнутри.</summary>
+    public static string NewToken() => Guid.NewGuid().ToString("N")[..TokenLength];
+
+    /// <summary>Имя объекта в хранилище: к обычному имени файла добавляется случайный хвост.
+    ///
+    /// <b>Хвост здесь не для уникальности, а вместо замка.</b> Бакет отдаётся наружу по публичному
+    /// веб-адресу (см. <see cref="S3Client.PublicUrl"/>), и объект с предсказуемым именем вида
+    /// «tickets_20260824_1530.zip» открыл бы кто угодно, кто догадается подставить дату. Тикеты —
+    /// это внутренняя переписка о том, что в конторе сломано, вместе со скриншотами рабочих
+    /// экранов. Случайный хвост делает адрес неугадываемым; полноценная защита — это отдельный
+    /// закрытый бакет, и пока его нет, честно считать эту меру именно тем, что она есть.</summary>
+    public static string StorageObjectName(DateTime at, string token) =>
+        $"tickets_{at:yyyyMMdd_HHmm}_{token}.zip";
+
+    /// <summary>Полный ключ объекта — с папкой и с префиксом, заданным в настройках хранилища.</summary>
+    public static string StorageKey(S3Settings settings, DateTime at, string token) =>
+        settings.KeyFor($"{StorageFolder}/{StorageObjectName(at, token)}");
 
     /// <summary>Собирает архив. <paramref name="attachmentsDirFor"/> отдаёт папку вложений тикета
     /// (или null, если сетевого диска сейчас нет) — раскладка вложений на диске известна приложению,

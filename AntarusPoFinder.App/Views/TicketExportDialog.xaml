@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.TicketExportDialog"
+﻿<Window x:Class="AntarusPoFinder.App.Views.TicketExportDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
@@ -6,7 +6,7 @@
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <StackPanel Margin="16">
-        <TextBlock Text="Тикеты уедут одним архивом: текст для чтения, тот же список для разбора программой и файлы, приложенные к тикетам. Архив можно унести флешкой, отправить почтой или загрузить на страницу приёма."
+        <TextBlock Text="Тикеты уедут одним архивом: текст для чтения, тот же список для разбора программой и файлы, приложенные к тикетам. Архив можно отправить прямо в хранилище — оно уже настроено и проходит через корпоративный фаервол, — либо сохранить файлом и унести флешкой или почтой."
                    Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
         <TextBlock Text="ЧТО ВЫГРУЖАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
@@ -21,9 +21,13 @@
                   ToolTip="Скриншоты и логи лежат на сетевом диске; без него выгрузятся только тексты"/>
         <TextBlock x:Name="AttachmentsHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="24,0,0,16"/>
 
+        <!-- Два действия вместо одного: «Отправить в хранилище» — обычный путь (не нужны ни флешка,
+             ни почта), «Сохранить…» остаётся для случая, когда хранилище не настроено или архив
+             нужен на руках. Кнопка по умолчанию — отправка, потому что именно ей и пользуются. -->
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="100" Margin="0,0,8,0" Click="Cancel_Click"/>
-            <Button Content="Сохранить…" Width="120" IsDefault="True" Click="Ok_Click"/>
+            <Button Content="Сохранить…" Style="{StaticResource SecondaryButton}" Width="120" Margin="0,0,8,0" Click="Ok_Click"/>
+            <Button x:Name="SendToStorageBtn" Content="Отправить в хранилище" Width="180" IsDefault="True" Click="SendToStorage_Click"/>
         </StackPanel>
     </StackPanel>
 </Window>
