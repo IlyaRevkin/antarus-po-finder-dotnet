@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -328,6 +328,7 @@ public partial class LoaderDialog : Window
             Progress.Value = 100;
             PercentLabel.Text = "100%";
             StageLabel.Text = "Загрузка завершена";
+            StageTone("SuccessBrush");
         }
         else
         {
@@ -354,6 +355,7 @@ public partial class LoaderDialog : Window
                 Progress.Value = 100;
                 PercentLabel.Text = "100%";
                 StageLabel.Text = "LFS собран";
+                StageTone("SuccessBrush");
                 break;
 
             case LfsConversionStatus.Cancelled:
@@ -408,6 +410,7 @@ public partial class LoaderDialog : Window
             Progress.Value = 0;
             PercentLabel.Text = "0%";
             StageLabel.Text = "Запуск…";
+            StageTone(null);
         }
         else
         {
@@ -443,6 +446,7 @@ public partial class LoaderDialog : Window
         Progress.IsIndeterminate = false;
         PercentLabel.Text = "";
         StageLabel.Text = stage;
+        StageTone(null);
         DetailsExpander.IsExpanded = true;
         ShowRetry();
     }
@@ -709,5 +713,18 @@ public partial class LoaderDialog : Window
         _cts?.Cancel();
         _operationElapsedTimer.Stop();
         base.OnClosing(e);
+    }
+
+    /// <summary>Цвет строки состояния лоадера. Заливка в контроллер — операция, за которой человек
+    /// стоит и ждёт: «Загрузка завершена» серым, тем же цветом, что и «Проверяем связь с ПЛК…»,
+    /// приходится ЧИТАТЬ, чтобы понять, чем всё кончилось. Зелёный виден боковым зрением.
+    ///
+    /// Цвет обязательно СБРАСЫВАЕТСЯ на каждом новом шаге (Stage ниже), иначе зелёное «завершена»
+    /// осталось бы висеть над следующим запуском и врало бы о нём.</summary>
+    private void StageTone(string? brushKey)
+    {
+        StageLabel.Foreground = brushKey is null
+            ? (System.Windows.Media.Brush)FindResource("TextMutedBrush")
+            : (System.Windows.Media.Brush)FindResource(brushKey);
     }
 }
