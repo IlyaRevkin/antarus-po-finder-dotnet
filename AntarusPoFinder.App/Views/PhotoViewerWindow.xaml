@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.PhotoViewerWindow"
+﻿<Window x:Class="AntarusPoFinder.App.Views.PhotoViewerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
@@ -16,11 +16,10 @@
                       LoadedBehavior="Manual" UnloadedBehavior="Stop"
                       MediaEnded="Video_MediaEnded" MediaFailed="Video_MediaFailed"/>
 
-        <!-- Крестик поверх содержимого; Esc закрывает тем же обработчиком (IsCancel). -->
-        <Button Content="✕" Click="Close_Click" IsCancel="True"
-                Width="32" Height="32" FontSize="14"
-                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6"
-                ToolTip="Закрыть (Esc)"/>
+        <!-- Своего крестика здесь больше нет. У окна обычный заголовок Windows со своим крестиком,
+             и второй, нарисованный поверх содержимого, стоял ровно под ним — два крестика в одном
+             углу. Esc закрывал именно эту кнопку (IsCancel), поэтому обработка Escape переехала в
+             Window_PreviewKeyDown рядом со стрелками. -->
 
         <!-- Перелистывание. Прячется целиком, когда файл в папке один: стрелки «в никуда» только
              сбивают с толку (см. UpdateChrome). -->

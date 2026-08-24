@@ -724,8 +724,13 @@
                      Значок мелкий сознательно: рядом стоят показатели, а не кнопки, и колокольчик
                      не должен перетягивать взгляд — он нужен, только когда на нём есть счётчик. -->
                 <Grid Grid.Column="4" Margin="14,0,0,0" VerticalAlignment="Center">
+                    <!-- Без рамки и фона: соседний значок синхронизации рисуется своим шаблоном
+                         без бордюра, а IconButton наследует его от SecondaryButton — два значка в
+                         строке оказывались в разном оформлении. Подсветку при наведении стиль
+                         оставляет, и это правильно: кнопку надо отличать от показателя рядом. -->
                     <Button x:Name="NotificationsNavButton" Style="{StaticResource IconButton}"
                             Width="20" Height="20" Padding="0"
+                            BorderThickness="0" Background="Transparent"
                             Command="{Binding ShowNotificationHistoryCommand}"
                             ToolTip="История сообщений этой строки и настройка их категорий">
                         <Path Data="{StaticResource Icon.Bell}" Stretch="Uniform" Width="12" Height="12"

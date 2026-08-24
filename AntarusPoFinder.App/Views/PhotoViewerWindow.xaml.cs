@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -51,7 +51,6 @@ public partial class PhotoViewerWindow : Window
         Closed += (_, _) => StopEverything();
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     private void Prev_Click(object sender, RoutedEventArgs e) => Step(-1);
 
@@ -71,6 +70,12 @@ public partial class PhotoViewerWindow : Window
             case Key.PageDown:
             case Key.Space:
                 Step(+1);
+                e.Handled = true;
+                break;
+            // Escape закрывал окно через IsCancel у собственного крестика; крестик убран как
+            // дубликат системного, и закрытие по Escape теперь живёт здесь.
+            case Key.Escape:
+                Close();
                 e.Handled = true;
                 break;
         }
