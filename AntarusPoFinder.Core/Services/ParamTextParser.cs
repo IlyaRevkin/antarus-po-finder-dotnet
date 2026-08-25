@@ -77,6 +77,17 @@ public static class ParamTextParser
         {
             var line = raw.TrimEnd();
             if (line.Trim().Length == 0) continue;
+
+            // Закрывающая «>>>» проверяется ПЕРВОЙ, до отсева украшений: букв и цифр в ней нет ни
+            // одной, и вместе с «=====» её отсеивало как украшение — применимость («Только для
+            // ПЧ №1») после этого молча растекалась до конца файла, помечая чужие строки чужим
+            // аппаратом. Ровно то, ради предотвращения чего применимость и заведена.
+            if (ApplyCloseRe.IsMatch(line))
+            {
+                applicability = "";
+                continue;
+            }
+
             // Строка-разделитель без единой буквы («=====», «*****», «-----»): ни секция, ни
             // параметр, ни пояснение. Молча пропускаем — иначе она осела бы пояснением в таблице.
             if (!line.Any(char.IsLetterOrDigit)) continue;
@@ -106,12 +117,6 @@ public static class ParamTextParser
             if (m.Success)
             {
                 applicability = m.Groups["t"].Value.Trim();
-                continue;
-            }
-
-            if (ApplyCloseRe.IsMatch(line))
-            {
-                applicability = "";
                 continue;
             }
 
