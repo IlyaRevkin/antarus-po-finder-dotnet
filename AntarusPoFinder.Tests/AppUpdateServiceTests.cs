@@ -472,6 +472,46 @@ public class AppUpdateServiceTests
         finally { AppUpdateService.ResetHttpClientForTests(); }
     }
 
+    // ── Релиз с неверсионным тегом не виден автообновлению ────────────────────────────────────
+    //
+    // На этом держится безопасность отдельной ленты релизов службы обмена (тег sync-server-v1.0.0,
+    // ассет antarus-sync.exe). Установленные КОПИИ СТАРЫХ ВЕРСИЙ содержат прежний отбор «первый
+    // .exe в релизе», и починка в 1.74.0.2 до них не доезжает — они узнают о ней, только обновившись.
+    // Единственное, что защищает их от скачивания службы вместо приложения, — то, что релиз с
+    // неразбираемым тегом пропускается целиком, ещё до просмотра ассетов.
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_NonVersionTag_IsSkippedBeforeAssets()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "sync-server-v1.0.0",
+                "assets": [
+                  { "name": "antarus-sync.exe", "browser_download_url": "https://example.invalid/antarus-sync.exe", "size": 9500000 }
+                ]
+              },
+              {
+                "tag_name": "v1.2.3",
+                "assets": [
+                  { "name": "AntarusPoFinder-1.2.3.exe", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe", "size": 123 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal("AntarusPoFinder-1.2.3.exe", result.Releases[0].FileName);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
     // ── Version/CurrentVersion sanity ────────────────────────────────────────
 
     [Fact]
