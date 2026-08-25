@@ -317,8 +317,8 @@ public static class AppUpdateService
     }
 
     /// <summary>Читает GitHub Releases репозитория: версия берётся из тега (без ведущей "v"),
-    /// файл — первый .exe-ассет релиза. Релизы без .exe-ассета или без разбираемого тега
-    /// пропускаются. Публикация нового релиза: <c>gh release create v1.2.0 publish/AntarusPoFinder.App.exe</c>
+    /// файл — ассет с именем AntarusPoFinder-{версия}.exe. Релизы без такого ассета или без
+    /// разбираемого тега пропускаются. Публикация нового релиза: <c>gh release create v1.2.0 publish/AntarusPoFinder.App.exe</c>
     /// (переименовав в AntarusPoFinder-{версия}.exe для единообразия с папочным источником).</summary>
     private static async Task<List<UpdateRelease>> ListGitHubReleasesAsync(System.Threading.CancellationToken ct = default)
     {
@@ -339,7 +339,12 @@ public static class AppUpdateService
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
-                if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                // Именно ReleaseFileRegex, а НЕ «первый .exe в релизе»: к релизу прикладываются и
+                // посторонние exe — antarus-sync.exe (служба обмена, см. tools/sync-server). По
+                // старому правилу приложение скачало бы девятимегабайтную службу, проверило размер
+                // и SHA (они сошлись бы — файл-то целый) и подменило бы ею само себя на всех
+                // машинах разом. Имя ассета — единственное, что отличает одно от другого.
+                if (!ReleaseFileRegex.IsMatch(name)) continue;
                 exeName = name;
                 exeUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
                 exeSize = asset.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0;

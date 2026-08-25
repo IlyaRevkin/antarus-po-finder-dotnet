@@ -408,6 +408,70 @@ public class AppUpdateServiceTests
         finally { AppUpdateService.ResetHttpClientForTests(); }
     }
 
+    // ── К релизу приложены посторонние .exe (служба обмена) ───────────────────────────────────
+    //
+    // Раньше отбор был «первый .exe-ассет релиза», и это ловушка: с v1.74.0.2 рядом с приложением
+    // едет antarus-sync.exe (служба обмена для ИТ, tools/sync-server). GitHub отдаёт ассеты в
+    // порядке загрузки, то есть посторонний exe вполне может оказаться первым — и приложение
+    // подменило бы им само себя на всех машинах. Размер и SHA такую подмену не ловят: файл целый,
+    // просто не тот. Отличает их только имя.
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_IgnoresForeignExeAsset()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v1.2.3",
+                "assets": [
+                  { "name": "antarus-sync.exe", "browser_download_url": "https://example.invalid/antarus-sync.exe", "size": 9500000 },
+                  { "name": "antarus-sync.exe.sha256", "browser_download_url": "https://example.invalid/antarus-sync.exe.sha256", "size": 64 },
+                  { "name": "AntarusPoFinder-1.2.3.exe", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe", "size": 123 },
+                  { "name": "AntarusPoFinder-1.2.3.exe.sha256", "browser_download_url": "https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256", "size": 64 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal("AntarusPoFinder-1.2.3.exe", result.Releases[0].FileName);
+            Assert.Equal("https://example.invalid/AntarusPoFinder-1.2.3.exe", result.Releases[0].DownloadUrl);
+            Assert.Equal("https://example.invalid/AntarusPoFinder-1.2.3.exe.sha256", result.Releases[0].Sha256Url);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_ReleaseWithOnlyForeignExe_IsSkipped()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v1.2.3",
+                "assets": [
+                  { "name": "antarus-sync.exe", "browser_download_url": "https://example.invalid/antarus-sync.exe", "size": 9500000 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Empty(result.Releases);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
     // ── Version/CurrentVersion sanity ────────────────────────────────────────
 
     [Fact]
