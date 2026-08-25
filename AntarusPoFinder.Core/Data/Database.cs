@@ -214,11 +214,18 @@ public partial class Database : IDisposable
              -- Произвольные столбцы документа сверх обязательных семи. Отдельной таблицей, а не
              -- ALTER TABLE на каждый новый столбец: «столбцы должны добавляться» — требование
              -- владельца, и упереть его в выпуск новой версии программы значит его не выполнить.
+             -- col_key: неизменяемый ключ столбца, им же помечено содержимое в param_table_rows.extra.
+             -- Разведён с заголовком ради переименования: строки ревизии неизменяемы, и будь
+             -- содержимое помечено заголовком, переименование опустошило бы столбец во всех прежних
+             -- ревизиях (см. Domain/ParamTable.cs, ParamTableColumn.Key).
              CREATE TABLE IF NOT EXISTS param_table_columns (
                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
                  table_id   INTEGER NOT NULL REFERENCES param_tables(id) ON DELETE CASCADE,
+                 col_key    TEXT NOT NULL DEFAULT '',
                  title      TEXT NOT NULL DEFAULT '',
-                 sort_order INTEGER NOT NULL DEFAULT 0
+                 sort_order INTEGER NOT NULL DEFAULT 0,
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 deleted_at TEXT NOT NULL DEFAULT ''
              );
 
              -- Ревизия документа — СНИМОК всей таблицы целиком, а не дельта: конфиг ездит между
@@ -791,6 +798,19 @@ public partial class Database : IDisposable
             ("applicability", "TEXT NOT NULL DEFAULT ''"),
             ("applies_when", "TEXT NOT NULL DEFAULT ''"),
             ("extra", "TEXT NOT NULL DEFAULT ''"));
+
+        // Свои столбцы документа завелись в 1.74.2 парой «заголовок + порядок»; окна для них не
+        // было, поэтому в базах 1.74.2 они могли появиться только приёмом чужого конфига. Ключ,
+        // отметка правки и тумбстоун добавляются здесь — не в CREATE TABLE выше: у установленной
+        // копии CREATE TABLE IF NOT EXISTS уже существующую таблицу не трогает.
+        AddColumnsIfMissing("param_table_columns",
+            ("col_key", "TEXT NOT NULL DEFAULT ''"),
+            ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+            ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
+
+        // Ключом уже заведённому столбцу становится его собственный заголовок — ровно то, чем
+        // помечено содержимое в extra у ревизий, сохранённых до этой правки.
+        Exec("UPDATE param_table_columns SET col_key = title WHERE col_key = ''");
 
         AddColumnsIfMissing("fw_version_reservations",
             ("expires_at", "TEXT NOT NULL DEFAULT ''"));

@@ -221,8 +221,29 @@ public class ExportedParamTable
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
     [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    /// <summary>Свои столбцы ОДНИМИ ЗАГОЛОВКАМИ — так их выгружала 1.74.2, и так их читают уже
+    /// установленные копии. Поле оставлено ради них: убери его — и у коллеги на 1.74.2 столбцы
+    /// перестали бы приезжать вовсе. Живые заголовки, без снятых: старый приёмник о тумбстоунах
+    /// столбцов не знает и снятый завёл бы заново.</summary>
     [JsonPropertyName("columns")] public List<string> Columns { get; set; } = new();
+
+    /// <summary>Свои столбцы ЦЕЛИКОМ: ключ, заголовок, порядок, снятие. null — «отправитель об
+    /// этом поле не знает» (снимок с 1.74.2), тогда приёмник откатывается на <see cref="Columns"/>
+    /// и заводит столбцы по заголовкам, как раньше.</summary>
+    [JsonPropertyName("param_columns")] public List<ExportedParamTableColumn>? ParamColumns { get; set; }
+
     [JsonPropertyName("revisions")] public List<ExportedParamTableRevision> Revisions { get; set; } = new();
+}
+
+/// <summary>Свой столбец документа. Ключ и заголовок разведены: заголовок переименовывают, а
+/// содержимое в строках помечено ключом (см. Domain/ParamTable.cs, ParamTableColumn.Key).</summary>
+public class ExportedParamTableColumn
+{
+    [JsonPropertyName("key")] public string Key { get; set; } = "";
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("sort_order")] public int SortOrder { get; set; }
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
 }
 
 /// <summary>Одна ревизия документа в выгрузке — со всеми своими строками. Ревизия НЕИЗМЕНЯЕМА, кроме

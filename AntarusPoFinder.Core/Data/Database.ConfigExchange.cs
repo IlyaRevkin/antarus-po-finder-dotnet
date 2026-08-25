@@ -223,7 +223,16 @@ public partial class Database
                 SyncId = table.SyncId, DiskPath = table.DiskPath, Filename = table.Filename,
                 Name = table.Name, Manufacturer = table.Manufacturer,
                 CreatedAt = table.CreatedAt, UpdatedAt = table.UpdatedAt, DeletedAt = table.DeletedAt,
+                // Два поля об одном и том же намеренно: «columns» читают установленные 1.74.2,
+                // «param_columns» — всё, что новее. Убрать первое можно будет, когда 1.74.2 не
+                // останется ни на одной машине, и не раньше.
                 Columns = GetParamTableColumns(table.Id!.Value).Select(c => c.Title).ToList(),
+                ParamColumns = AllParamTableColumnsIncludingDeleted(table.Id.Value)
+                    .Select(c => new ExportedParamTableColumn
+                    {
+                        Key = c.Key, Title = c.Title, SortOrder = c.SortOrder,
+                        UpdatedAt = c.UpdatedAt, DeletedAt = c.DeletedAt,
+                    }).ToList(),
             };
 
             foreach (var revision in AllParamTableRevisionsIncludingDeleted(table.Id.Value))
@@ -1622,10 +1631,12 @@ public partial class Database
     ///       сводить в них нечего, у одинакового sync_id они одинаковы по определению;</item>
     /// <item>у совпавшей ревизии сводится ОДНО поле — reason, по updated_at. Summary не сводится
     ///       вовсе: его считает программа по строкам, а строки неизменяемы;</item>
-    /// <item>⚠️ НОМЕР приехавшей ревизии сохраняется как прислан, а не пересчитывается. Две машины,
-    ///       независимо заведшие «ревизию 3», после обмена покажут две третьих — некрасиво, но
-    ///       честно: номер это то, чем ревизию называют вслух, и перенумеровав её у себя, мы
-    ///       завели бы в разговоре двух РАЗНЫХ «третьих» на разных машинах, а это уже опасно.</item>
+    /// <item>⚠️ НОМЕР приехавшей ревизии сохраняется как прислан и не пересчитывается — но и
+    ///       человеку он больше не показывается. Хранимый номер присвоила заведшая машина, между
+    ///       машинами он не уникален (две, не видевшие правок друг друга, обе заведут «третью»), и
+    ///       переписывать его у себя нельзя: под ним ревизия названа в чужих Summary. Человеку
+    ///       показывается место ревизии в истории по времени заведения — оно считается при чтении и
+    ///       одинаково у всех, см. ParamTableNumbering.</item>
     /// </list>
     /// Группа строки в СПРАВОЧНИК не добавляется — ровно как вид доп. материала: осознанно удалённая
     /// группа иначе воскресала бы с каждой приехавшей ревизией. Справочник едет своей секцией.</summary>
@@ -1668,7 +1679,7 @@ public partial class Database
                     UpdatedAt = inc.UpdatedAt,
                     SyncId = inc.SyncId,
                 });
-                foreach (var column in inc.Columns) AddParamTableColumn(id, column);
+                ImportParamTableColumns(id, inc);
                 ImportParamTableRevisions(id, inc, counts, apply: true);
                 continue;
             }
@@ -1689,13 +1700,61 @@ public partial class Database
                 if (apply) UpdateParamTable(local.Id!.Value, inc.Name, inc.Manufacturer, inc.UpdatedAt);
             }
 
-            // Столбцы аддитивны и различаются названием — повтор AddParamTableColumn пропускает сам.
-            if (apply)
-                foreach (var column in inc.Columns) AddParamTableColumn(local.Id!.Value, column);
+            if (apply) ImportParamTableColumns(local.Id!.Value, inc);
 
             // Ревизии разбираются ВСЕГДА, а не только когда изменилась шапка: обычный случай
             // синхронизации — «документ у всех давно есть, приехала его новая редакция».
             ImportParamTableRevisions(local.Id!.Value, inc, counts, apply);
+        }
+    }
+
+    /// <summary>Свои столбцы документа. Опознаются по КЛЮЧУ, а не по заголовку: заголовок
+    /// переименовывают, и матч по нему завёл бы у получателя второй такой же столбец, а содержимое
+    /// строк осталось бы у первого.
+    ///
+    /// Сводится по updated_at, как и всё прочее LWW-хозяйство: переименование и перестановка
+    /// уезжают к коллегам, снятие — тоже (тумбстоуном, иначе убранный столбец воскресал бы с первым
+    /// же снимком с машины, которая о снятии ещё не знает).
+    ///
+    /// ⚠️ Снимок со СТАРОЙ версии (param_columns == null) разбирается по прежнему полю columns и
+    /// строго аддитивно: там одни заголовки, и отличить «этого столбца у отправителя нет» от «он
+    /// его убрал» невозможно — а раз невозможно, то ничего и не убираем.</summary>
+    private void ImportParamTableColumns(int tableId, ExportedParamTable inc)
+    {
+        if (inc.ParamColumns is null)
+        {
+            foreach (var title in inc.Columns) AddParamTableColumn(tableId, title);
+            return;
+        }
+
+        foreach (var column in inc.ParamColumns)
+        {
+            var key = string.IsNullOrWhiteSpace(column.Key) ? column.Title : column.Key;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+
+            var local = FindParamTableColumn(tableId, key);
+            if (local?.Id is not int localId)
+            {
+                // Столбец, снятый ещё до того, как доехал до нас: заводить его, чтобы тут же
+                // спрятать под тумбстоуном, значит показать фантом (как у самих документов).
+                if (column.DeletedAt.Length > 0) continue;
+                AddParamTableColumn(tableId, column.Title, key, column.UpdatedAt);
+                continue;
+            }
+
+            // Местное снятие постоянно: чужая живая копия его не отменяет — иначе убранный столбец
+            // возвращался бы каждым снимком с машины, до которой снятие ещё не доехало.
+            if (local.DeletedAt.Length > 0) continue;
+
+            if (column.DeletedAt.Length > 0)
+            {
+                TombstoneParamTableColumn(localId, column.DeletedAt);
+                continue;
+            }
+
+            if (string.CompareOrdinal(column.UpdatedAt, local.UpdatedAt) > 0
+                && (column.Title != local.Title || column.SortOrder != local.SortOrder))
+                UpdateParamTableColumn(localId, column.Title, column.SortOrder, column.UpdatedAt);
         }
     }
 

@@ -112,6 +112,10 @@ public static class ParamTableEditing
             tidy.AppliesWhen = (tidy.AppliesWhen ?? "").Trim();
             tidy.GroupName = NormalizeGroup(known, tidy.GroupName);
             tidy.ValueState = ParamValueState.Normalize(tidy.ValueState);
+            // Свои столбцы — к единому виду: пустые значения выброшены, ключи по порядку. Иначе
+            // «стёр значение своего столбца» и «переставил столбцы» доехали бы до разбора изменений
+            // как правка строки.
+            tidy.Extra = ParamRowExtra.Format(ParamRowExtra.Parse(tidy.Extra));
             // Строка без кода параметром быть не может: код — это то, что человек ищет глазами и
             // вбивает в частотник. Осталось название — значит это пояснение.
             tidy.Kind = tidy.Code.Length == 0 ? ParamRowKind.Note : ParamRowKind.Param;
@@ -189,7 +193,9 @@ public static class ParamTableEditing
         foreach (var group in tidy.Select(r => r.GroupName).Distinct(StringComparer.OrdinalIgnoreCase))
             db.AddParamGroup(group);
 
-        var previous = db.GetParamTableRevisions(tableId).FirstOrDefault();
+        // «Предыдущая» — самая свежая ПО ВРЕМЕНИ, а не с самым большим хранимым номером: номера
+        // приезжают с чужих машин и упорядочить историю не могут (см. ParamTableNumbering).
+        var previous = ParamTableNumbering.LiveRevisions(db, tableId).FirstOrDefault();
         var before = previous?.Id is null ? null : db.GetParamTableRows(previous.Id.Value);
         var diff = ParamTableDiff.Compare(before, tidy);
 

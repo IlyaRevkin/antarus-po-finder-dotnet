@@ -323,7 +323,7 @@ public class ParamTableDbTests : IDisposable
         var columnId = _db.AddParamTableColumn(id, "Диапазон");
         var revisionId = NewRevision(id, new ParamTableRow { Code = "P0-02", Value = "2", Extra = "{\"Диапазон\":\"0-600\"}" });
 
-        _db.DeleteParamTableColumn(columnId);
+        _db.TombstoneParamTableColumn(columnId);
 
         // Ревизия — снимок. Переписывать её задним числом значит рассказывать про прошлое неправду.
         Assert.Empty(_db.GetParamTableColumns(id));

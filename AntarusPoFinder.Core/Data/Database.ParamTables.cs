@@ -300,53 +300,119 @@ public partial class Database
 
     // ── Произвольные столбцы документа ────────────────────────────────────────
 
+    private const string ColumnFields = "id, table_id, col_key, title, sort_order, updated_at, deleted_at";
+
+    private static ParamTableColumn ReadColumn(Microsoft.Data.Sqlite.SqliteDataReader r) => new()
+    {
+        Id = GetInt(r, "id"),
+        TableId = GetInt(r, "table_id"),
+        Key = GetString(r, "col_key"),
+        Title = GetString(r, "title"),
+        SortOrder = GetInt(r, "sort_order"),
+        UpdatedAt = GetString(r, "updated_at"),
+        DeletedAt = GetString(r, "deleted_at"),
+    };
+
+    /// <summary>Живые свои столбцы документа в порядке показа.</summary>
     public List<ParamTableColumn> GetParamTableColumns(int tableId)
     {
         var result = new List<ParamTableColumn>();
         using var reader = ExecuteReader(
-            "SELECT id, table_id, title, sort_order FROM param_table_columns WHERE table_id=@t ORDER BY sort_order, id",
+            $"SELECT {ColumnFields} FROM param_table_columns WHERE table_id=@t AND deleted_at='' ORDER BY sort_order, id",
             cmd => cmd.Parameters.AddWithValue("@t", tableId));
         while (reader.Read())
-            result.Add(new ParamTableColumn
-            {
-                Id = GetInt(reader, "id"),
-                TableId = GetInt(reader, "table_id"),
-                Title = GetString(reader, "title"),
-                SortOrder = GetInt(reader, "sort_order"),
-            });
+            result.Add(ReadColumn(reader));
         return result;
     }
 
-    /// <summary>Добавить свой столбец. Повтор названия (с игнором регистра — см. про кириллицу выше)
-    /// молча пропускается: два столбца «Диапазон» в одной таблице не различить ни глазами, ни по
-    /// содержимому в ParamTableRow.Extra, ключ у которого как раз название.</summary>
-    public int AddParamTableColumn(int tableId, string title)
+    /// <summary>Столбцы ВМЕСТЕ СО СНЯТЫМИ. Нужны двоим: выгрузке конфига (без тумбстоуна снятие не
+    /// доедет до коллег) и показу старой ревизии — по снятому столбцу в ней осталось содержимое, и
+    /// без его заголовка колонка называлась бы служебным ключом.</summary>
+    public List<ParamTableColumn> AllParamTableColumnsIncludingDeleted(int tableId)
+    {
+        var result = new List<ParamTableColumn>();
+        using var reader = ExecuteReader(
+            $"SELECT {ColumnFields} FROM param_table_columns WHERE table_id=@t ORDER BY sort_order, id",
+            cmd => cmd.Parameters.AddWithValue("@t", tableId));
+        while (reader.Read())
+            result.Add(ReadColumn(reader));
+        return result;
+    }
+
+    /// <summary>Столбец по ключу, включая снятый, — ключ и есть его межмашинная опознавалка.
+    /// Сравнение с игнором регистра идёт в .NET: у SQLite COLLATE NOCASE сворачивает только
+    /// латиницу, а заголовки здесь кириллические (см. CLAUDE.md).</summary>
+    public ParamTableColumn? FindParamTableColumn(int tableId, string? key) =>
+        AllParamTableColumnsIncludingDeleted(tableId)
+            .FirstOrDefault(c => string.Equals(c.Key, (key ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Завести свой столбец. Ключом становится сам заголовок — так две машины, независимо
+    /// заведшие «Диапазон», получают ОДИН столбец, а не два одинаковых с виду (см.
+    /// ParamTableColumn.Key). Повтор ключа молча возвращает уже заведённый; СНЯТЫЙ столбец с тем же
+    /// ключом при этом воскресает — «завёл снова тот же столбец» и значит ровно это, а завести
+    /// рядом второй с тем же ключом нельзя: содержимое в extra у них было бы общим.</summary>
+    public int AddParamTableColumn(int tableId, string title, string? key = null, string? updatedAt = null)
     {
         title = (title ?? "").Trim();
-        if (title.Length == 0) return -1;
+        var wantedKey = string.IsNullOrWhiteSpace(key) ? title : key.Trim();
+        if (title.Length == 0 || wantedKey.Length == 0) return -1;
 
-        var existing = GetParamTableColumns(tableId)
-            .FirstOrDefault(c => string.Equals(c.Title, title, StringComparison.OrdinalIgnoreCase));
-        if (existing?.Id is not null) return existing.Id.Value;
+        var stamp = string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt;
+        var existing = FindParamTableColumn(tableId, wantedKey);
+        if (existing?.Id is int existingId)
+        {
+            if (existing.DeletedAt.Length > 0)
+                ExecuteNonQuery("UPDATE param_table_columns SET deleted_at='', title=@n, updated_at=@u WHERE id=@id", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@n", title);
+                    cmd.Parameters.AddWithValue("@u", stamp);
+                    cmd.Parameters.AddWithValue("@id", existingId);
+                });
+            return existingId;
+        }
 
         var order = Convert.ToInt32(ExecuteScalar(
             "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM param_table_columns WHERE table_id=@t",
             cmd => cmd.Parameters.AddWithValue("@t", tableId)) ?? 1);
 
-        ExecuteNonQuery("INSERT INTO param_table_columns(table_id, title, sort_order) VALUES(@t, @n, @s)", cmd =>
+        ExecuteNonQuery("""
+            INSERT INTO param_table_columns(table_id, col_key, title, sort_order, updated_at, deleted_at)
+            VALUES(@t, @k, @n, @s, @u, '')
+            """, cmd =>
         {
             cmd.Parameters.AddWithValue("@t", tableId);
+            cmd.Parameters.AddWithValue("@k", wantedKey);
             cmd.Parameters.AddWithValue("@n", title);
             cmd.Parameters.AddWithValue("@s", order);
+            cmd.Parameters.AddWithValue("@u", stamp);
         });
         return Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()"));
     }
 
-    /// <summary>Убрать свой столбец. Содержимое в уже сохранённых ревизиях (ParamTableRow.Extra) не
-    /// вычищается: ревизия — снимок, и переписывать её задним числом нельзя.</summary>
-    public void DeleteParamTableColumn(int columnId) =>
-        ExecuteNonQuery("DELETE FROM param_table_columns WHERE id=@id",
-            cmd => cmd.Parameters.AddWithValue("@id", columnId));
+    /// <summary>Переименовать столбец и/или переставить его. Ключ НЕ трогается — на нём держится
+    /// содержимое в уже сохранённых ревизиях.</summary>
+    public void UpdateParamTableColumn(int columnId, string title, int sortOrder, string? updatedAt = null) =>
+        ExecuteNonQuery("UPDATE param_table_columns SET title=@n, sort_order=@s, updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@n", (title ?? "").Trim());
+            cmd.Parameters.AddWithValue("@s", sortOrder);
+            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt);
+            cmd.Parameters.AddWithValue("@id", columnId);
+        });
+
+    /// <summary>Убрать свой столбец — ОТМЕТКОЙ, а не DELETE. Строка обязана продолжать ездить по
+    /// машинам как положительный сигнал «этот столбец убрали»: без неё он воскресал бы с первым же
+    /// снимком с машины, которая об удалении ещё не знает. Содержимое в уже сохранённых ревизиях
+    /// (ParamTableRow.Extra) не вычищается: ревизия — снимок, переписывать её задним числом нельзя.</summary>
+    public void TombstoneParamTableColumn(int columnId, string? deletedAt = null)
+    {
+        var stamp = string.IsNullOrEmpty(deletedAt) ? NowIsoPrecise() : deletedAt;
+        ExecuteNonQuery("UPDATE param_table_columns SET deleted_at=@d, updated_at=@d WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", stamp);
+            cmd.Parameters.AddWithValue("@id", columnId);
+        });
+    }
 
     // ── Ревизии ───────────────────────────────────────────────────────────────
 
