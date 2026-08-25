@@ -10,6 +10,9 @@
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="SharpCompress" Version="0.50.0" />
+    <!-- Кодовые страницы 1251/866: в .NET Core их нет в коробке (только UTF-*/ASCII/Latin1), а
+         текстовые файлы параметров ПЧ приходят и в той, и в другой — см. TextFileEncoding. -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

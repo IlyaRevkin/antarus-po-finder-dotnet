@@ -82,6 +82,14 @@ public partial class Database
             while (r.Read())
                 data.ParamManufacturers.Add(new ExportedManufacturer { Name = r.GetString(0), SortOrder = r.GetInt32(1) });
 
+        // Справочник групп параметров ПЧ/УПП — с ПОРЯДКОМ: он и есть главное его содержимое
+        // («сперва основные значения, сброс до заводских в конце», см. ParamGroupCatalog), и уехать
+        // одними именами значило бы отправить коллеге тот же список в алфавитном беспорядке.
+        data.ParamGroups = new();
+        using (var r = ExecuteReader("SELECT name, sort_order FROM param_groups ORDER BY sort_order, name"))
+            while (r.Read())
+                data.ParamGroups.Add(new ExportedManufacturer { Name = r.GetString(0), SortOrder = r.GetInt32(1) });
+
         data.Tags = GetAllTags();
         data.FwAttachmentKinds = GetFwAttachmentKinds();
         data.AllowedExtensions = GetAllowedExtensions();
@@ -202,6 +210,43 @@ public partial class Database
                     GroupName = GetString(r, "group_name"),
                     ControllerName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
+
+        // Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — ЦЕЛИКОМ, вместе со снятыми: снятые и
+        // есть тумбстоуны, без них удаление не доехало бы до коллег (тот же довод, что у param_files
+        // и fw_attachments выше). Ревизии и их строки вложены в документ, а не выгружаются своей
+        // секцией: ревизия без документа не значит ничего и приехать отдельно не должна.
+        data.ParamTables = new();
+        foreach (var table in AllParamTablesIncludingDeleted())
+        {
+            var exported = new ExportedParamTable
+            {
+                SyncId = table.SyncId, DiskPath = table.DiskPath, Filename = table.Filename,
+                Name = table.Name, Manufacturer = table.Manufacturer,
+                CreatedAt = table.CreatedAt, UpdatedAt = table.UpdatedAt, DeletedAt = table.DeletedAt,
+                Columns = GetParamTableColumns(table.Id!.Value).Select(c => c.Title).ToList(),
+            };
+
+            foreach (var revision in AllParamTableRevisionsIncludingDeleted(table.Id.Value))
+                exported.Revisions.Add(new ExportedParamTableRevision
+                {
+                    SyncId = revision.SyncId, Number = revision.Number, Reason = revision.Reason,
+                    Summary = revision.Summary, Author = revision.Author, CreatedAt = revision.CreatedAt,
+                    DeletedAt = revision.DeletedAt, UpdatedAt = revision.UpdatedAt,
+                    // Строки снятой ревизии не выгружаются: тумбстоуну они не нужны (получателю
+                    // достаточно знать, что ревизия снята), а весят они столько же, сколько живые.
+                    Rows = revision.DeletedAt.Length > 0
+                        ? new()
+                        : GetParamTableRows(revision.Id!.Value).Select(row => new ExportedParamTableRow
+                        {
+                            Kind = row.Kind, GroupName = row.GroupName, Code = row.Code, Title = row.Title,
+                            Value = row.Value, ValueState = row.ValueState, Factory = row.Factory,
+                            Unit = row.Unit, Description = row.Description,
+                            Applicability = row.Applicability, AppliesWhen = row.AppliesWhen, Extra = row.Extra,
+                        }).ToList(),
+                });
+
+            data.ParamTables.Add(exported);
+        }
 
         // Паспорта шкафов из синхронизации УБРАНЫ: паспорт больше не хранимая запись, а эфемерный
         // документ, формируемый из шаблона-файла (см. PassportService / Views.PassportPrintWindow).

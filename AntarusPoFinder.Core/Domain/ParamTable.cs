@@ -1,0 +1,202 @@
+namespace AntarusPoFinder.Core.Domain;
+
+/// <summary>ТАБЛИЦА ПАРАМЕТРОВ ПЧ/УПП — собственный документ программы, заменивший блокнот.
+///
+/// Раньше настройки частотника жили текстовым файлом рядом с прошивкой: секции решётками из «=»,
+/// строки вида «P0-02(2) - Выбор канала - Протокол связи». Читать это можно было только глазами и
+/// только в блокноте, сравнить две редакции — никак.
+///
+/// Документ живёт РЯДОМ с файлом параметров (.par), а не вместо него: .par — проприетарная выгрузка
+/// конфигуратора вендора, её никто не разбирает и разбирать не собирается. Таблица — то, что человек
+/// читает и правит руками.
+///
+/// <b>Ключ — сам ФАЙЛ на диске (папка + имя), а не строка param_files.</b> У одного и того же файла
+/// параметров в param_files по строке на КАЖДЫЙ привязанный подтип шкафа (см. ParamFileLinkService и
+/// Database.GetParamFilesSharingFile): файл физически один, записей пять. Внешний ключ на
+/// param_files.id размножил бы таблицу параметров по числу подтипов — пять копий одного документа,
+/// расходящихся при первой же правке. Сравнение путей и имён идёт через Database.FileKey, тем же
+/// способом, что и всё остальное про файлы параметров.</summary>
+public class ParamTable
+{
+    public int? Id { get; set; }
+
+    /// <summary>Папка файла параметров, к которому привязан документ. Абсолютная и в нотации той
+    /// машины, что его завела, — у получателя приводится к своему корню (FirmwarePathLocalizer),
+    /// как и у param_files.</summary>
+    public string DiskPath { get; set; } = "";
+
+    /// <summary>Имя файла параметров (.par), рядом с которым живёт документ.</summary>
+    public string Filename { get; set; } = "";
+
+    /// <summary>Название документа — то, что человек видит в списке: «Задание Modbus»,
+    /// «Пуск по месту». У одного файла параметров их может быть несколько.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Производитель ПЧ/УПП — дублируется из param_files ради показа в списках без
+    /// лишнего JOIN'а. Строкой, а не ссылкой: производителя могли убрать из справочника, документ
+    /// от этого читаться не перестаёт (тот же приём, что у param_files.manufacturer).</summary>
+    public string Manufacturer { get; set; } = "";
+
+    public string CreatedAt { get; set; } = "";
+    public string UpdatedAt { get; set; } = "";
+
+    /// <summary>Отметка удаления ('' — живой документ). Тумбстоун, а не DELETE: таблица аддитивная,
+    /// «строки нет во входящем снимке» никогда не значит «её удалили» (см. FwAttachment).</summary>
+    public string DeletedAt { get; set; } = "";
+
+    public string SyncId { get; set; } = "";
+}
+
+/// <summary>Одна РЕВИЗИЯ документа — снимок ВСЕЙ таблицы целиком на момент правки.
+///
+/// Снимок, а не дельта: дельта требует, чтобы цепочка правок доехала целиком и по порядку, а конфиг
+/// ездит между машинами как попало и с пропусками. Ревизия самодостаточна — её можно показать, не
+/// имея ни одной другой.
+///
+/// <see cref="Summary"/> считает ПРОГРАММА (см. ParamTableDiff), <see cref="Reason"/> пишет человек.
+/// Разделены намеренно: на просьбу «перечисли, что изменил» человек отвечает «поправил параметры» и
+/// забывает половину, а вот на «зачем» отвечает честно и одной строкой.</summary>
+public class ParamTableRevision
+{
+    public int? Id { get; set; }
+    public int TableId { get; set; }
+
+    /// <summary>Своя сквозная нумерация документа: 1, 2, 3… Не версия прошивки и не дата — документ
+    /// правят отдельно от прошивки и иногда по нескольку раз в день.</summary>
+    public int Number { get; set; }
+
+    /// <summary>Зачем правили — одна-две строки от человека.</summary>
+    public string Reason { get; set; } = "";
+
+    /// <summary>Что изменилось относительно предыдущей ревизии — СЧИТАЕТ ПРОГРАММА, человек это поле
+    /// не заполняет (см. ParamTableDiff.Describe).</summary>
+    public string Summary { get; set; } = "";
+
+    public string Author { get; set; } = "";
+    public string CreatedAt { get; set; } = "";
+    public string DeletedAt { get; set; } = "";
+    public string SyncId { get; set; } = "";
+    public string UpdatedAt { get; set; } = "";
+
+    /// <summary>Строки этой ревизии. Заполняются только там, где они нужны (просмотр, разбор
+    /// изменений, выгрузка) — список ревизий слева их не тянет.</summary>
+    public List<ParamTableRow> Rows { get; set; } = new();
+}
+
+/// <summary>Чем задано значение параметра. Три состояния, и пустая ячейка без пометки врёт: наладчик
+/// не отличит «здесь ноль» от «здесь надо посмотреть на шильдик двигателя».</summary>
+public static class ParamValueState
+{
+    /// <summary>Значение задано прямо: «2», «00001», «8-N-1».</summary>
+    public const string Set = "set";
+
+    /// <summary>В исходнике стоял «(?)» — уточнить по ПЛК.</summary>
+    public const string Ask = "ask";
+
+    /// <summary>Значения нет вовсе: снимается по месту — с шильдика двигателя, из проекта.</summary>
+    public const string OnSite = "onsite";
+
+    public static string Normalize(string? raw) => raw switch
+    {
+        Ask => Ask,
+        OnSite => OnSite,
+        _ => Set,
+    };
+}
+
+/// <summary>Что за строка: настоящий параметр или пояснение простым текстом. В исходных файлах
+/// попадаются строки вроде «В ПЛК выставить частоту 55Гц» — это указание наладчику, а не параметр,
+/// и выбросить его при разборе значит потерять смысл всей подгруппы.</summary>
+public static class ParamRowKind
+{
+    public const string Param = "param";
+    public const string Note = "note";
+}
+
+/// <summary>Одна строка таблицы параметров внутри ревизии. Неизменяемая: правка заводит НОВУЮ
+/// ревизию со своим полным набором строк, а прежние остаются как были — иначе «переключение между
+/// версиями» показывало бы одно и то же.</summary>
+public class ParamTableRow
+{
+    public int? Id { get; set; }
+    public int RevisionId { get; set; }
+
+    /// <summary>Порядок внутри ревизии — как строки шли в исходнике. Показ идёт по группам
+    /// справочника (у них свой порядок), внутри группы — по этому числу.</summary>
+    public int SortOrder { get; set; }
+
+    public string Kind { get; set; } = ParamRowKind.Param;
+
+    /// <summary>Группа из справочника param_groups — «Основные настройки», «Двигатель», «Сброс до
+    /// заводских». Строкой, а не ссылкой: удалённая из справочника группа обязана остаться читаемой
+    /// у уже сохранённой ревизии.</summary>
+    public string GroupName { get; set; } = "";
+
+    /// <summary>Код настройки: P0-02, PD-01, 1-20, F0.00. У пояснения (Kind=Note) пуст.</summary>
+    public string Code { get; set; } = "";
+
+    /// <summary>Название параметра: «Выбор канала команды запуска».</summary>
+    public string Title { get; set; } = "";
+
+    public string Value { get; set; } = "";
+    public string ValueState { get; set; } = ParamValueState.Set;
+
+    /// <summary>Заводское значение. Без него нельзя ответить «а что мы вообще трогали» — единственный
+    /// вопрос, который на объекте задают всегда.</summary>
+    public string Factory { get; set; } = "";
+
+    public string Unit { get; set; } = "";
+    public string Description { get; set; } = "";
+
+    /// <summary>«Только для ПЧ №1», «Для ПЧ №1 и ПЧ №2» — применимость к КОНКРЕТНОМУ аппарату
+    /// (в исходнике блок «&lt;&lt;&lt;…&gt;&gt;&gt;»). Пусто — годится всем. Свойство СТРОКИ, а не
+    /// всей таблицы: одна и та же таблица описывает несколько частотников сразу, и плоский список
+    /// без этой пометки заставил бы наладчика выставить параметр не тому аппарату.</summary>
+    public string Applicability { get; set; } = "";
+
+    /// <summary>«Для ПЧ от 18,5 кВт», «Для 55 Гц» — условие, при котором строка вообще нужна
+    /// (в исходнике подгруппа «-----»). Пусто — нужна всегда.</summary>
+    public string AppliesWhen { get; set; } = "";
+
+    /// <summary>Произвольные столбцы документа — JSON «название столбца» → «значение». Столбцы
+    /// заводятся на документ (param_table_columns), а их содержимое живёт здесь: добавить столбец
+    /// не должно означать ALTER TABLE и новый релиз.</summary>
+    public string Extra { get; set; } = "";
+
+    /// <summary>Значение так, как его надо ПОКАЗАТЬ. Пустая ячейка у состояния «уточнить»/«по месту»
+    /// читалась бы как «ноль» — см. ParamValueState.</summary>
+    public string ValueDisplay => ValueState switch
+    {
+        ParamValueState.Ask => "? — уточнить по ПЛК",
+        ParamValueState.OnSite => "— по месту",
+        _ => Value,
+    };
+
+    public ParamTableRow Clone() => new()
+    {
+        RevisionId = RevisionId,
+        SortOrder = SortOrder,
+        Kind = Kind,
+        GroupName = GroupName,
+        Code = Code,
+        Title = Title,
+        Value = Value,
+        ValueState = ValueState,
+        Factory = Factory,
+        Unit = Unit,
+        Description = Description,
+        Applicability = Applicability,
+        AppliesWhen = AppliesWhen,
+        Extra = Extra,
+    };
+}
+
+/// <summary>Произвольный столбец документа сверх обязательных семи (Группа, Код, Название, Значение,
+/// Заводское, Единица, Описание). Заводится на документ, содержимое — в ParamTableRow.Extra.</summary>
+public class ParamTableColumn
+{
+    public int? Id { get; set; }
+    public int TableId { get; set; }
+    public string Title { get; set; } = "";
+    public int SortOrder { get; set; }
+}

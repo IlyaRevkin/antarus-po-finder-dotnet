@@ -182,6 +182,86 @@ public partial class Database : IDisposable
                  sort_order INTEGER NOT NULL DEFAULT 0
              );
 
+             -- Справочник ГРУПП параметров ПЧ/УПП: «Основные настройки», «Двигатель», «Сброс до
+             -- заводских». Устройство дословно как у fw_attachment_kinds выше, и порядок здесь —
+             -- главное содержимое, а не украшение (см. ParamGroupCatalog). Стартовый набор кладёт
+             -- разовая миграция SeedParamGroupsOnce.
+             -- ⚠️ COLLATE NOCASE тут стоит для латиницы и только для неё: все группы кириллические,
+             -- а NOCASE у SQLite кириллицу не сворачивает, поэтому регистр сводится в .NET
+             -- (AddParamGroup/DeleteParamGroup) — см. CLAUDE.md.
+             CREATE TABLE IF NOT EXISTS param_groups (
+                 name       TEXT PRIMARY KEY COLLATE NOCASE,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
+             -- ТАБЛИЦА ПАРАМЕТРОВ ПЧ/УПП — собственный документ программы вместо блокнота (см.
+             -- Domain/ParamTable.cs). Привязан к ФАЙЛУ параметров на диске (disk_path + filename), а
+             -- НЕ внешним ключом на param_files.id, и это принципиально: у одного файла в param_files
+             -- по строке на каждый привязанный подтип шкафа (см. ParamFileLinkService), и ключ на id
+             -- размножил бы документ по числу подтипов. Сравнение путей и имён — через FileKey.
+             CREATE TABLE IF NOT EXISTS param_tables (
+                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                 disk_path    TEXT NOT NULL DEFAULT '',
+                 filename     TEXT NOT NULL DEFAULT '',
+                 name         TEXT NOT NULL DEFAULT '',
+                 manufacturer TEXT NOT NULL DEFAULT '',
+                 created_at   TEXT NOT NULL DEFAULT '',
+                 updated_at   TEXT NOT NULL DEFAULT '',
+                 deleted_at   TEXT NOT NULL DEFAULT '',
+                 sync_id      TEXT NOT NULL DEFAULT ''
+             );
+
+             -- Произвольные столбцы документа сверх обязательных семи. Отдельной таблицей, а не
+             -- ALTER TABLE на каждый новый столбец: «столбцы должны добавляться» — требование
+             -- владельца, и упереть его в выпуск новой версии программы значит его не выполнить.
+             CREATE TABLE IF NOT EXISTS param_table_columns (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 table_id   INTEGER NOT NULL REFERENCES param_tables(id) ON DELETE CASCADE,
+                 title      TEXT NOT NULL DEFAULT '',
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
+             -- Ревизия документа — СНИМОК всей таблицы целиком, а не дельта: конфиг ездит между
+             -- машинами с пропусками и не по порядку, и цепочка дельт у получателя не соберётся.
+             -- summary считает программа (ParamTableDiff), reason пишет человек — см. ParamTableRevision.
+             CREATE TABLE IF NOT EXISTS param_table_revisions (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 table_id   INTEGER NOT NULL REFERENCES param_tables(id) ON DELETE CASCADE,
+                 number     INTEGER NOT NULL DEFAULT 1,
+                 reason     TEXT NOT NULL DEFAULT '',
+                 summary    TEXT NOT NULL DEFAULT '',
+                 author     TEXT NOT NULL DEFAULT '',
+                 created_at TEXT NOT NULL DEFAULT '',
+                 deleted_at TEXT NOT NULL DEFAULT '',
+                 sync_id    TEXT NOT NULL DEFAULT '',
+                 updated_at TEXT NOT NULL DEFAULT ''
+             );
+
+             -- Строки ревизии. Неизменяемые: правка заводит НОВУЮ ревизию со своим полным набором,
+             -- иначе «переключение между версиями» показывало бы одно и то же.
+             -- applies_when («Для ПЧ от 18,5 кВт») и applicability («Только для ПЧ №1») — РАЗНЫЕ
+             -- вещи и оба свойства СТРОКИ: в исходном текстовом файле это подгруппа «-----» и блок
+             -- «<<<…>>>», и свалив их в одно поле, наладчик выставит параметр не тому частотнику.
+             -- Столбец назван applies_when, а не condition: последнее — зарезервированное слово в
+             -- ряде диалектов SQL, и запрос к нему рано или поздно упрётся в это на ровном месте.
+             CREATE TABLE IF NOT EXISTS param_table_rows (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 revision_id   INTEGER NOT NULL REFERENCES param_table_revisions(id) ON DELETE CASCADE,
+                 sort_order    INTEGER NOT NULL DEFAULT 0,
+                 kind          TEXT NOT NULL DEFAULT 'param',
+                 group_name    TEXT NOT NULL DEFAULT '',
+                 code          TEXT NOT NULL DEFAULT '',
+                 title         TEXT NOT NULL DEFAULT '',
+                 value         TEXT NOT NULL DEFAULT '',
+                 value_state   TEXT NOT NULL DEFAULT 'set',
+                 factory       TEXT NOT NULL DEFAULT '',
+                 unit          TEXT NOT NULL DEFAULT '',
+                 description   TEXT NOT NULL DEFAULT '',
+                 applicability TEXT NOT NULL DEFAULT '',
+                 applies_when  TEXT NOT NULL DEFAULT '',
+                 extra         TEXT NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS users (
                  id            INTEGER PRIMARY KEY AUTOINCREMENT,
                  name          TEXT    NOT NULL,
@@ -526,6 +606,15 @@ public partial class Database : IDisposable
         CREATE INDEX IF NOT EXISTS idx_fw_attachments_version   ON fw_attachments(fw_version_id);
         CREATE INDEX IF NOT EXISTS idx_fw_attachments_sync_id   ON fw_attachments(sync_id);
         CREATE INDEX IF NOT EXISTS idx_fw_usage_shared_query    ON fw_usage_shared(query_key);
+        -- Таблицы параметров: сами документы ищутся по sync_id (импорт конфига — по строке на
+        -- каждый входящий документ), а ревизии и их строки — всегда «все, что принадлежат
+        -- родителю». Без индекса на revision_id открытие документа с полусотней ревизий читало бы
+        -- param_table_rows полным перебором по разу на ревизию.
+        CREATE INDEX IF NOT EXISTS idx_param_tables_sync_id     ON param_tables(sync_id);
+        CREATE INDEX IF NOT EXISTS idx_param_table_revs_table   ON param_table_revisions(table_id);
+        CREATE INDEX IF NOT EXISTS idx_param_table_revs_sync_id ON param_table_revisions(sync_id);
+        CREATE INDEX IF NOT EXISTS idx_param_table_rows_rev     ON param_table_rows(revision_id);
+        CREATE INDEX IF NOT EXISTS idx_param_table_cols_table   ON param_table_columns(table_id);
         """);
 
     /// <summary>Gives every pre-existing hierarchy row (both genuinely old databases picking up the
@@ -682,6 +771,27 @@ public partial class Database : IDisposable
             ("tags", "TEXT NOT NULL DEFAULT ''"),
             ("sync_id", "TEXT NOT NULL DEFAULT ''"));
 
+        // Таблицы параметров ПЧ/УПП. Таблицы новые, CREATE TABLE выше заводит их целиком — эти три
+        // вызова нужны не сегодня, а завтра: следующий столбец здесь придётся добавлять именно так
+        // (CREATE TABLE IF NOT EXISTS уже существующую таблицу не трогает), и место для него должно
+        // быть очевидным, а не выдуманным заново под давлением бага у пользователя.
+        AddColumnsIfMissing("param_tables",
+            ("manufacturer", "TEXT NOT NULL DEFAULT ''"),
+            ("deleted_at", "TEXT NOT NULL DEFAULT ''"),
+            ("sync_id", "TEXT NOT NULL DEFAULT ''"),
+            ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("param_table_revisions",
+            ("summary", "TEXT NOT NULL DEFAULT ''"),
+            ("deleted_at", "TEXT NOT NULL DEFAULT ''"),
+            ("sync_id", "TEXT NOT NULL DEFAULT ''"),
+            ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        AddColumnsIfMissing("param_table_rows",
+            ("factory", "TEXT NOT NULL DEFAULT ''"),
+            ("unit", "TEXT NOT NULL DEFAULT ''"),
+            ("applicability", "TEXT NOT NULL DEFAULT ''"),
+            ("applies_when", "TEXT NOT NULL DEFAULT ''"),
+            ("extra", "TEXT NOT NULL DEFAULT ''"));
+
         AddColumnsIfMissing("fw_version_reservations",
             ("expires_at", "TEXT NOT NULL DEFAULT ''"));
 
@@ -714,7 +824,9 @@ public partial class Database : IDisposable
         // к другому контроллеру, переписывание hw) плодила бы дубликаты. Разойтись машины при этом
         // не могут: на первой же синхронизации строки совпадают по натуральному ключу, и получатель
         // перенимает sync_id отправителя (см. ImportHierarchyDataCore) — дальше они связаны уже им.
-        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "fw_versions", "param_files", "passports" })
+        // param_tables/param_table_revisions здесь по той же причине, что и остальные: строку без
+        // sync_id получатель не соотнесёт ни с чем — ни обновить, ни снять тумбстоуном.
+        foreach (var table in new[] { "equipment_groups", "equipment_subtypes", "controller_models", "controller_modifications", "fw_versions", "param_files", "passports", "param_tables", "param_table_revisions" })
         {
             var ids = QueryInts($"SELECT id FROM {table} WHERE sync_id IS NULL OR sync_id = ''");
             foreach (var id in ids)
@@ -755,6 +867,7 @@ public partial class Database : IDisposable
         MigratePlaintextPasswordsToHashesOnce();
         AddNewDefaultManufacturersOnce();
         SeedFwAttachmentKindsOnce();
+        SeedParamGroupsOnce();
         SeedHostingAddressesOnce();
         RenameLabelInstructionTextsOnce();
         ApplyLabelDesignDefaultsOnce();

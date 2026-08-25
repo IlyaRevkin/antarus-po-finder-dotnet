@@ -203,6 +203,62 @@ public class ExportedFwAttachment
     [JsonPropertyName("controller_name")] public string ControllerName { get; set; } = "";
 }
 
+/// <summary>Один ДОКУМЕНТ-таблица параметров ПЧ/УПП вместе со всеми своими ревизиями и столбцами
+/// (см. Domain/ParamTable.cs). Ревизии вложены, а не вынесены отдельной секцией верхнего уровня,
+/// намеренно: ревизия неизменяема и без своего документа не значит ничего — приехать «наполовину»
+/// (ревизия есть, документа нет) она не должна в принципе.
+///
+/// Файл, к которому документ привязан, адресуется путём и именем, а не строкой param_files: у одного
+/// файла в param_files по записи на каждый привязанный подтип (см. ParamFileLinkService), и
+/// адресация по строке размножила бы документ по числу подтипов.</summary>
+public class ExportedParamTable
+{
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("disk_path")] public string DiskPath { get; set; } = "";
+    [JsonPropertyName("filename")] public string Filename { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("manufacturer")] public string Manufacturer { get; set; } = "";
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    [JsonPropertyName("columns")] public List<string> Columns { get; set; } = new();
+    [JsonPropertyName("revisions")] public List<ExportedParamTableRevision> Revisions { get; set; } = new();
+}
+
+/// <summary>Одна ревизия документа в выгрузке — со всеми своими строками. Ревизия НЕИЗМЕНЯЕМА, кроме
+/// поля «зачем» (reason), поэтому сводить у неё по updated_at приходится ровно одно это поле, а
+/// строки не сводятся вовсе: у одинакового sync_id они одинаковы по определению.</summary>
+public class ExportedParamTableRevision
+{
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("number")] public int Number { get; set; }
+    [JsonPropertyName("reason")] public string Reason { get; set; } = "";
+    [JsonPropertyName("summary")] public string Summary { get; set; } = "";
+    [JsonPropertyName("author")] public string Author { get; set; } = "";
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+    [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
+    [JsonPropertyName("rows")] public List<ExportedParamTableRow> Rows { get; set; } = new();
+}
+
+/// <summary>Строка ревизии. Своего sync_id у неё нет и не нужно: строка живёт только внутри своей
+/// ревизии, а та неизменяема — соотносить строки между машинами не приходится ни разу.</summary>
+public class ExportedParamTableRow
+{
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "param";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
+    [JsonPropertyName("code")] public string Code { get; set; } = "";
+    [JsonPropertyName("title")] public string Title { get; set; } = "";
+    [JsonPropertyName("value")] public string Value { get; set; } = "";
+    [JsonPropertyName("value_state")] public string ValueState { get; set; } = "set";
+    [JsonPropertyName("factory")] public string Factory { get; set; } = "";
+    [JsonPropertyName("unit")] public string Unit { get; set; } = "";
+    [JsonPropertyName("description")] public string Description { get; set; } = "";
+    [JsonPropertyName("applicability")] public string Applicability { get; set; } = "";
+    [JsonPropertyName("applies_when")] public string AppliesWhen { get; set; } = "";
+    [JsonPropertyName("extra")] public string Extra { get; set; } = "";
+}
+
 public class ExportedAppUser
 {
     [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
@@ -394,6 +450,18 @@ public class HierarchyExportData
     /// логикой для снимков со старой версии приложения.</summary>
     [JsonPropertyName("fw_attachment_kinds")] public List<string>? FwAttachmentKinds { get; set; }
 
+    /// <summary>Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — полный список, вместе со
+    /// снятыми (они и есть тумбстоуны), с вложенными ревизиями и их строками. Nullable без дефолта
+    /// по той же причине, что FwAttachments рядом: снимок со старой версии приложения ключа не
+    /// содержит вовсе, и это «отправитель о секции не знает», а не «у отправителя таблиц ноль».</summary>
+    [JsonPropertyName("param_tables")] public List<ExportedParamTable>? ParamTables { get; set; }
+
+    /// <summary>Справочник групп параметров — такой же плоский список, как fw_attachment_kinds
+    /// выше, с теми же отметками удаления/возврата в FlatListState и той же nullable-без-дефолта
+    /// логикой для снимков со старой версии приложения. Порядок групп едет вместе с именами: он и
+    /// есть главное содержимое этого справочника (см. ParamGroupCatalog).</summary>
+    [JsonPropertyName("param_groups")] public List<ExportedManufacturer>? ParamGroups { get; set; }
+
     /// <summary>Отметки времени удаления/возврата для трёх плоских списков выше (производители,
     /// теги, расширения) — см. Database.FlatLists.cs. Nullable по той же причине: экспорт со старой
     /// версии приложения ключа не содержит, и импорт тогда откатывается на прежнее чисто additive
@@ -509,6 +577,27 @@ public class ImportCounts
     /// оставлен (мягкий предохранитель, см. MirrorFlatListDeletions).</summary>
     public int AttachmentKindsSkippedDelete { get; set; }
 
+    /// <summary>Таблицы параметров ПЧ/УПП: заведённые здесь по входящему снимку / снятые по входящему
+    /// тумбстоуну / обновлённые (название, производитель). Полные аналоги трёх счётчиков
+    /// FwAttachments* выше — секция устроена так же.</summary>
+    public int ParamTablesAdded { get; set; }
+    public int ParamTablesRemoved { get; set; }
+    public int ParamTablesUpdated { get; set; }
+
+    /// <summary>Ревизии таблиц параметров, приехавшие с чужой машины. Считаются ОТДЕЛЬНО от самих
+    /// таблиц: обычный случай синхронизации — «документ у всех давно есть, приехала его новая
+    /// редакция», и молчать о нём в сводке значит не сказать ничего о самом частом изменении.</summary>
+    public int ParamTableRevisionsAdded { get; set; }
+    public int ParamTableRevisionsRemoved { get; set; }
+
+    /// <summary>Группы параметров, добавленные/убранные в справочнике входящим снимком — тот же
+    /// LWW-механизм, что у тегов, производителей и видов доп. материалов.</summary>
+    public int ParamGroupsAdded { get; set; }
+    public int ParamGroupsRemoved { get; set; }
+    /// <summary>Группа, которую эталонный снимок хотел бы убрать, но ею ещё помечена локальная
+    /// строка таблицы параметров — оставлена (тот же мягкий предохранитель, что у видов).</summary>
+    public int ParamGroupsSkippedDelete { get; set; }
+
     /// <summary>Строк fw_versions, которые продвинуло вперёд приехавшее РЕШЕНИЕ МОДЕРАЦИИ с другой
     /// машины (см. ExportedModerationDecision / Database.ApplyModerationDecisions). Считается отдельно
     /// от FwVersions/FwVersionsRemoved: те отражают дифф самих строк снимка, а это — узкий канал
@@ -534,5 +623,8 @@ public class ImportCounts
         Passports + PassportsRemoved + PassportsUpdated +
         FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +
         AttachmentKindsAdded + AttachmentKindsRemoved +
+        ParamTablesAdded + ParamTablesRemoved + ParamTablesUpdated +
+        ParamTableRevisionsAdded + ParamTableRevisionsRemoved +
+        ParamGroupsAdded + ParamGroupsRemoved +
         AppUsersAdded + AppUsersUpdated + ModerationApplied;
 }
