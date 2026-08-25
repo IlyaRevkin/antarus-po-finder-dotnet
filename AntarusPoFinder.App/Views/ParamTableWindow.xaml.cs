@@ -334,6 +334,14 @@ public partial class ParamTableWindow : Window
         var at = RevisionsList.SelectedIndex;
         LoadRevisions();
         if (at >= 0 && at < _revisions.Count) RevisionsList.SelectedIndex = at;
+
+        // Свои столбцы встают ПОСЛЕДНИМИ, а встроенных девять — на обычном экране только что
+        // заведённый столбец оказывается за правым краем, и выглядит это как «кнопка ничего не
+        // сделала». Подматываем таблицу к нему один раз, сразу после действия человека: дальше он
+        // крутит её сам, и лезть в это уже нельзя.
+        if (RowsGrid.Items.Count > 0 && RowsGrid.Columns.Count > _builtInColumns)
+            RowsGrid.ScrollIntoView(RowsGrid.Items[0], RowsGrid.Columns[^1]);
+
         Announce($"Поправлены свои столбцы документа «{Current.Name}»");
     }
 
