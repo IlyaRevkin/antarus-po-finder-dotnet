@@ -1,31 +1,32 @@
-using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Tasks;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Services;
 
-/// <summary>Состояние одной проверки. «Не настроено» — отдельно от «недоступно» намеренно: второй
-/// диск или папка обновлений могут быть просто не заданы, и красить это в красный — значит приучить
-/// смотреть мимо реальных отказов.</summary>
+/// <summary>Состояние одной проверки. «Не настроено» — отдельно от «недоступно» намеренно: вход по
+/// учётной записи может быть просто не настроен, и красить это в красный — значит приучить смотреть
+/// мимо реальных отказов.</summary>
 public enum ConnectionState { Checking, Ok, Failed, NotConfigured }
 
-/// <param name="Title">Что проверяли — «Корень сетевого диска», «Контроллер домена», …</param>
+/// <param name="Title">Что проверяли — «Контроллер домена (LDAP)», «Сервер проверки входа», …</param>
 /// <param name="Target">Куда ходили: путь, адрес, репозиторий. Пусто, если проверять было нечего.</param>
 /// <param name="Details">Человекочитаемый результат/причина — то, что читает наладчик и что уходит
 /// в буфер обмена (текст пересылают, а не пересказывают).</param>
 public record ConnectionCheckResult(string Title, ConnectionState State, string Target, string Details);
 
-/// <summary>Проверки для экрана «Состояние подключения» (см. ConnectionStatusDialog). Каждая
-/// обязана уложиться в таймаут и не бросать: на отвалившейся SMB-шаре даже Directory.Exists отвечает
-/// секундами, а под IPsec туннель поднимается ПОЗЖЕ старта приложения, поэтому «сети нет» — это
-/// штатное состояние, которое надо показать, а не авария, на которой можно повиснуть.
+/// <summary>Проверка ЦЕЛИ ВХОДА — домена или веб-сервера, смотря какой способ выбран, — и общие
+/// примитивы «сделать с таймаутом» / «отвечает ли хост». Единственный потребитель сегодня —
+/// SelfCheckProbe, собирающий снимок машины для «Проверки компьютера».
 ///
-/// Живёт в App (не в Core), потому что опирается на AppUpdateService — App-овый. Ничего WPF-ного
-/// здесь нет специально: логика проверок покрыта тестами без окна.</summary>
+/// Проверка обязана уложиться в таймаут и не бросать: под IPsec туннель поднимается ПОЗЖЕ старта
+/// приложения, поэтому «сети нет» — штатное состояние, которое надо показать, а не авария, на
+/// которой можно повиснуть.
+///
+/// Раньше здесь жили ещё и проверки папок, источников обновлений и сборка отчёта — они переехали
+/// туда, где стали разбором с причинами: SelfCheckProbe (сбор) и SelfCheckAnalyzer/SelfCheckReport
+/// в Core (выводы и текст).</summary>
 public static class ConnectionStatusService
 {
     /// <summary>Сколько ждём каждый источник. 6 секунд — компромисс: обычная шара/домен в локальной
@@ -36,37 +37,6 @@ public static class ConnectionStatusService
     /// <summary>Порт LDAP контроллера домена — проверяем именно достижимость порта, а не бинд:
     /// у экрана состояния нет (и не должно быть) ни логина, ни пароля пользователя.</summary>
     private const int LdapPort = 389;
-
-    // ── Папки (сетевой диск, второй диск) ────────────────────────────────────
-
-    /// <summary><paramref name="probe"/> — шов для тестов: подменяет реальный поход на диск. В бою
-    /// всегда null (используется Directory.Exists + чтение содержимого).</summary>
-    public static Task<ConnectionCheckResult> CheckFolderAsync(string title, string? path, TimeSpan timeout, Func<string, bool>? probe = null)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return Task.FromResult(new ConnectionCheckResult(title, ConnectionState.NotConfigured, "", "путь не задан в настройках"));
-
-        var target = path.Trim();
-        return RunWithTimeoutAsync(
-            () =>
-            {
-                try
-                {
-                    var exists = probe is not null ? probe(target) : Directory.Exists(target);
-                    return exists
-                        ? new ConnectionCheckResult(title, ConnectionState.Ok, target, "доступен")
-                        : new ConnectionCheckResult(title, ConnectionState.Failed, target,
-                            "недоступен: сетевой диск не подключён, путь не существует или нет прав");
-                }
-                catch (Exception ex)
-                {
-                    return new ConnectionCheckResult(title, ConnectionState.Failed, target, $"недоступен: {ex.Message}");
-                }
-            },
-            timeout,
-            () => new ConnectionCheckResult(title, ConnectionState.Failed, target,
-                $"не ответил за {timeout.TotalSeconds:0} с — диск/сеть не отвечают"));
-    }
 
     // ── Вход (контроллер домена / веб-сервер проверки пароля) ────────────────
 
@@ -151,64 +121,6 @@ public static class ConnectionStatusService
             timeout,
             () => new ConnectionCheckResult(title, ConnectionState.Failed, target, $"не ответил за {timeout.TotalSeconds:0} с"));
     }
-
-    // ── Обновления ───────────────────────────────────────────────────────────
-
-    /// <summary>Одна строка на оба источника сразу: папка и GitHub, с найденными версиями. Красная,
-    /// только если недоступны ОБА — то есть новые версии на эту машину не придут никак (это и есть
-    /// «молчаливая» поломка, ради видимости которой экран затевался). Если папка отвалилась, но
-    /// GitHub жив (или наоборот) — это предупреждение в тексте, но не отказ.</summary>
-    public static async Task<ConnectionCheckResult> CheckUpdateSourcesAsync(string? folderPath, TimeSpan timeout)
-    {
-        const string title = "Источник обновлений";
-        var report = await AppUpdateService.ProbeSourcesAsync(folderPath, timeout);
-        var details = AppUpdateService.DescribeSources(report).Replace("\n", "; ");
-        var target = report.Folder.Configured ? report.Folder.Location : "GitHub";
-        return new ConnectionCheckResult(title,
-            report.EffectiveSource is null ? ConnectionState.Failed : ConnectionState.Ok,
-            target, details);
-    }
-
-    /// <summary>Все проверки разом — то, что дёргает окно и кнопка «Проверить снова». Пункты
-    /// запускаются параллельно: последовательный запуск на трёх неотвечающих целях складывал бы три
-    /// таймаута подряд.</summary>
-    public static async Task<IReadOnlyList<ConnectionCheckResult>> CheckAllAsync(ConfigService cfg, TimeSpan timeout)
-    {
-        var root = CheckFolderAsync("Корень сетевого диска", cfg.RootPath(), timeout);
-        var second = CheckFolderAsync("Второй диск", cfg.SecondDiskPath(), timeout);
-        var auth = CheckAuthTargetAsync(cfg, timeout);
-        var updates = CheckUpdateSourcesAsync(cfg.EffectiveAppUpdatePath(), timeout);
-
-        await Task.WhenAll(root, second, auth, updates);
-        return new[] { root.Result, second.Result, auth.Result, updates.Result };
-    }
-
-    // ── Отчёт ────────────────────────────────────────────────────────────────
-
-    /// <summary>Текст для буфера обмена: то, что пересылают как есть. Дата и версия — сверху,
-    /// иначе через день непонятно, к какому моменту относится присланный кусок.</summary>
-    public static string BuildReport(IEnumerable<ConnectionCheckResult> results)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"Состояние подключения — {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"Antarus ПО Finder {AppUpdateService.CurrentVersionText}, компьютер {Environment.MachineName}, пользователь Windows {Environment.UserName}");
-        sb.AppendLine();
-        foreach (var r in results)
-        {
-            sb.AppendLine($"{StateLabel(r.State)} {r.Title}");
-            if (!string.IsNullOrEmpty(r.Target)) sb.AppendLine($"    адрес: {r.Target}");
-            sb.AppendLine($"    {r.Details}");
-        }
-        return sb.ToString().TrimEnd();
-    }
-
-    public static string StateLabel(ConnectionState state) => state switch
-    {
-        ConnectionState.Ok => "[ ОК ]",
-        ConnectionState.Failed => "[ НЕТ ]",
-        ConnectionState.NotConfigured => "[ — ]",
-        _ => "[ ... ]",
-    };
 
     // ── Внутреннее ───────────────────────────────────────────────────────────
 

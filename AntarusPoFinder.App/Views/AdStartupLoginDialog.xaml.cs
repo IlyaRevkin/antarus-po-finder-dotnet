@@ -306,7 +306,7 @@ public partial class AdStartupLoginDialog : Window
     /// и даёт скопировать результат.</summary>
     private void ShowConnectionStatus_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new ConnectionStatusDialog(_cfg) { Owner = this };
+        var dlg = new SelfCheckDialog(_services) { Owner = this };
         dlg.ShowDialog();
     }
 

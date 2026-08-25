@@ -15,10 +15,13 @@ using Xunit;
 
 namespace AntarusPoFinder.Tests;
 
-/// <summary>Экран «Состояние подключения». Главное требование к нему — НЕ ВИСНУТЬ: проверка
-/// отвалившейся сетевой шары сама по себе отвечает секундами, и если её не ограничить таймаутом,
-/// диагностическое окно повиснет ровно в тот момент, когда оно и нужно. Поэтому основная часть
-/// тестов — про соблюдение таймаута, а не про «зелёное/красное».</summary>
+/// <summary>Проверка цели входа (домен/веб-сервер) — то, что осталось в ConnectionStatusService
+/// после переезда диагностики в «Проверку компьютера» (SelfCheckProbe + SelfCheckAnalyzer).
+///
+/// Главное требование — НЕ ВИСНУТЬ: недостижимый домен отвечает секундами, а под IPsec туннель
+/// поднимается позже старта приложения, и окно диагностики обязано оставаться живым ровно тогда,
+/// когда оно нужно. Проверки папок, источников обновлений и сборки отчёта переехали вместе с
+/// логикой — см. SelfCheckProbeTests и SelfCheckAnalyzerTests.</summary>
 public class ConnectionStatusServiceTests
 {
     /// <summary>Регрессия, пойманная живым GUI-прогоном: проверка недостижимого домена оставляла
@@ -73,52 +76,6 @@ public class ConnectionStatusServiceTests
     /// обладают, но «уложились в таймаут + запас» и «висим, пока шара не ответит» — разница на
     /// порядки, так что грубого запаса достаточно и тест не становится хрупким.</summary>
     private static readonly TimeSpan Slack = TimeSpan.FromSeconds(3);
-
-    [Fact]
-    public async Task CheckFolderAsync_ProbeHangs_ReturnsWithinTimeoutInsteadOfWaitingForIt()
-    {
-        var timeout = TimeSpan.FromMilliseconds(300);
-        var sw = Stopwatch.StartNew();
-
-        var result = await ConnectionStatusService.CheckFolderAsync(
-            "Корень сетевого диска", @"\\мертвая-шара\ПО", timeout,
-            probe: _ => { Thread.Sleep(TimeSpan.FromSeconds(30)); return true; });
-
-        sw.Stop();
-        Assert.True(sw.Elapsed < timeout + Slack, $"проверка вернулась за {sw.Elapsed}, а должна была уложиться в {timeout} + запас");
-        Assert.Equal(ConnectionState.Failed, result.State);
-        Assert.Contains("не ответил", result.Details);
-    }
-
-    [Fact]
-    public async Task CheckFolderAsync_ProbeThrows_ReportsFailureWithReasonAndDoesNotThrow()
-    {
-        var result = await ConnectionStatusService.CheckFolderAsync(
-            "Второй диск", @"Z:\второй", TimeSpan.FromSeconds(5),
-            probe: _ => throw new IOException("Доступ запрещён"));
-
-        Assert.Equal(ConnectionState.Failed, result.State);
-        Assert.Contains("Доступ запрещён", result.Details);
-    }
-
-    [Fact]
-    public async Task CheckFolderAsync_ExistingFolder_IsOk()
-    {
-        using var root = new TempRoot();
-        var result = await ConnectionStatusService.CheckFolderAsync("Корень сетевого диска", root.Path, TimeSpan.FromSeconds(5));
-
-        Assert.Equal(ConnectionState.Ok, result.State);
-        Assert.Equal(root.Path, result.Target);
-    }
-
-    [Fact]
-    public async Task CheckFolderAsync_PathNotConfigured_IsNotReportedAsFailure()
-    {
-        // «Второй диск не настроен» не должно гореть красным — иначе на красное перестанут смотреть.
-        var result = await ConnectionStatusService.CheckFolderAsync("Второй диск", "", TimeSpan.FromSeconds(5));
-
-        Assert.Equal(ConnectionState.NotConfigured, result.State);
-    }
 
     [Fact]
     public async Task CheckAuthTargetAsync_HttpMode_UsesWebServerAndReportsItsProblem()
@@ -188,86 +145,5 @@ public class ConnectionStatusServiceTests
             tcpProbe: (_, _) => throw new InvalidOperationException("проверять нечего"));
 
         Assert.Equal(ConnectionState.NotConfigured, result.State);
-    }
-
-    [Fact]
-    public async Task CheckUpdateSourcesAsync_BothSourcesDown_IsFailedAndSaysWhy()
-    {
-        try
-        {
-            AppUpdateService.SetHttpClientForTests(new HttpClient(new ThrowingHttpMessageHandler()));
-
-            var result = await ConnectionStatusService.CheckUpdateSourcesAsync(@"Z:\нет\такой\папки", TimeSpan.FromSeconds(5));
-
-            Assert.Equal(ConnectionState.Failed, result.State);
-            Assert.Contains("не доступен", result.Details);
-        }
-        finally { AppUpdateService.ResetHttpClientForTests(); }
-    }
-
-    [Fact]
-    public async Task CheckUpdateSourcesAsync_FolderAlive_IsOkEvenWithoutGitHub()
-    {
-        using var root = new TempRoot();
-        File.WriteAllText(Path.Combine(root.Path, "AntarusPoFinder-3.0.0.exe"), "release");
-        try
-        {
-            AppUpdateService.SetHttpClientForTests(new HttpClient(new ThrowingHttpMessageHandler()));
-
-            var result = await ConnectionStatusService.CheckUpdateSourcesAsync(root.Path, TimeSpan.FromSeconds(5));
-
-            Assert.Equal(ConnectionState.Ok, result.State);
-            Assert.Contains("3.0.0", result.Details);
-        }
-        finally { AppUpdateService.ResetHttpClientForTests(); }
-    }
-
-    [Fact]
-    public async Task CheckAllAsync_AllTargetsUnreachable_StillFinishesWithinOneTimeoutBudget()
-    {
-        // Проверки идут параллельно: последовательно четыре таймаута сложились бы в минуту ожидания
-        // на полностью оборванной сети, и «не блокировать интерфейс» превратилось бы в фикцию.
-        using var dbFile = new TempDb();
-        using var db = new Database(dbFile.Path);
-        var cfg = new ConfigService(db);
-        cfg.SetRootPath(@"\\мертвая-шара\ПО");
-        cfg.SetSecondDiskPath(@"\\мертвая-шара\Второй");
-        cfg.Set("ad_auth_mode", "ldap");
-        cfg.Set("ad_domain", ""); // не ходим в реальный DNS/домен из теста
-        cfg.SetAppUpdatePath(@"\\мертвая-шара\Обновления");
-
-        var timeout = TimeSpan.FromMilliseconds(500);
-        try
-        {
-            AppUpdateService.SetHttpClientForTests(new HttpClient(new ThrowingHttpMessageHandler()));
-
-            var sw = Stopwatch.StartNew();
-            var results = await ConnectionStatusService.CheckAllAsync(cfg, timeout);
-            sw.Stop();
-
-            Assert.Equal(4, results.Count);
-            Assert.True(sw.Elapsed < timeout + Slack, $"полная проверка заняла {sw.Elapsed}");
-            Assert.All(results, r => Assert.NotEqual(ConnectionState.Checking, r.State));
-        }
-        finally { AppUpdateService.ResetHttpClientForTests(); }
-    }
-
-    [Fact]
-    public void BuildReport_ContainsEveryCheckAndItsReason_SoItCanJustBeForwarded()
-    {
-        var results = new[]
-        {
-            new ConnectionCheckResult("Корень сетевого диска", ConnectionState.Ok, @"Z:\Software", "доступен"),
-            new ConnectionCheckResult("Контроллер домена (LDAP)", ConnectionState.Failed, "Elita:389", "недоступен — нет сети до домена"),
-            new ConnectionCheckResult("Второй диск", ConnectionState.NotConfigured, "", "путь не задан в настройках"),
-        };
-
-        var report = ConnectionStatusService.BuildReport(results);
-
-        Assert.Contains("Корень сетевого диска", report);
-        Assert.Contains(@"Z:\Software", report);
-        Assert.Contains("недоступен — нет сети до домена", report);
-        Assert.Contains("путь не задан в настройках", report);
-        Assert.Contains(Environment.MachineName, report);
     }
 }

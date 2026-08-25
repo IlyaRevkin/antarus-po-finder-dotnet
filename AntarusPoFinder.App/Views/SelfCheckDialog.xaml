@@ -1,0 +1,70 @@
+<Window x:Class="AntarusPoFinder.App.Views.SelfCheckDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Проверка компьютера" Width="760" Height="640" MinWidth="560" MinHeight="420"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="Что программа проверила прямо сейчас" FontWeight="Bold" Margin="0,0,0,4"/>
+            <!-- Про «сети нет на старте» сказано прямо: под IPsec туннель поднимается ПОЗЖЕ запуска
+                 приложения, и первая проверка штатно может показать красное. Кнопка «Проверить снова»
+                 внизу — именно для этого случая. -->
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                       Text="Сразу после включения компьютера сеть может быть ещё не поднята (VPN/IPsec подключается позже запуска программы) — это не поломка, нажмите «Проверить снова» через минуту. Вне офиса недоступный сетевой диск тоже нормален: такие пункты помечаются знаком «!», а не «ПРОБЛЕМА»."/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="RowsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource CardBorder}" Margin="0,0,0,8">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="{Binding StateText}" Foreground="{Binding StateBrush}" FontWeight="Bold" Margin="0,0,8,0"/>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding Target}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,2"
+                                           Visibility="{Binding TargetVisibility}"/>
+                                <TextBlock Text="{Binding Reason}" TextWrapping="Wrap"/>
+                                <!-- «Что делать» — акцентным цветом ТЕКСТА (не фоном), поэтому
+                                     TextOnAccentBrush здесь ни при чём: текст лежит на фоне карточки. -->
+                                <TextBlock Text="{Binding FixText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource AccentBrush}"
+                                           Visibility="{Binding FixVisibility}"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2">
+            <!-- Тикет предлагается ТОЛЬКО когда найдена настоящая проблема, и только предлагается:
+                 сам по себе он не создаётся никогда (см. SelfCheckDialog.CreateTicket_Click —
+                 текст сначала показывается целиком и его можно дописать). -->
+            <Border x:Name="ProblemBanner" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,8,0,0">
+                <StackPanel>
+                    <TextBlock x:Name="ProblemBannerText" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Button x:Name="CreateTicketBtn" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
+                            Content="Составить тикет по этим данным" Click="CreateTicket_Click"
+                            ToolTip="Откроется уже заполненный текст — версия, роль, состояние диска и результаты проверок. Ничего не отправится, пока вы не нажмёте «Создать тикет»."/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Style="{StaticResource MutedText}" Margin="0,0,12,0"/>
+                <Button x:Name="RecheckBtn" Content="Проверить снова" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Recheck_Click"/>
+                <Button x:Name="CopyBtn" Content="Скопировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Copy_Click"/>
+                <Button Content="Закрыть" IsCancel="True" Click="Close_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>

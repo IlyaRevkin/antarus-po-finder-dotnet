@@ -1127,7 +1127,7 @@ public partial class SettingsView : UserControl
 
     private void ShowConnectionStatus_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new ConnectionStatusDialog(_services.Cfg) { Owner = Window.GetWindow(this) };
+        var dlg = new SelfCheckDialog(_services) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
     }
 

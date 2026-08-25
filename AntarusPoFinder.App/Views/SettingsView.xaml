@@ -208,8 +208,8 @@
                                         ToolTip="Опрашивает оба источника сразу: что лежит в папке обновлений, что есть на GitHub, что установлено и что из этого будет использовано."/>
                                 <Button x:Name="InstallLatestBtn" Content="Установить последнюю версию" IsEnabled="False" Margin="0,0,8,0" Click="InstallLatestUpdate_Click"
                                         ToolTip="Приложение закроется и перезапустится само. Доступно после проверки обновлений"/>
-                                <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Click="ShowConnectionStatus_Click"
-                                        ToolTip="Диск, домен/сервер входа и источник обновлений — что доступно прямо сейчас и почему нет."/>
+                                <Button Content="Проверить компьютер" Style="{StaticResource SecondaryButton}" Click="ShowConnectionStatus_Click"
+                                        ToolTip="Диск, пути в базе, источник обновлений, обмен, права запуска — что не так, почему и что делать. По найденной проблеме можно сразу составить тикет."/>
                             </StackPanel>
                             <!-- Постоянный журнал «что нового по версиям» — то же, что разовое окно после
                                  обновления, но к нему можно вернуться в любой момент (см. AppChangelogWindow). -->
@@ -814,9 +814,9 @@
                     <Border Style="{StaticResource CardBorder}" x:Name="ConnectionCheckCard">
                         <StackPanel>
                             <TextBlock Text="ПРОВЕРКА ВСЕГО СРАЗУ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <TextBlock Text="Диск, домен, веб-проверка, GitHub, папка обновлений — одним прогоном, с таймаутами и отчётом, который можно скопировать в письмо."
+                            <TextBlock Text="Рабочий диск, права запуска, пути к файлам в базе, источник обновлений, обмен, домен и хранилище — одним прогоном. По каждому пункту не «доступно/недоступно», а причина и что делать; отчёт можно скопировать в письмо, а по найденной проблеме — сразу составить заполненный тикет."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                            <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}"
+                            <Button Content="Проверить компьютер" Style="{StaticResource SecondaryButton}"
                                     HorizontalAlignment="Left" Click="ShowConnectionStatus_Click"/>
                         </StackPanel>
                     </Border>

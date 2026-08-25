@@ -128,24 +128,12 @@ public partial class TicketsView : UserControl
             return;
         }
         var type = (TicketTypeCombo.SelectedItem as TicketTypeOption)?.Id ?? TicketType.Other;
-        var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff");
 
-        var ticket = new Ticket
-        {
-            Id = Guid.NewGuid().ToString(),
-            Type = type,
-            Text = text,
-            Status = TicketStatus.Open,
-            CreatedBy = _services.CurrentUserName,
-            CreatedByRole = _services.Cfg.CurrentRole(),
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        _services.Db.InsertTicketIfMissing(ticket);
-
-        var (filename, payload) = TicketSyncService.BuildCreateEvent(ticket);
-        _services.Db.EnqueueTicketOutbox(filename, payload);
-        TryFlush();
+        // Заведение тикета (строка в базе + событие в очередь + попытка отправки) живёт одним
+        // методом на всех заводчиков — см. TicketSyncService.CreateTicket: тикеты создаёт ещё и
+        // «Проверка компьютера», и разъехавшиеся копии этой последовательности рано или поздно
+        // разошлись бы в мелочах.
+        var ticket = TicketSyncService.CreateTicket(_services, type, text);
 
         CopyPendingAttachments(ticket.Id);
 

@@ -83,7 +83,8 @@
             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
                        Text="Похоже, сеть ещё не поднялась (VPN/IPsec подключается позже запуска программы). Подождите минуту и попробуйте снова — пароль вводить заново не нужно."/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Состояние подключения" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowConnectionStatus_Click"/>
+                <Button Content="Проверить компьютер" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowConnectionStatus_Click"
+                        ToolTip="Диск, права запуска, обновления, обмен — что не так и что делать."/>
                 <Button Content="Проверить снова" Click="AdAuth_Click"/>
             </StackPanel>
         </StackPanel>

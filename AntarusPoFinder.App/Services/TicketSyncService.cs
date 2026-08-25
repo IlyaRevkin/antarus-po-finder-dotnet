@@ -50,6 +50,42 @@ public static class TicketSyncService
         return (FileNameFor(ev), JsonSerializer.Serialize(ev));
     }
 
+    /// <summary>Заводит тикет целиком: строка в локальной базе, событие в исходящую очередь и
+    /// попытка сразу отправить её на диск. Одна точка на всех, кто создаёт тикеты (страница «Тикеты»
+    /// и «Проверка компьютера»), — иначе второй заводчик неизбежно забыл бы про очередь, и его тикет
+    /// остался бы виден только на своей машине.
+    ///
+    /// Недоступный диск здесь не ошибка: событие остаётся в очереди и уйдёт при следующем удобном
+    /// случае (см. <see cref="FlushOutbox(AppServices,string)"/>) — тикет с машины, у которой всё
+    /// отвалилось, обязан дойти, ведь именно про это он и заведён.</summary>
+    public static Ticket CreateTicket(AppServices services, string type, string text)
+    {
+        var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff");
+        var ticket = new Ticket
+        {
+            Id = Guid.NewGuid().ToString(),
+            Type = type,
+            Text = text,
+            Status = TicketStatus.Open,
+            CreatedBy = services.CurrentUserName,
+            CreatedByRole = services.Cfg.CurrentRole(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        services.Db.InsertTicketIfMissing(ticket);
+
+        var (filename, payload) = BuildCreateEvent(ticket);
+        services.Db.EnqueueTicketOutbox(filename, payload);
+
+        var root = services.Cfg.RootPath();
+        if (!string.IsNullOrEmpty(root))
+        {
+            try { FlushOutbox(services, root); }
+            catch { /* диск сейчас недоступен — событие ждёт в очереди */ }
+        }
+        return ticket;
+    }
+
     private static string FileNameFor(TicketEvent ev) =>
         $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{ev.EventType}_{ev.EventId}.json";
 
