@@ -147,6 +147,13 @@
                                 ToolTip="Открыть выбранный файл параметров программой по умолчанию — то же, что двойной клик по строке"/>
                         <Button x:Name="OpenFolderBtn" Content="Открыть папку" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenFolder_Click" Visibility="Collapsed"
                                 ToolTip="Открыть в проводнике папку, где лежит выбранный файл"/>
+                        <!-- Сама ТАБЛИЦА параметров — то, что до сих пор жило текстовым файлом рядом
+                             с .par и читалось только блокнотом. Кнопка стоит первой из правок,
+                             сразу за открытием: с файлом параметров работают не «открывая» его
+                             (это проприетарная выгрузка конфигуратора вендора), а сверяясь с
+                             заданием на настройку. -->
+                        <Button x:Name="ParamTableBtn" Content="Таблица параметров" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="ParamTable_Click" Visibility="Collapsed"
+                                ToolTip="Что выставлять на этом ПЧ/УПП: значения, заводские, применимость к конкретному аппарату — и что менялось от редакции к редакции"/>
                         <Button x:Name="EditTagsBtn" Content="Теги" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="EditTags_Click" Visibility="Collapsed"
                                 ToolTip="Изменить теги выбранного файла — по ним он находится поиском"/>
                         <!-- Набор подтипов у уже загруженного файла: раньше он задавался только в
@@ -182,16 +189,29 @@
                             <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="Refresh_Click"/>
                         </StackPanel>
 
+                        <!-- Общий вид таблиц приложения (RoomyDataGrid + DataGridCellText на каждой
+                             колонке). Это была единственная таблица в программе МИМО общих стилей:
+                             строки в ней стояли теснее, чем на всех соседних экранах, текст жался
+                             к верхнему краю ячейки без отступа, а длинное описание обрывалось без
+                             подсказки с полным текстом. Ширины столбцов переведены в MinWidth с
+                             растяжкой — как в остальных таблицах, где столбец можно потянуть. -->
                         <DataGrid Grid.Row="1" x:Name="FilesGrid" SelectionMode="Single" SelectionUnit="FullRow"
                                   Height="320" AutoGenerateColumns="False" IsReadOnly="True"
+                                  Style="{StaticResource RoomyDataGrid}" CanUserResizeColumns="True"
                                   MouseDoubleClick="FilesGrid_MouseDoubleClick">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Файл" Binding="{Binding Filename}" Width="*"/>
-                                <DataGridTextColumn Header="Группа / Подтип" Binding="{Binding GroupSubtypeDisplay}" Width="160"/>
-                                <DataGridTextColumn Header="Производитель" Binding="{Binding Manufacturer}" Width="120"/>
-                                <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100"/>
-                                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="180"/>
-                                <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="140"/>
+                                <DataGridTextColumn Header="Файл" Binding="{Binding Filename}" Width="*" MinWidth="180"
+                                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                                <DataGridTextColumn Header="Группа / Подтип" Binding="{Binding GroupSubtypeDisplay}" Width="Auto" MinWidth="150"
+                                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                                <DataGridTextColumn Header="Производитель" Binding="{Binding Manufacturer}" Width="Auto" MinWidth="110"
+                                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                                <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="Auto" MinWidth="90"
+                                                    ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*" MinWidth="160"
+                                                    ElementStyle="{StaticResource DataGridCellText}"/>
+                                <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="Auto" MinWidth="130"
+                                                    ElementStyle="{StaticResource DataGridCellText}"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>

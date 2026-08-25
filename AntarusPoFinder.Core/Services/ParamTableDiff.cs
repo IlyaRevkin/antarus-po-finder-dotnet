@@ -54,6 +54,12 @@ public static class ParamTableDiff
         /// не поиском по списку на каждую строку: строк в таблице сотни, изменений единицы.</summary>
         public Dictionary<string, ChangeKind> ByKey { get; } =
             Changes.GroupBy(c => c.Key).ToDictionary(g => g.Key, g => g.First().Kind, StringComparer.Ordinal);
+
+        /// <summary>Что стало с ЭТОЙ строкой, или null, если ничего. Ровно то, что нужно показу:
+        /// таблица идёт сверху вниз и про каждую строку спрашивает один раз. Ключ строки при этом
+        /// наружу не выставляется — он служебный, и знать его правила показу незачем.</summary>
+        public ChangeKind? KindOf(ParamTableRow? row) =>
+            row is not null && ByKey.TryGetValue(KeyOf(row), out var kind) ? kind : null;
     }
 
     /// <summary>Ключ строки для сравнения. Регистр и лишние пробелы свёрнуты в .NET — <b>не через

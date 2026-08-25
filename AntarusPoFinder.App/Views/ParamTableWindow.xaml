@@ -1,0 +1,164 @@
+<Window x:Class="AntarusPoFinder.App.Views.ParamTableWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Таблица параметров"
+        Width="1180" Height="720" MinWidth="900" MinHeight="540"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Шапка: к какому файлу параметров всё это относится, какой документ показан (у одного
+             файла их бывает несколько: «Задание Modbus», «Пуск по месту») и отбор по аппарату —
+             главное действие наладчика на объекте. -->
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="160"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="7" x:Name="FileLabel"
+                       Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Документ:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DocumentCombo" Height="30" DisplayMemberPath="Name"
+                      SelectionChanged="Document_Changed"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="3" Text="Показать строки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Row="1" Grid.Column="4" x:Name="ApplicabilityCombo" Width="220" Height="30"
+                      SelectionChanged="Applicability_Changed"
+                      ToolTip="Строки без пометки годятся всем аппаратам и показываются всегда"/>
+
+            <Button Grid.Row="1" Grid.Column="6" x:Name="ImportBtn" Content="Новый документ из файла…"
+                    Style="{StaticResource SecondaryButton}" Click="Import_Click"
+                    ToolTip="Разобрать накопленный txt в таблицу — с предпросмотром и правкой до сохранения"/>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210" MinWidth="150"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Список ревизий слева — как в «Истории изменений программы»: свежая сверху, у каждой
+                 номер, дата и автор. -->
+            <ListBox Grid.Column="0" x:Name="RevisionsList" SelectionChanged="Revision_Changed">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="2,4">
+                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Subheader}" Style="{StaticResource MutedText}" FontSize="11"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="3*"/>
+                    <RowDefinition Height="6"/>
+                    <RowDefinition Height="1*" MinHeight="60"/>
+                </Grid.RowDefinitions>
+
+                <!-- «Зачем» от автора ревизии — короткой строкой над таблицей: это единственное, что
+                     пишет человек, и единственное, что объясняет, почему числа ниже такие. -->
+                <Border Grid.Row="0" Style="{StaticResource CardBorder}" Margin="0,0,0,8">
+                    <StackPanel>
+                        <TextBlock x:Name="ReasonText" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="AuthorText" Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <DataGrid Grid.Row="1" x:Name="RowsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserResizeColumns="True" SelectionMode="Single" SelectionUnit="FullRow"
+                          Style="{StaticResource RoomyDataGrid}">
+                    <DataGrid.Columns>
+                        <!-- Пометка словом, а не только цветом: цвет не читается ни на печати, ни
+                             при дальтонизме, а «что изменилось» — главный вопрос к этой таблице. -->
+                        <DataGridTextColumn Header="" Binding="{Binding ChangeMark}" Width="Auto" MinWidth="80"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="140"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Код" Binding="{Binding Code}" Width="Auto" MinWidth="80"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Название" Binding="{Binding Title}" Width="2*" MinWidth="160"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Значение" Binding="{Binding ValueDisplay}" Width="Auto" MinWidth="120"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Заводское" Binding="{Binding Factory}" Width="Auto" MinWidth="80"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Ед." Binding="{Binding Unit}" Width="Auto" MinWidth="55"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" MinWidth="150"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Только для" Binding="{Binding Applicability}" Width="*" MinWidth="110"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Когда нужно" Binding="{Binding AppliesWhen}" Width="*" MinWidth="110"
+                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                    </DataGrid.Columns>
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <!-- Изменённые относительно ПРЕДЫДУЩЕЙ ревизии строки. Foreground
+                                     задан на строке, а не на ячейке: выделенная строка переключает
+                                     Foreground ячейки на TextOnAccentBrush, и подсветка не мешает
+                                     её читать. -->
+                                <DataTrigger Binding="{Binding Change}" Value="ValueChanged">
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                                    <Setter Property="FontWeight" Value="Bold"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Change}" Value="Added">
+                                    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Change}" Value="Edited">
+                                    <Setter Property="FontStyle" Value="Italic"/>
+                                </DataTrigger>
+                                <!-- Пояснение простым текстом («В ПЛК выставить частоту 55Гц») — не
+                                     параметр, и выглядеть как параметр не должно. -->
+                                <DataTrigger Binding="{Binding IsNote}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                </DataGrid>
+
+                <GridSplitter Grid.Row="2" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                <TextBox Grid.Row="3" x:Name="SummaryText" IsReadOnly="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"/>
+            </Grid>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <Button x:Name="EditBtn" Content="Править…" Width="130" Margin="0,0,8,0" Click="Edit_Click"
+                        ToolTip="Правка сохранится новой ревизией: прежняя останется как была"/>
+                <Button x:Name="RenameBtn" Content="Поправить «зачем»…" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,8,0" Click="EditReason_Click"
+                        ToolTip="Единственное, что можно изменить у уже сохранённой ревизии: сами строки — снимок"/>
+                <Button x:Name="DeleteBtn" Content="Удалить документ" Style="{StaticResource SecondaryButton}"
+                        Click="Delete_Click"/>
+            </StackPanel>
+            <Button Content="Закрыть" Width="110" HorizontalAlignment="Right" IsCancel="True" Click="Close_Click"/>
+        </Grid>
+    </Grid>
+</Window>

@@ -234,6 +234,7 @@ public partial class ParamsView : UserControl
         // it, not just left dangling above a hidden grid (see the XAML comment on this StackPanel).
         var rowActionsVisibility = expanding ? Visibility.Visible : Visibility.Collapsed;
         OpenFileBtn.Visibility = rowActionsVisibility;
+        ParamTableBtn.Visibility = rowActionsVisibility;
         TidyBtn.Visibility = rowActionsVisibility;
         OpenFolderBtn.Visibility = rowActionsVisibility;
         EditTagsBtn.Visibility = rowActionsVisibility;
@@ -487,6 +488,27 @@ public partial class ParamsView : UserControl
             return;
         }
         Process.Start(new ProcessStartInfo(row.DiskPath) { UseShellExecute = true });
+    }
+
+    /// <summary>Таблица параметров выбранного файла — задание на настройку ПЧ/УПП с ревизиями.
+    ///
+    /// Ключ у неё — сам ФАЙЛ (папка + имя), а не строка param_files: у одного файла в таблице по
+    /// записи на каждый привязанный подтип шкафа, и открывшись «по строке», документ размножился бы
+    /// по числу подтипов, а копии разошлись бы при первой же правке (см. Domain/ParamTable.cs).
+    /// Поэтому окну передаются путь и имя, а не row.Id.</summary>
+    private void ParamTable_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilesGrid.SelectedItem is not ParamFileRow row)
+        {
+            AppMessageBox.Show("Выберите строку.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var window = new ParamTableWindow(_services, _host, row.DiskPath, row.Filename, row.Filename)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        window.ShowDialog();
     }
 
     private void EditTags_Click(object sender, RoutedEventArgs e)
