@@ -128,6 +128,10 @@
                                 <DataTrigger Binding="{Binding Change}" Value="ValueChanged">
                                     <Setter Property="FontWeight" Value="Bold"/>
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding Change}" Value="ExtraChanged">
+                                    <Setter Property="FontWeight" Value="Bold"/>
+                                    <Setter Property="FontStyle" Value="Italic"/>
+                                </DataTrigger>
                                 <DataTrigger Binding="{Binding Change}" Value="Edited">
                                     <Setter Property="FontStyle" Value="Italic"/>
                                 </DataTrigger>
@@ -139,6 +143,15 @@
                             <Style.Triggers>
                                 <!-- Изменённые относительно ПРЕДЫДУЩЕЙ ревизии строки. -->
                                 <DataTrigger Binding="{Binding Change}" Value="ValueChanged">
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                                </DataTrigger>
+                                <!-- Правка в СВОЁМ столбце — тем же цветом, что и правка значения:
+                                     это и есть правка значения, просто в столбце, который человек
+                                     завёл сам. Различает их слово в столбце «Изменение», а не
+                                     оттенок: цвет не читается ни на печати, ни при дальтонизме, и
+                                     заводить ради этого третью кисть значило бы уводить взгляд с
+                                     того, ради чего таблицу и открыли. -->
+                                <DataTrigger Binding="{Binding Change}" Value="ExtraChanged">
                                     <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Change}" Value="Added">
@@ -176,6 +189,9 @@
                 <Button x:Name="RenameBtn" Content="Поправить «зачем»…" Style="{StaticResource SecondaryButton}"
                         Margin="0,0,8,0" Click="EditReason_Click"
                         ToolTip="Единственное, что можно изменить у уже сохранённой ревизии: сами строки — снимок"/>
+                <Button x:Name="ColumnsBtn" Content="Свои столбцы…" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,8,0" Click="Columns_Click"
+                        ToolTip="Столбцы сверх обязательных: «Диапазон», «Кем проверено». Заполняются вместе с остальными ячейками"/>
                 <Button x:Name="DeleteBtn" Content="Удалить документ" Style="{StaticResource SecondaryButton}"
                         Click="Delete_Click"/>
             </StackPanel>

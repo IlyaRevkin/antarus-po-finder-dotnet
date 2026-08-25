@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -28,6 +29,8 @@ public partial class ParamTableWindow : Window
     private List<ParamTableRevision> _revisions = new();
     private List<ParamTableRow> _rows = new();
     private ParamTableDiff.Result? _diff;
+    private List<ParamTableColumn> _ownColumns = new();
+    private int _builtInColumns;
 
     /// <summary>Строка таблицы для показа: сами данные плюс пометка «что с ней стало относительно
     /// предыдущей ревизии».</summary>
@@ -44,6 +47,11 @@ public partial class ParamTableWindow : Window
         public string AppliesWhen { get; init; } = "";
         public bool IsNote { get; init; }
 
+        /// <summary>Значения своих столбцов документа ПО МЕСТУ — в том же порядке, в каком колонки
+        /// для них заведены в коде (см. ShowOwnColumns). По месту, а не по названию: заголовок
+        /// пишет человек, и путь привязки со скобками и пробелами внутри разбирается не так.</summary>
+        public List<string> Extras { get; init; } = new();
+
         /// <summary>Имя изменения ровно как у ParamTableDiff.ChangeKind — по нему подсвечивает
         /// DataGrid.RowStyle. Пусто — строка не менялась.</summary>
         public string Change { get; init; } = "";
@@ -54,9 +62,19 @@ public partial class ParamTableWindow : Window
     private sealed class RevisionVm
     {
         public ParamTableRevision Source { get; init; } = new();
-        public string Header => $"Ревизия {Source.Number}";
-        public string Subheader => string.Join(" · ",
-            new[] { DateOnly(Source.CreatedAt), Source.Author }.Where(s => s.Length > 0));
+
+        /// <summary>Номер ПОКАЗА, а не хранимый: хранимый присвоила заведшая машина, и после обмена
+        /// конфигом «третьих» в одном документе бывает две (см. ParamTableNumbering).</summary>
+        public string Header => $"Ревизия {Source.DisplayNumber}";
+
+        /// <summary>Дата, автор и — если номера разошлись — под каким номером ревизию завели.
+        /// Молчать об этом нельзя: под старым номером она названа в чужих Summary и в разговоре.</summary>
+        public string Subheader => string.Join(" · ", new[]
+        {
+            DateOnly(Source.CreatedAt),
+            Source.Author,
+            Source.Number > 0 && Source.Number != Source.DisplayNumber ? $"заведена как {Source.Number}" : "",
+        }.Where(s => s.Length > 0));
 
         private static string DateOnly(string iso) =>
             iso.Length >= 10 ? iso[..10] : iso;
@@ -71,11 +89,16 @@ public partial class ParamTableWindow : Window
         _filename = filename;
 
         FileLabel.Text = "Файл параметров: " + fileLabel;
+        // Сколько колонок задано в XAML — до них своих столбцов не бывает, и при перестроении
+        // трогать их нельзя. Считаем один раз здесь, а не числом в коде: добавится встроенный
+        // столбец — и число молча разошлось бы с разметкой.
+        _builtInColumns = RowsGrid.Columns.Count;
         var canEdit = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
         EditBtn.IsEnabled = canEdit;
         RenameBtn.IsEnabled = canEdit;
         DeleteBtn.IsEnabled = canEdit;
         ImportBtn.IsEnabled = canEdit;
+        ColumnsBtn.IsEnabled = canEdit;
         if (!canEdit)
         {
             var hint = "Правка таблицы — у программиста и администратора. Здесь можно смотреть и отбирать строки по аппарату.";
@@ -124,7 +147,9 @@ public partial class ParamTableWindow : Window
             return;
         }
 
-        _revisions = _services.Db.GetParamTableRevisions(tableId);
+        // Список ревизий — через ParamTableNumbering: номер показа считается по времени заведения,
+        // а не берётся из чужой базы, иначе после обмена конфигом в списке бывают две «третьих».
+        _revisions = ParamTableNumbering.LiveRevisions(_services.Db, tableId);
         RevisionsList.ItemsSource = _revisions.Select(r => new RevisionVm { Source = r }).ToList();
         if (_revisions.Count > 0) RevisionsList.SelectedIndex = 0;
         else ShowEmpty();
@@ -150,14 +175,14 @@ public partial class ParamTableWindow : Window
             : "Зачем правили — не записано.";
         AuthorText.Text = string.Join(" · ", new[]
         {
-            $"Ревизия {selected.Source.Number}",
+            "Ревизия " + ParamTableNumbering.Label(selected.Source),
             selected.Source.CreatedAt,
             selected.Source.Author.Length > 0 ? "автор: " + selected.Source.Author : "",
         }.Where(s => s.Length > 0));
 
         SummaryText.Text = previous is null
             ? selected.Source.Summary.Length > 0 ? selected.Source.Summary : "Первая редакция документа — сравнивать не с чем."
-            : $"Изменения относительно ревизии {previous.Number}. " + ParamTableDiff.Describe(_diff!);
+            : $"Изменения относительно ревизии {previous.DisplayNumber}. " + ParamTableDiff.Describe(_diff!);
 
         var applicabilities = ParamTableEditing.Applicabilities(_rows);
         var wanted = ApplicabilityCombo.SelectedItem as string;
@@ -175,13 +200,16 @@ public partial class ParamTableWindow : Window
 
         var shown = ParamTableEditing.FilterByApplicability(_rows, ApplicabilityCombo.SelectedItem as string);
         var ordered = ParamTableEditing.Ordered(shown, _services.Db.GetParamGroupOrder());
+        ShowOwnColumns();
 
         RowsGrid.ItemsSource = ordered.Select(row =>
         {
             var change = _diff?.KindOf(row)?.ToString() ?? "";
+            var extra = ParamRowExtra.Parse(row.Extra);
 
             return new RowVm
             {
+                Extras = _ownColumns.Select(c => extra.TryGetValue(c.Key, out var value) ? value : "").ToList(),
                 GroupName = row.GroupName,
                 Code = row.Code,
                 Title = row.Title,
@@ -197,11 +225,41 @@ public partial class ParamTableWindow : Window
                 {
                     nameof(ParamTableDiff.ChangeKind.Added) => "новая",
                     nameof(ParamTableDiff.ChangeKind.ValueChanged) => "значение",
+                    nameof(ParamTableDiff.ChangeKind.ExtraChanged) => "свой столбец",
                     nameof(ParamTableDiff.ChangeKind.Edited) => "правка",
                     _ => "",
                 },
             };
         }).ToList();
+    }
+
+    /// <summary>Свои столбцы документа — колонками справа от встроенных, заново под каждую
+    /// показанную ревизию.
+    ///
+    /// Заново, а не один раз при открытии, потому что набор зависит от РЕВИЗИИ: снятый столбец,
+    /// по которому в этой редакции осталось содержимое, показывать надо (иначе человек увидит
+    /// меньше, чем в редакции записано, и не узнает об этом), а в редакции, где его не заполняли, —
+    /// не надо. Правило считает ParamTableColumnEditing.Visible, оно под тестами.</summary>
+    private void ShowOwnColumns()
+    {
+        var all = Current?.Id is int tableId
+            ? _services.Db.AllParamTableColumnsIncludingDeleted(tableId)
+            : new List<ParamTableColumn>();
+        _ownColumns = ParamTableColumnEditing.Visible(all, _rows);
+
+        while (RowsGrid.Columns.Count > _builtInColumns)
+            RowsGrid.Columns.RemoveAt(RowsGrid.Columns.Count - 1);
+
+        var cellStyle = (Style)FindResource("DataGridCellText");
+        for (var i = 0; i < _ownColumns.Count; i++)
+            RowsGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = _ownColumns[i].Title,
+                Binding = new System.Windows.Data.Binding($"Extras[{i}]"),
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+                MinWidth = 110,
+                ElementStyle = cellStyle,
+            });
     }
 
     // ── Действия ─────────────────────────────────────────────────────────────────────────────
@@ -247,7 +305,8 @@ public partial class ParamTableWindow : Window
     {
         if (Current?.Id is not int tableId) return;
 
-        var dialog = new ParamTableEditorDialog(_services.Db.GetParamGroups(), Current.Name, _rows) { Owner = this };
+        var dialog = new ParamTableEditorDialog(_services.Db.GetParamGroups(),
+            _services.Db.GetParamTableColumns(tableId), Current.Name, _rows) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
         if (!string.Equals(dialog.ResultName, Current.Name, System.StringComparison.Ordinal))
@@ -262,12 +321,28 @@ public partial class ParamTableWindow : Window
             : $"Новая ревизия таблицы «{dialog.ResultName}» — строки не изменились");
     }
 
+    private void Columns_Click(object sender, RoutedEventArgs e)
+    {
+        if (Current?.Id is not int tableId) return;
+
+        var dialog = new ParamTableColumnsDialog(_services.Db, tableId, Current.Name) { Owner = this };
+        dialog.ShowDialog();
+        // Правки в том окне записываются сразу, поэтому смотрим на его Changed, а не на
+        // DialogResult: окно закрывают и крестиком тоже.
+        if (!dialog.Changed) return;
+
+        var at = RevisionsList.SelectedIndex;
+        LoadRevisions();
+        if (at >= 0 && at < _revisions.Count) RevisionsList.SelectedIndex = at;
+        Announce($"Поправлены свои столбцы документа «{Current.Name}»");
+    }
+
     private void EditReason_Click(object sender, RoutedEventArgs e)
     {
         if (RevisionsList.SelectedItem is not RevisionVm selected || selected.Source.Id is not int revisionId) return;
 
         var text = TextPromptDialog.Prompt(this, "Зачем правили",
-            $"Ревизия {selected.Source.Number} — одна строка о том, зачем её завели:", selected.Source.Reason);
+            $"Ревизия {selected.Source.DisplayNumber} — одна строка о том, зачем её завели:", selected.Source.Reason);
         if (text is null) return;
 
         // Правится ТОЛЬКО «зачем». Строки ревизии — снимок: переписать их задним числом значит
@@ -276,7 +351,7 @@ public partial class ParamTableWindow : Window
         var at = RevisionsList.SelectedIndex;
         LoadRevisions();
         if (at >= 0 && at < _revisions.Count) RevisionsList.SelectedIndex = at;
-        Announce("Поправлено «зачем» у ревизии " + selected.Source.Number);
+        Announce("Поправлено «зачем» у ревизии " + selected.Source.DisplayNumber);
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)

@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
@@ -31,11 +33,26 @@ public partial class ParamTableEditorDialog : Window
 
     public sealed class RowVm
     {
-        public RowVm(IReadOnlyList<string> groups) => Groups = groups;
+        public RowVm(IReadOnlyList<string> groups, IReadOnlyList<string> extraKeys)
+        {
+            Groups = groups;
+            ExtraKeys = extraKeys;
+            Extras = extraKeys.Select(_ => "").ToList();
+        }
 
         /// <summary>Справочник групп — общий список на все строки, у каждой строки свой выпадающий
         /// список из него же.</summary>
         public IReadOnlyList<string> Groups { get; }
+
+        /// <summary>Ключи своих столбцов документа — по одному на каждую ячейку в
+        /// <see cref="Extras"/>, в том же порядке.</summary>
+        public IReadOnlyList<string> ExtraKeys { get; }
+
+        /// <summary>Значения своих столбцов ПО МЕСТУ, а не словарём: столбцы для них заводятся в
+        /// коде (их число известно только на открытии окна), и привязка к «Extras[0]» ловит любой
+        /// заголовок — в том числе с пробелами и скобками, на которых путь привязки со словарём
+        /// разбирается неверно.</summary>
+        public List<string> Extras { get; }
 
         public IReadOnlyList<string> StateChoices => States.Select(s => s.Label).ToList();
 
@@ -63,24 +80,46 @@ public partial class ParamTableEditorDialog : Window
             Description = Description,
             Applicability = Applicability,
             AppliesWhen = AppliesWhen,
+            // Своё содержимое строки собирается заново из ячеек. Значения столбцов, которых в этом
+            // окне не показывали (снятые), при этом теряются намеренно: сохранение заводит НОВУЮ
+            // редакцию, и тащить в неё то, чего человек не видел, значит записать за него.
+            Extra = ParamRowExtra.Format(BuildExtra()),
         };
 
-        public static RowVm From(ParamTableRow row, IReadOnlyList<string> groups) => new(groups)
+        private Dictionary<string, string> BuildExtra()
         {
-            GroupName = row.GroupName,
-            Code = row.Code,
-            Title = row.Title,
-            Value = row.Value,
-            Factory = row.Factory,
-            Unit = row.Unit,
-            Description = row.Description,
-            Applicability = row.Applicability,
-            AppliesWhen = row.AppliesWhen,
-            StateLabel = States.First(s => s.State == ParamValueState.Normalize(row.ValueState)).Label,
-        };
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < ExtraKeys.Count && i < Extras.Count; i++)
+                values[ExtraKeys[i]] = Extras[i] ?? "";
+            return values;
+        }
+
+        public static RowVm From(ParamTableRow row, IReadOnlyList<string> groups, IReadOnlyList<string> extraKeys)
+        {
+            var vm = new RowVm(groups, extraKeys)
+            {
+                GroupName = row.GroupName,
+                Code = row.Code,
+                Title = row.Title,
+                Value = row.Value,
+                Factory = row.Factory,
+                Unit = row.Unit,
+                Description = row.Description,
+                Applicability = row.Applicability,
+                AppliesWhen = row.AppliesWhen,
+                StateLabel = States.First(s => s.State == ParamValueState.Normalize(row.ValueState)).Label,
+            };
+
+            var stored = ParamRowExtra.Parse(row.Extra);
+            for (var i = 0; i < extraKeys.Count; i++)
+                vm.Extras[i] = stored.TryGetValue(extraKeys[i], out var value) ? value : "";
+            return vm;
+        }
     }
 
     private readonly List<string> _groups;
+    private readonly List<ParamTableColumn> _columns;
+    private readonly List<string> _extraKeys;
     private readonly ObservableCollection<RowVm> _rows = new();
 
     /// <summary>Байты выбранного файла — их приходится держать при себе на всё время окна: смена
@@ -94,17 +133,43 @@ public partial class ParamTableEditorDialog : Window
     public string ResultReason => ReasonInput.Text.Trim();
     public List<ParamTableRow> ResultRows { get; private set; } = new();
 
-    private ParamTableEditorDialog(IEnumerable<string> groups)
+    private ParamTableEditorDialog(IEnumerable<string> groups, IEnumerable<ParamTableColumn>? columns)
     {
         InitializeComponent();
         _groups = groups.ToList();
+        _columns = (columns ?? Enumerable.Empty<ParamTableColumn>()).ToList();
+        _extraKeys = _columns.Select(c => c.Key).ToList();
+        AddOwnColumns();
         RowsGrid.ItemsSource = _rows;
         foreach (var choice in TextFileEncoding.Choices) EncodingCombo.Items.Add(choice);
         EncodingCombo.SelectedIndex = 0;
     }
 
+    /// <summary>Свои столбцы документа — колонками справа от встроенных. В коде, а не в XAML, по
+    /// единственной причине: сколько их и как они называются, известно только на открытии окна.
+    /// Привязка идёт по МЕСТУ («Extras[0]»), а не по названию столбца: заголовок пишет человек, и
+    /// в нём бывают пробелы, точки и скобки, на которых путь привязки разбирается не так.</summary>
+    private void AddOwnColumns()
+    {
+        var cellStyle = (Style)FindResource("DataGridCellText");
+        for (var i = 0; i < _columns.Count; i++)
+            RowsGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = _columns[i].Title,
+                Binding = new System.Windows.Data.Binding($"Extras[{i}]")
+                {
+                    Mode = System.Windows.Data.BindingMode.TwoWay,
+                    UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged,
+                },
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+                MinWidth = 110,
+                ElementStyle = cellStyle,
+            });
+    }
+
     /// <summary>Импорт: разбор только что выбранного текстового файла.</summary>
-    public ParamTableEditorDialog(IEnumerable<string> groups, byte[] bytes, string fileName) : this(groups)
+    public ParamTableEditorDialog(IEnumerable<string> groups, byte[] bytes, string fileName)
+        : this(groups, null)
     {
         _bytes = bytes;
         _fileName = fileName;
@@ -116,8 +181,9 @@ public partial class ParamTableEditorDialog : Window
     }
 
     /// <summary>Правка уже сохранённого документа: строки берутся из его последней ревизии.</summary>
-    public ParamTableEditorDialog(IEnumerable<string> groups, string documentName, IEnumerable<ParamTableRow> rows)
-        : this(groups)
+    public ParamTableEditorDialog(IEnumerable<string> groups, IEnumerable<ParamTableColumn> columns,
+        string documentName, IEnumerable<ParamTableRow> rows)
+        : this(groups, columns)
     {
         Title = "Правка таблицы параметров: " + documentName;
         Intro.Text = "Правка сохранится НОВОЙ ревизией: прежняя останется как была, и переключаться между ними можно будет "
@@ -132,7 +198,7 @@ public partial class ParamTableEditorDialog : Window
     private void Fill(IEnumerable<ParamTableRow> rows)
     {
         _rows.Clear();
-        foreach (var row in rows) _rows.Add(RowVm.From(row, _groups));
+        foreach (var row in rows) _rows.Add(RowVm.From(row, _groups, _extraKeys));
         RefreshCount();
     }
 
@@ -167,7 +233,7 @@ public partial class ParamTableEditorDialog : Window
     private void AddRow_Click(object sender, RoutedEventArgs e)
     {
         var at = RowsGrid.SelectedIndex;
-        var fresh = new RowVm(_groups)
+        var fresh = new RowVm(_groups, _extraKeys)
         {
             // Новая строка наследует группу и условия соседа: её заводят, чтобы дописать параметр
             // РЯДОМ с выделенным, а не в другой конец таблицы.
