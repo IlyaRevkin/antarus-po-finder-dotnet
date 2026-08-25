@@ -29,3 +29,27 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build --logger "console;verbosity=normal"
+
+  sync-server:
+    # Служба обмена (tools/sync-server) — отдельный проект на Go, к решению .NET отношения не имеет,
+    # поэтому и job отдельный: падение одного не должно прятать результат другого.
+    # Собранный antarus-sync.exe лежит в репозитории (его ставит ИТ, где Go нет), и подменить
+    # забытую пересборку CI не может — но хотя бы ловит правку, которая просто не компилируется.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: tools/sync-server/go.sum
+
+      - name: Test
+        working-directory: tools/sync-server
+        run: go test ./...
+
+      - name: Build
+        working-directory: tools/sync-server
+        run: go build -o antarus-sync-ci.exe .
