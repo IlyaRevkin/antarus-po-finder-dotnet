@@ -255,4 +255,94 @@ public class ParamTableDiffTests
 
         Assert.Equal(1, diff.Added);
     }
+
+    // ── Свои столбцы документа ───────────────────────────────────────────────────────────────
+
+    private static ParamTableRow WithExtra(ParamTableRow row, string key, string value)
+    {
+        var copy = row.Clone();
+        copy.Extra = ParamRowExtra.With(copy.Extra, key, value);
+        return copy;
+    }
+
+    [Fact]
+    public void AChangeInAnOwnColumn_IsItsOwnKind_NotBuriedUnderEdits()
+    {
+        var before = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…50") };
+        var after = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…60") };
+
+        var diff = ParamTableDiff.Compare(before, after);
+
+        // Свои столбцы заводят как раз под то, что нужно выставлять и сверять. Потеряйся эта
+        // правка в куче «поправлены описания» — столбец завели бы и не увидели, что в нём меняли.
+        var change = Assert.Single(diff.Changes);
+        Assert.Equal(ParamTableDiff.ChangeKind.ExtraChanged, change.Kind);
+        Assert.Contains("Диапазон: 0…50 → 0…60", ParamTableDiff.Describe(diff));
+    }
+
+    [Fact]
+    public void AChangedValueOutranksAChangedOwnColumn()
+    {
+        // У строки одна пометка, и значение — то, что человек реально вобьёт в частотник.
+        var before = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…50") };
+        var after = new List<ParamTableRow> { WithExtra(P("P0-10", "55"), "Диапазон", "0…60") };
+
+        Assert.Equal(ParamTableDiff.ChangeKind.ValueChanged, Assert.Single(ParamTableDiff.Compare(before, after).Changes).Kind);
+    }
+
+    [Fact]
+    public void ReorderedKeysInsideACellAreNotAChange()
+    {
+        // Тот же набор, записанный иначе, — это разный вывод сериализатора, а не правка документа.
+        var before = new List<ParamTableRow> { R("P0-10", "50", "{\"Б\":\"2\",\"А\":\"1\"}") };
+        var after = new List<ParamTableRow> { R("P0-10", "50", "{\"А\":\"1\", \"Б\": \"2\"}") };
+
+        Assert.False(ParamTableDiff.Compare(before, after).Any);
+    }
+
+    private static ParamTableRow R(string code, string value, string extra)
+    {
+        var row = P(code, value);
+        row.Extra = extra;
+        return row;
+    }
+
+    [Fact]
+    public void AColumnFilledForTheFirstTime_IsReportedAsANewColumn()
+    {
+        var before = new List<ParamTableRow> { P("P0-10", "50") };
+        var after = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…60") };
+
+        var diff = ParamTableDiff.Compare(before, after);
+
+        var column = Assert.Single(diff.ColumnChanges);
+        Assert.True(column.Added);
+        Assert.Equal("Диапазон", column.Key);
+        Assert.Equal(1, column.Filled);
+        Assert.Contains("Заведён свой столбец «Диапазон» (заполнен в строках: 1)", ParamTableDiff.Describe(diff));
+    }
+
+    [Fact]
+    public void AColumnEmptiedEverywhere_IsReportedAsRemoved()
+    {
+        var before = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…60") };
+        var after = new List<ParamTableRow> { P("P0-10", "50") };
+
+        var diff = ParamTableDiff.Compare(before, after);
+
+        Assert.False(Assert.Single(diff.ColumnChanges).Added);
+        Assert.Contains("Убран свой столбец «Диапазон»", ParamTableDiff.Describe(diff));
+    }
+
+    [Fact]
+    public void ANewColumnMakesTheRevisionCountAsChanged_EvenWithoutOtherEdits()
+    {
+        // «Добавление столбца — тоже изменение»: без этого редакция, в которой только и сделали,
+        // что завели и заполнили столбец, отчиталась бы «изменений нет».
+        var before = new List<ParamTableRow> { P("P0-10", "50") };
+        var after = new List<ParamTableRow> { WithExtra(P("P0-10", "50"), "Диапазон", "0…60") };
+
+        Assert.True(ParamTableDiff.Compare(before, after).Any);
+        Assert.DoesNotContain("Изменений нет", ParamTableDiff.Describe(ParamTableDiff.Compare(before, after)));
+    }
 }

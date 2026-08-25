@@ -324,4 +324,104 @@ public class ParamTableSyncTests : IDisposable
         Assert.Equal(applied.ParamTableRevisionsAdded, promised.ParamTableRevisionsAdded);
         Assert.Equal(2, promised.ParamTableRevisionsAdded);
     }
+
+    // ── Свои столбцы документа ───────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void OwnColumnsTravelWithTheDocument()
+    {
+        var id = NewTable(_a);
+        _a.AddParamTableColumn(id, "Диапазон");
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "перенёс из txt", "Ilia");
+
+        Sync();
+
+        var column = Assert.Single(_b.GetParamTableColumns(OnB().Id!.Value));
+        Assert.Equal("Диапазон", column.Title);
+        Assert.Equal("Диапазон", column.Key);
+    }
+
+    [Fact]
+    public void RenamingAColumnTravels_AndKeepsTheContentOfTheRevisionsAlreadyThere()
+    {
+        var id = NewTable(_a);
+        var columnId = _a.AddParamTableColumn(id, "Диапазон");
+        var rows = new[] { WithExtra(P("P0-02", "2"), "Диапазон", "0…600") };
+        ParamTableEditing.SaveRevision(_a, id, rows, "перенёс из txt", "Ilia");
+        Sync();
+
+        _a.UpdateParamTableColumn(columnId, "Пределы", sortOrder: 1);
+        Sync();
+
+        var tableId = OnB().Id!.Value;
+        var column = Assert.Single(_b.GetParamTableColumns(tableId));
+        Assert.Equal("Пределы", column.Title);
+        // Ключ тот же, поэтому содержимое уже приехавшей ревизии никуда не делось.
+        var revision = _b.GetParamTableRevisions(tableId).Single();
+        Assert.Equal("0…600", ParamRowExtra.Get(_b.GetParamTableRows(revision.Id!.Value)[0].Extra, column.Key));
+    }
+
+    [Fact]
+    public void ARemovedColumnStaysRemoved_AndDoesNotComeBackWithTheNextSnapshot()
+    {
+        var id = NewTable(_a);
+        var columnId = _a.AddParamTableColumn(id, "Диапазон");
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "перенёс из txt", "Ilia");
+        Sync();
+
+        _a.TombstoneParamTableColumn(columnId);
+        Sync();
+        Assert.Empty(_b.GetParamTableColumns(OnB().Id!.Value));
+
+        // И местное снятие тоже постоянно: чужая живая копия его не отменяет.
+        Sync();
+        Assert.Empty(_b.GetParamTableColumns(OnB().Id!.Value));
+    }
+
+    [Fact]
+    public void ASnapshotFromAnOlderVersion_StillBringsColumnsButNeverRemovesThem()
+    {
+        var id = NewTable(_a);
+        _a.AddParamTableColumn(id, "Диапазон");
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "перенёс из txt", "Ilia");
+
+        // Снимок с 1.74.2: нового поля нет, есть только список заголовков.
+        var data = _a.ExportHierarchyData();
+        foreach (var table in data.ParamTables!) table.ParamColumns = null;
+        _b.ImportHierarchyData(data);
+
+        Assert.Equal("Диапазон", Assert.Single(_b.GetParamTableColumns(OnB().Id!.Value)).Title);
+
+        // Тот же снимок, но столбца в нём уже нет: в одних заголовках нельзя отличить «его у
+        // отправителя нет» от «он его убрал», поэтому не убираем ничего.
+        var later = _a.ExportHierarchyData();
+        foreach (var table in later.ParamTables!)
+        {
+            table.ParamColumns = null;
+            table.Columns.Clear();
+        }
+        _b.ImportHierarchyData(later);
+
+        Assert.Single(_b.GetParamTableColumns(OnB().Id!.Value));
+    }
+
+    [Fact]
+    public void ValuesOfOwnColumnsSurviveTheTrip()
+    {
+        var id = NewTable(_a);
+        _a.AddParamTableColumn(id, "Диапазон");
+        ParamTableEditing.SaveRevision(_a, id,
+            new[] { WithExtra(P("P0-02", "2"), "Диапазон", "0…600") }, "перенёс из txt", "Ilia");
+
+        Sync();
+
+        var revision = _b.GetParamTableRevisions(OnB().Id!.Value).Single();
+        Assert.Equal("0…600", ParamRowExtra.Get(_b.GetParamTableRows(revision.Id!.Value)[0].Extra, "Диапазон"));
+    }
+
+    private static ParamTableRow WithExtra(ParamTableRow row, string key, string value)
+    {
+        row.Extra = ParamRowExtra.With(row.Extra, key, value);
+        return row;
+    }
 }
