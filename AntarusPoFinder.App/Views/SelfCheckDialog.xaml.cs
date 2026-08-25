@@ -119,7 +119,7 @@ public partial class SelfCheckDialog : Window
         }
         catch (Exception ex)
         {
-            AppMessageBox.Show($"Не удалось создать тикет: {ex.Message}", "Проверка компьютера",
+            AppMessageBox.Show($"Не удалось создать тикет: {ex.Message}", "Тикет",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -133,7 +133,7 @@ public partial class SelfCheckDialog : Window
             onDisk
                 ? "Тикет создан и отправлен. Он виден на странице «Тикеты»."
                 : "Тикет создан. Сетевой диск сейчас недоступен, поэтому он ждёт отправки на этом компьютере и уйдёт сам, как только диск появится. Он уже виден на странице «Тикеты».",
-            "Проверка компьютера", MessageBoxButton.OK, MessageBoxImage.Information);
+            "Тикет", MessageBoxButton.OK, MessageBoxImage.Information);
 
         CreateTicketBtn.IsEnabled = false;
         StatusText.Text = "Тикет создан";
