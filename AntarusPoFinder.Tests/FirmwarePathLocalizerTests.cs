@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Services;
+﻿using AntarusPoFinder.Core.Services;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -85,5 +85,19 @@ public class FirmwarePathLocalizerTests
         var stored = @"\\ant_srv\Software\Antarus Finder\ПО\НГР\PIXEL\1.1.0044.0001\";
         var result = FirmwarePathLocalizer.Localize(stored, @"Z:\Software\Antarus Finder");
         Assert.Equal(@"Z:\Software\Antarus Finder\ПО\НГР\PIXEL\1.1.0044.0001", result);
+    }
+
+    /// <summary>Ровно случай коллеги (25.08.2026): рабочий диск подключён по UNC, а в базе лежит
+    /// путь с буквой Z — её записала машина, которая файл заливала, и общий конфиг разнёс её по
+    /// всем. Прошивки у него открывались, а параметры нет: страница «Параметры» брала disk_path из
+    /// базы напрямую, мимо локализатора. Обратное направление (UNC в базе, Z на машине) уже
+    /// закреплено выше — здесь именно то, на чём обожглись.</summary>
+    [Fact]
+    public void Localize_ParamsStoredWithForeignDriveLetter_ReRootedOntoLocalUnc()
+    {
+        var stored = @"Z:\Software\Antarus Finder\Параметры\НГР\Segnetics\params.knt";
+        var result = FirmwarePathLocalizer.Localize(stored, @"\\ant_srv\Software\Antarus Finder");
+
+        Assert.Equal(@"\\ant_srv\Software\Antarus Finder\Параметры\НГР\Segnetics\params.knt", result);
     }
 }

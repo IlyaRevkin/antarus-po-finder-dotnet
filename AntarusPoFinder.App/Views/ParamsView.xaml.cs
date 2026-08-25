@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -421,6 +421,13 @@ public partial class ParamsView : UserControl
                 f.Description.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
                 f.Tags.Contains(searchText, StringComparison.OrdinalIgnoreCase)).ToList();
 
+        // Пути к параметрам приводим к корню ЭТОЙ машины. В базе disk_path абсолютный, с
+        // буквой диска заливавшей машины, и общий конфиг разносит её по всем. Прошивки этим
+        // уже занимаются (FirmwarePathLocalizer в поиске, истории, карточке), а параметры — нет:
+        // отсюда «прошивки открываются, а параметры лезут в чужой Z».
+        // Source остаётся исходной записью — в базу уезжает именно он, не наш локальный путь.
+        var localRoot = _services.Cfg.RootPath();
+
         var rows = files.Select(f => new ParamFileRow
         {
             Id = f.Id ?? 0,
@@ -433,7 +440,7 @@ public partial class ParamsView : UserControl
             Tags = f.Tags,
             DateOnly = f.UploadDate.Length >= 10 ? f.UploadDate[..10] : f.UploadDate,
             Description = f.Description,
-            DiskPath = f.DiskPath,
+            DiskPath = FirmwarePathLocalizer.Localize(f.DiskPath, localRoot),
             Source = f,
         }).ToList();
 
