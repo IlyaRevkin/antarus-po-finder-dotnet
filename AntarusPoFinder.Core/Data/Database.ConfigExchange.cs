@@ -1071,6 +1071,18 @@ public partial class Database
             data.FlatListState, apply, GetFwAttachmentKinds, AddFwAttachmentKind, DeleteFwAttachmentKind,
             () => counts.AttachmentKindsAdded++, () => counts.AttachmentKindsRemoved++);
 
+        // Группы параметров ПЧ/УПП — пятый справочник того же устройства. С одной особенностью:
+        // главное его содержимое не имена, а ПОРЯДОК («сперва основные значения, сброс до заводских
+        // в конце», см. ParamGroupCatalog), поэтому у новой группы место берётся из снимка, а не
+        // «в конец списка» (см. ParamGroupOrderFrom ниже).
+        var incomingGroupOrder = ParamGroupOrderFrom(data.ParamGroups);
+        ImportFlatList(Database.FlatKindParamGroup,
+            (data.ParamGroups ?? new()).Select(g => g.Name),
+            data.FlatListState, apply, GetParamGroups,
+            name => AddParamGroup(name, incomingGroupOrder.TryGetValue(name, out var order) ? order : null),
+            DeleteParamGroup,
+            () => counts.ParamGroupsAdded++, () => counts.ParamGroupsRemoved++);
+
         ImportFlatList(Database.FlatKindExtension,
             data.AllowedExtensions ?? new(),
             data.FlatListState, apply, GetAllowedExtensions, AddAllowedExtension, RemoveAllowedExtension,
@@ -1126,6 +1138,22 @@ public partial class Database
             MirrorFlatListDeletions(GetFwAttachmentKinds, DeleteFwAttachmentKind, data.FwAttachmentKinds ?? new(),
                 flatState.Where(s => s.Kind == FlatKindAttachmentKind).Select(s => s.Name), usedKinds.Contains,
                 apply, () => counts.AttachmentKindsRemoved++, () => counts.AttachmentKindsSkippedDelete++);
+
+            // Группа параметров — тоже не FK, а текст в param_table_rows.group_name, и
+            // предохранитель тот же текстовый: группу, которой помечена живая строка таблицы,
+            // эталонный снимок не убирает — иначе у полусотни строк пропала бы подпись, к чему они
+            // относятся.
+            var usedParamGroups = CollectUsedParamGroups();
+            MirrorFlatListDeletions(GetParamGroups, DeleteParamGroup,
+                (data.ParamGroups ?? new()).Select(g => g.Name),
+                flatState.Where(s => s.Kind == FlatKindParamGroup).Select(s => s.Name), usedParamGroups.Contains,
+                apply, () => counts.ParamGroupsRemoved++, () => counts.ParamGroupsSkippedDelete++);
+
+            // ⚠️ Порядок групп у УЖЕ ИЗВЕСТНЫХ имён переписывается только эталонным снимком. В
+            // обычном обмене между машинами он не трогается намеренно: отметок времени у порядка
+            // нет, и «побеждает тот, кто последним нажал импорт» вернуло бы ровно ту болезнь, ради
+            // которой у плоских списков и заведены отметки удаления/возврата.
+            if (apply) ApplyParamGroupOrder(data.ParamGroups);
 
             MirrorFlatListDeletions(GetAllowedExtensions, RemoveAllowedExtension, data.AllowedExtensions ?? new(),
                 flatState.Where(s => s.Kind == FlatKindExtension).Select(s => s.Name), null,
@@ -1471,6 +1499,11 @@ public partial class Database
         // Доп. материалы — ПОСЛЕ блока fw_versions и решений модерации, по той же причине, что и они:
         // вложение может относиться к прошивке, которую этот же импорт только что и завёл.
         ImportFwAttachments(data, subtypeSyncToId, controllerSyncToId, counts, apply);
+        // Таблицы параметров привязаны к ФАЙЛУ на диске (папка + имя), а не к строке param_files, и
+        // ни от какой другой секции не зависят — но идут после param_files намеренно: документ и
+        // файл, к которому он относится, обычно приезжают одним снимком, и заводить документ раньше
+        // файла незачем.
+        ImportParamTables(data, counts, apply);
         // Паспорта из синхронизации убраны: секцию data.Passports эта версия не читает вовсе (см.
         // ExportHierarchyData). Старый клиент мог прислать её заполненной — она просто игнорируется.
 
@@ -1547,6 +1580,181 @@ public partial class Database
                 SyncId = inc.SyncId,
                 UpdatedAt = inc.UpdatedAt,
             });
+        }
+    }
+
+    /// <summary>Порядок групп из входящего снимка, с игнором регистра. ⚠️ Через TryAdd, а не
+    /// ToDictionary: «Двигатель» и «двигатель» для SQLite — разные строки, обе могли доехать с разных
+    /// машин, и ToDictionary с OrdinalIgnoreCase упал бы на такой паре (та же грабля, что описана у
+    /// ImportFlatList).</summary>
+    private static Dictionary<string, int> ParamGroupOrderFrom(List<ExportedManufacturer>? incoming)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in incoming ?? new())
+            result.TryAdd(group.Name, group.SortOrder);
+        return result;
+    }
+
+    /// <summary>Расставить группы по местам из ЭТАЛОННОГО снимка — только для тех, что уже есть
+    /// локально (новые встали на своё место при заведении). Написание берётся местное: имя группы
+    /// лежит в строках таблиц текстом, и переписать его значило бы разойтись с ними.</summary>
+    private void ApplyParamGroupOrder(List<ExportedManufacturer>? incoming)
+    {
+        if (incoming is null) return;
+        var order = ParamGroupOrderFrom(incoming);
+        foreach (var name in GetParamGroups())
+            if (order.TryGetValue(name, out var sortOrder))
+                ExecuteNonQuery("UPDATE param_groups SET sort_order=@s WHERE name=@n", cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@s", sortOrder);
+                    cmd.Parameters.AddWithValue("@n", name);
+                });
+    }
+
+    /// <summary>Синхронизация таблиц параметров ПЧ/УПП (см. ExportedParamTable). Секция аддитивная,
+    /// правила те же, что у доп. материалов выше, и по тем же причинам: null — «отправитель о секции
+    /// не знает» (снимок со старой версии), локальное снятие постоянно, приехавший тумбстоун
+    /// зеркалится, шапка документа (название, производитель) сводится по updated_at.
+    ///
+    /// Своё здесь — РЕВИЗИИ. Ревизия неизменяема, кроме поля «зачем», поэтому:
+    /// <list type="bullet">
+    /// <item>ревизии, которой нет локально, строки приезжают вместе с ней и записываются как есть —
+    ///       сводить в них нечего, у одинакового sync_id они одинаковы по определению;</item>
+    /// <item>у совпавшей ревизии сводится ОДНО поле — reason, по updated_at. Summary не сводится
+    ///       вовсе: его считает программа по строкам, а строки неизменяемы;</item>
+    /// <item>⚠️ НОМЕР приехавшей ревизии сохраняется как прислан, а не пересчитывается. Две машины,
+    ///       независимо заведшие «ревизию 3», после обмена покажут две третьих — некрасиво, но
+    ///       честно: номер это то, чем ревизию называют вслух, и перенумеровав её у себя, мы
+    ///       завели бы в разговоре двух РАЗНЫХ «третьих» на разных машинах, а это уже опасно.</item>
+    /// </list>
+    /// Группа строки в СПРАВОЧНИК не добавляется — ровно как вид доп. материала: осознанно удалённая
+    /// группа иначе воскресала бы с каждой приехавшей ревизией. Справочник едет своей секцией.</summary>
+    private void ImportParamTables(HierarchyExportData data, ImportCounts counts, bool apply)
+    {
+        if (data.ParamTables is null) return;
+
+        foreach (var inc in data.ParamTables)
+        {
+            if (string.IsNullOrWhiteSpace(inc.SyncId)) continue;
+
+            var local = FindParamTableBySyncId(inc.SyncId);
+            if (local is null)
+            {
+                // Строки нет, а входящая уже снята — материализовать нечего (та же логика, что у
+                // fw_versions и доп. материалов): завести документ только чтобы тут же спрятать его
+                // под тумбстоуном значит показать фантом.
+                if (!string.IsNullOrEmpty(inc.DeletedAt)) continue;
+
+                counts.ParamTablesAdded++;
+                if (!apply)
+                {
+                    // Ревизии нового документа считаются и в сухом прогоне: плашка приёма обязана
+                    // обещать ровно то, что применение применит, иначе она обещает «1 документ», а
+                    // приезжает документ с восемью редакциями (тот же довод, что у CountSettingsChanges).
+                    // Номер документа здесь не нужен — писать всё равно нечего.
+                    ImportParamTableRevisions(0, inc, counts, apply: false);
+                    continue;
+                }
+
+                var id = AddParamTable(new Domain.ParamTable
+                {
+                    // Путь абсолютный и в нотации отправителя — к нашему корню его приводит тот же
+                    // RemapFwPaths, что и остальные пути (см. ConfigSyncService.ApplyToDatabase).
+                    DiskPath = inc.DiskPath,
+                    Filename = inc.Filename,
+                    Name = inc.Name,
+                    Manufacturer = inc.Manufacturer,
+                    CreatedAt = inc.CreatedAt,
+                    UpdatedAt = inc.UpdatedAt,
+                    SyncId = inc.SyncId,
+                });
+                foreach (var column in inc.Columns) AddParamTableColumn(id, column);
+                ImportParamTableRevisions(id, inc, counts, apply: true);
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(local.DeletedAt)) continue;
+
+            if (!string.IsNullOrEmpty(inc.DeletedAt))
+            {
+                counts.ParamTablesRemoved++;
+                if (apply) TombstoneParamTable(local.Id!.Value, inc.DeletedAt);
+                continue;
+            }
+
+            if (string.CompareOrdinal(inc.UpdatedAt, local.UpdatedAt) > 0
+                && (inc.Name != local.Name || inc.Manufacturer != local.Manufacturer))
+            {
+                counts.ParamTablesUpdated++;
+                if (apply) UpdateParamTable(local.Id!.Value, inc.Name, inc.Manufacturer, inc.UpdatedAt);
+            }
+
+            // Столбцы аддитивны и различаются названием — повтор AddParamTableColumn пропускает сам.
+            if (apply)
+                foreach (var column in inc.Columns) AddParamTableColumn(local.Id!.Value, column);
+
+            // Ревизии разбираются ВСЕГДА, а не только когда изменилась шапка: обычный случай
+            // синхронизации — «документ у всех давно есть, приехала его новая редакция».
+            ImportParamTableRevisions(local.Id!.Value, inc, counts, apply);
+        }
+    }
+
+    private void ImportParamTableRevisions(int tableId, ExportedParamTable inc, ImportCounts counts, bool apply)
+    {
+        foreach (var rev in inc.Revisions)
+        {
+            if (string.IsNullOrWhiteSpace(rev.SyncId)) continue;
+
+            var local = FindParamTableRevisionBySyncId(rev.SyncId);
+            if (local is null)
+            {
+                if (!string.IsNullOrEmpty(rev.DeletedAt)) continue;
+
+                counts.ParamTableRevisionsAdded++;
+                if (!apply) continue;
+
+                AddParamTableRevision(new Domain.ParamTableRevision
+                {
+                    TableId = tableId,
+                    Number = rev.Number,
+                    Reason = rev.Reason,
+                    Summary = rev.Summary,
+                    Author = rev.Author,
+                    CreatedAt = rev.CreatedAt,
+                    SyncId = rev.SyncId,
+                    UpdatedAt = rev.UpdatedAt,
+                    Rows = rev.Rows.Select(r => new Domain.ParamTableRow
+                    {
+                        Kind = r.Kind,
+                        GroupName = r.GroupName,
+                        Code = r.Code,
+                        Title = r.Title,
+                        Value = r.Value,
+                        ValueState = r.ValueState,
+                        Factory = r.Factory,
+                        Unit = r.Unit,
+                        Description = r.Description,
+                        Applicability = r.Applicability,
+                        AppliesWhen = r.AppliesWhen,
+                        Extra = r.Extra,
+                    }).ToList(),
+                });
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(local.DeletedAt)) continue;
+
+            if (!string.IsNullOrEmpty(rev.DeletedAt))
+            {
+                counts.ParamTableRevisionsRemoved++;
+                if (apply) TombstoneParamTableRevision(local.Id!.Value, rev.DeletedAt);
+                continue;
+            }
+
+            // Единственное сводимое поле ревизии. Строки — снимок, и переписывать их приехавшей
+            // копией значит рассказывать про прошлое неправду.
+            if (string.CompareOrdinal(rev.UpdatedAt, local.UpdatedAt) > 0 && rev.Reason != local.Reason && apply)
+                UpdateParamTableRevisionReason(local.Id!.Value, rev.Reason, rev.UpdatedAt);
         }
     }
 
@@ -2035,6 +2243,27 @@ public partial class Database
             var (disk, changed) = Remap(row.DiskPath);
             if (!changed) continue;
             ExecuteNonQuery("UPDATE param_files SET disk_path=@d WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@d", disk);
+                cmd.Parameters.AddWithValue("@id", row.Id);
+            });
+            changedCount++;
+        }
+
+        // Таблицы параметров привязаны к файлу параметров ПАПКОЙ И ИМЕНЕМ, и папка та же самая, что
+        // у param_files выше. Не переставь её — и документ, приехавший с машины с другой буквой
+        // диска, перестал бы находиться по своему файлу вовсе (отбор идёт сравнением путей, см.
+        // GetParamTablesForFile), то есть таблица просто исчезла бы с глаз.
+        var paramTableRows = new List<(int Id, string DiskPath)>();
+        using (var r = ExecuteReader("SELECT id, disk_path FROM param_tables"))
+            while (r.Read())
+                paramTableRows.Add((r.GetInt32(0), GetString(r, "disk_path")));
+
+        foreach (var row in paramTableRows)
+        {
+            var (disk, changed) = Remap(row.DiskPath);
+            if (!changed) continue;
+            ExecuteNonQuery("UPDATE param_tables SET disk_path=@d WHERE id=@id", cmd =>
             {
                 cmd.Parameters.AddWithValue("@d", disk);
                 cmd.Parameters.AddWithValue("@id", row.Id);
