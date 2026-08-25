@@ -93,7 +93,10 @@
                     <DataGrid.Columns>
                         <!-- Пометка словом, а не только цветом: цвет не читается ни на печати, ни
                              при дальтонизме, а «что изменилось» — главный вопрос к этой таблице. -->
-                        <DataGridTextColumn Header="" Binding="{Binding ChangeMark}" Width="Auto" MinWidth="80"
+                        <!-- Ширина задана, а не «по содержимому»: у изменённой строки пометка
+                             ЖИРНАЯ, ширину по содержимому столбец меряет обычным начертанием, и
+                             запас нужен ровно той строке, ради которой столбец и заведён. -->
+                        <DataGridTextColumn Header="Изменение" Binding="{Binding ChangeMark}" Width="130" MinWidth="130"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                         <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="140"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
@@ -114,31 +117,49 @@
                         <DataGridTextColumn Header="Когда нужно" Binding="{Binding AppliesWhen}" Width="*" MinWidth="110"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                     </DataGrid.Columns>
+                    <!-- Начертание — на СТРОКЕ (оно наследуется ячейками), а цвет — на ЯЧЕЙКЕ, и
+                         это не вкусовщина: общий стиль DataGridCell задаёт Foreground сам, а стиль
+                         текста внутри ячейки привязан именно к её Foreground (см. Themes/Styles.xaml)
+                         — цвет, заданный на строке, до текста просто не доходит. Живой прогон это и
+                         показал: строки помечались, но оставались обычного цвета. -->
                     <DataGrid.RowStyle>
-                        <Style TargetType="DataGridRow">
+                        <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
                             <Style.Triggers>
-                                <!-- Изменённые относительно ПРЕДЫДУЩЕЙ ревизии строки. Foreground
-                                     задан на строке, а не на ячейке: выделенная строка переключает
-                                     Foreground ячейки на TextOnAccentBrush, и подсветка не мешает
-                                     её читать. -->
                                 <DataTrigger Binding="{Binding Change}" Value="ValueChanged">
-                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
                                     <Setter Property="FontWeight" Value="Bold"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding Change}" Value="Added">
-                                    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Change}" Value="Edited">
                                     <Setter Property="FontStyle" Value="Italic"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.CellStyle>
+                        <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                            <Style.Triggers>
+                                <!-- Изменённые относительно ПРЕДЫДУЩЕЙ ревизии строки. -->
+                                <DataTrigger Binding="{Binding Change}" Value="ValueChanged">
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Change}" Value="Added">
+                                    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                                 </DataTrigger>
                                 <!-- Пояснение простым текстом («В ПЛК выставить частоту 55Гц») — не
                                      параметр, и выглядеть как параметр не должно. -->
                                 <DataTrigger Binding="{Binding IsNote}" Value="True">
                                     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
                                 </DataTrigger>
+                                <!-- ⚠️ Выделение — ПОСЛЕДНИМ и не просто так: внутри одного стиля
+                                     побеждает последний подошедший триггер, а текст на акцентной
+                                     заливке обязан быть TextOnAccentBrush. Поставь его выше — и
+                                     выделенная изменённая строка стала бы нечитаемой в светлой теме. -->
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                </Trigger>
                             </Style.Triggers>
                         </Style>
-                    </DataGrid.RowStyle>
+                    </DataGrid.CellStyle>
                 </DataGrid>
 
                 <GridSplitter Grid.Row="2" HorizontalAlignment="Stretch" Background="Transparent"/>

@@ -45,6 +45,11 @@ public class ParamTable
     public string DeletedAt { get; set; } = "";
 
     public string SyncId { get; set; } = "";
+
+    /// <summary>Название документа. Не для отладки: в выпадающем списке документов WPF показывает
+    /// Name через DisplayMemberPath, а вот наружу — средствам доступности и автоматизации — отдаёт
+    /// именно ToString(), и без этого они читают «AntarusPoFinder.Core.Domain.ParamTable».</summary>
+    public override string ToString() => Name;
 }
 
 /// <summary>Одна РЕВИЗИЯ документа — снимок ВСЕЙ таблицы целиком на момент правки.
