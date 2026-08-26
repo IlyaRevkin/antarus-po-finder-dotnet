@@ -7,6 +7,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AntarusPoFinder.Core.Services;
 
+using AntarusPoFinder.App.Services;
+
 namespace AntarusPoFinder.App.Views;
 
 /// <summary>Встроенный просмотрщик для пасхалки на номере версии — своё окно, а не системный
@@ -37,6 +39,19 @@ public partial class PhotoViewerWindow : Window
     /// <summary>Лента файлов и место в ней. Порядок задаёт вызывающий (EasterEggPhoto.List) — он же
     /// одинаков на всех машинах.</summary>
     private IReadOnlyList<string> _files = Array.Empty<string>();
+
+    /// <summary>Режим пасхалки: во весь экран, поверх всех, крестика нет.</summary>
+    private bool _kiosk;
+
+    /// <summary>Закрытие разрешено — снимается только названными в подсказке способами.</summary>
+    private bool _closeAllowed;
+
+    private System.Windows.Threading.DispatcherTimer? _hintTimer;
+
+
+    /// <summary>Предохранитель: забытая шутка не должна занимать компьютер насовсем.</summary>
+    private static readonly TimeSpan AutoCloseAfter = TimeSpan.FromMinutes(10);
+
     private int _index;
 
     /// <summary>Показываемый сейчас файл — видео (его надо запустить, когда окно появится).</summary>
@@ -51,6 +66,48 @@ public partial class PhotoViewerWindow : Window
         Closed += (_, _) => StopEverything();
     }
 
+
+    /// <summary>Единственный путь закрытия в режиме пасхалки: сначала снимаем запрет, потом
+    /// закрываем. Иначе OnClosing вернёт окно обратно.</summary>
+    private void AllowCloseAndClose()
+    {
+        _closeAllowed = true;
+        Close();
+    }
+
+    /// <summary>В режиме пасхалки крестика нет, но Alt+F4 и системное меню остаются — их и держим.
+    /// Не «намертво»: выходы названы в подсказке, а через AutoCloseAfter окно уйдёт само.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_kiosk && !_closeAllowed)
+        {
+            e.Cancel = true;
+            ShowHintBriefly();
+            return;
+        }
+        base.OnClosing(e);
+    }
+
+    /// <summary>Подсказка сама выглядывает на несколько секунд — при открытии и при попытке
+    /// закрыть окно обычным способом. Наведение на изображение показывает её же (ToolTip в XAML),
+    /// но полагаться только на наведение нельзя: мышь может никто и не подвести.</summary>
+    private void ShowHintBriefly()
+    {
+        if (HintBar is null) return;
+        HintBar.Visibility = Visibility.Visible;
+        _hintTimer ??= new System.Windows.Threading.DispatcherTimer();
+        _hintTimer.Stop();
+        _hintTimer.Interval = TimeSpan.FromSeconds(6);
+        _hintTimer.Tick -= HideHint;
+        _hintTimer.Tick += HideHint;
+        _hintTimer.Start();
+    }
+
+    private void HideHint(object? sender, EventArgs e)
+    {
+        _hintTimer?.Stop();
+        if (HintBar is not null) HintBar.Visibility = Visibility.Collapsed;
+    }
 
     private void Prev_Click(object sender, RoutedEventArgs e) => Step(-1);
 
@@ -75,7 +132,14 @@ public partial class PhotoViewerWindow : Window
             // Escape закрывал окно через IsCancel у собственного крестика; крестик убран как
             // дубликат системного, и закрытие по Escape теперь живёт здесь.
             case Key.Escape:
-                Close();
+                AllowCloseAndClose();
+                e.Handled = true;
+                break;
+            // Второй выход, названный в подсказке. Ctrl+Shift+Esc намеренно НЕ занимаем — это
+            // системный диспетчер задач, и отбирать его у человека нельзя.
+            case Key.F4 when (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift))
+                             == (ModifierKeys.Control | ModifierKeys.Shift):
+                AllowCloseAndClose();
                 e.Handled = true;
                 break;
         }
@@ -123,6 +187,50 @@ public partial class PhotoViewerWindow : Window
     /// <summary>Показывает ленту <paramref name="files"/>, начиная с <paramref name="startIndex"/>.
     /// Возвращает true, если окно удалось открыть; false — если показать нечего (пустая лента или ни
     /// один файл не читается). Тихо, без сообщений об ошибке.</summary>
+    /// <summary>Показать ленту в режиме пасхалки: во весь экран, поверх всех, без рамки и без
+    /// крестика. Вызывается ТОЛЬКО из отдельного процесса (см. EasterEggProcess) — в диспетчере
+    /// задач он подписан «Пасхалка» и снимается независимо от Finder.
+    ///
+    /// ⚠️ Окно, которое не закрывается обычным способом, — это повадки блокировщика экрана.
+    /// Поэтому выходов ровно три, и все они названы человеку прямо в окне:
+    /// Esc, Ctrl+Shift+F4 и «снять Пасхалку» в диспетчере задач. Подсказка висит при наведении на
+    /// изображение (как у кнопок) и, кроме того, сама показывается на несколько секунд при
+    /// открытии — на случай, если мышь никто не подведёт.
+    ///
+    /// Чего здесь СОЗНАТЕЛЬНО нет: перехвата Ctrl+Alt+Del, блокировки диспетчера задач и
+    /// глобальных клавиатурных хуков. Это граница между шуткой и вредоносом, и мы её не переходим.
+    /// Есть и предохранитель: через AutoCloseAfter окно закроется само, чтобы забытая шутка не
+    /// заняла чужой компьютер насовсем.</summary>
+    public static bool ShowAsEasterEgg(IReadOnlyList<string>? files, int startIndex = 0)
+    {
+        if (files is null || files.Count == 0) return false;
+        try
+        {
+            var window = new PhotoViewerWindow { _files = files, _kiosk = true };
+            var start = startIndex >= 0 && startIndex < files.Count ? startIndex : 0;
+            if (!window.ShowFrom(start, +1)) return false;
+
+            window.Title = EasterEggProcess.WindowTitle;
+            window.WindowStyle = WindowStyle.None;
+            window.ResizeMode = ResizeMode.NoResize;
+            window.WindowState = WindowState.Maximized;
+            window.Topmost = true;
+            window.ShowInTaskbar = true;   // иначе процесс не найти в диспетчере задач глазами
+
+            window.Show();
+            window.ShowHintBriefly();
+
+            var life = new System.Windows.Threading.DispatcherTimer { Interval = AutoCloseAfter };
+            life.Tick += (_, _) => { life.Stop(); window.AllowCloseAndClose(); };
+            life.Start();
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     public static bool TryShow(Window? owner, IReadOnlyList<string>? files, int startIndex = 0)
     {
         if (files is null || files.Count == 0) return false;

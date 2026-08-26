@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Navigation;
@@ -374,11 +374,19 @@ public partial class MainWindow : Window
     /// файлы битые — просто ничего не происходит.</summary>
     private void OpenEasterPhoto()
     {
-        if (PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(_services.Cfg.RootPath())))
-            return;
+        var root = _services.Cfg.RootPath();
 
-        if (ImportEasterPhoto() is not null)
-            PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(_services.Cfg.RootPath()));
+        // Отдельным процессом: во весь экран, поверх всех, и снимается в диспетчере задач под
+        // именем «Пасхалка», не задевая Finder. Не удалось запустить — показываем по-старому,
+        // окном внутри программы: шутка не повод оставлять человека ни с чем.
+        if (EasterEggPhoto.List(root).Count > 0)
+        {
+            if (Services.EasterEggProcess.TryLaunch(root)) return;
+            if (PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(root))) return;
+        }
+
+        if (ImportEasterPhoto() is not null && !Services.EasterEggProcess.TryLaunch(root))
+            PhotoViewerWindow.TryShow(this, EasterEggPhoto.List(root));
     }
 
     /// <summary>Выбор картинки → копия в общую папку на диске. Возвращает машинно-независимый путь

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -76,6 +76,18 @@ public partial class App : Application
         base.OnStartup(e);
 
         ApplyToolTipTiming();
+
+        // Пасхалка — отдельный процесс того же exe (см. EasterEggProcess): так её видно в
+        // диспетчере задач под своим именем и можно снять, не трогая Finder. Проверка стоит ДО
+        // мьютекса единственного экземпляра намеренно: иначе второй процесс тут же закрылся бы,
+        // разбудив первый, и никакой пасхалки не открылось бы вовсе.
+        if (Services.EasterEggProcess.TryRunAsEasterEgg(
+                e.Args,
+                root => Views.PhotoViewerWindow.ShowAsEasterEgg(
+                    Core.Services.EasterEggPhoto.List(root))))
+        {
+            return;
+        }
 
         _singleInstanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)

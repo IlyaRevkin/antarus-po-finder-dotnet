@@ -11,8 +11,10 @@
         <!-- Uniform: содержимое вписывается в окно с сохранением пропорций и масштабируется вместе с
              ним, без искажений и без обрезки. Картинка и видео — два разных элемента: показывается
              всегда ровно один, второй скрыт (см. PhotoViewerWindow.xaml.cs). -->
-        <Image x:Name="Photo" Stretch="Uniform" Margin="12" Visibility="Collapsed"/>
+        <Image x:Name="Photo" Stretch="Uniform" Margin="12" Visibility="Collapsed"
+               ToolTipService.ShowDuration="20000" ToolTip="Esc — закрыть  ·  Ctrl+Shift+F4 — закрыть  ·  либо снять «Пасхалку» в диспетчере задач (Finder при этом останется работать)"/>
         <MediaElement x:Name="Video" Stretch="Uniform" Margin="12" Visibility="Collapsed"
+                      ToolTipService.ShowDuration="20000" ToolTip="Esc — закрыть  ·  Ctrl+Shift+F4 — закрыть  ·  либо снять «Пасхалку» в диспетчере задач (Finder при этом останется работать)"
                       LoadedBehavior="Manual" UnloadedBehavior="Stop"
                       MediaEnded="Video_MediaEnded" MediaFailed="Video_MediaFailed"/>
 
@@ -35,5 +37,18 @@
                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"
                    Padding="10,4" FontSize="13" Opacity="0.85"
                    Foreground="{DynamicResource FgBrush}"/>
+
+        <!-- Выходы названы прямо в окне. Окно, которое не закрывается крестиком, обязано сказать
+             человеку, как из него выйти, — иначе это неотличимо от блокировщика экрана. Полоса
+             выглядывает при открытии и при попытке закрыть обычным способом; то же самое висит
+             подсказкой при наведении на изображение. -->
+        <Border x:Name="HintBar" Visibility="Collapsed"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,28"
+                Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                BorderThickness="1" CornerRadius="8" Padding="16,10">
+            <TextBlock Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" MaxWidth="720"
+                       TextAlignment="Center"
+                       Text="Esc — закрыть  ·  Ctrl+Shift+F4 — закрыть  ·  либо снять «Пасхалку» в диспетчере задач (Finder при этом останется работать)"/>
+        </Border>
     </Grid>
 </Window>
