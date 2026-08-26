@@ -74,14 +74,98 @@ public partial class Database
         MarkFlatListAlive(FlatKindParamGroup, name);
     }
 
+    /// <summary>Группы вместе с их местом в порядке — то, что правит раздел «Группы параметров
+    /// ПЧ/УПП» в Настройках. Показу таблицы хватает <see cref="GetParamGroupOrder"/>, а вот
+    /// перестановке нужен именно список: соседа по списку по словарю не найти.</summary>
+    public List<(string Name, int SortOrder)> GetParamGroupsWithOrder()
+    {
+        var result = new List<(string, int)>();
+        using var reader = ExecuteReader("SELECT name, sort_order FROM param_groups ORDER BY sort_order, name");
+        while (reader.Read())
+            result.Add((reader.GetString(0), reader.GetInt32(1)));
+        return result;
+    }
+
     /// <summary>Куда встанет группа, заведённая без явного места: на десятку выше самой поздней из
-    /// НЕ-заключительных. «Сброс до заводских» (1000) из расчёта исключён — он обязан остаться
-    /// последним, чем бы список ни пополняли.</summary>
+    /// ОСТАЛЬНЫХ, но всегда ВЫШЕ «Сброса до заводских» — он обязан остаться последним, чем бы список
+    /// ни пополняли. Своя группа, вставшая ниже сброса, означала бы, что человек, идущий по таблице
+    /// сверху вниз, сперва обнулит частотник, а потом станет что-то выставлять.
+    ///
+    /// ⚠️ Считается по СПИСКУ, а не запросом «где sort_order &lt; 1000»: с тех пор как порядок
+    /// правят руками (ParamGroupEditing.Move перенумеровывает весь список десятками), число 1000
+    /// перестало быть меткой заключительной группы — ею стало само название.</summary>
     private int NextParamGroupOrder()
     {
-        var max = Convert.ToInt32(ExecuteScalar(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM param_groups WHERE sort_order < 1000") ?? 0);
-        return System.Math.Min(max + 10, 999);
+        var groups = GetParamGroupsWithOrder();
+        var reset = groups.FirstOrDefault(g =>
+            string.Equals(g.Name, ParamGroupCatalog.FactoryReset, StringComparison.OrdinalIgnoreCase));
+
+        var others = groups
+            .Where(g => !string.Equals(g.Name, ParamGroupCatalog.FactoryReset, StringComparison.OrdinalIgnoreCase))
+            .Select(g => g.SortOrder).ToList();
+        var next = (others.Count == 0 ? 0 : others.Max()) + 10;
+
+        // Место кончилось — двигаем сброс вниз, а не втискиваем новую группу под него.
+        if (reset.Name is not null && next >= reset.SortOrder)
+            AddParamGroup(reset.Name, next + 10);
+
+        return next;
+    }
+
+    /// <summary>Сколько ЖИВЫХ строк помечено этой группой — вопрос «а на ней что-нибудь держится?»
+    /// перед удалением группы из справочника. Сравнение в .NET по той же причине, что везде:
+    /// COLLATE NOCASE кириллицу не сворачивает.</summary>
+    public int CountParamRowsInGroup(string name)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) return 0;
+
+        var count = 0;
+        using var reader = ExecuteReader("""
+            SELECT r.group_name
+            FROM param_table_rows r
+            JOIN param_table_revisions rev ON r.revision_id = rev.id
+            JOIN param_tables t            ON rev.table_id  = t.id
+            WHERE rev.deleted_at = '' AND t.deleted_at = ''
+            """);
+        while (reader.Read())
+            if (string.Equals(reader.GetString(0), name, StringComparison.OrdinalIgnoreCase))
+                count++;
+        return count;
+    }
+
+    /// <summary>Переименовать группу В СТРОКАХ уже сохранённых редакций.
+    ///
+    /// ⚠️ Единственное место во всей подсистеме, где строки ревизии переписываются, и это осознанно:
+    /// группа — ПОДПИСЬ строки, а не её содержимое, и оставить полсотни строк с именем, которого в
+    /// справочнике больше нет, значит выкинуть их из порядка показа (см.
+    /// ParamGroupCatalog.OrderOf — незнакомая группа уходит в конец).
+    ///
+    /// ⚠️ И ровно поэтому же переименование ЛОКАЛЬНОЕ: строки ревизий между машинами не
+    /// переписываются никогда (ImportParamTableRevisions правит только «зачем»), так что у коллег в
+    /// их копиях этих же редакций останется прежнее имя. Об этом сказано и человеку — в окне
+    /// правки справочника.</summary>
+    public int RenameParamGroupInRows(string from, string to)
+    {
+        from = (from ?? "").Trim();
+        to = (to ?? "").Trim();
+        if (from.Length == 0 || to.Length == 0) return 0;
+
+        // Сравнение в .NET, а не COLLATE NOCASE: имена кириллические, а NOCASE у SQLite сворачивает
+        // только латиницу (см. CLAUDE.md).
+        var ids = new List<int>();
+        using (var reader = ExecuteReader("SELECT id, group_name FROM param_table_rows"))
+            while (reader.Read())
+                if (string.Equals(reader.GetString(1), from, StringComparison.OrdinalIgnoreCase))
+                    ids.Add(reader.GetInt32(0));
+
+        foreach (var id in ids)
+            ExecuteNonQuery("UPDATE param_table_rows SET group_name=@to WHERE id=@id", cmd =>
+            {
+                cmd.Parameters.AddWithValue("@to", to);
+                cmd.Parameters.AddWithValue("@id", id);
+            });
+        return ids.Count;
     }
 
     /// <summary>Убрать группу из справочника. Уже сохранённые ревизии свою группу СОХРАНЯЮТ: в

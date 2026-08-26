@@ -429,6 +429,31 @@
                         <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteManufacturer_Click"/>
                     </StackPanel>
 
+                    <!-- Группы параметров — те самые «поля в выпадающих списках», которые до сих пор
+                         правились только косвенно: справочник засевался миграцией, а завести свою
+                         группу можно было лишь вписав её от руки в предпросмотре импорта. Порядок
+                         здесь важнее названий: наладчик идёт по таблице сверху вниз, и «Сброс до
+                         заводских», оказавшийся в середине, обнулит всё, что он уже выставил, —
+                         поэтому «Выше»/«Ниже» стоят прямо в ряду, а не прячутся в отдельное окно. -->
+                    <TextBlock Text="ГРУППЫ ПАРАМЕТРОВ ПЧ/УПП" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Разделы, на которые разбита таблица параметров. Порядок в этом списке — порядок разделов в документе; «Сброс до заводских» должен оставаться последним."
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <ListBox x:Name="ParamGroupList" Height="180" Margin="0,0,0,4"
+                             PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"
+                             MouseDoubleClick="RenameParamGroup_Click"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button x:Name="ParamGroupAddBtn" Content="Добавить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddParamGroup_Click"/>
+                        <Button x:Name="ParamGroupRenameBtn" Content="Переименовать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RenameParamGroup_Click"
+                                ToolTip="Подпись поправится и в уже сохранённых редакциях НА ЭТОЙ МАШИНЕ. У коллег в их копиях этих редакций останется прежнее имя — строки редакции это снимок, и по машинам они не переписываются"/>
+                        <Button x:Name="ParamGroupUpBtn" Content="Выше" Style="{StaticResource SecondaryButton}" Width="80" Margin="0,0,8,0" Click="MoveParamGroupUp_Click"/>
+                        <Button x:Name="ParamGroupDownBtn" Content="Ниже" Style="{StaticResource SecondaryButton}" Width="80" Margin="0,0,8,0" Click="MoveParamGroupDown_Click"/>
+                        <Button x:Name="ParamGroupRemoveBtn" Content="Убрать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RemoveParamGroup_Click"
+                                ToolTip="Из справочника. У строк, уже помеченных этой группой, подпись останется — группа лежит в них текстом, а не ссылкой"/>
+                        <Button x:Name="ParamGroupResetBtn" Content="Заводской порядок" Style="{StaticResource SecondaryButton}" Click="ResetParamGroupOrder_Click"
+                                ToolTip="Вернуть порядок, заданный при первой установке. Свои группы останутся, но уедут в конец — перед «Сбросом до заводских»"/>
+                    </StackPanel>
+                    <TextBlock x:Name="ParamGroupHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
                     <!-- ПЛК, HMI и Схемы — три независимых списка расширений, но каждый занимал бы
                          целую полосу по высоте при списке всего в несколько пунктов. Кладём рядом,
                          в три столбца, экономя вертикальное место вкладки. -->

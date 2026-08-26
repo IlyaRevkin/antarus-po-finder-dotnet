@@ -2119,6 +2119,7 @@ public partial class SettingsView : UserControl
         }
 
         ManufList.ItemsSource = _services.Db.GetParamManufacturers();
+        LoadParamGroups(null);
 
         ExtList.Items.Clear();
         foreach (var ext in _services.Db.GetAllowedExtensions())
@@ -2619,6 +2620,126 @@ public partial class SettingsView : UserControl
         LoadHierarchy();
         MoveDeletedFolder(name);
         _host.PushCatalogChange($"Производитель ПЧ/УПП «{name}» удалён");
+    }
+
+    // ── Группы параметров ПЧ/УПП ─────────────────────────────────────────────
+    //
+    // Справочник разделов таблицы параметров. До этого его правила только миграция: интерфейса не
+    // было вообще, и «поля в выпадающих списках» документа были неизменяемы. Вся логика — в
+    // Core/Services/ParamGroupEditing.cs под тестами; здесь только показ и вопросы человеку.
+
+    /// <summary>Перечитать список групп, сохранив выделение по НАЗВАНИЮ (а не по номеру строки):
+    /// перестановка меняет как раз номер, и по нему выделение уезжало бы на соседнюю группу.</summary>
+    private void LoadParamGroups(string? select)
+    {
+        var groups = _services.Db.GetParamGroups();
+        var keep = select ?? ParamGroupList.SelectedItem as string;
+        ParamGroupList.ItemsSource = groups;
+        if (keep is not null)
+            ParamGroupList.SelectedItem = groups.FirstOrDefault(g =>
+                string.Equals(g, keep, StringComparison.OrdinalIgnoreCase));
+
+        ParamGroupHint.Text = $"Групп: {groups.Count}. Порядок сверху вниз — порядок разделов в таблице параметров.";
+    }
+
+    /// <summary>Показать итог правки справочника: отказ — окном, удача — строкой состояния и
+    /// толчком отправки конфига (справочник ездит в общем конфиге, как производители и теги).</summary>
+    private bool ShowParamGroupResult(ParamGroupEditing.Result result)
+    {
+        if (!result.Ok)
+        {
+            AppMessageBox.Show(result.Message, "Группы параметров", MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+        _host.PushCatalogChange(result.Message);
+        return true;
+    }
+
+    private void AddParamGroup_Click(object sender, RoutedEventArgs e)
+    {
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Добавить группу параметров",
+            "Название раздела таблицы: «Насос», «Пожарный режим»:");
+        if (name is null) return;
+
+        var result = ParamGroupEditing.Add(_services.Db, name);
+        if (!ShowParamGroupResult(result)) return;
+        LoadParamGroups(name.Trim());
+    }
+
+    private void RenameParamGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (ParamGroupList.SelectedItem is not string source)
+        {
+            AppMessageBox.Show("Выберите группу.", "Группы параметров", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var used = ParamGroupEditing.UsedBy(_services.Db, source);
+        var hint = used == 0
+            ? "Этой группой пока не помечена ни одна строка."
+            : $"Этой группой помечено строк: {used}. Подпись поправится и в них — но только на этой машине: "
+              + "строки уже сохранённой редакции по машинам не переписываются, и у коллег в их копиях останется прежнее имя.";
+
+        var name = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать группу",
+            $"Новое название вместо «{source}».\n{hint}", source);
+        if (name is null) return;
+
+        var result = ParamGroupEditing.Rename(_services.Db, source, name);
+        if (!ShowParamGroupResult(result)) return;
+        LoadParamGroups(name.Trim());
+    }
+
+    private void MoveParamGroupUp_Click(object sender, RoutedEventArgs e) => MoveParamGroup(-1);
+
+    private void MoveParamGroupDown_Click(object sender, RoutedEventArgs e) => MoveParamGroup(+1);
+
+    private void MoveParamGroup(int delta)
+    {
+        if (ParamGroupList.SelectedItem is not string source)
+        {
+            AppMessageBox.Show("Выберите группу.", "Группы параметров", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var result = ParamGroupEditing.Move(_services.Db, source, delta);
+        if (!ShowParamGroupResult(result)) return;
+        LoadParamGroups(source);
+    }
+
+    private void RemoveParamGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (ParamGroupList.SelectedItem is not string source)
+        {
+            AppMessageBox.Show("Выберите группу.", "Группы параметров", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var used = ParamGroupEditing.UsedBy(_services.Db, source);
+        var tail = used == 0
+            ? "Ни одна строка таблиц ею не помечена."
+            : $"Ею помечено строк: {used}. Подпись у них останется — группа лежит в строке текстом, а не ссылкой, "
+              + "но своего места в порядке показа эти строки лишатся.";
+
+        var reply = AppMessageBox.Show($"Убрать группу «{source}» из справочника?\n\n{tail}",
+            "Группы параметров", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var result = ParamGroupEditing.Remove(_services.Db, source);
+        if (!ShowParamGroupResult(result)) return;
+        LoadParamGroups(null);
+    }
+
+    private void ResetParamGroupOrder_Click(object sender, RoutedEventArgs e)
+    {
+        var reply = AppMessageBox.Show(
+            "Вернуть заводской порядок групп?\n\nНазвания не изменятся: переставятся только места. "
+            + "Свои группы останутся, но уедут в конец — перед «Сбросом до заводских».",
+            "Группы параметров", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var result = ParamGroupEditing.ResetToDefaults(_services.Db);
+        if (!ShowParamGroupResult(result)) return;
+        LoadParamGroups(null);
     }
 
     private void AddExtension_Click(object sender, RoutedEventArgs e)
