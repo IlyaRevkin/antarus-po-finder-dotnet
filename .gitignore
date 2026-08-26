@@ -67,3 +67,6 @@ tools/inbox/.env
 tools/sync-server/*.exe
 !tools/sync-server/antarus-sync.exe
 tools/sync-server/antarus-sync.json
+
+# Файлы, присланные Ильёй в переписке, — рабочий материал, не код.
+.telegram-inbox/
