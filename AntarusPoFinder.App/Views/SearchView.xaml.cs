@@ -175,13 +175,14 @@ public partial class SearchView : UserControl
     /// InternalsVisibleTo("AntarusPoFinder.Tests") — уже используется так же для AppUpdateService).</summary>
     internal sealed record FilterOption(string Label, int? Id = null, string? Text = null);
 
-    private enum SearchMode { Firmware, Params, Schemas }
+    private enum SearchMode { Firmware, Params, ParamTables, Schemas }
 
-    /// <summary>Что сейчас выбрано в трёхпозиционном переключателе. Через null-условные обращения:
+    /// <summary>Что сейчас выбрано в переключателе режимов. Через null-условные обращения:
     /// FwModeRadio.IsChecked="True" в XAML поднимает Checked ещё до того, как соседним радиокнопкам
     /// присвоены поля x:Name (см. AnimateModeThumb).</summary>
     private SearchMode CurrentMode =>
         SchemasModeRadio?.IsChecked == true ? SearchMode.Schemas :
+        ParamTablesModeRadio?.IsChecked == true ? SearchMode.ParamTables :
         ParamsModeRadio?.IsChecked == true ? SearchMode.Params : SearchMode.Firmware;
 
     private bool FiltersVisible => FiltersPanel.Visibility == Visibility.Visible;
@@ -328,7 +329,7 @@ public partial class SearchView : UserControl
         FirmwareFiltersPanel.Visibility = mode == SearchMode.Firmware ? Visibility.Visible : Visibility.Collapsed;
         SchemaFiltersPanel.Visibility = mode == SearchMode.Schemas ? Visibility.Visible : Visibility.Collapsed;
         FiltersHint.Text = mode == SearchMode.Schemas ? SchemaFiltersHint : FirmwareFiltersHint;
-        if (mode == SearchMode.Params) FiltersPanel.Visibility = Visibility.Collapsed;
+        if (mode is SearchMode.Params or SearchMode.ParamTables) FiltersPanel.Visibility = Visibility.Collapsed;
         UpdateFiltersButton();
     }
 
@@ -427,7 +428,7 @@ public partial class SearchView : UserControl
     {
         if (FiltersToggle is null) return;
         var mode = CurrentMode;
-        if (mode == SearchMode.Params)
+        if (mode is SearchMode.Params or SearchMode.ParamTables)
         {
             FiltersToggle.Visibility = Visibility.Collapsed;
             return;
@@ -496,8 +497,8 @@ public partial class SearchView : UserControl
         if (!string.IsNullOrWhiteSpace(SearchInput.Text)) PerformSearch();
     }
 
-    /// <summary>Width of one segment in the three-way Прошивки/Параметры/Схемы slider — must match
-    /// the Width set on each RadioButton and on ModeThumb in SearchView.xaml.</summary>
+    /// <summary>Ширина одного сегмента переключателя Прошивки/Параметры/Таблицы/Схемы — обязана
+    /// совпадать с Width у каждой RadioButton и у ModeThumb в SearchView.xaml.</summary>
     private const double ModeSegmentWidth = 150;
 
     /// <summary>Glides ModeThumb under whichever segment is now checked instead of each segment
@@ -509,7 +510,9 @@ public partial class SearchView : UserControl
     private void AnimateModeThumb()
     {
         if (ModeThumbTransform is null) return;
-        var index = SchemasModeRadio?.IsChecked == true ? 2 : ParamsModeRadio?.IsChecked == true ? 1 : 0;
+        var index = SchemasModeRadio?.IsChecked == true ? 3
+            : ParamTablesModeRadio?.IsChecked == true ? 2
+            : ParamsModeRadio?.IsChecked == true ? 1 : 0;
         ModeThumbTransform.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(index * ModeSegmentWidth, TimeSpan.FromSeconds(0.15)));
     }
@@ -540,6 +543,8 @@ public partial class SearchView : UserControl
 
         if (SchemasModeRadio.IsChecked == true)
             PerformSchemasSearch(query);
+        else if (ParamTablesModeRadio.IsChecked == true)
+            PerformParamTablesSearch(query);
         else if (ParamsModeRadio.IsChecked == true)
             PerformParamsSearch(query);
         else
@@ -1147,6 +1152,135 @@ public partial class SearchView : UserControl
         panel.Children.Add(actions);
 
         return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
+    }
+
+    // ── Поиск по документам-таблицам параметров ──────────────────────────────
+    //
+    // Отдельный режим от файлов параметров, потому что это разные вещи: файл — проприетарная
+    // выгрузка конфигуратора вендора, документ — задание на настройку, которое читают глазами.
+    // Наладчик на объекте ищет второе и ищет его по КОДУ настройки («P0-10») или по названию
+    // параметра — до этого таблицы не находились поиском вовсе.
+
+    private void PerformParamTablesSearch(string query)
+    {
+        var exact = ExactWordCheck.IsChecked == true;
+        var hits = SearchService.SearchWithLayoutFallback(query, exact, (q, ex) =>
+        {
+            var tokens = SearchService.Normalize(q).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return _services.Db.SearchParamTablesByTokens(tokens, ex);
+        }, LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery);
+
+        if (hits.Count == 0)
+        {
+            ShowNoResults(query, NoResultsHint);
+            return;
+        }
+
+        StatusLabel.Text = $"Найдено: {hits.Count}";
+        foreach (var hit in hits.Take(SearchResultCap.MaxCards))
+            ResultsPanel.Children.Add(MakeParamTableCard(hit));
+        if (hits.Count > SearchResultCap.MaxCards)
+            StatusLabel.Text = SearchResultCap.Describe(hits.Count, SearchResultCap.MaxCards);
+
+        if (!ConfirmLayoutFallback(query, usedFallback, convertedQuery))
+            ShowNoResults(query, NoResultsHint);
+    }
+
+    /// <summary>Карточка найденного документа. Главное в ней — СТРОКИ, из-за которых он нашёлся:
+    /// ответ «нашёлся документ „Задание Modbus“» без строки заставляет открывать его и искать
+    /// глазами заново, то есть отменяет весь смысл поиска.</summary>
+    private Border MakeParamTableCard(Database.ParamTableHit hit)
+    {
+        var table = hit.Table;
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = table.Manufacturer.Length > 0 ? $"{table.Name} [{table.Manufacturer}]" : table.Name,
+            Style = (Style)FindResource("SubtitleText"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            // Тип и подтип шкафа — то, чего в документе не хватало и в самом окне («в таблице
+            // теряется привязка к типам подтипам»). В выдаче он тем более обязателен: одинаковых по
+            // названию «Заданий Modbus» на разные шкафы бывает несколько.
+            Text = string.Join(" · ", new[]
+            {
+                hit.Subtypes.Length > 0 ? hit.Subtypes : "подтип не задан",
+                "файл: " + table.Filename,
+            }),
+            Style = (Style)FindResource("MutedText"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        var tags = TagString.Parse(table.Tags);
+        if (tags.Count > 0)
+        {
+            var tagsView = new TagBubbleEditor { Margin = new Thickness(0, 4, 0, 0) };
+            tagsView.Configure(tags, null, readOnly: true);
+            panel.Children.Add(tagsView);
+        }
+
+        // Показываем несколько совпавших строк, а не все: у общего слова их бывают десятки, и
+        // карточка выросла бы в целую таблицу.
+        const int shownRows = 3;
+        foreach (var row in hit.Rows.Take(shownRows))
+            panel.Children.Add(new TextBlock
+            {
+                Text = string.Join("  ", new[]
+                {
+                    row.Code.Length > 0 ? row.Code : "•",
+                    row.Title,
+                    row.ValueDisplay.Length > 0 ? "= " + row.ValueDisplay : "",
+                }.Where(s => s.Length > 0)),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        if (hit.Rows.Count > shownRows)
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"…и ещё строк: {hit.Rows.Count - shownRows}",
+                Style = (Style)FindResource("MutedText"),
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var openBtn = new Button { Content = "Открыть таблицу", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        // Подматываем к строке, из-за которой документ нашёлся: иначе человек, искавший «P0-10»,
+        // получает полсотни строк и ищет нужную глазами заново.
+        openBtn.Click += (_, _) => OpenParamTable(hit);
+        actions.Children.Add(openBtn);
+
+        var openFolderBtn = new Button { Content = "Открыть папку с файлом", Style = (Style)FindResource("SecondaryButton") };
+        openFolderBtn.Click += (_, _) => OpenParamTableFolder(table);
+        actions.Children.Add(openFolderBtn);
+        panel.Children.Add(actions);
+
+        return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
+    }
+
+    private void OpenParamTable(Database.ParamTableHit hit)
+    {
+        var window = new ParamTableWindow(_services, _host, hit.Table.DiskPath, hit.Table.Filename,
+            hit.Table.Filename, hit.Table.Id, hit.Rows.FirstOrDefault()?.Code)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        window.ShowDialog();
+        // Документ могли поправить прямо из окна — выдача о нём уже устарела.
+        MarkResultsDirty();
+    }
+
+    private void OpenParamTableFolder(ParamTable table)
+    {
+        if (string.IsNullOrWhiteSpace(table.DiskPath) || !Directory.Exists(table.DiskPath))
+        {
+            AppMessageBox.Show("Папка файла параметров недоступна: " + table.DiskPath, "Таблица параметров",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Process.Start(new ProcessStartInfo(table.DiskPath) { UseShellExecute = true });
     }
 
     /// <summary>Обход второго диска, идущий прямо сейчас — null, когда ничего не идёт. Обход всегда

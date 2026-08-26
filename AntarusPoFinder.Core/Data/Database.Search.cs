@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -592,5 +592,94 @@ public partial class Database
             .OrderByDescending(x => x.Score)
             .Select(x => x.File)
             .ToList();
+    }
+
+    /// <summary>Найденный ДОКУМЕНТ-таблица параметров.
+    ///
+    /// <paramref name="Rows"/> — те строки последней живой редакции, которые совпали с запросом. Они
+    /// нужны не для красоты: наладчик ищет «P0-10» или «максимальная частота», и ответ «нашёлся
+    /// документ „Задание Modbus“» без строки, из-за которой он нашёлся, заставляет открывать документ
+    /// и искать глазами заново.</summary>
+    public record ParamTableHit(ParamTable Table, int Score, List<ParamTableRow> Rows, string Subtypes);
+
+    /// <summary>Поиск по документам-таблицам параметров: название, теги, производитель, имя файла —
+    /// и СОДЕРЖИМОЕ последней живой редакции (код настройки, название параметра, описание).
+    ///
+    /// Содержимое здесь главное. Просьба владельца была дословной: «наладчик на объекте должен
+    /// находить нужную таблицу», а ищет он не по названию документа (его он не помнит), а по коду
+    /// параметра или по тому, как параметр называется в аппарате.
+    ///
+    /// Ищем по ПОСЛЕДНЕЙ живой редакции, а не по всем сразу: прежние редакции — прошлое, и находка
+    /// в снятом два года назад значении сбивала бы с толку. Какая редакция последняя, решает
+    /// ParamTableNumbering (по времени, а не по хранимому номеру — тот присвоила чужая машина).</summary>
+    public List<ParamTableHit> SearchParamTablesByTokens(IReadOnlyList<string> tokens, bool exactWord = false)
+    {
+        var qTokens = tokens.Where(t => !string.IsNullOrEmpty(t) && t.Length >= 2)
+            .Select(t => t.ToUpperInvariant()).ToArray();
+        if (qTokens.Length == 0) return new();
+
+        var hits = new List<ParamTableHit>();
+        foreach (var table in GetParamTables())
+        {
+            if (table.Id is not int tableId) continue;
+
+            var head = new[] { table.Name, table.Manufacturer, table.Filename };
+            var tags = TagString.Parse(table.Tags);
+
+            // Веса: название/производитель/имя файла — 2, теги — 3, содержимое — 1. Документ,
+            // НАЗВАННЫЙ искомым словом, обязан стоять выше документа, где это слово просто
+            // встречается в сорока строках; тег ставят руками, и он точнее всего остального.
+            var score = qTokens.Count(token => head.Any(field => TokenMatches(token, field, exactWord))) * 2;
+            score += qTokens.Count(token => tags.Any(t => TokenMatches(token, t, exactWord))) * 3;
+
+            var matched = BestMatchingRows(LatestParamTableRows(tableId), qTokens, exactWord);
+            // Счёт по строкам — ОДИН РАЗ НА СЛОВО, а не по числу совпавших строк: иначе таблица на
+            // сорок строк перебивала бы точное попадание в название просто своим размером.
+            score += qTokens.Count(token => matched.Any(r => RowMatches(r, token, exactWord)));
+
+            if (score == 0) continue;
+
+            var subtypes = string.Join(", ", Services.ParamTableBinding
+                .For(this, table.DiskPath, table.Filename).Links.Select(l => l.Display));
+            hits.Add(new ParamTableHit(table, score, matched, subtypes));
+        }
+
+        return hits
+            .OrderByDescending(h => h.Score)
+            .ThenBy(h => h.Table.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private bool RowMatches(ParamTableRow row, string token, bool exactWord) =>
+        TokenMatches(token, row.Code, exactWord)
+        || TokenMatches(token, row.Title, exactWord)
+        || TokenMatches(token, row.Description, exactWord);
+
+    /// <summary>Какие строки показать как «вот из-за чего нашлось».
+    ///
+    /// ⚠️ <b>Код настройки разбивается на слова.</b> SearchService.Normalize считает дефис
+    /// разделителем (иначе не нашлись бы «НГР-2.0» и «НГР 2 0» одним запросом), поэтому «P0-10»
+    /// приходит сюда двумя словами — «P0» и «10». Отдай мы все строки, где встретилось хоть одно,
+    /// и на запрос «P0-10» человек получил бы весь блок P0-xx.
+    ///
+    /// Правило: если есть строки, совпавшие со ВСЕМИ словами запроса, показываем только их. Нет
+    /// таких — берём те, что совпали с наибольшим числом слов.</summary>
+    private List<ParamTableRow> BestMatchingRows(List<ParamTableRow> rows, string[] tokens, bool exactWord)
+    {
+        var scored = rows
+            .Select(r => (Row: r, Hits: tokens.Count(t => RowMatches(r, t, exactWord))))
+            .Where(x => x.Hits > 0)
+            .ToList();
+        if (scored.Count == 0) return new();
+
+        var best = scored.Max(x => x.Hits);
+        return scored.Where(x => x.Hits == best).Select(x => x.Row).ToList();
+    }
+
+    /// <summary>Строки последней ЖИВОЙ редакции документа — то, что документ означает сегодня.</summary>
+    public List<ParamTableRow> LatestParamTableRows(int tableId)
+    {
+        var latest = Services.ParamTableNumbering.LiveRevisions(this, tableId).FirstOrDefault();
+        return latest?.Id is int revisionId ? GetParamTableRows(revisionId) : new();
     }
 }

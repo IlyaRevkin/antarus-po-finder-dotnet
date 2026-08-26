@@ -38,6 +38,10 @@ public partial class ParamTableWindow : Window
     /// и меняют её отсюда же.</summary>
     private ParamTableBinding.Result _binding = new(new(), null);
 
+    /// <summary>Код строки, к которой надо подмотать таблицу при открытии (пришли из поиска).
+    /// Гасится после первого показа: дальше человек крутит таблицу сам, и лезть в это уже нельзя.</summary>
+    private string _focusCode = "";
+
     /// <summary>Строка таблицы для показа: сами данные плюс пометка «что с ней стало относительно
     /// предыдущей ревизии».</summary>
     public sealed class RowVm
@@ -86,7 +90,14 @@ public partial class ParamTableWindow : Window
             iso.Length >= 10 ? iso[..10] : iso;
     }
 
-    public ParamTableWindow(AppServices services, IAppHost host, string diskPath, string filename, string fileLabel)
+    /// <param name="selectTableId">Какой документ раскрыть сразу. Нужен поиску: он находит
+    /// КОНКРЕТНЫЙ документ, а у файла их бывает несколько, и открыть первый попавшийся значило бы
+    /// показать не то, что нашлось.</param>
+    /// <param name="focusCode">Код настройки, из-за которого документ нашёлся. Таблица подматывается
+    /// к этой строке и выделяет её: иначе человек, искавший «P0-10», получает полсотни строк и ищет
+    /// нужную глазами заново.</param>
+    public ParamTableWindow(AppServices services, IAppHost host, string diskPath, string filename, string fileLabel,
+        int? selectTableId = null, string? focusCode = null)
     {
         InitializeComponent();
         _services = services;
@@ -112,7 +123,8 @@ public partial class ParamTableWindow : Window
             ImportBtn.ToolTip = hint;
         }
 
-        LoadDocuments(null);
+        _focusCode = (focusCode ?? "").Trim();
+        LoadDocuments(selectTableId);
         ShowBinding();
     }
 
@@ -251,6 +263,25 @@ public partial class ParamTableWindow : Window
         var view = new ListCollectionView(shownRows);
         view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(RowVm.GroupName)));
         RowsGrid.ItemsSource = view;
+
+        FocusFoundRow(shownRows);
+    }
+
+    /// <summary>Подмотать таблицу к строке, из-за которой документ нашёлся поиском, и выделить её.
+    /// Ровно один раз: дальше человек крутит таблицу сам.</summary>
+    private void FocusFoundRow(List<RowVm> shown)
+    {
+        if (_focusCode.Length == 0) return;
+
+        var found = shown.FirstOrDefault(r => string.Equals(r.Code, _focusCode, System.StringComparison.OrdinalIgnoreCase));
+        _focusCode = "";
+        if (found is null) return;
+
+        RowsGrid.SelectedItem = found;
+        // Через Dispatcher: строки ещё не построены (группировка отключает виртуализацию не сразу),
+        // и ScrollIntoView прямо здесь промахивается на первый экран.
+        Dispatcher.BeginInvoke(new System.Action(() => RowsGrid.ScrollIntoView(found)),
+            System.Windows.Threading.DispatcherPriority.Background);
     }
 
     // ── Привязка к типам и подтипам шкафов ───────────────────────────────────────────────────

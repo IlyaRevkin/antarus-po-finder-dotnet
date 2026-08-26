@@ -122,6 +122,14 @@
                                      Content="Прошивки" Width="150" Height="26" IsChecked="True" Checked="SearchMode_Changed"/>
                         <RadioButton x:Name="ParamsModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
                                      Content="Параметры ПЧ/УПП" Width="150" Height="26" Checked="SearchMode_Changed"/>
+                        <!-- Документы-таблицы отдельным режимом от файлов параметров: это разные
+                             вещи. Файл — проприетарная выгрузка конфигуратора, её открывают
+                             программой вендора; таблица — задание на настройку, которое читают
+                             глазами. Наладчик на объекте ищет именно её и именно по коду настройки
+                             («P0-10») или по названию параметра, а не по имени .par-файла. -->
+                        <RadioButton x:Name="ParamTablesModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
+                                     Content="Таблицы параметров" Width="150" Height="26" Checked="SearchMode_Changed"
+                                     ToolTip="Задания на настройку ПЧ/УПП — по названию документа, тегам, коду настройки и названию параметра"/>
                         <RadioButton x:Name="SchemasModeRadio" GroupName="SearchMode" Style="{StaticResource SearchModeSegment}"
                                      Content="Схемы" Width="150" Height="26" Checked="SearchMode_Changed"
                                      ToolTip="Поиск электросхем шкафов на втором диске — по всем папкам, частичное совпадение по названию"/>
