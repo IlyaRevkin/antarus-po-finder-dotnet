@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.ParamTableWindow"
+﻿<Window x:Class="AntarusPoFinder.App.Views.ParamTableWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
@@ -152,7 +152,7 @@
                         <!-- Ширина задана, а не «по содержимому»: у изменённой строки пометка
                              ЖИРНАЯ, ширину по содержимому столбец меряет обычным начертанием, и
                              запас нужен ровно той строке, ради которой столбец и заведён. -->
-                        <DataGridTextColumn Header="Изменение" Binding="{Binding ChangeMark}" Width="110" MinWidth="90"
+                        <DataGridTextColumn Header="Изменение" Binding="{Binding ChangeMark}" Width="128" MinWidth="110"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                         <DataGridTextColumn Header="Код" Binding="{Binding Code}" Width="Auto" MinWidth="80"
                                             ElementStyle="{StaticResource DataGridCellText}"/>

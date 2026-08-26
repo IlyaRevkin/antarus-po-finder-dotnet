@@ -797,9 +797,16 @@
 
          ⚠️ Виртуализация строк при этом работает хуже: WPF не может посчитать высоту заранее.
          Ставить этот стиль на таблицы в тысячи строк не надо — здесь их полсотни. -->
-    <Style x:Key="WrappingDataGrid" TargetType="DataGrid" BasedOn="{StaticResource RoomyDataGrid}">
-        <Setter Property="RowHeight" Value="Auto"/>
+    <!-- ⚠️ Наследовать RoomyDataGrid здесь НЕЛЬЗЯ, хотя набор настроек тот же минус один. У
+         RoomyDataGrid высота строки задана числом, а «отпустить» её значением «Auto» не выходит:
+         DataGrid.RowHeight — это обычный double, и разбор XAML на строке «Auto» падает
+         XamlParseException прямо при открытии окна (поймано живым прогоном). Свести к
+         double.NaN через x:Static можно, но читается это хуже, чем два повторённых Setter'а. -->
+    <Style x:Key="WrappingDataGrid" TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
         <Setter Property="MinRowHeight" Value="34"/>
+        <Setter Property="ColumnHeaderHeight" Value="38"/>
+        <Setter Property="GridLinesVisibility" Value="All"/>
+        <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrush2}"/>
     </Style>
 
     <!-- Заголовок РАЗДЕЛА внутри таблицы: строка через всю ширину с линией под ней. Заведён по

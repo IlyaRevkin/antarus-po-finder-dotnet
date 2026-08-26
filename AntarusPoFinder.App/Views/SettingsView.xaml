@@ -438,7 +438,12 @@
                     <TextBlock Text="ГРУППЫ ПАРАМЕТРОВ ПЧ/УПП" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock Text="Разделы, на которые разбита таблица параметров. Порядок в этом списке — порядок разделов в документе; «Сброс до заводских» должен оставаться последним."
                                Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                    <ListBox x:Name="ParamGroupList" Height="180" Margin="0,0,0,4"
+                    <!-- Виртуализация выключена намеренно: групп десяток-другой, а «Сброс до
+                         заводских» обязан быть виден последним — ради него список и заведён. С
+                         виртуализацией последний пункт не существует, пока к нему не прокрутишь, и
+                         проверить «сброс внизу» нельзя ни глазом на снимке, ни живым прогоном. -->
+                    <ListBox x:Name="ParamGroupList" Height="220" Margin="0,0,0,4"
+                             VirtualizingStackPanel.IsVirtualizing="False"
                              PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"
                              MouseDoubleClick="RenameParamGroup_Click"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
