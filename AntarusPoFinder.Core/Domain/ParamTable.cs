@@ -1,4 +1,4 @@
-namespace AntarusPoFinder.Core.Domain;
+﻿namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>ТАБЛИЦА ПАРАМЕТРОВ ПЧ/УПП — собственный документ программы, заменивший блокнот.
 ///
@@ -186,12 +186,19 @@ public class ParamTableRow
     public string Extra { get; set; } = "";
 
     /// <summary>Значение так, как его надо ПОКАЗАТЬ. Пустая ячейка у состояния «уточнить»/«по месту»
-    /// читалась бы как «ноль» — см. ParamValueState.</summary>
+    /// читалась бы как «ноль» — см. ParamValueState.
+    ///
+    /// <b>Единица приклеена к значению, а не вынесена столбцом</b>, и это не экономия места ради
+    /// экономии: по живому корпусу (1602 строки) «Ед.» заполнена в 3 % строк, то есть столбец под
+    /// неё в 97 % таблицы был пустым — а ширину занимал всегда и вклинивался между значением и
+    /// описанием. «55 Гц» читается ровно так же, как в исходном txt, где единица и написана рядом
+    /// с числом. Одинокая единица без значения не показывается: «Гц» в ячейке значения — это не
+    /// ответ на вопрос «что выставить».</summary>
     public string ValueDisplay => ValueState switch
     {
         ParamValueState.Ask => "? — уточнить по ПЛК",
         ParamValueState.OnSite => "— по месту",
-        _ => Value,
+        _ => Value.Length > 0 && (Unit ?? "").Trim() is { Length: > 0 } unit ? Value + " " + unit : Value,
     };
 
     public ParamTableRow Clone() => new()
