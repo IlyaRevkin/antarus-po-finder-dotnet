@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using AntarusPoFinder.Core.Services;
 using Xunit;
@@ -95,6 +95,41 @@ public class LongOperationsTests
         var refusal = LongOperationRules.Refusal(
             Op(LongOperationKind.LfsBuild, LongOperationSubject.None, "Сборка"), running);
         Assert.Contains("Segnetics Loader", refusal);
+    }
+
+    /// <summary>Работа без привязки к версии — машинная целиком: второй перенос со старого диска
+    /// это не «ещё одна задача», а второй обход того же дерева теми же руками.</summary>
+    [Fact]
+    public void SameKindWithoutSubject_IsSingleton()
+    {
+        var running = new[] { Op(LongOperationKind.LegacyImport, LongOperationSubject.None, "Перенос со старого диска") };
+
+        var refusal = LongOperationRules.Refusal(
+            Op(LongOperationKind.LegacyImport, LongOperationSubject.None, "Перенос со старого диска"), running);
+
+        Assert.Equal("«Перенос со старого диска» уже идёт.", refusal);
+    }
+
+    /// <summary>Перенос со старого диска только ДОБАВЛЯЕТ папки — заливку в ПЛК он блокировать не
+    /// должен, иначе получасовой перенос запрещал бы наладчику работать вовсе.</summary>
+    [Fact]
+    public void LegacyImport_DoesNotBlockPlcDeploy()
+    {
+        var running = new[] { Op(LongOperationKind.LegacyImport, LongOperationSubject.None, "Перенос") };
+
+        Assert.Null(LongOperationRules.Refusal(
+            Op(LongOperationKind.PlcDeploy, LongOperationSubject.Folder(@"C:\ПО\A\1.5"), "Загрузка"), running));
+    }
+
+    /// <summary>…но с перестройкой раскладки соседствовать не может: она двигает те же папки.</summary>
+    [Fact]
+    public void LegacyImport_AndDiskRebuild_DoNotOverlap()
+    {
+        var importing = new[] { Op(LongOperationKind.LegacyImport, LongOperationSubject.None, "Перенос") };
+        Assert.NotNull(LongOperationRules.Refusal(Op(LongOperationKind.DiskRebuild, title: "Перестройка"), importing));
+
+        var rebuilding = new[] { Op(LongOperationKind.DiskRebuild, LongOperationSubject.None, "Перестройка") };
+        Assert.NotNull(LongOperationRules.Refusal(Op(LongOperationKind.LegacyImport, title: "Перенос"), rebuilding));
     }
 
     // ── Ключ версии ────────────────────────────────────────────────────────
@@ -296,6 +331,27 @@ public class LongOperationsTests
         Assert.NotNull(registry.SubjectBusyReason(subject));
         lease!.Dispose();
         Assert.Null(registry.SubjectBusyReason(subject));
+    }
+
+    /// <summary>Кто сам ничего не занимает, но ЧИТАЕТ диск (обновление локальных копий), обязан
+    /// уметь спросить: не переезжает ли прямо сейчас то, что он собирается прочитать.</summary>
+    [Fact]
+    public void Registry_WholeDiskBusyReason_OnlyWhileDiskWideOperationRuns()
+    {
+        var registry = new LongOperationRegistry();
+        Assert.Null(registry.WholeDiskBusyReason());
+
+        registry.TryBegin(LongOperationKind.LfsBuild, "folder:A", "Сборка LFS: A", out var build, out _);
+        Assert.Null(registry.WholeDiskBusyReason());
+        build!.Dispose();
+
+        registry.TryBegin(LongOperationKind.DiskRebuild, LongOperationSubject.None, "Перестройка", out var rebuild, out _);
+        var reason = registry.WholeDiskBusyReason();
+        Assert.NotNull(reason);
+        Assert.Contains("Перестройка структуры диска", reason);
+
+        rebuild!.Dispose();
+        Assert.Null(registry.WholeDiskBusyReason());
     }
 
     [Fact]

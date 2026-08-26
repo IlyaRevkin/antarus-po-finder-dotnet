@@ -2854,6 +2854,11 @@ public partial class SettingsView : UserControl
     /// с двумя планами, и второе из них — заведомо устаревшим.</summary>
     private DiskMigrationDialog? _migrationWindow;
 
+    /// <summary>Открытое окно разбора старого диска — по той же причине, что и _migrationWindow
+    /// выше: окно немодальное, а в нём лежит ручная разметка найденного, которую нельзя
+    /// продублировать вторым окном.</summary>
+    private LegacyImportDialog? _legacyWindow;
+
     private void DiskMigration_Click(object sender, RoutedEventArgs e)
     {
         // Немодально: перестройка идёт минутами, и всё это время программой надо пользоваться.
@@ -2878,8 +2883,18 @@ public partial class SettingsView : UserControl
     /// После закрытия перечитываем вкладку «Прошивки» — версий могло прибавиться.</summary>
     private void LegacyImport_Click(object sender, RoutedEventArgs e)
     {
+        // Немодально — по той же причине, что и перестройка диска: разбор чужого дерева и перенос
+        // идут десятками минут. Второе окно не заводим: в открытом лежит ручная разметка.
+        if (_legacyWindow is { IsLoaded: true } opened)
+        {
+            if (opened.WindowState == WindowState.Minimized) opened.WindowState = WindowState.Normal;
+            opened.Activate();
+            return;
+        }
         var dlg = new LegacyImportDialog(_services, _host) { Owner = Window.GetWindow(this) };
-        dlg.ShowDialog();
+        _legacyWindow = dlg;
+        dlg.Closed += (_, _) => _legacyWindow = null;
+        dlg.Show();
         LoadFirmwareTab();
     }
 

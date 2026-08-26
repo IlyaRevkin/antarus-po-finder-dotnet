@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,6 +23,11 @@ public enum LongOperationKind
 
     /// <summary>Чистка диска: поиск и удаление мусора по всему дереву.</summary>
     DiskCleanup,
+
+    /// <summary>Перенос накопленного со «старого», дофайндеровского диска: обход чужого дерева и
+    /// копирование найденного к нам. Диск целиком не перекладывает (только добавляет папки), поэтому
+    /// заливку в ПЛК не блокирует — но с перестройкой раскладки соседствовать не может.</summary>
+    LegacyImport,
 }
 
 /// <summary>Ключ «над чем работаем». Строкой, а не типом, потому что сравнивают его разные страницы,
@@ -86,6 +91,7 @@ public static class LongOperationRules
         LongOperationKind.LfsBuild => "Сборка LFS",
         LongOperationKind.DiskRebuild => "Перестройка структуры диска",
         LongOperationKind.DiskCleanup => "Очистка диска",
+        LongOperationKind.LegacyImport => "Перенос со старого диска",
         _ => "Операция",
     };
 
@@ -156,6 +162,12 @@ public static class LongOperationRules
         if (candidate.SubjectKey.Length > 0 &&
             running.Any(o => SameSubject(o, candidate) && o.Kind == candidate.Kind))
             return $"«{candidate.Caption}» для этой версии уже идёт.";
+
+        // Работа без привязки к версии — машинная целиком (перенос со старого диска, чистка): второй
+        // такой же запуск был бы не «ещё одной задачей», а двумя обходами одного и того же дерева.
+        if (candidate.SubjectKey.Length == 0 &&
+            running.Any(o => o.Kind == candidate.Kind && o.SubjectKey.Length == 0))
+            return $"«{candidate.Caption}» уже идёт.";
 
         if (UsesLoader(candidate.Kind) &&
             running.FirstOrDefault(o => UsesLoader(o.Kind)) is { } loaderBusy)
@@ -244,6 +256,24 @@ public sealed class LongOperationRegistry
     public string? SubjectBusyReason(string subjectKey)
     {
         lock (_gate) return LongOperationRules.SubjectBusyReason(subjectKey ?? "", _active);
+    }
+
+    /// <summary>Почему сейчас нельзя ЧИТАТЬ диск и полагаться на прочитанное: идёт операция, которая
+    /// перекладывает файлы по всему дереву. null — можно.
+    ///
+    /// Нужно тем, кто сам ничего не занимает, но опирается на пути: обновление локальных копий,
+    /// массовое скачивание. Отдельно от <see cref="TryBegin"/>, потому что занимать им нечего —
+    /// им нужна только проверка.</summary>
+    public string? WholeDiskBusyReason()
+    {
+        lock (_gate)
+        {
+            var holder = _active.FirstOrDefault(o => LongOperationRules.TouchesWholeDisk(o.Kind));
+            return holder is null
+                ? null
+                : $"Сейчас идёт «{holder.Caption}» — она переносит файлы по всему диску. " +
+                  "Дождитесь окончания: прочитанное сейчас может оказаться половиной переезда.";
+        }
     }
 
     /// <summary>Идёт ли прямо сейчас операция такого рода — для подписей и тестов.</summary>

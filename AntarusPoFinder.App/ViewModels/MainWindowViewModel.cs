@@ -1108,9 +1108,33 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     [RelayCommand]
     private void ShowFwUpdatesDetails()
     {
-        var win = new FirmwareUpdatesWindow(_services, _pendingFwUpdates) { Owner = Application.Current.MainWindow };
-        win.ShowDialog();
+        // Немодально: обновление тянет с шары сотни мегабайт на версию, и всё это время программой
+        // надо пользоваться. Второе окно не заводим — в открытом уже идёт своя пачка.
+        if (_fwUpdatesWindow is { IsLoaded: true } opened)
+        {
+            if (opened.WindowState == WindowState.Minimized) opened.WindowState = WindowState.Normal;
+            opened.Activate();
+            return;
+        }
 
+        var win = new FirmwareUpdatesWindow(_services, _pendingFwUpdates) { Owner = Application.Current.MainWindow };
+        _fwUpdatesWindow = win;
+        win.Closed += (_, _) =>
+        {
+            _fwUpdatesWindow = null;
+            OnFwUpdatesWindowClosed(win);
+        };
+        win.Show();
+    }
+
+    /// <summary>Открытое окно обновления прошивок. Появилось вместе с немодальностью: раньше «нажали
+    /// второй раз» было невозможно, пока окно держало программу.</summary>
+    private Views.FirmwareUpdatesWindow? _fwUpdatesWindow;
+
+    /// <summary>Пересчёт после закрытия окна обновлений. Раньше это шло сразу за ShowDialog(); теперь
+    /// окно возвращает управление немедленно, и пересчитывать надо по его закрытию.</summary>
+    private void OnFwUpdatesWindowClosed(Views.FirmwareUpdatesWindow win)
+    {
         if (win.UpdatedCount > 0)
             RefreshSearchIfActive();
 

@@ -1,8 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Windows;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Infrastructure;
@@ -156,6 +157,12 @@ public partial class LegacyImportDialog : Window
 
     private readonly AppServices _services;
     private readonly IAppHost _host;
+
+    /// <summary>Отмена переноса. Обрывается ПО ГРАНИЦЕ ВЕРСИИ: одна строка — одна обычная загрузка
+    /// целиком, между строками на диске полноценные версии, а не полповерсии.</summary>
+    private CancellationTokenSource? _cts;
+
+    private bool _running;
     private readonly LaunchTypeChecks _launchChecks;
     private List<EquipmentGroup> _groups = new();
     private List<ControllerModification> _mods = new();
@@ -211,6 +218,15 @@ public partial class LegacyImportDialog : Window
                 .ToList(),
             _mods.Select(m => m.ControllerName).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
+        // Право берётся тем же реестром, что и у остальных долгих операций: обход чужого дерева
+        // посреди перестройки нашего диска нашёл бы файлы, которые прямо сейчас переезжают.
+        if (!_services.Operations.TryBegin(LongOperationKind.LegacyImport, LongOperationSubject.None,
+                "Поиск на старом диске", out var scanLease, out var scanRefusal))
+        {
+            AppMessageBox.Show(scanRefusal, "Разобрать старый диск", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         List<LegacyFinding> found;
         ScanButton.IsEnabled = false;
         try
@@ -219,7 +235,11 @@ public partial class LegacyImportDialog : Window
             using (_host.BeginBusy("Ищем прошивки на старом диске…"))
                 found = await Task.Run(() => LegacyDiskScanner.Scan(root, catalog));
         }
-        finally { ScanButton.IsEnabled = true; }
+        finally
+        {
+            ScanButton.IsEnabled = true;
+            scanLease!.Dispose();
+        }
 
         _rows = found.Select(f => new Row(this, f)).ToList();
         FoundGrid.ItemsSource = _rows;
@@ -331,26 +351,81 @@ public partial class LegacyImportDialog : Window
             "Разобрать старый диск", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
 
-        ImportButton.IsEnabled = false;
+        if (!_services.Operations.TryBegin(LongOperationKind.LegacyImport, LongOperationSubject.None,
+                "Перенос со старого диска", out var lease, out var busyRefusal))
+        {
+            AppMessageBox.Show(busyRefusal, "Разобрать старый диск", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _cts = new CancellationTokenSource();
+        SetRunning(true);
         var done = 0;
+        var stopped = false;
         try
         {
-            using (_host.BeginBusy("Переносим найденное на диск…"))
+            // Индикатор внизу главного окна считает версии, а не байты: окно переноса можно отодвинуть
+            // и работать дальше, но «сколько из скольки уже сделано» должно быть видно и без него.
+            using (var busy = _host.BeginBusy("Переносим найденное на диск…"))
                 foreach (var row in todo)
                 {
+                    if (_cts.IsCancellationRequested) { stopped = true; break; }
+                    busy.Text = $"Переносим со старого диска: {row.RelativePath}";
+                    busy.Report(done, todo.Count);
                     var ok = await ImportOneAsync(row, launchTypes);
                     if (ok) done++;
                 }
         }
+        catch (Exception ex)
+        {
+            // Окно немодальное — на него могли и не смотреть. Уведомление с категорией попадает в
+            // историю колокольчика, а сообщение поднимает окно обратно.
+            _host.ShowStatus($"\u26a0 Перенос со старого диска прерван ошибкой: {ex.Message}",
+                12000, NotificationCategory.FirmwareAndParams);
+            AppMessageBox.Show($"Перенос прерван:{Environment.NewLine}{ex.Message}", "Разобрать старый диск",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
         finally
         {
             RefreshSummary();
-            ImportButton.IsEnabled = true;
+            SetRunning(false);
+            _cts?.Dispose();
+            _cts = null;
+            lease!.Dispose();
         }
 
         _host.InvalidateSearchResults();
-        _host.ShowStatus($"Перенос со старого диска: перенесено версий {done} из {todo.Count}",
-            category: NotificationCategory.FirmwareAndParams);
+        _host.ShowStatus(stopped
+                ? $"\u26a0 Перенос со старого диска остановлен: перенесено {done} из {todo.Count}. " +
+                  "Непереснесённые строки остались отмеченными — можно продолжить."
+                : $"Перенос со старого диска: перенесено версий {done} из {todo.Count}",
+            stopped ? 12000 : 6000, NotificationCategory.FirmwareAndParams);
+    }
+
+    /// <summary>Кнопки на время работы. Окно немодальное, поэтому «идёт» и «не идёт» должно читаться
+    /// по самому окну, а не по тому, что программа перестала отвечать.</summary>
+    private void SetRunning(bool running)
+    {
+        _running = running;
+        ImportButton.IsEnabled = !running;
+        ScanButton.IsEnabled = !running;
+        StopButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.IsEnabled = running;
+        CloseButton.IsEnabled = !running;
+        CancelPolicyLabel.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        CancelPolicyLabel.Text = running
+            ? "Остановить можно: перенос прервётся между версиями, уже перенесённые останутся на диске " +
+              "целыми. Закрыть окно во время работы нельзя — в нём разметка найденного."
+            : "";
+    }
+
+    /// <summary>Остановка. Без подтверждения: обрыв здесь безопасен по построению — одна строка это
+    /// одна обычная загрузка целиком, и между строками недоделанного не бывает.</summary>
+    private void Stop_Click(object sender, RoutedEventArgs e)
+    {
+        _cts?.Cancel();
+        StopButton.IsEnabled = false;
+        CancelPolicyLabel.Text = "Останавливаемся — доносим текущую версию…";
     }
 
     /// <summary>Одна строка — одна обычная загрузка, разбитая на фазы: проверки и номер (БД, поток
@@ -429,4 +504,22 @@ public partial class LegacyImportDialog : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Пока перенос идёт, окно не закрывается: в нём вся ручная разметка найденного (тип,
+    /// подтип, контроллер, выбранные файлы), которую собирали руками и восстановить нечем.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_running)
+        {
+            e.Cancel = true;
+            AppMessageBox.Show(
+                "Перенос ещё идёт. Закрыть окно нельзя — в нём вся разметка найденного." +
+                Environment.NewLine + Environment.NewLine +
+                "Программой при этом можно пользоваться: окно не модальное, просто отодвиньте его. " +
+                "Прервать работу — кнопкой «Остановить».",
+                "Разобрать старый диск", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        base.OnClosing(e);
+    }
 }

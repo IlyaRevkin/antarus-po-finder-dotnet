@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -131,6 +131,16 @@ public partial class DiskCleanupView : UserControl
             _services.Db.GetAllowedExtensionsSchematic(),
             ReferencedParamFiles());
 
+        // Страница и раньше не запирала окно, но защиты от «а в это время идёт перестройка диска»
+        // у неё не было вовсе: обход считал бы мусором файлы, которые прямо сейчас переезжают.
+        // Право берётся тем же реестром, что и у остальных долгих операций.
+        if (!_services.Operations.TryBegin(LongOperationKind.DiskCleanup, LongOperationSubject.None,
+                "Поиск мусора на диске", out var scanLease, out var scanRefusal))
+        {
+            AppMessageBox.Show(scanRefusal, "Чистка диска", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         DiskCleanupScanner.CleanupPlan plan;
         ScanButton.IsEnabled = false;
         try
@@ -141,6 +151,7 @@ public partial class DiskCleanupView : UserControl
         finally
         {
             ScanButton.IsEnabled = true;
+            scanLease!.Dispose();
         }
 
         _plan = plan;
@@ -245,6 +256,15 @@ public partial class DiskCleanupView : UserControl
             "Чистка диска", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
 
+        // Удаление файлов по всему дереву — та же «занимаю весь диск» работа, что и перестройка:
+        // пока она идёт, ни заливка, ни сборка LFS, ни перестройка запускаться не должны.
+        if (!_services.Operations.TryBegin(LongOperationKind.DiskCleanup, LongOperationSubject.None,
+                "Чистка диска", out var lease, out var busyRefusal))
+        {
+            AppMessageBox.Show(busyRefusal, "Чистка диска", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         var journalPath = WriteJournal(_plan, "plan");
 
         ScanButton.IsEnabled = false;
@@ -271,11 +291,20 @@ public partial class DiskCleanupView : UserControl
                 category: NotificationCategory.Sync);
             if (renames.Count > 0) _host.InvalidateSearchResults();
         }
+        catch (Exception ex)
+        {
+            // Страница немодальна — оператор давно мог уйти на «Поиск». Ошибку нельзя оставить только
+            // в футере: уведомление с категорией попадает и в историю колокольчика.
+            _host.ShowStatus($"\u26a0 Чистка диска не завершена: {ex.Message}", 12000, NotificationCategory.Sync);
+            AppMessageBox.Show($"Чистка не завершена:{Environment.NewLine}{ex.Message}", "Чистка диска",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
         finally
         {
             ScanButton.IsEnabled = true;
             // Список после выполнения уже неактуален — за новыми находками надо проверить диск заново.
             ApplyButton.IsEnabled = false;
+            lease!.Dispose();
         }
     }
 

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -123,6 +123,15 @@ public partial class FirmwareUpdatesWindow : Window
     private async Task ApplyBatchAsync(List<FirmwareUpdateInfo> batch)
     {
         if (batch.Count == 0) return;
+
+        // Занимать нам нечего (пишем только в локальный кэш), но ЧИТАЕМ мы сетевой диск. Пока по нему
+        // ходит перестройка раскладки, прочитанное — половина переезда, и утащить это в локальную
+        // копию значит получить у себя мусор с виду рабочей версии.
+        if (_services.Operations.WholeDiskBusyReason() is { } busyReason)
+        {
+            AppMessageBox.Show(busyReason, "Обновить", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
 
         UpdateAllButton.IsEnabled = false;
         UpdateSelectedButton.IsEnabled = false;
