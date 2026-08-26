@@ -104,6 +104,31 @@ public partial class MainWindow : Window
         Activate();
     }
 
+    /// <summary>⚠️ Закрытие программы посреди долгой операции.
+    ///
+    /// Пока окно заливки было модальным, закрыть программу во время неё было физически невозможно.
+    /// Теперь главное окно свободно, и крестик на нём убил бы процесс вместе с заливкой — в худшем
+    /// случае посреди форматирования ядра ПЛК, то есть оставил бы контроллер без прошивки. Поэтому
+    /// спрашиваем и перечисляем, что именно идёт.
+    ///
+    /// Сворачивание в трей этого не касается: программа при нём не закрывается, операция живёт
+    /// дальше — поэтому проверка стоит ПОСЛЕ ветки трея.</summary>
+    private bool ConfirmExitDuringLongOperations()
+    {
+        var active = _services.Operations.Active;
+        if (active.Count == 0) return true;
+
+        var what = string.Join(Environment.NewLine, active.Select(o => "  • " + o.Title));
+        var answer = AppMessageBox.Show(
+            "Сейчас идёт незаконченная работа:" + Environment.NewLine + what + Environment.NewLine +
+            Environment.NewLine +
+            "Если закрыть программу, она оборвётся на середине. Заливка в ПЛК при этом может " +
+            "оставить контроллер без рабочей прошивки." + Environment.NewLine + Environment.NewLine +
+            "Всё равно закрыть?",
+            "Antarus ПО Finder", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        return answer == MessageBoxResult.Yes;
+    }
+
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (!ForceRealExit && _trayIcon is not null && _services.Cfg.CloseAction() == "tray")
@@ -111,6 +136,12 @@ public partial class MainWindow : Window
             e.Cancel = true;
             Hide();
             _trayIcon.Visible = true;
+            return;
+        }
+
+        if (!ConfirmExitDuringLongOperations())
+        {
+            e.Cancel = true;
             return;
         }
 

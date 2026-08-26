@@ -218,12 +218,12 @@ public partial class LegacyImportDialog : Window
                 .ToList(),
             _mods.Select(m => m.ControllerName).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
-        // Право берётся тем же реестром, что и у остальных долгих операций: обход чужого дерева
-        // посреди перестройки нашего диска нашёл бы файлы, которые прямо сейчас переезжают.
-        if (!_services.Operations.TryBegin(LongOperationKind.LegacyImport, LongOperationSubject.None,
-                "Поиск на старом диске", out var scanLease, out var scanRefusal))
+        // Поиск только ЧИТАЕТ (причём чужую папку) — права на перенос он не берёт. Но если наш
+        // собственный диск прямо сейчас перекладывают, разбирать нечего: справочник и пути под
+        // ногами меняются.
+        if (_services.Operations.WholeDiskBusyReason() is { } busyNow)
         {
-            AppMessageBox.Show(scanRefusal, "Разобрать старый диск", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show(busyNow, "Разобрать старый диск", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -238,7 +238,6 @@ public partial class LegacyImportDialog : Window
         finally
         {
             ScanButton.IsEnabled = true;
-            scanLease!.Dispose();
         }
 
         _rows = found.Select(f => new Row(this, f)).ToList();

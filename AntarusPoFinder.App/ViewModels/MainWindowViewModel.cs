@@ -1022,6 +1022,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // firmware that's been silently stuck out of date for hours/days is no longer invisible.
         var autoUpdated = 0;
         var autoFailed = new List<string>();
+        // Пока по диску идёт перестройка раскладки, тянуть с него нечего: приедет половина переезда.
+        // Автообновление — работа фоновая, поэтому просто пропускаем тик, ничего не говоря: на
+        // следующем тике перестройка кончится и всё догрузится само.
+        if (_services.Operations.WholeDiskBusyReason() is not null) autoOnes = new List<FirmwareUpdateInfo>();
         if (autoOnes.Count > 0)
         {
             // Копирование с сетевого диска — в фоновом потоке и с прогрессом снизу: раньше это
@@ -1072,6 +1076,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // A manual, explicitly-clicked action — same per-item error surfacing as
         // FirmwareUpdatesWindow.ApplyUpdate (the "Показать"/details path for the same banner), which
         // already tells the operator exactly which firmware and why instead of just under-counting.
+        // Та же проверка, что и у «Показать» → FirmwareUpdatesWindow: обе кнопки тянут одно и то
+        // же с одного и того же диска. Здесь действие ручное, поэтому не молчим, а объясняем.
+        if (_services.Operations.WholeDiskBusyReason() is { } diskBusy)
+        {
+            AppMessageBox.Show(diskBusy, "Обновить прошивки", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         var count = 0;
         var stillPending = new List<FirmwareUpdateInfo>();
         var failedMessages = new List<string>();

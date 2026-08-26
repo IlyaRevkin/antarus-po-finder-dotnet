@@ -596,10 +596,32 @@ public class DiskLayoutMigratorTests
         DiskLayoutMigrator.Apply(plan, renamed: null,
             progress: (done, _) => { if (done == 1) cts.Cancel(); }, cancellationToken: cts.Token);
 
+        Assert.True(plan.Cancelled);
         Assert.Equal("ok", plan.Ops[0].Status);
         Assert.Equal("cancel", plan.Ops[1].Status);
         Assert.False(File.Exists(Path.Combine(firstDir, "a.psl")));
         Assert.True(File.Exists(Path.Combine(secondDir, "b.psl")));
+    }
+
+    /// <summary>«Оборвали» и «нажали „Остановить“» — не одно и то же.
+    ///
+    /// ⚠️ Нажатие на ПОСЛЕДНЕЙ операции взводит токен, но пропускать уже нечего: прогон доделан
+    /// целиком. Окно, считавшее это по токену, врало «остановлено, повторите» и пропускало
+    /// завершающие шаги. Поэтому Cancelled ставит сам Apply — по факту пропущенных строк.</summary>
+    [Fact]
+    public void Apply_CancelledOnTheVeryLastOp_IsNotReportedAsInterrupted()
+    {
+        using var root = new TempRoot();
+        var (record, _) = MakeVersion(root.Path, "1.0.0004.0003", "a.psl");
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+        Assert.Single(plan.Ops);
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        DiskLayoutMigrator.Apply(plan, renamed: null,
+            progress: (_, _) => cts.Cancel(), cancellationToken: cts.Token);
+
+        Assert.False(plan.Cancelled);
+        Assert.Equal("ok", plan.Ops[0].Status);
     }
 
     /// <summary>Остановленный прогон НЕ выкладывает ничего на хостинг: половина папок ещё в старом

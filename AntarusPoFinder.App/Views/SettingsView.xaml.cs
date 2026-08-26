@@ -2872,9 +2872,15 @@ public partial class SettingsView : UserControl
         }
         var dlg = new DiskMigrationDialog(_services, _host) { Owner = Window.GetWindow(this) };
         _migrationWindow = dlg;
-        dlg.Closed += (_, _) => _migrationWindow = null;
+        // Перечитывать вкладку «Прошивки» надо ПОСЛЕ работы окна, а не после его открытия: имена
+        // файлов у записей меняет сама перестройка. Немодальное Show() возвращает управление сразу,
+        // поэтому обновление переехало в Closed — иначе список так и остался бы со старыми именами.
+        dlg.Closed += (_, _) =>
+        {
+            _migrationWindow = null;
+            LoadFirmwareTab();
+        };
         dlg.Show();
-        LoadFirmwareTab();
     }
 
     /// <summary>Разбор «дофайндеровского» диска (LegacyImportDialog): обход выбранной папки, поиск
@@ -2893,9 +2899,13 @@ public partial class SettingsView : UserControl
         }
         var dlg = new LegacyImportDialog(_services, _host) { Owner = Window.GetWindow(this) };
         _legacyWindow = dlg;
-        dlg.Closed += (_, _) => _legacyWindow = null;
+        // Тоже ПОСЛЕ работы окна: версии, которые перенесёт разбор, до его закрытия ещё не заведены.
+        dlg.Closed += (_, _) =>
+        {
+            _legacyWindow = null;
+            LoadFirmwareTab();
+        };
         dlg.Show();
-        LoadFirmwareTab();
     }
 
     /// <summary>Локальная починка путей ОПЦ после переноса их внутрь контроллера

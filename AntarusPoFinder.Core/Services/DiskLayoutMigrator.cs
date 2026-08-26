@@ -161,6 +161,14 @@ public static class DiskLayoutMigrator
     public sealed record MigrationPlan(IReadOnlyList<Op> Ops, IReadOnlyList<string> Skipped)
     {
         public int Count => Ops.Count;
+
+        /// <summary>Прогон был ОБОРВАН и до части строк дело не дошло.
+        ///
+        /// ⚠️ Считать это по токену отмены на стороне окна нельзя: нажатие «Остановить» на последней
+        /// операции токен взводит, но пропустить уже нечего — прогон доделан целиком. Тогда окно
+        /// врало бы «остановлено, повторите» и пропускало бы завершающие шаги (создание недостающих
+        /// папок). Поэтому «оборвано ли» знает только сам Apply.</summary>
+        public bool Cancelled { get; set; }
     }
 
     // ── Планирование (сухой прогон) ──────────────────────────────────────────
@@ -484,6 +492,7 @@ public static class DiskLayoutMigrator
         var total = plan.Ops.Count;
         var done = 0;
         var cancelled = false;
+        plan.Cancelled = false;
 
         foreach (var op in plan.Ops)
         {
@@ -538,6 +547,8 @@ public static class DiskLayoutMigrator
         // Выкладка на хостинг — ПОСЛЕ всех операций на диске: к этому моменту инструкции уже
         // переехали/переименовались, и в папках лежит их конечное состояние. Best-effort, как и вся
         // выкладка (см. InstructionPublisher): неудача уходит в журнал операции, а не валит перестройку.
+        plan.Cancelled = cancelled;
+
         // Остановленный прогон на хостинг ничего не отправляет: половина папок ещё в старом виде,
         // и выложить их под новыми ключами значит развести диск и хостинг окончательно.
         if (!cancelled && publisher is not null && !string.IsNullOrEmpty(firstRoot))

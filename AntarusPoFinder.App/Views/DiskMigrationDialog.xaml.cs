@@ -125,27 +125,20 @@ public partial class DiskMigrationDialog : Window
                 OpcCheck.IsChecked == true,
                 InstructionNamingCheck.IsChecked == true));
 
-        // Право берём и на ПОДСЧЁТ плана: он читает весь диск минутами, и план, посчитанный поверх
-        // идущей заливки, к моменту «Выполнить» уже врёт. Отказ показываем сообщением — молча
-        // погашенная кнопка ничего не объясняет.
-        if (!_services.Operations.TryBegin(LongOperationKind.DiskRebuild, LongOperationSubject.None,
-                "Подсчёт плана перестройки диска", out var planLease, out var refusal))
+        // Подсчёт плана ничего не двигает — он ЧИТАЕТ диск. Поэтому права «занимаю весь диск» он не
+        // берёт (иначе чужая заливка получала бы отказ «перестройка переносит файлы», хотя ничего
+        // ещё не переносится), но спрашивает, не переезжает ли диск прямо сейчас: план, посчитанный
+        // посреди чужого переезда, к моменту «Выполнить» уже врёт.
+        if (_services.Operations.WholeDiskBusyReason() is { } busyNow)
         {
-            AppMessageBox.Show(refusal, "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show(busyNow, "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         DiskLayoutMigrator.MigrationPlan plan;
         // Обход всех папок версий на сетевом диске — минуты; окно во время этого не должно висеть.
-        try
-        {
-            using (_host.BeginBusy("Считаем план перестройки диска…"))
-                plan = await Task.Run(() => DiskLayoutMigrator.Plan(input));
-        }
-        finally
-        {
-            planLease!.Dispose();
-        }
+        using (_host.BeginBusy("Считаем план перестройки диска…"))
+            plan = await Task.Run(() => DiskLayoutMigrator.Plan(input));
 
         _plan = plan;
         _applied = false;
@@ -267,7 +260,9 @@ public partial class DiskMigrationDialog : Window
                     repointed: op => repoints.Add(op), stubs: _services.StubWriter(),
                     publisher: publisher, firstRoot: firstRoot, cancellationToken: token));
             }
-            stopped = token.IsCancellationRequested;
+            // Именно у плана, а не у токена: нажатие «Остановить» на последней операции взводит
+            // токен, но пропускать уже нечего (см. MigrationPlan.Cancelled).
+            stopped = _plan.Cancelled;
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
             // (папку переименовали на диске); правим по каждому известному пути, см. Op.RecordPaths.

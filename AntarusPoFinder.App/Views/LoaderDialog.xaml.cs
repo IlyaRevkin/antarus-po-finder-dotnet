@@ -434,10 +434,20 @@ public partial class LoaderDialog : Window
     /// запись истории уведомлений — свёрнутое окно оттуда достаётся одним нажатием.</summary>
     private void Reveal()
     {
+        // Запись в истории уведомлений живёт дольше окна: её «Показать» могут нажать через час,
+        // когда окно давно закрыто. Show() у закрытого окна бросает InvalidOperationException —
+        // ловим, а не рассчитываем только на IsLoaded.
         if (!IsLoaded) return;
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Show();
-        Activate();
+        try
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Show();
+            Activate();
+        }
+        catch (InvalidOperationException)
+        {
+            // Окно уже закрыто — показывать нечего, а падать из-за нажатия в истории тем более.
+        }
     }
 
     private void ReleaseLease()

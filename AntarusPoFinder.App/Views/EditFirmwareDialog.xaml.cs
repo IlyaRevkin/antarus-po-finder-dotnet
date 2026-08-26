@@ -330,9 +330,16 @@ public partial class EditFirmwareDialog : Window
             NetworkFolder = folder,
         }, _host, _services.Operations, built =>
         {
+            _ownBuildRunning = false;
+            if (!built)
+            {
+                // Сборка не удалась — вернуть кнопку и честную подсказку. Без этого кнопка оставалась
+                // спрятанной, а подпись продолжала уверять, что сборка идёт.
+                if (IsLoaded) RefreshBuildLfs();
+                return;
+            }
             // Окно модерации к этому моменту обычно уже закрыто, и поднятый здесь _lfsBuilt
             // до ReportChanges не доедет — поэтому выдачу поиска сбрасываем сразу сами.
-            if (!built) return;
             _lfsBuilt = true;
             _host?.InvalidateSearchResults();
         });
@@ -341,6 +348,7 @@ public partial class EditFirmwareDialog : Window
             RefreshBuildLfs();
             return;
         }
+        _ownBuildRunning = true;
         BuildLfsBtn.Visibility = Visibility.Collapsed;
         BuildLfsHint.Text = "Сборка LFS запущена. Это окно можно закрыть — ход виден внизу главного окна, " +
                             "по итогу придёт уведомление.";
@@ -349,6 +357,15 @@ public partial class EditFirmwareDialog : Window
     /// <summary>В папке версии появился собранный .lfs — показанная выдача поиска с её строкой
     /// «Файлы: LFS —» больше не актуальна (см. ReportChanges).</summary>
     private bool _lfsBuilt;
+
+    /// <summary>Сборку LFS запустили ИЗ ЭТОГО окна и она ещё идёт.
+    ///
+    /// ⚠️ Нужно, чтобы «Сохранить» не отказало из-за собственной же сборки. Папка версии занята —
+    /// и защита «пока туда пишут, версию менять нельзя» сработала бы на человека, который только что
+    /// нажал «Собрать LFS» в этом же окне: описание и теги, набранные до нажатия, потерялись бы при
+    /// закрытии. Сборка пишет только .lfs в подпапку «Прошивка», а модерация — документы в свои
+    /// подпапки, так что за один файл они не борются.</summary>
+    private bool _ownBuildRunning;
 
     /// <summary>Оболочка для немодальной сборки LFS — см. конструктор.</summary>
     private readonly IAppHost? _host;
@@ -913,7 +930,8 @@ public partial class EditFirmwareDialog : Window
         // Пока туда же пишет сборка LFS или заливка, делать это нельзя — два писателя в одну папку.
         // Проверка стоит на сохранении, а не на открытии окна: смотреть карточку и разбираться, что
         // сейчас происходит, никто не мешает.
-        if (BusySubjectGuard.Blocked(_services, _record.DiskPath, "Модерация прошивки")) return;
+        if (!_ownBuildRunning &&
+            BusySubjectGuard.Blocked(_services, _record.DiskPath, "Модерация прошивки")) return;
 
         ResultDescription = DescriptionInput.Text.Trim();
         var tags = TagsEditor.Tags;

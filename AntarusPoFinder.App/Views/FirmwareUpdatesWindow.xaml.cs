@@ -136,6 +136,7 @@ public partial class FirmwareUpdatesWindow : Window
         UpdateAllButton.IsEnabled = false;
         UpdateSelectedButton.IsEnabled = false;
         ProgressPanel.Visibility = Visibility.Visible;
+        _running = true;
         try
         {
             for (int i = 0; i < batch.Count; i++)
@@ -147,6 +148,7 @@ public partial class FirmwareUpdatesWindow : Window
         }
         finally
         {
+            _running = false;
             ProgressPanel.Visibility = Visibility.Collapsed;
             ProgressText.Text = "";
             ProgressIndicator.Value = 0;
@@ -160,4 +162,28 @@ public partial class FirmwareUpdatesWindow : Window
         await ApplyBatchAsync(_selectCheckboxes.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList());
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Идёт ли прямо сейчас пачка обновлений.</summary>
+    private bool _running;
+
+    /// <summary>⚠️ Пока пачка идёт, окно не закрывается.
+    ///
+    /// Окно перестало быть модальным, и закрытый посреди копирования список приводил бы к тому, что
+    /// вызывающая сторона пересчитывала «что ещё не обновлено» по недоделанной пачке, а следующее
+    /// нажатие на баннер открывало бы ВТОРОЕ окно, тянущее те же папки одновременно с первым.
+    /// Отдельной отмены у копирования нет (FirmwareSync.CopyToLocal без токена), поэтому честнее
+    /// сказать «дождитесь», чем сделать вид, что закрытие что-то останавливает.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_running)
+        {
+            e.Cancel = true;
+            AppMessageBox.Show(
+                "Обновление ещё идёт — дождитесь окончания." + Environment.NewLine + Environment.NewLine +
+                "Программой при этом можно пользоваться: окно не модальное, просто отодвиньте его.",
+                "Обновить", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        base.OnClosing(e);
+    }
 }

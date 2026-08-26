@@ -131,13 +131,13 @@ public partial class DiskCleanupView : UserControl
             _services.Db.GetAllowedExtensionsSchematic(),
             ReferencedParamFiles());
 
-        // Страница и раньше не запирала окно, но защиты от «а в это время идёт перестройка диска»
-        // у неё не было вовсе: обход считал бы мусором файлы, которые прямо сейчас переезжают.
-        // Право берётся тем же реестром, что и у остальных долгих операций.
-        if (!_services.Operations.TryBegin(LongOperationKind.DiskCleanup, LongOperationSubject.None,
-                "Поиск мусора на диске", out var scanLease, out var scanRefusal))
+        // Поиск мусора ничего не удаляет — он ЧИТАЕТ диск, поэтому права «занимаю весь диск» не
+        // берёт: чужая заливка не должна получать отказ «идёт очистка диска», когда очистка ещё
+        // только высматривает. А вот идёт ли ПЕРЕЕЗД — спрашивает: файл, который прямо сейчас
+        // переносят, выглядит для чистильщика ничьим.
+        if (_services.Operations.WholeDiskBusyReason() is { } busyNow)
         {
-            AppMessageBox.Show(scanRefusal, "Чистка диска", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show(busyNow, "Чистка диска", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -151,7 +151,6 @@ public partial class DiskCleanupView : UserControl
         finally
         {
             ScanButton.IsEnabled = true;
-            scanLease!.Dispose();
         }
 
         _plan = plan;
