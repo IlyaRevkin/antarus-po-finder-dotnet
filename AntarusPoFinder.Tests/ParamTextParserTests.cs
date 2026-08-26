@@ -338,11 +338,15 @@ public class ParamTextParserTests
     }
 
     [Fact]
-    public void UnknownSection_FallsToOther_AndSaysSo()
+    public void UnknownSection_KeepsItsOwnName_AndSaysSo()
     {
         var result = ParamTextParser.Parse("=====[Настройка редуктора]\nP9-01 (1) - Что-то своё");
 
-        Assert.Equal(ParamGroupCatalog.Other, Row(result, "P9-01").GroupName);
+        // Раньше незнакомая секция уезжала в «Прочее». Жалоба владельца («визуально нет разделения
+        // разделов, как в том же txt») этого и касалась: в накопленных файлах разделы названы
+        // по-своему, и сваленные в одну группу они переставали отбивать таблицу вообще. Своё имя
+        // раздела сохраняет ту же разбивку, что видна в исходнике.
+        Assert.Equal("Настройка редуктора", Row(result, "P9-01").GroupName);
         Assert.Contains(result.Warnings, w => w.Contains("Настройка редуктора"));
     }
 
@@ -353,6 +357,216 @@ public class ParamTextParserTests
 
         Assert.Empty(result.Rows);
         Assert.Equal("", result.Title);
+    }
+
+    // ── Формы, найденные прогоном по всему накопленному на диске ─────────────────────────────
+    //
+    // Каждый случай ниже взят с живого файла из «Прочее\!Файлы параметров ПЧ». До этих правил
+    // разбор не находил НИ ОДНОГО параметра в 16 файлах из 93 — целые семейства (INNOVERT, ABB,
+    // Vacon) написаны в форме, которой он не знал.
+
+    [Fact]
+    public void CodeWithoutSeparator_IsRecognized_Innovert()
+    {
+        var result = ParamTextParser.Parse("Innovert ТГР\nPa00 (1) - Частота\nPd25 (3) - Выходное реле");
+
+        Assert.Equal(new[] { "Pa00", "Pd25" }, result.Rows.Select(r => r.Code));
+    }
+
+    [Fact]
+    public void FourDigitCode_IsRecognized_Abb()
+    {
+        var result = ParamTextParser.Parse("ABB ACS 310\n1611 (3) - Вид параметра\n9905 НОМ. НАПРЯЖЕНИЕ");
+
+        Assert.Equal(new[] { "1611", "9905" }, result.Rows.Select(r => r.Code));
+    }
+
+    [Fact]
+    public void CodeWithSpace_AndTabSeparatedValue_IsRecognized_Vacon()
+    {
+        // «P 17.2 - 0<таб>Скрыть часть параметров - выкл»: и код с пробелом, и значение, отбитое
+        // от описания табуляцией. Формат объявлен в самом файле первой строкой.
+        var result = ParamTextParser.Parse("Vacon 20 - КПЧ\nP 17.2 - 0\t\tСкрыть часть параметров - выкл");
+
+        var row = result.Rows.Single();
+        Assert.Equal("P 17.2", row.Code);
+        Assert.Equal("0", row.Value);
+        Assert.Equal("Скрыть часть параметров", row.Title);
+        Assert.Equal("выкл", row.Description);
+    }
+
+    [Fact]
+    public void DoubleSpaceInsideName_IsNotTakenForAValue()
+    {
+        // Ровно то, из-за чего значение ищется по ТАБУЛЯЦИИ, а не по «двум пробелам подряд»:
+        // «Максимальное входное  напряжение» — обычная опечатка, и по ней половина названия
+        // уехала бы в столбец «Значение».
+        var result = ParamTextParser.Parse("Innovert\nPd01 - Максимальное входное  напряжение");
+
+        var row = result.Rows.Single();
+        Assert.Equal("", row.Value);
+        Assert.StartsWith("Максимальное", row.Title);
+    }
+
+    [Fact]
+    public void CyrillicLookalikesInCode_AreBroughtBackToLatin()
+    {
+        // «С00.16» у VEDA набрано русской «С», «Р2-28» русской «Р». В самом частотнике это
+        // латинские C00.16 и P2-28 — код это то, что человек ВБИВАЕТ, и русская буква там значит,
+        // что набрать его по таблице нельзя.
+        var result = ParamTextParser.Parse("VEDA\nС00.16 (1) - Напряжение Ai\nР2-28 (1) - Реле F");
+
+        Assert.Equal(new[] { "C00.16", "P2-28" }, result.Rows.Select(r => r.Code));
+    }
+
+    [Fact]
+    public void FootnoteMarker_DoesNotHideTheParameter_AndBringsItsExplanation()
+    {
+        var result = ParamTextParser.Parse(string.Join("\n", new[]
+        {
+            "VEDA Дробилка",
+            "*F06.00 (1) - Выходные сигналы",
+            "F06.21 (1) - Цифровой выход",
+            "",
+            "* - при использовании AO вместо ModBus",
+        }));
+
+        // Помеченная звёздочкой строка — параметр, а не пояснение: раньше она уходила в текст
+        // целиком, вместе с кодом.
+        Assert.Equal("F06.00", result.Rows[0].Code);
+        // Сама сноска отдельной строкой в таблицу не идёт: её текст стоит в «Когда нужно» у той
+        // строки, к которой она относится.
+        Assert.Equal("при использовании AO вместо ModBus", result.Rows[0].AppliesWhen);
+        Assert.Equal("", result.Rows[1].AppliesWhen);
+        Assert.Equal(2, result.Rows.Count);
+    }
+
+    [Fact]
+    public void ConditionInBracketsBeforeCode_DoesNotLoseTheParameter()
+    {
+        var result = ParamTextParser.Parse("M740\nU0-04 (16) - Датчик\n(если требуется) \tU0-15 (55) - Максимальная частота");
+
+        var row = result.Rows.Single(r => r.Code == "U0-15");
+        Assert.Equal("55", row.Value);
+        Assert.Equal("если требуется", row.AppliesWhen);
+    }
+
+    [Fact]
+    public void SelfClosingApplicabilityBlock_DoesNotLeakToTheRestOfTheFile()
+    {
+        // «<<<<< Для схем без HL1 - (11) Сухой ход >>>>>» — блок открыт и закрыт ОДНОЙ строкой.
+        // Прежний разбор принимал её за открытие и метил ею весь остаток файла, причём вместе с
+        // прилипшими «>>>>>».
+        var result = ParamTextParser.Parse(string.Join("\n", new[]
+        {
+            "M740",
+            "U2-11 (0) - DI2",
+            "<<<<< Для схем без HL1 - (11) Сухой ход >>>>>",
+            "U2-12 (0) - DI3",
+        }));
+
+        Assert.All(result.Rows, r => Assert.Equal("", r.Applicability));
+        var note = result.Rows.Single(r => r.Kind == ParamRowKind.Note);
+        Assert.Equal("Для схем без HL1 - (11) Сухой ход", note.Title);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("не закрыт"));
+    }
+
+    [Fact]
+    public void BracketOnlySection_IsASection_Innovert()
+    {
+        var result = ParamTextParser.Parse("Innovert\nPa00 (1) - Частота\n\n[Мотор]\nPC09 - Напряжение двигателя");
+
+        Assert.Equal(ParamGroupCatalog.Main, Row(result, "Pa00").GroupName);
+        Assert.Equal(ParamGroupCatalog.Motor, Row(result, "PC09").GroupName);
+    }
+
+    [Fact]
+    public void BareHeading_SplitsTheTableIntoSections()
+    {
+        // «Параметры электродвигателя» без единого «=» — так отбита большая часть накопленных
+        // файлов. Без этого правила ВЕСЬ файл оказывался одной группой.
+        var result = ParamTextParser.Parse(string.Join("\n", new[]
+        {
+            "M740 НГР X",
+            "U0-04 (16) - Датчик",
+            "",
+            "Параметры электродвигателя",
+            "U3.33 - Мощность",
+        }));
+
+        Assert.Equal(ParamGroupCatalog.Main, Row(result, "U0-04").GroupName);
+        Assert.Equal(ParamGroupCatalog.Motor, Row(result, "U3.33").GroupName);
+        Assert.Contains(result.Warnings, w => w.Contains("принята за раздел"));
+    }
+
+    [Fact]
+    public void NoteRightUnderCondition_StaysANote_NotAHeading()
+    {
+        // Оговорка «перед заголовком пусто» держит именно это: «В ПЛК выставить частоту 55Гц»
+        // стоит сразу под «-----[Для 55 ГЦ]» и заголовком раздела не является.
+        var result = ParamTextParser.Parse(LiveSample);
+
+        Assert.Equal(1, result.Rows.Count(r => r.Kind == ParamRowKind.Note));
+    }
+
+    [Fact]
+    public void ModelNameOnTheFirstLine_IsTheTitle_NotAParameter()
+    {
+        // «M740 НГР X» разбирается как код ровно так же, как «Pa00»: буква и цифры. Отличает его
+        // то, что значения у него нет, а приставка («M») не та, что у кодов всего остального файла
+        // («U»).
+        var result = ParamTextParser.Parse("M740 НГР X\nU0-04 (16) - Датчик\nU1-00 (4) - Вход\nU2-15 (8) - Реле");
+
+        Assert.Equal("M740 НГР X", result.Title);
+        Assert.Equal(3, result.Rows.Count);
+    }
+
+    [Fact]
+    public void ValueWithUnit_FillsTheUnitColumn()
+    {
+        // Столбец «Ед.» до этого не заполнялся вообще ничем — ни разбором, ни импортом.
+        var result = ParamTextParser.Parse("M740\nU1-03 (0.5 сек) - Время\nU1-05 (10 Bar) - Давление");
+
+        Assert.Equal("0.5", Row(result, "U1-03").Value);
+        Assert.Equal("сек", Row(result, "U1-03").Unit);
+        Assert.Equal("10", Row(result, "U1-05").Value);
+        Assert.Equal("Bar", Row(result, "U1-05").Unit);
+    }
+
+    [Fact]
+    public void UnitAfterCommaInTheName_MovesToTheUnitColumn()
+    {
+        var result = ParamTextParser.Parse(LiveSample);
+
+        var p012 = Row(result, "P0-12");
+        Assert.Equal("Верхний предел частоты", p012.Title);
+        Assert.Equal("Гц", p012.Unit);
+    }
+
+    [Fact]
+    public void UnknownWordAfterComma_IsNotAUnit()
+    {
+        // Список единиц закрытый намеренно: иначе в столбец «Ед.» уезжал бы любой хвост после
+        // последней запятой.
+        var result = ParamTextParser.Parse("VEDA\nF01.01 (1) - Запуск, вход");
+
+        var row = result.Rows.Single();
+        Assert.Equal("", row.Unit);
+        Assert.Equal("Запуск, вход", row.Title);
+    }
+
+    [Fact]
+    public void PlaceholderValue_MeansTakenOnSite_NotALiteralValue()
+    {
+        // «(По шильду)», «(Настраивается по месту)» — так написана добрая половина параметров
+        // двигателя. Прежде наладчик читал в таблице «выставить „По шильду“».
+        var result = ParamTextParser.Parse("Vacon\nP 1.1 - (По шильду)\tНапряжение\nU0.18 (Настраивается по месту) Время разгона");
+
+        Assert.All(result.Rows.Where(r => r.Kind == ParamRowKind.Param), r =>
+        {
+            Assert.Equal(ParamValueState.OnSite, r.ValueState);
+            Assert.Equal("", r.Value);
+        });
     }
 
     [Fact]
