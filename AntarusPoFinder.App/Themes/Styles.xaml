@@ -823,11 +823,44 @@
              тёмной теме сайдбарный тон темнее карточки, в светлой — серее белого, и в обеих
              обычный TextBrush читается на ней с запасом. -->
         <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
-        <Setter Property="Padding" Value="10,7,10,6"/>
+        <Setter Property="Padding" Value="10,5,10,4"/>
     </Style>
 
     <Style x:Key="DataGridGroupHeaderText" TargetType="TextBlock">
         <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+
+    <!-- ПОДЗАГОЛОВОК БЛОКА внутри раздела — вторым уровнем под заголовком раздела: «Только для
+         ПЧ №1», «Для 55 ГЦ». Заведён по третьему подряд замечанию владельца о нечитаемости
+         таблицы параметров.
+
+         В исходном txt применимость и условие записаны ИМЕННО ТАК — заголовком над куском строк
+         («<<<<<[Только для ПЧ №1]», «[Для 55 ГЦ]» под строкой из чёрточек), прочитанным один
+         раз на весь кусок.
+         Разбор превратил их в поля строки (и правильно: по ним идёт отбор), а показ — в две
+         колонки у правого края, которые на живом корпусе заполнены в 3 % и 0,2 % строк и при
+         этом всегда занимают ширину. При размере окна по умолчанию «Когда нужно» не помещалась
+         вовсе, и увидеть её можно было только горизонтальной прокруткой.
+
+         Легче заголовка раздела намеренно: раздел — это «=========[Настройка ШУ]», а блок внутри
+         него подчинён ему. Отсюда и заливки нет, и линия тоньше — иначе два уровня отбивки
+         спорили бы друг с другом, а таблица снова стала бы рябой. -->
+    <Style x:Key="DataGridBlockHeader" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="Padding" Value="10,3,10,2"/>
+    </Style>
+
+    <!-- ⚠️ Цвет — обычный TextBrush, а НЕ AccentBrush, хотя акцент напрашивался. В тёмной теме
+         акцент (#2A66D9) на полотне карточки (#2A2A3A) даёт контраст 2,7:1 — подпись, ради
+         которой всё и затевалось, читалась бы хуже строк под ней. Подчинённость показана
+         курсивом и кеглем, а не приглушением: приглушённая подпись — это ровно та беда, от
+         которой уходим. -->
+    <Style x:Key="DataGridBlockHeaderText" TargetType="TextBlock">
+        <Setter Property="FontStyle" Value="Italic"/>
+        <Setter Property="FontSize" Value="12"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
     </Style>

@@ -47,14 +47,24 @@ public partial class ParamTableWindow : Window
     public sealed class RowVm
     {
         public string GroupName { get; init; } = "";
+
+        /// <summary>Блок применимости, в который строка попала: «Только для ПЧ №1», «Для 55 ГЦ».
+        /// По нему идёт ВТОРОЙ уровень группировки представления — подзаголовок внутри раздела,
+        /// ровно как в исходном txt. Колонок «Только для» и «Когда нужно» из-за этого больше нет:
+        /// на живом корпусе они заполнены в 0,2 % и 3 % строк, а ширину занимали всегда и стояли
+        /// за правым краем окна (см. Core/Services/ParamTableView.cs).</summary>
+        public ParamTableView.Block Block { get; init; } = new(0, "");
+
         public string Code { get; init; } = "";
         public string Title { get; init; } = "";
+
+        /// <summary>Описание — хвостом за тире к названию, в одной с ним ячейке и приглушённым:
+        /// «Функция DI1 — Нет функции (для сигнала протечки на ПЛК)». Так оно и записано в
+        /// источнике, и так видно, что оно подчинено названию, а не спорит с ним за колонку.</summary>
+        public string Tail { get; init; } = "";
+
         public string ValueDisplay { get; init; } = "";
         public string Factory { get; init; } = "";
-        public string Unit { get; init; } = "";
-        public string Description { get; init; } = "";
-        public string Applicability { get; init; } = "";
-        public string AppliesWhen { get; init; } = "";
         public bool IsNote { get; init; }
 
         /// <summary>Значения своих столбцов документа ПО МЕСТУ — в том же порядке, в каком колонки
@@ -226,7 +236,12 @@ public partial class ParamTableWindow : Window
         var ordered = ParamTableEditing.Ordered(shown, _services.Db.GetParamGroupOrder());
         ShowOwnColumns();
 
-        var shownRows = ordered.Select(row =>
+        // Применимость и условие — не поля строки, а ПОДЗАГОЛОВКИ блока: так они записаны в
+        // исходном txt, так их и показываем. Раскладка по блокам идёт по порядку показа, поэтому
+        // считается здесь, а не в разметке (правило под тестами — ParamTableView.Blocks).
+        var blocks = ParamTableView.Blocks(ordered);
+
+        var shownRows = ordered.Select((row, at) =>
         {
             var change = _diff?.KindOf(row)?.ToString() ?? "";
             var extra = ParamRowExtra.Parse(row.Extra);
@@ -235,14 +250,12 @@ public partial class ParamTableWindow : Window
             {
                 Extras = _ownColumns.Select(c => extra.TryGetValue(c.Key, out var value) ? value : "").ToList(),
                 GroupName = row.GroupName,
+                Block = blocks[at],
                 Code = row.Code,
                 Title = row.Title,
+                Tail = ParamTableView.Tail(row),
                 ValueDisplay = row.Kind == ParamRowKind.Note ? "" : row.ValueDisplay,
                 Factory = row.Factory,
-                Unit = row.Unit,
-                Description = row.Description,
-                Applicability = row.Applicability,
-                AppliesWhen = row.AppliesWhen,
                 IsNote = row.Kind == ParamRowKind.Note,
                 Change = change,
                 ChangeMark = change switch
@@ -256,12 +269,23 @@ public partial class ParamTableWindow : Window
             };
         }).ToList();
 
+        // Встроенные колонки, которые показываются ПО ФАКТУ СОДЕРЖИМОГО. Приём не новый — так же
+        // ведут себя свои столбцы документа (ShowOwnColumns ниже); здесь он просто распространён на
+        // встроенные. Гасим Visibility, а не удаляем колонку: удаление сбило бы счёт _builtInColumns,
+        // по которому ShowOwnColumns отличает свои столбцы от встроенных.
+        FactoryColumn.Visibility = ParamTableView.NeedsFactory(ordered) ? Visibility.Visible : Visibility.Collapsed;
+        ChangeColumn.Visibility = ParamTableView.NeedsChange(_diff, ordered) ? Visibility.Visible : Visibility.Collapsed;
+
         // Разделы таблицы — группировкой представления, а не своими строками-врезками в списке:
         // врезка была бы обычной строкой, и её пришлось бы прятать от отбора, от подсветки
         // изменений и от выделения. Порядок разделов при этом остаётся тем, в котором строки
         // пришли (см. ParamTableEditing.Ordered) — своих SortDescriptions у представления нет.
+        //
+        // ⚠️ Уровней два, и порядок здесь тот же, что у GroupStyle в разметке: раздел, потом блок
+        // применимости внутри него. Переставишь местами — полосы поменяются ролями.
         var view = new ListCollectionView(shownRows);
         view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(RowVm.GroupName)));
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(RowVm.Block)));
         RowsGrid.ItemsSource = view;
 
         FocusFoundRow(shownRows);
