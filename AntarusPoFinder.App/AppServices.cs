@@ -13,6 +13,12 @@ public class AppServices
     public HierarchyService Hierarchy { get; }
     public SchematicService Schematics { get; }
 
+    /// <summary>Идущие прямо сейчас долгие операции (заливка в ПЛК, сборка LFS, перестройка диска).
+    /// Один список на приложение — им же заменена та защита, которую раньше давала модальность окна:
+    /// пока окно операции запирало программу, вторую такую же нажать было физически нельзя, а теперь
+    /// это надо проверять явно. См. LongOperationRegistry.</summary>
+    public LongOperationRegistry Operations { get; } = new();
+
     /// <summary>Set once per session on a successful AD login (see RoleSwitchDialog.AdAuth_Click),
     /// via either the AD-group or the app-roster path — null for the whole session if the operator
     /// only ever picked a role through the plain shared-password dialog, in which case CurrentUserName
