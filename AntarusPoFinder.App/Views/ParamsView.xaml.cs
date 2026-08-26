@@ -235,6 +235,10 @@ public partial class ParamsView : UserControl
         var rowActionsVisibility = expanding ? Visibility.Visible : Visibility.Collapsed;
         OpenFileBtn.Visibility = rowActionsVisibility;
         ParamTableBtn.Visibility = rowActionsVisibility;
+        // Перенос — действие не над строкой, а над всеми файлами сразу, но живёт в том же ряду:
+        // раскрытый список и есть то, на что он подействует, и показывать кнопку над свёрнутой
+        // таблицей значило бы предлагать перенос вслепую.
+        BulkImportBtn.Visibility = rowActionsVisibility;
         TidyBtn.Visibility = rowActionsVisibility;
         OpenFolderBtn.Visibility = rowActionsVisibility;
         EditTagsBtn.Visibility = rowActionsVisibility;
@@ -509,6 +513,27 @@ public partial class ParamsView : UserControl
             Owner = Window.GetWindow(this),
         };
         window.ShowDialog();
+    }
+
+    /// <summary>Разовый перенос всех накопленных текстовых заданий в документы-таблицы. Само окно
+    /// ничего не пишет, пока человек не посмотрит на разбор и не нажмёт кнопку, а после записи даёт
+    /// её отменить — см. ParamTableBulkImportDialog.</summary>
+    private void BulkImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ParamTableEditing.CanEdit(_services.Cfg.CurrentRole()))
+        {
+            AppMessageBox.Show("Заводить таблицы параметров может программист или администратор.",
+                "Перенос", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new ParamTableBulkImportDialog(_services) { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
+        // Окно пишет СРАЗУ, а закрывают его и крестиком — смотрим на Changed, а не на DialogResult.
+        if (!dialog.Changed) return;
+
+        _host.PushCatalogChange("Задания на настройку ПЧ/УПП перенесены в таблицы параметров");
+        ReloadTable();
     }
 
     private void EditTags_Click(object sender, RoutedEventArgs e)

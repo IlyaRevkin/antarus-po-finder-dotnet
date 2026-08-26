@@ -1,0 +1,97 @@
+﻿<Window x:Class="AntarusPoFinder.App.Views.ParamTableBulkImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/icon.ico"
+        Title="Перенести задания в таблицы"
+        Width="1080" Height="660" MinWidth="820" MinHeight="480"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="Intro" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,10"/>
+
+        <!-- Перенос показывается ДО того, как что-нибудь запишется: разбор чужого текста ошибается,
+             а документ уезжает к коллегам общим конфигом. Отметку можно снять у любой строки, а
+             после переноса — отменить его целиком (кнопка появляется тут же, а не «ищите документ
+             и удаляйте по одному»). -->
+        <DataGrid Grid.Row="1" x:Name="ItemsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                  CanUserResizeColumns="True" SelectionMode="Single" SelectionUnit="FullRow"
+                  Style="{StaticResource WrappingDataGrid}">
+            <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="Взять" Binding="{Binding Selected, UpdateSourceTrigger=PropertyChanged}"
+                                        Width="Auto" MinWidth="60"/>
+                <DataGridTextColumn Header="Файл параметров" Binding="{Binding FileName}" Width="2*" MinWidth="180"
+                                    IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                <DataGridTextColumn Header="Тип / подтип" Binding="{Binding Subtypes}" Width="2*" MinWidth="150"
+                                    IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                <DataGridTextColumn Header="Откуда" Binding="{Binding SourceName}" Width="2*" MinWidth="160"
+                                    IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                <!-- Название правится прямо здесь: разбор берёт его из скобок в имени файла и
+                     промахивается ровно так же часто, как попадает. -->
+                <DataGridTextColumn Header="Название документа" Binding="{Binding DocumentName, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="2*" MinWidth="160" ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                <DataGridTextColumn Header="Кодировка" Binding="{Binding EncodingName}" Width="Auto" MinWidth="100"
+                                    IsReadOnly="True" ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Что получится" Binding="{Binding Outcome}" Width="2*" MinWidth="170"
+                                    IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+            </DataGrid.Columns>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CanImport}" Value="False">
+                            <Setter Property="FontStyle" Value="Italic"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                    <Style.Triggers>
+                        <!-- Строка, которую перенести нельзя, приглушена, а не спрятана: «почему не
+                             перенеслось» — первый вопрос к этому окну. -->
+                        <DataTrigger Binding="{Binding CanImport}" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding Imported}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                        </DataTrigger>
+                        <!-- ⚠️ Выделение — ПОСЛЕДНИМ: внутри стиля побеждает последний подошедший
+                             триггер, а текст на акцентной заливке обязан быть TextOnAccentBrush. -->
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
+        </DataGrid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+            <Button x:Name="CheckAllBtn" Content="Отметить все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CheckAll_Click"/>
+            <Button x:Name="UncheckAllBtn" Content="Снять все" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="UncheckAll_Click"/>
+            <Button x:Name="WarningsBtn" Content="На что взглянуть…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Warnings_Click"
+                    ToolTip="Что разбор счёл сомнительным: неопознанные разделы, сноски без пояснения, строки, принятые за заголовки"/>
+            <Button x:Name="ReportBtn" Content="Отчёт…" Style="{StaticResource SecondaryButton}" Click="Report_Click"
+                    ToolTip="Тот же список текстом — его копируют в переписку или прикладывают к тикету"/>
+            <TextBlock x:Name="CountLabel" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+        </StackPanel>
+
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <Button x:Name="UndoBtn" Content="Отменить перенос" Style="{StaticResource SecondaryButton}"
+                        Click="Undo_Click" Visibility="Collapsed"
+                        ToolTip="Убрать ровно те документы, которые завёл этот перенос. Файлы на диске не тронутся"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="RunBtn" Content="Перенести отмеченные" Width="200" Margin="0,0,8,0" Click="Run_Click"/>
+                <Button x:Name="CloseBtn" Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="110" IsCancel="True" Click="Close_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

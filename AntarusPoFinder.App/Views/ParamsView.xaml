@@ -154,6 +154,13 @@
                              заданием на настройку. -->
                         <Button x:Name="ParamTableBtn" Content="Таблица параметров" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="ParamTable_Click" Visibility="Collapsed"
                                 ToolTip="Что выставлять на этом ПЧ/УПП: значения, заводские, применимость к конкретному аппарату — и что менялось от редакции к редакции"/>
+                        <!-- Разовый перенос всего накопленного: до этого документ заводился только
+                             руками и по одному, и всё, что копилось годами, оставалось снаружи
+                             («Автоматически файлы не перенёс что были»). Кнопка стоит рядом с
+                             «Таблицей параметров» — это то же действие, только для всех файлов
+                             сразу. -->
+                        <Button x:Name="BulkImportBtn" Content="Перенести задания в таблицы…" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="BulkImport_Click" Visibility="Collapsed"
+                                ToolTip="Пройтись по всем зарегистрированным файлам параметров, разобрать лежащие рядом текстовые задания и завести из них документы. Показывает, что получится, до записи — и позволяет отменить перенос"/>
                         <Button x:Name="EditTagsBtn" Content="Теги" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="EditTags_Click" Visibility="Collapsed"
                                 ToolTip="Изменить теги выбранного файла — по ним он находится поиском"/>
                         <!-- Набор подтипов у уже загруженного файла: раньше он задавался только в

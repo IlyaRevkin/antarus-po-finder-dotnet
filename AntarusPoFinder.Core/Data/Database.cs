@@ -208,7 +208,11 @@ public partial class Database : IDisposable
                  created_at   TEXT NOT NULL DEFAULT '',
                  updated_at   TEXT NOT NULL DEFAULT '',
                  deleted_at   TEXT NOT NULL DEFAULT '',
-                 sync_id      TEXT NOT NULL DEFAULT ''
+                 sync_id      TEXT NOT NULL DEFAULT '',
+                 -- Теги документа — ровно как param_files.tags и fw_versions.tags: строкой через
+                 -- разделитель (TagString), а не отдельной таблицей связей. По ним документ
+                 -- находится поиском, и ими же он отбирается в списке.
+                 tags         TEXT NOT NULL DEFAULT ''
              );
 
              -- Произвольные столбцы документа сверх обязательных семи. Отдельной таблицей, а не
@@ -784,6 +788,9 @@ public partial class Database : IDisposable
         // быть очевидным, а не выдуманным заново под давлением бага у пользователя.
         AddColumnsIfMissing("param_tables",
             ("manufacturer", "TEXT NOT NULL DEFAULT ''"),
+            // Теги документа появились позже самой таблицы — тот самый «следующий столбец», ради
+            // которого этот вызов и стоял здесь заранее.
+            ("tags", "TEXT NOT NULL DEFAULT ''"),
             ("deleted_at", "TEXT NOT NULL DEFAULT ''"),
             ("sync_id", "TEXT NOT NULL DEFAULT ''"),
             ("updated_at", "TEXT NOT NULL DEFAULT ''"));

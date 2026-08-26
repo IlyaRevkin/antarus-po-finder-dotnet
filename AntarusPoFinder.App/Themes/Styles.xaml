@@ -729,6 +729,23 @@
         <Setter Property="ToolTipService.ShowDuration" Value="30000"/>
     </Style>
 
+    <!-- Тот же вид, но С ПЕРЕНОСОМ строк. Заведён по жалобе на таблицу параметров: «некоторый текст
+         не влазит» — названия параметров и их описания в исходных файлах бывают в полторы строки, и
+         обрезка многоточием превращала самую нужную колонку в загадку. Подсказка при наведении
+         остаётся (наследуется), но подсказку надо ещё догадаться вызвать, а прочитать текст глазами
+         человек хочет сразу.
+
+         ⚠️ Сам по себе перенос ничего не даёт: у RoomyDataGrid высота строки задана числом, и
+         вторая строка текста просто обрезается. Работает он только вместе с WrappingDataGrid ниже.
+         VerticalAlignment=Top — иначе однострочные ячейки в высокой строке висят по центру, а
+         многострочные начинаются выше них, и глазу не за что зацепиться. -->
+    <Style x:Key="DataGridCellTextWrap" TargetType="TextBlock" BasedOn="{StaticResource DataGridCellText}">
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="TextTrimming" Value="None"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="Margin" Value="0,7,0,7"/>
+    </Style>
+
     <!-- Тот же вид, но по центру — для коротких/числовых полей (короткие коды, даты, статусы),
          см. "числа/короткие поля по центру" в списке правок таблиц. HorizontalAlignment="Stretch"
          обязателен: без него TextBlock сжимается до ширины текста и TextAlignment="Center" внутри
@@ -768,6 +785,44 @@
              единым, а не появлялась жирная сетка. -->
         <Setter Property="GridLinesVisibility" Value="All"/>
         <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrush2}"/>
+    </Style>
+
+    <!-- Таблица, у которой строка растёт под содержимое. Нужна там, где в ячейке живёт не поле
+         базы, а фраза человека: названия параметров ПЧ и их описания взяты из накопленных
+         текстовых файлов и в одну строку не помещаются.
+
+         Высота НЕ фиксируется, но и не отпускается совсем: MinRowHeight держит тот же ритм (34),
+         что и у остальных таблиц программы, — иначе однострочные таблицы в этом стиле выглядели бы
+         теснее соседних экранов.
+
+         ⚠️ Виртуализация строк при этом работает хуже: WPF не может посчитать высоту заранее.
+         Ставить этот стиль на таблицы в тысячи строк не надо — здесь их полсотни. -->
+    <Style x:Key="WrappingDataGrid" TargetType="DataGrid" BasedOn="{StaticResource RoomyDataGrid}">
+        <Setter Property="RowHeight" Value="Auto"/>
+        <Setter Property="MinRowHeight" Value="34"/>
+    </Style>
+
+    <!-- Заголовок РАЗДЕЛА внутри таблицы: строка через всю ширину с линией под ней. Заведён по
+         жалобе владельца: «визуально нет разделения разделов, как в том же txt у нас разделено
+         визуально линией и удобно для чтения». В исходных файлах разделы отбиты строками
+         «=========[Настройка ШУ]», и глазами это читается мгновенно; в таблице же группа была
+         обычным значением первой колонки, повторявшимся из строки в строку.
+
+         Линия — снизу и тем же тоном, что и сетка таблицы (BorderBrush2): это отбивка, а не рамка. -->
+    <Style x:Key="DataGridGroupHeader" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <!-- Полоса заголовка отличается от полотна таблицы поверхностью, а не цветом текста: в
+             тёмной теме сайдбарный тон темнее карточки, в светлой — серее белого, и в обеих
+             обычный TextBrush читается на ней с запасом. -->
+        <Setter Property="Background" Value="{DynamicResource BgSidebarBrush}"/>
+        <Setter Property="Padding" Value="10,7,10,6"/>
+    </Style>
+
+    <Style x:Key="DataGridGroupHeaderText" TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
     </Style>
 
     <!-- Кнопка-иконка «i»: длинное объяснение открывается по клику, а не висит абзацем на форме.

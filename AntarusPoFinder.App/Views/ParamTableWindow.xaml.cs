@@ -1,8 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -31,6 +32,11 @@ public partial class ParamTableWindow : Window
     private ParamTableDiff.Result? _diff;
     private List<ParamTableColumn> _ownColumns = new();
     private int _builtInColumns;
+
+    /// <summary>К каким типам и подтипам шкафов относится файл документа. Пересчитывается при
+    /// открытии и после каждой правки: привязка живёт не в документе, а в записях файла параметров,
+    /// и меняют её отсюда же.</summary>
+    private ParamTableBinding.Result _binding = new(new(), null);
 
     /// <summary>Строка таблицы для показа: сами данные плюс пометка «что с ней стало относительно
     /// предыдущей ревизии».</summary>
@@ -107,6 +113,7 @@ public partial class ParamTableWindow : Window
         }
 
         LoadDocuments(null);
+        ShowBinding();
     }
 
     private ParamTable? Current => DocumentCombo.SelectedItem as ParamTable;
@@ -130,6 +137,7 @@ public partial class ParamTableWindow : Window
         RevisionsList.ItemsSource = null;
         RowsGrid.ItemsSource = null;
         ApplicabilityCombo.ItemsSource = null;
+        ShowTags();
         ReasonText.Text = "У этого файла параметров таблицы ещё нет.";
         AuthorText.Text = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole())
             ? "«Новый документ из файла…» разберёт накопленный txt в таблицу — с предпросмотром и правкой до сохранения."
@@ -137,7 +145,11 @@ public partial class ParamTableWindow : Window
         SummaryText.Text = "";
     }
 
-    private void Document_Changed(object sender, SelectionChangedEventArgs e) => LoadRevisions();
+    private void Document_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        LoadRevisions();
+        ShowTags();
+    }
 
     private void LoadRevisions()
     {
@@ -202,7 +214,7 @@ public partial class ParamTableWindow : Window
         var ordered = ParamTableEditing.Ordered(shown, _services.Db.GetParamGroupOrder());
         ShowOwnColumns();
 
-        RowsGrid.ItemsSource = ordered.Select(row =>
+        var shownRows = ordered.Select(row =>
         {
             var change = _diff?.KindOf(row)?.ToString() ?? "";
             var extra = ParamRowExtra.Parse(row.Extra);
@@ -231,6 +243,133 @@ public partial class ParamTableWindow : Window
                 },
             };
         }).ToList();
+
+        // Разделы таблицы — группировкой представления, а не своими строками-врезками в списке:
+        // врезка была бы обычной строкой, и её пришлось бы прятать от отбора, от подсветки
+        // изменений и от выделения. Порядок разделов при этом остаётся тем, в котором строки
+        // пришли (см. ParamTableEditing.Ordered) — своих SortDescriptions у представления нет.
+        var view = new ListCollectionView(shownRows);
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(RowVm.GroupName)));
+        RowsGrid.ItemsSource = view;
+    }
+
+    // ── Привязка к типам и подтипам шкафов ───────────────────────────────────────────────────
+
+    /// <summary>Показать, к каким шкафам относится документ. Привязка ВЫВОДИТСЯ из записей файла
+    /// параметров (см. Core/Services/ParamTableBinding.cs) — своей у документа нет и быть не
+    /// должно.</summary>
+    private void ShowBinding()
+    {
+        _binding = ParamTableBinding.For(_services.Db, _diskPath, _filename,
+            _services.Hierarchy, _services.Cfg.RootPath());
+
+        BindingLabel.Text = _binding.Describe();
+        // Непривязанный документ — не мелочь: наладчик не поймёт, к какому шкафу таблица. Поэтому
+        // строка не просто «пустая», а помечена цветом предупреждения.
+        BindingLabel.Foreground = (System.Windows.Media.Brush)FindResource(
+            _binding.Links.Count == 0 ? "WarningBrush" : "TextBrush");
+        BindingLabel.ToolTip = _binding.Links.Count == 0
+            ? "Файл параметров в базе не значится: он есть на диске, но программа не знает, к какому шкафу он относится. «Подтипы…» это исправит."
+            : _binding.Describe();
+
+        SubtypesBtn.IsEnabled = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
+    }
+
+    private void ShowTags()
+    {
+        var tags = TagString.Parse(Current?.Tags);
+        TagsBtn.IsEnabled = Current is not null && ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
+        TagsLabel.Text = Current is null
+            ? ""
+            : tags.Count == 0 ? "Тегов нет — по словам этот документ не найдётся"
+                              : "Теги: " + string.Join(", ", tags);
+    }
+
+    private void Subtypes_Click(object sender, RoutedEventArgs e)
+    {
+        var primary = _binding.Primary;
+        if (primary is null)
+        {
+            primary = RegisterFile();
+            if (primary is null) return;
+        }
+
+        var dialog = new EditParamSubtypesDialog(_services, primary, _filename) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        var result = dialog.Result;
+        if (result is not null)
+        {
+            if (result.Warnings.Count > 0)
+                AppMessageBox.Show(string.Join("\n", result.Warnings), "Подтипы",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            var parts = new List<string>();
+            if (result.Added.Count > 0) parts.Add("добавлено: " + string.Join(", ", result.Added));
+            if (result.Removed.Count > 0) parts.Add("убрано: " + string.Join(", ", result.Removed));
+            if (parts.Count > 0) Announce($"Подтипы файла {_filename} — {string.Join("; ", parts)}");
+        }
+
+        ShowBinding();
+    }
+
+    /// <summary>Завести запись файла параметров для документа, у которого её нет.
+    ///
+    /// Такое бывает: файл на диске лежит, а в базе не значится — запись удалили, либо документ
+    /// приехал с машины, где диск смонтирован иначе. Пока записи нет, привязывать нечего: подтипы
+    /// живут именно на ней (см. ParamTableBinding). Спрашиваем ОСНОВНОЙ подтип — тот, в чьей папке
+    /// файл считается лежащим, — и заводим запись; остальные подтипы добавляются потом обычным
+    /// окном, вместе с ярлыками в их папках.</summary>
+    private ParamFile? RegisterFile()
+    {
+        if (Current is null)
+        {
+            AppMessageBox.Show("Сначала заведите документ — привязывать пока нечего.", "Подтипы",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return null;
+        }
+
+        var candidates = ParamTableBinding.Candidates(_services.Db);
+        if (candidates.Count == 0)
+        {
+            AppMessageBox.Show("В справочнике нет ни одного подтипа шкафа — заводить привязку не к чему.",
+                "Подтипы", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return null;
+        }
+
+        var answer = AppMessageBox.Show(
+            $"Файл «{_filename}» в базе не значится — программа не знает, к какому шкафу он относится.\n\n"
+            + "Завести для него запись? Сам файл на диске не тронется: он уже там, копировать нечего.",
+            "Подтипы", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return null;
+
+        var options = candidates
+            .OrderBy(c => c.GroupName, System.StringComparer.CurrentCulture)
+            .ThenBy(c => c.Display, System.StringComparer.CurrentCulture)
+            .Select(c => new PickOptionDialog.Option(c.Id, c.FullDisplay))
+            .ToList();
+        var pick = PickOptionDialog.Pick(this, "Основной подтип",
+            "В папке какого подтипа лежит этот файл параметров:", options, options[0].Id);
+        if (pick is not int subtypeId) return null;
+
+        var file = ParamTableBinding.Register(_services.Db, Current, subtypeId);
+        Announce($"Файл параметров {_filename} заведён в базе");
+        ShowBinding();
+        return file;
+    }
+
+    private void Tags_Click(object sender, RoutedEventArgs e)
+    {
+        if (Current?.Id is not int tableId) return;
+
+        var dialog = new EditParamTagsDialog(_services.Db, Current.Tags, Current.Name, "Документ") { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        _services.Db.UpdateParamTableTags(tableId, dialog.ResultTags);
+        var at = DocumentCombo.SelectedIndex;
+        LoadDocuments(tableId);
+        if (at >= 0 && DocumentCombo.Items.Count > at && DocumentCombo.SelectedIndex < 0)
+            DocumentCombo.SelectedIndex = at;
+        Announce($"Теги документа «{Current?.Name}» изменены");
     }
 
     /// <summary>Свои столбцы документа — колонками справа от встроенных, заново под каждую

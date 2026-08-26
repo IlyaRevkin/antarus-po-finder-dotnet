@@ -199,6 +199,22 @@ public class ParamTableSyncTests : IDisposable
     }
 
     [Fact]
+    public void TagsTravelWithTheDocument()
+    {
+        // Теги документа появились позже самой таблицы, и ездят они вместе с остальной шапкой, по
+        // той же отметке времени. Не поехали бы — документ находился бы поиском только у того, кто
+        // теги проставил.
+        var id = NewTable(_a);
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "первая", "Ilia");
+        Sync();
+
+        _a.UpdateParamTableTags(id, "modbus, задание");
+        Sync();
+
+        Assert.Equal("modbus, задание", OnB().Tags);
+    }
+
+    [Fact]
     public void EditedReasonTravels_ButRowsStayAsTheyWere()
     {
         var id = NewTable(_a);

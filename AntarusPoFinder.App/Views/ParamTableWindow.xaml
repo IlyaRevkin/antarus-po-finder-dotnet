@@ -20,6 +20,8 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -32,18 +34,38 @@
             </Grid.ColumnDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="7" x:Name="FileLabel"
-                       Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8"/>
+                       Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="Документ:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DocumentCombo" Height="30" DisplayMemberPath="Name"
+            <!-- К каким типам и подтипам шкафов относится документ. Своей привязки у него нет и быть
+                 не должно (см. Core/Services/ParamTableBinding.cs): она ВЫВОДИТСЯ из записей файла
+                 параметров. Но не показать её было прямой жалобой владельца — «в таблице теряется
+                 привязка к типам подтипам»: наладчик, открыв документ, не понимал, к какому шкафу
+                 таблица относится вообще. Правится там же, где и у файла, тем же окном. -->
+            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="5" x:Name="BindingLabel"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,6"/>
+            <Button Grid.Row="1" Grid.Column="6" x:Name="SubtypesBtn" Content="Подтипы…"
+                    Style="{StaticResource CompactSecondaryButton}" HorizontalAlignment="Right" Margin="0,0,0,6"
+                    Click="Subtypes_Click"
+                    ToolTip="К каким подтипам шкафов подходит этот файл параметров. Тот же набор, что на странице «Параметры»: файл и документ описывают один и тот же шкаф"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="5" x:Name="TagsLabel"
+                       Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" Margin="0,0,12,8"/>
+            <Button Grid.Row="2" Grid.Column="6" x:Name="TagsBtn" Content="Теги…"
+                    Style="{StaticResource CompactSecondaryButton}" HorizontalAlignment="Right" Margin="0,0,0,8"
+                    Click="Tags_Click"
+                    ToolTip="Слова, по которым документ находится поиском: «modbus», «пуск по месту», модель ПЧ"/>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Документ:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Row="3" Grid.Column="1" x:Name="DocumentCombo" Height="30" DisplayMemberPath="Name"
                       SelectionChanged="Document_Changed"/>
 
-            <TextBlock Grid.Row="1" Grid.Column="3" Text="Показать строки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Grid.Row="1" Grid.Column="4" x:Name="ApplicabilityCombo" Width="220" Height="30"
+            <TextBlock Grid.Row="3" Grid.Column="3" Text="Показать строки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Row="3" Grid.Column="4" x:Name="ApplicabilityCombo" Width="220" Height="30"
                       SelectionChanged="Applicability_Changed"
                       ToolTip="Строки без пометки годятся всем аппаратам и показываются всегда"/>
 
-            <Button Grid.Row="1" Grid.Column="6" x:Name="ImportBtn" Content="Новый документ из файла…"
+            <Button Grid.Row="3" Grid.Column="6" x:Name="ImportBtn" Content="Новый документ из файла…"
                     Style="{StaticResource SecondaryButton}" Click="Import_Click"
                     ToolTip="Разобрать накопленный txt в таблицу — с предпросмотром и правкой до сохранения"/>
         </Grid>
@@ -89,33 +111,68 @@
 
                 <DataGrid Grid.Row="1" x:Name="RowsGrid" AutoGenerateColumns="False" IsReadOnly="True"
                           CanUserResizeColumns="True" SelectionMode="Single" SelectionUnit="FullRow"
-                          Style="{StaticResource RoomyDataGrid}">
+                          Style="{StaticResource WrappingDataGrid}">
+                    <!-- Разделы таблицы отбиты строкой через всю ширину — как «=========[Настройка
+                         ШУ]» в исходном txt. До этого группа была обычным значением первой колонки,
+                         повторявшимся из строки в строку: и читалось хуже, и место занимало зря.
+                         Поэтому столбца «Группа» здесь больше нет — его заменил этот заголовок.
+
+                         ⚠️ Порядок разделов — ИЗ СПРАВОЧНИКА, а не по алфавиту: строки приходят сюда
+                         уже разложенными (ParamTableEditing.Ordered), а группировка порядок
+                         источника сохраняет. Своих SortDescriptions здесь нет намеренно — они бы
+                         как раз и переставили разделы по алфавиту, уронив «Сброс до заводских» в
+                         середину. -->
+                    <DataGrid.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.ContainerStyle>
+                                <Style TargetType="{x:Type GroupItem}">
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="{x:Type GroupItem}">
+                                                <StackPanel>
+                                                    <Border Style="{StaticResource DataGridGroupHeader}">
+                                                        <TextBlock Style="{StaticResource DataGridGroupHeaderText}">
+                                                            <Run Text="{Binding Name, Mode=OneWay}"/>
+                                                            <Run Text="{Binding ItemCount, Mode=OneWay, StringFormat=({0})}"
+                                                                 Foreground="{DynamicResource TextMutedBrush}"/>
+                                                        </TextBlock>
+                                                    </Border>
+                                                    <ItemsPresenter/>
+                                                </StackPanel>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </GroupStyle.ContainerStyle>
+                        </GroupStyle>
+                    </DataGrid.GroupStyle>
                     <DataGrid.Columns>
                         <!-- Пометка словом, а не только цветом: цвет не читается ни на печати, ни
                              при дальтонизме, а «что изменилось» — главный вопрос к этой таблице. -->
                         <!-- Ширина задана, а не «по содержимому»: у изменённой строки пометка
                              ЖИРНАЯ, ширину по содержимому столбец меряет обычным начертанием, и
                              запас нужен ровно той строке, ради которой столбец и заведён. -->
-                        <DataGridTextColumn Header="Изменение" Binding="{Binding ChangeMark}" Width="130" MinWidth="130"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="140"
+                        <DataGridTextColumn Header="Изменение" Binding="{Binding ChangeMark}" Width="110" MinWidth="90"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                         <DataGridTextColumn Header="Код" Binding="{Binding Code}" Width="Auto" MinWidth="80"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Название" Binding="{Binding Title}" Width="2*" MinWidth="160"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <!-- Название и описание — с переносом: в накопленных файлах это фразы
+                             человека, а не короткие поля базы, и «некоторый текст не влазит» была
+                             жалоба ровно про них. -->
+                        <DataGridTextColumn Header="Название" Binding="{Binding Title}" Width="2*" MinWidth="180"
+                                            ElementStyle="{StaticResource DataGridCellTextWrap}"/>
                         <DataGridTextColumn Header="Значение" Binding="{Binding ValueDisplay}" Width="Auto" MinWidth="120"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Заводское" Binding="{Binding Factory}" Width="Auto" MinWidth="80"
+                                            ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                        <DataGridTextColumn Header="Заводское" Binding="{Binding Factory}" Width="Auto" MinWidth="90"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
                         <DataGridTextColumn Header="Ед." Binding="{Binding Unit}" Width="Auto" MinWidth="55"
                                             ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" MinWidth="150"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Только для" Binding="{Binding Applicability}" Width="*" MinWidth="110"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
-                        <DataGridTextColumn Header="Когда нужно" Binding="{Binding AppliesWhen}" Width="*" MinWidth="110"
-                                            ElementStyle="{StaticResource DataGridCellText}"/>
+                        <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="3*" MinWidth="180"
+                                            ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                        <DataGridTextColumn Header="Только для" Binding="{Binding Applicability}" Width="*" MinWidth="120"
+                                            ElementStyle="{StaticResource DataGridCellTextWrap}"/>
+                        <DataGridTextColumn Header="Когда нужно" Binding="{Binding AppliesWhen}" Width="*" MinWidth="120"
+                                            ElementStyle="{StaticResource DataGridCellTextWrap}"/>
                     </DataGrid.Columns>
                     <!-- Начертание — на СТРОКЕ (оно наследуется ячейками), а цвет — на ЯЧЕЙКЕ, и
                          это не вкусовщина: общий стиль DataGridCell задаёт Foreground сам, а стиль

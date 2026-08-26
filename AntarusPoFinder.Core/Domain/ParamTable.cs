@@ -37,6 +37,11 @@ public class ParamTable
     /// от этого читаться не перестаёт (тот же приём, что у param_files.manufacturer).</summary>
     public string Manufacturer { get; set; } = "";
 
+    /// <summary>Теги документа — «modbus», «пуск по месту», «ESQ». Строкой через разделитель
+    /// (TagString), как у param_files.tags и fw_versions.tags: заводить третий способ хранить теги
+    /// в одной программе незачем, а поиск и отбор уже умеют работать именно с этим.</summary>
+    public string Tags { get; set; } = "";
+
     public string CreatedAt { get; set; } = "";
     public string UpdatedAt { get; set; } = "";
 

@@ -221,7 +221,7 @@ public partial class Database
             var exported = new ExportedParamTable
             {
                 SyncId = table.SyncId, DiskPath = table.DiskPath, Filename = table.Filename,
-                Name = table.Name, Manufacturer = table.Manufacturer,
+                Name = table.Name, Manufacturer = table.Manufacturer, Tags = table.Tags,
                 CreatedAt = table.CreatedAt, UpdatedAt = table.UpdatedAt, DeletedAt = table.DeletedAt,
                 // Два поля об одном и том же намеренно: «columns» читают установленные 1.74.2,
                 // «param_columns» — всё, что новее. Убрать первое можно будет, когда 1.74.2 не
@@ -1675,6 +1675,7 @@ public partial class Database
                     Filename = inc.Filename,
                     Name = inc.Name,
                     Manufacturer = inc.Manufacturer,
+                    Tags = inc.Tags,
                     CreatedAt = inc.CreatedAt,
                     UpdatedAt = inc.UpdatedAt,
                     SyncId = inc.SyncId,
@@ -1694,10 +1695,17 @@ public partial class Database
             }
 
             if (string.CompareOrdinal(inc.UpdatedAt, local.UpdatedAt) > 0
-                && (inc.Name != local.Name || inc.Manufacturer != local.Manufacturer))
+                && (inc.Name != local.Name || inc.Manufacturer != local.Manufacturer || inc.Tags != local.Tags))
             {
                 counts.ParamTablesUpdated++;
-                if (apply) UpdateParamTable(local.Id!.Value, inc.Name, inc.Manufacturer, inc.UpdatedAt);
+                if (apply)
+                {
+                    UpdateParamTable(local.Id!.Value, inc.Name, inc.Manufacturer, inc.UpdatedAt);
+                    // Теги отдельным вызовом: их правят из своего окна, и общий метод шапки о них
+                    // не знает. Отметка времени та же — иначе применённая правка коллеги поехала бы
+                    // обратно как более свежая.
+                    UpdateParamTableTags(local.Id.Value, inc.Tags, inc.UpdatedAt);
+                }
             }
 
             if (apply) ImportParamTableColumns(local.Id!.Value, inc);

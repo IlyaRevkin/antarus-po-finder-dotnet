@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
 
@@ -201,7 +201,7 @@ public partial class Database
     // ── Документы ─────────────────────────────────────────────────────────────
 
     private const string ParamTableColumns =
-        "id, disk_path, filename, name, manufacturer, created_at, updated_at, deleted_at, sync_id";
+        "id, disk_path, filename, name, manufacturer, tags, created_at, updated_at, deleted_at, sync_id";
 
     private static ParamTable ReadParamTable(Microsoft.Data.Sqlite.SqliteDataReader r) => new()
     {
@@ -210,6 +210,7 @@ public partial class Database
         Filename = GetString(r, "filename"),
         Name = GetString(r, "name"),
         Manufacturer = GetString(r, "manufacturer"),
+        Tags = GetString(r, "tags"),
         CreatedAt = GetString(r, "created_at"),
         UpdatedAt = GetString(r, "updated_at"),
         DeletedAt = GetString(r, "deleted_at"),
@@ -325,14 +326,15 @@ public partial class Database
         var updatedAt = string.IsNullOrEmpty(table.UpdatedAt) ? NowIsoPrecise() : table.UpdatedAt;
 
         ExecuteNonQuery("""
-            INSERT INTO param_tables (disk_path, filename, name, manufacturer, created_at, updated_at, deleted_at, sync_id)
-            VALUES (@d, @f, @n, @m, @c, @u, @del, @sy)
+            INSERT INTO param_tables (disk_path, filename, name, manufacturer, tags, created_at, updated_at, deleted_at, sync_id)
+            VALUES (@d, @f, @n, @m, @tg, @c, @u, @del, @sy)
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@d", table.DiskPath);
             cmd.Parameters.AddWithValue("@f", table.Filename);
             cmd.Parameters.AddWithValue("@n", table.Name);
             cmd.Parameters.AddWithValue("@m", table.Manufacturer);
+            cmd.Parameters.AddWithValue("@tg", table.Tags ?? "");
             cmd.Parameters.AddWithValue("@c", createdAt);
             cmd.Parameters.AddWithValue("@u", updatedAt);
             cmd.Parameters.AddWithValue("@del", table.DeletedAt);
@@ -354,6 +356,18 @@ public partial class Database
         {
             cmd.Parameters.AddWithValue("@n", name ?? "");
             cmd.Parameters.AddWithValue("@m", manufacturer ?? "");
+            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt);
+            cmd.Parameters.AddWithValue("@id", id);
+        });
+
+    /// <summary>Теги документа — по ним он находится поиском. Отдельным методом, а не полем в
+    /// UpdateParamTable: теги правят из своего окна (EditParamTagsDialog), и тащить туда название с
+    /// производителем незачем. <paramref name="updatedAt"/> задаётся только импортом конфига — там
+    /// нужна ЧУЖАЯ отметка, иначе применённая правка коллеги поехала бы обратно как более свежая.</summary>
+    public void UpdateParamTableTags(int id, string tags, string? updatedAt = null) =>
+        ExecuteNonQuery("UPDATE param_tables SET tags=@t, updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@t", tags ?? "");
             cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt);
             cmd.Parameters.AddWithValue("@id", id);
         });

@@ -218,6 +218,11 @@ public class ExportedParamTable
     [JsonPropertyName("filename")] public string Filename { get; set; } = "";
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("manufacturer")] public string Manufacturer { get; set; } = "";
+    /// <summary>Теги документа. Едут вместе с названием и производителем и сводятся по той же
+    /// отметке времени: снимок со старой версии этого поля не содержит, и там останется пустая
+    /// строка — приёмник различает «тегов нет» и «отправитель о поле не знает» по updated_at, как и
+    /// у остальных полей шапки.</summary>
+    [JsonPropertyName("tags")] public string Tags { get; set; } = "";
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
     [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
