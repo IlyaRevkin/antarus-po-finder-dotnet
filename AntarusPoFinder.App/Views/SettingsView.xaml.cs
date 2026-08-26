@@ -2849,10 +2849,26 @@ public partial class SettingsView : UserControl
     /// а эта переименовывает файлы и переносит инструкции — то есть меняет то, что уже лежит.
     /// Список версий окно берёт из БД само; после закрытия перечитываем вкладку «Прошивки», потому
     /// что имена файлов у записей могли поменяться.</summary>
+    /// <summary>Открытое окно перестройки. Оно больше не модальное, поэтому «нажали кнопку
+    /// второй раз» перестало быть невозможным: без этой ссылки на экране оказались бы два окна
+    /// с двумя планами, и второе из них — заведомо устаревшим.</summary>
+    private DiskMigrationDialog? _migrationWindow;
+
     private void DiskMigration_Click(object sender, RoutedEventArgs e)
     {
+        // Немодально: перестройка идёт минутами, и всё это время программой надо пользоваться.
+        // Второй раз её не запустить — окно живёт в одном экземпляре, а самой работе право
+        // выдаёт LongOperationRegistry (см. DiskMigrationDialog).
+        if (_migrationWindow is { IsLoaded: true } opened)
+        {
+            if (opened.WindowState == WindowState.Minimized) opened.WindowState = WindowState.Normal;
+            opened.Activate();
+            return;
+        }
         var dlg = new DiskMigrationDialog(_services, _host) { Owner = Window.GetWindow(this) };
-        dlg.ShowDialog();
+        _migrationWindow = dlg;
+        dlg.Closed += (_, _) => _migrationWindow = null;
+        dlg.Show();
         LoadFirmwareTab();
     }
 

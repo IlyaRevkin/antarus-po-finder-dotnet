@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading;
 using System.Windows;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -22,7 +23,18 @@ namespace AntarusPoFinder.App.Views;
 /// Что операция НЕ делает (и почему): не переименовывает папки версий, не переносит ОПЦ и не
 /// затаскивает пять папок внутрь версии (docs/hierarchy-rework-plan.md, этапы 4–5). Всё это меняет
 /// <c>disk_path</c>, а он у коллег при импорте общего конфига не обновляется — такой переезд можно
-/// выпускать только после релиза, который умеет читать обе раскладки.</summary>
+/// выпускать только после релиза, который умеет читать обе раскладки.
+///
+/// ⚠️ Окно НЕмодальное. Перестройка обходит весь диск и идёт минутами, а раньше всё это время
+/// программа стояла — та же жалоба, что и про заливку в ПЛК. Что из этого следует:
+///
+/// • Право на работу берётся в LongOperationRegistry как DiskRebuild: пока перестройка идёт, ни она
+///   сама, ни заливка, ни сборка LFS второй раз не запустятся — перекладывать файлы под ногами у
+///   работающей операции нельзя.
+/// • Обрыв возможен, но ПО ГРАНИЦЕ ОПЕРАЦИИ (см. DiskLayoutMigrator.Apply): между строками плана
+///   диск в согласованном состоянии, внутри переноса папки — нет.
+/// • Пока работа идёт, окно не закрывается: план и журнал живут в нём, и потерять их на середине
+///   значит не узнать, что успело переехать.</summary>
 public partial class DiskMigrationDialog : Window
 {
     private readonly AppServices _services;
@@ -30,6 +42,8 @@ public partial class DiskMigrationDialog : Window
     private DiskLayoutMigrator.MigrationPlan? _plan;
     private List<OpRow> _rows = new();
     private bool _applied;
+    private CancellationTokenSource? _cts;
+    private bool _running;
 
     private sealed class OpRow : INotifyPropertyChanged
     {
@@ -62,6 +76,7 @@ public partial class DiskMigrationDialog : Window
             "skip" => "пропущено",
             "error" => "ошибка",
             "off" => "не выбрано",
+            "cancel" => "не успели",
             _ => "",
         };
 
@@ -110,10 +125,27 @@ public partial class DiskMigrationDialog : Window
                 OpcCheck.IsChecked == true,
                 InstructionNamingCheck.IsChecked == true));
 
+        // Право берём и на ПОДСЧЁТ плана: он читает весь диск минутами, и план, посчитанный поверх
+        // идущей заливки, к моменту «Выполнить» уже врёт. Отказ показываем сообщением — молча
+        // погашенная кнопка ничего не объясняет.
+        if (!_services.Operations.TryBegin(LongOperationKind.DiskRebuild, LongOperationSubject.None,
+                "Подсчёт плана перестройки диска", out var planLease, out var refusal))
+        {
+            AppMessageBox.Show(refusal, "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         DiskLayoutMigrator.MigrationPlan plan;
         // Обход всех папок версий на сетевом диске — минуты; окно во время этого не должно висеть.
-        using (_host.BeginBusy("Считаем план перестройки диска…"))
-            plan = await Task.Run(() => DiskLayoutMigrator.Plan(input));
+        try
+        {
+            using (_host.BeginBusy("Считаем план перестройки диска…"))
+                plan = await Task.Run(() => DiskLayoutMigrator.Plan(input));
+        }
+        finally
+        {
+            planLease!.Dispose();
+        }
 
         _plan = plan;
         _applied = false;
@@ -195,10 +227,21 @@ public partial class DiskMigrationDialog : Window
             "Перестроить структуру", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
 
+        // Перестройка занимает ВЕСЬ диск: пока она идёт, ни заливка, ни сборка LFS, ни вторая
+        // перестройка не запустятся (LongOperationRules.TouchesWholeDisk). Раньше это обеспечивала
+        // модальность окна — теперь реестр.
+        if (!_services.Operations.TryBegin(LongOperationKind.DiskRebuild, LongOperationSubject.None,
+                "Перестройка структуры диска", out var lease, out var busyRefusal))
+        {
+            AppMessageBox.Show(busyRefusal, "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         var journalPath = WriteJournal(_plan, "plan");
 
-        RunButton.IsEnabled = false;
-        PlanButton.IsEnabled = false;
+        _cts = new CancellationTokenSource();
+        SetRunning(true);
+        var stopped = false;
         try
         {
             // Правки в БД (имя файла и подсказка «чем открывать») собираем в очередь и применяем на
@@ -213,10 +256,18 @@ public partial class DiskMigrationDialog : Window
             // нет) — For() вернёт null, и выкладка просто не делается.
             var publisher = _services.Publisher();
             var firstRoot = _services.Cfg.RootPath();
-            using (_host.BeginBusy("Перестраиваем структуру диска…"))
+            var token = _cts.Token;
+            // Индикатор внизу главного окна показывает долю сделанного: окно перестройки можно
+            // отодвинуть и работать дальше, но «сколько ещё ждать» должно быть видно и без него.
+            using (var busy = _host.BeginBusy("Перестраиваем структуру диска…"))
+            {
+                var scope = busy;
                 await Task.Run(() => DiskLayoutMigrator.Apply(_plan, op => renames.Add(op),
+                    progress: (done, total) => Dispatcher.BeginInvoke(new Action(() => scope.Report(done, total))),
                     repointed: op => repoints.Add(op), stubs: _services.StubWriter(),
-                    publisher: publisher, firstRoot: firstRoot));
+                    publisher: publisher, firstRoot: firstRoot, cancellationToken: token));
+            }
+            stopped = token.IsCancellationRequested;
 
             // Записей на одну папку может быть несколько, и disk_path у части из них — устаревший
             // (папку переименовали на диске); правим по каждому известному пути, см. Op.RecordPaths.
@@ -243,20 +294,63 @@ public partial class DiskMigrationDialog : Window
                 _host.PushCatalogChange("Диск перестроен: новые версии заводятся с папками «Прошивка», «Инструкция», «Карта ВВ», «Карта Modbus», «HMI»");
             }
 
-            if (FoldersCheck.IsChecked == true)
+            if (!stopped && FoldersCheck.IsChecked == true)
                 await CreateMissingFoldersAsync();
 
             _applied = true;
             WriteJournal(_plan, "result", journalPath);
             ShowPlan(_plan);
-            _host.ShowStatus($"Структура диска перестроена: {_plan.Ops.Count(o => o.Status == "ok")} операций",
-                category: NotificationCategory.Sync);
+            var doneCount = _plan.Ops.Count(o => o.Status == "ok");
+            var leftCount = _plan.Ops.Count(o => o.Status == "cancel");
+            // Итог — уведомлением, а не только текстом в окне: окно немодальное, и к этому моменту
+            // человек вполне может смотреть на другую страницу.
+            _host.ShowStatus(stopped
+                    ? $"\u26a0 Перестройка диска остановлена: сделано {doneCount}, осталось {leftCount}. " +
+                      "Повторный запуск предложит недоделанное снова."
+                    : $"Структура диска перестроена: {doneCount} операций",
+                stopped ? 12000 : 6000, NotificationCategory.Sync);
+        }
+        catch (Exception ex)
+        {
+            // Немодальное окно могли отодвинуть — об ошибке надо сказать так, чтобы её не потеряли.
+            _host.ShowStatus($"\u26a0 Перестройка диска не удалась: {ex.Message}", 12000, NotificationCategory.Sync);
+            AppMessageBox.Show($"Перестройка не завершена:{Environment.NewLine}{ex.Message}",
+                "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            PlanButton.IsEnabled = true;
-            RunButton.IsEnabled = false;
+            SetRunning(false);
+            _cts?.Dispose();
+            _cts = null;
+            lease!.Dispose();
         }
+    }
+
+    /// <summary>Кнопки и подпись на время работы. Окно немодальное, поэтому «идёт» и «не идёт»
+    /// должно быть видно по самому окну, а не по тому, что программа не отвечает.</summary>
+    private void SetRunning(bool running)
+    {
+        _running = running;
+        RunButton.IsEnabled = false;
+        PlanButton.IsEnabled = !running;
+        StopButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.IsEnabled = running;
+        CloseButton.IsEnabled = !running;
+        CancelPolicyLabel.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        CancelPolicyLabel.Text = running
+            ? "Остановить можно: перестройка прервётся на границе очередной операции, уже переехавшее " +
+              "останется переехавшим, недоделанное попадёт в журнал и будет предложено снова. " +
+              "Закрыть окно во время работы нельзя — в нём план и журнал."
+            : "";
+    }
+
+    /// <summary>Остановка. Подтверждения не спрашиваем: обрыв здесь безопасен по построению (см.
+    /// DiskLayoutMigrator.Apply), а лишний вопрос посреди получасовой операции только раздражает.</summary>
+    private void Stop_Click(object sender, RoutedEventArgs e)
+    {
+        _cts?.Cancel();
+        StopButton.IsEnabled = false;
+        CancelPolicyLabel.Text = "Останавливаемся — доделываем текущую операцию…";
     }
 
     private async Task CreateMissingFoldersAsync()
@@ -429,4 +523,23 @@ public partial class DiskMigrationDialog : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Пока перестройка идёт, окно не закрывается: в нём и план, и то, что уже успело
+    /// переехать, — потеряв его на середине, разбираться придётся по журналу на диске. Остановить
+    /// работу можно кнопкой «Остановить», и это отдельное осознанное действие.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_running)
+        {
+            e.Cancel = true;
+            AppMessageBox.Show(
+                "Перестройка ещё идёт. Закрыть окно нельзя — в нём план и то, что уже сделано." +
+                Environment.NewLine + Environment.NewLine +
+                "Программой при этом можно пользоваться: окно не модальное, просто отодвиньте его. " +
+                "Прервать работу — кнопкой «Остановить».",
+                "Перестроить структуру", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        base.OnClosing(e);
+    }
 }

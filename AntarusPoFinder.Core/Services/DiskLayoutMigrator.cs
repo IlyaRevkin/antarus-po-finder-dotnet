@@ -1,6 +1,7 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Services;
@@ -470,16 +471,30 @@ public static class DiskLayoutMigrator
     /// выкладка просто не делается.</param>
     /// <param name="firstRoot">Корень первого диска — от него считается ключ объекта на хостинге
     /// (см. <see cref="InstructionPublisher"/>). Нужен только вместе с <paramref name="publisher"/>.</param>
+    /// <param name="cancellationToken">Остановка ПО ГРАНИЦЕ ОПЕРАЦИИ. Каждая строка плана —
+    /// самостоятельное переименование или перенос: между ними диск в согласованном состоянии, и
+    /// прекратить работу здесь безопасно. Внутрь операции отмена не заглядывает НАМЕРЕННО — оборвать
+    /// перенос папки на середине значит потерять её половину. Недоделанные строки помечаются
+    /// «cancel» и попадают в журнал: повторный прогон обязан предложить их снова.</param>
     public static MigrationPlan Apply(MigrationPlan plan, Action<Op>? renamed,
         Action<int, int>? progress = null, Action<Op>? repointed = null,
         IInstructionStubWriter? stubs = null, IInstructionPublisher? publisher = null,
-        string? firstRoot = null)
+        string? firstRoot = null, CancellationToken cancellationToken = default)
     {
         var total = plan.Ops.Count;
         var done = 0;
+        var cancelled = false;
 
         foreach (var op in plan.Ops)
         {
+            if (cancelled || cancellationToken.IsCancellationRequested)
+            {
+                cancelled = true;
+                op.Status = op.Selected ? "cancel" : "off";
+                progress?.Invoke(++done, total);
+                continue;
+            }
+
             // Снятая галочка — не «пропущено», а «не запускали»: в журнале это разные вещи, и
             // повторный прогон обязан показать такую строку снова, а не считать её сделанной.
             if (!op.Selected) { op.Status = "off"; progress?.Invoke(++done, total); continue; }
@@ -523,7 +538,9 @@ public static class DiskLayoutMigrator
         // Выкладка на хостинг — ПОСЛЕ всех операций на диске: к этому моменту инструкции уже
         // переехали/переименовались, и в папках лежит их конечное состояние. Best-effort, как и вся
         // выкладка (см. InstructionPublisher): неудача уходит в журнал операции, а не валит перестройку.
-        if (publisher is not null && !string.IsNullOrEmpty(firstRoot))
+        // Остановленный прогон на хостинг ничего не отправляет: половина папок ещё в старом виде,
+        // и выложить их под новыми ключами значит развести диск и хостинг окончательно.
+        if (!cancelled && publisher is not null && !string.IsNullOrEmpty(firstRoot))
             PublishRebuiltInstructions(plan, publisher, firstRoot!);
 
         return plan;

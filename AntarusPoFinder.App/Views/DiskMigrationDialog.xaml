@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.DiskMigrationDialog"
+﻿<Window x:Class="AntarusPoFinder.App.Views.DiskMigrationDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
@@ -86,8 +86,16 @@
 
         <TextBlock Grid.Row="4" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,10,0,10"/>
 
+        <!-- Окно немодальное: перестройка идёт минутами, и запирать ради неё всю программу нельзя.
+             Отсюда «Остановить» (перестройка обрывается ПО ГРАНИЦЕ ОПЕРАЦИИ — см. DiskLayoutMigrator.Apply)
+             и строка о том, что закрыть окно во время работы нельзя. -->
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="110" IsCancel="True" Click="Close_Click"/>
+            <TextBlock x:Name="CancelPolicyLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                       VerticalAlignment="Center" Margin="0,0,16,0" MaxWidth="620" Visibility="Collapsed"/>
+            <Button x:Name="StopButton" Content="Остановить" Style="{StaticResource SecondaryButton}" Width="130"
+                    Margin="0,0,8,0" Visibility="Collapsed" Click="Stop_Click"/>
+            <Button x:Name="CloseButton" Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="110"
+                    IsCancel="True" Click="Close_Click"/>
         </StackPanel>
     </Grid>
 </Window>

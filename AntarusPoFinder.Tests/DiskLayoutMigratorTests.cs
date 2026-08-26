@@ -539,4 +539,95 @@ public class DiskLayoutMigratorTests
         var moved = Path.Combine(root.Path, "ПО", "ПЖ", "2.0", "SMH5", HierarchyFolders.Opc, "01312");
         Assert.True(File.Exists(Path.Combine(VersionLayout.FirmwareFolder(moved), "3.0.005.0777.psl")));
     }
+
+    // ── Остановка на середине ────────────────────────────────────────────────
+    // Окно перестройки перестало быть модальным (жалоба владельца «окно блокирует работу основного»),
+    // и вместе с немодальностью появилась кнопка «Остановить». Обрыв обязан быть безопасным: диск
+    // после него — в согласованном состоянии, а недоделанное различимо от «не выбрано».
+
+    /// <summary>Отмена, попросившая остановиться ДО первой операции, не трогает диск вовсе.</summary>
+    [Fact]
+    public void Apply_CancelledBeforeStart_ChangesNothingOnDisk()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0004.0003", "старое_имя.psl");
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+        Assert.NotEmpty(plan.Ops);
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+        DiskLayoutMigrator.Apply(plan, renamed: null, cancellationToken: cts.Token);
+
+        Assert.True(File.Exists(Path.Combine(dir, "старое_имя.psl")));
+    }
+
+    /// <summary>Недоделанная строка помечается «cancel», а НЕ «off»: «не выбрали» и «не успели» —
+    /// разные вещи, и повторный прогон обязан предложить второе снова.</summary>
+    [Fact]
+    public void Apply_Cancelled_MarksLeftoversDistinctlyFromUnchecked()
+    {
+        using var root = new TempRoot();
+        var (first, _) = MakeVersion(root.Path, "1.0.0004.0003", "a.psl");
+        var (second, _) = MakeVersion(root.Path, "1.0.0004.0004", "b.psl");
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { first, second }));
+        Assert.Equal(2, plan.Ops.Count);
+        plan.Ops[1].Selected = false;
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+        DiskLayoutMigrator.Apply(plan, renamed: null, cancellationToken: cts.Token);
+
+        Assert.Equal("cancel", plan.Ops[0].Status);
+        Assert.Equal("off", plan.Ops[1].Status);
+    }
+
+    /// <summary>Отмена ПОСЛЕ первой операции: сделанное остаётся сделанным (иначе обрыв означал бы
+    /// откат, которого перестройка не умеет), недоделанное — «cancel».</summary>
+    [Fact]
+    public void Apply_CancelledMidway_KeepsWhatAlreadyMoved()
+    {
+        using var root = new TempRoot();
+        var (first, firstDir) = MakeVersion(root.Path, "1.0.0004.0003", "a.psl");
+        var (second, secondDir) = MakeVersion(root.Path, "1.0.0004.0004", "b.psl");
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { first, second }));
+        Assert.Equal(2, plan.Ops.Count);
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        DiskLayoutMigrator.Apply(plan, renamed: null,
+            progress: (done, _) => { if (done == 1) cts.Cancel(); }, cancellationToken: cts.Token);
+
+        Assert.Equal("ok", plan.Ops[0].Status);
+        Assert.Equal("cancel", plan.Ops[1].Status);
+        Assert.False(File.Exists(Path.Combine(firstDir, "a.psl")));
+        Assert.True(File.Exists(Path.Combine(secondDir, "b.psl")));
+    }
+
+    /// <summary>Остановленный прогон НЕ выкладывает ничего на хостинг: половина папок ещё в старом
+    /// виде, и разъехавшиеся диск и хостинг — худший из возможных исходов обрыва.</summary>
+    [Fact]
+    public void Apply_Cancelled_DoesNotPublishToHosting()
+    {
+        using var root = new TempRoot();
+        var (record, _) = MakeVersion(root.Path, "1.0.0004.0003", "a.psl");
+        var plan = DiskLayoutMigrator.Plan(Input(root.Path, new[] { record }));
+        var publisher = new CountingPublisher();
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+        DiskLayoutMigrator.Apply(plan, renamed: null, publisher: publisher, firstRoot: root.Path,
+            cancellationToken: cts.Token);
+
+        Assert.Equal(0, publisher.Calls);
+    }
+
+    private sealed class CountingPublisher : IInstructionPublisher
+    {
+        public int Calls { get; private set; }
+
+        public string? Publish(string actualPath, string pathOnFirstDisk, string firstDiskRoot, List<string> warnings)
+        {
+            Calls++;
+            return null;
+        }
+    }
 }
