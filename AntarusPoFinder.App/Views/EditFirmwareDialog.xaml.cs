@@ -77,10 +77,15 @@ public partial class EditFirmwareDialog : Window
     /// делить).</summary>
     public FirmwareConfigService.ApplyResult? ConfigResult { get; private set; }
 
-    public EditFirmwareDialog(AppServices services, FwVersionRecord v, string title)
+    /// <summary><paramref name="host"/> нужен только «Собрать LFS»: сборка идёт немодально,
+    /// её ход показывается внизу ГЛАВНОГО окна, а итог приходит уведомлением уже после того, как
+    /// это окно, вполне возможно, закрыли. Необязателен, чтобы окно оставалось открываемым в
+    /// отладочных прогонах без оболочки.</summary>
+    public EditFirmwareDialog(AppServices services, FwVersionRecord v, string title, IAppHost? host = null)
     {
         InitializeComponent();
         _services = services;
+        _host = host;
         _db = services.Db;
         _record = v;
         _title = title;
@@ -314,25 +319,39 @@ public partial class EditFirmwareDialog : Window
             return;
         }
 
-        var built = LoaderDialog.ShowBuild(this, _services.Cfg, new LoaderJob
+        // Окно сборки немодальное и висит на ГЛАВНОМ окне, а не на этом (см. LoaderDialog.Start):
+        // сборка идёт минутами, и держать ради неё открытой модерацию — то же самое запирание
+        // программы, от которого мы и уходим. Поэтому модерацию можно закрывать сразу; итог придёт
+        // уведомлением, а перезалить или откатить эту версию, пока сборка идёт, не дадут.
+        var started = LoaderDialog.StartBuild(this, _services.Cfg, new LoaderJob
         {
             VersionName = _record.VersionRaw,
             SourcePath = decision.Plan.PslPath,
             NetworkFolder = folder,
+        }, _host, _services.Operations, built =>
+        {
+            // Окно модерации к этому моменту обычно уже закрыто, и поднятый здесь _lfsBuilt
+            // до ReportChanges не доедет — поэтому выдачу поиска сбрасываем сразу сами.
+            if (!built) return;
+            _lfsBuilt = true;
+            _host?.InvalidateSearchResults();
         });
-        if (!built)
+        if (!started)
         {
             RefreshBuildLfs();
             return;
         }
-        _lfsBuilt = true;
         BuildLfsBtn.Visibility = Visibility.Collapsed;
-        BuildLfsHint.Text = "LFS собран и сохранён в папке версии на диске — его увидят все.";
+        BuildLfsHint.Text = "Сборка LFS запущена. Это окно можно закрыть — ход виден внизу главного окна, " +
+                            "по итогу придёт уведомление.";
     }
 
     /// <summary>В папке версии появился собранный .lfs — показанная выдача поиска с её строкой
     /// «Файлы: LFS —» больше не актуальна (см. ReportChanges).</summary>
     private bool _lfsBuilt;
+
+    /// <summary>Оболочка для немодальной сборки LFS — см. конструктор.</summary>
+    private readonly IAppHost? _host;
 
     // ── Вес в поиске (по запросам) ────────────────────────────────────────────
 
@@ -890,6 +909,12 @@ public partial class EditFirmwareDialog : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        // Сохранение модерации докладывает файлы В ПАПКУ ВЕРСИИ (вложения, заглушки, PDF на хостинг).
+        // Пока туда же пишет сборка LFS или заливка, делать это нельзя — два писателя в одну папку.
+        // Проверка стоит на сохранении, а не на открытии окна: смотреть карточку и разбираться, что
+        // сейчас происходит, никто не мешает.
+        if (BusySubjectGuard.Blocked(_services, _record.DiskPath, "Модерация прошивки")) return;
+
         ResultDescription = DescriptionInput.Text.Trim();
         var tags = TagsEditor.Tags;
         foreach (var tag in tags) _db.AddTag(tag);

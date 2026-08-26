@@ -1833,7 +1833,7 @@ public partial class SearchView : UserControl
             AppMessageBox.Show("Версия не найдена в базе.", "Теги", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var dlg = new EditFirmwareDialog(_services, v, $"{result.Name} {result.VersionRaw}") { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, $"{result.Name} {result.VersionRaw}", _host) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         // Что именно изменилось (какие теги добавились/убрались и у какой прошивки по-человечески)
@@ -2189,12 +2189,18 @@ public partial class SearchView : UserControl
             return;
         }
 
-        LoaderDialog.ShowDeploy(Window.GetWindow(this), _services.Cfg, new LoaderJob
+        // Окно загрузки немодальное: метод возвращается сразу, поиском и карточками можно
+        // пользоваться дальше. Итог придёт уведомлением, а «не запускать вторую заливку» держит
+        // реестр долгих операций (_services.Operations), а не запертое окно, как раньше.
+        LoaderDialog.StartDeploy(Window.GetWindow(this), _services.Cfg, new LoaderJob
         {
             VersionName = versionName,
             SourcePath = files.LfsPath ?? files.PslPath!,
             NetworkFolder = result.FirmwareDir ?? "",
             LocalFolder = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
+        }, _host, _services.Operations, succeeded =>
+        {
+            if (succeeded) _host.InvalidateSearchResults();
         });
     }
 

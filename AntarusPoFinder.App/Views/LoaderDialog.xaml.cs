@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Threading;
+using AntarusPoFinder.App.ViewModels;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Loader;
 using AntarusPoFinder.Core.Services;
 
@@ -22,7 +24,23 @@ namespace AntarusPoFinder.App.Views;
 /// «Подробности», а внизу максимум две кнопки: «Остановить» во время работы и «Закрыть» после.
 ///
 /// Недоступность Automation проверяется ДО открытия окна (см. <see cref="EnsureAvailable"/>):
-/// пустое окно с красным баннером и неработающей кнопкой оператору ничего не объясняло.</summary>
+/// пустое окно с красным баннером и неработающей кнопкой оператору ничего не объясняло.
+///
+/// ⚠️ Окно НЕ модальное (жалоба владельца: «когда идёт загрузка LFS или форматирование, окно
+/// блокирует работу основного окна — не хочу чтобы так было»). Заливка идёт минутами, и всё это
+/// время наладчик был отрезан от поиска, карточек и подготовки следующей версии. Что из этого
+/// следует:
+///
+/// • Ход операции дублируется ВНИЗ главного окна (<see cref="IAppHost.BeginBusy"/>) — свернув окно,
+///   человек всё равно видит, что программа занята и чем.
+/// • Итог уходит уведомлением с категорией (колокольчик хранит историю), потому что окна перед
+///   глазами может уже не быть. Провал вдобавок разворачивает окно и поднимает его — ошибку нельзя
+///   потерять из-за выключенной категории уведомлений.
+/// • Защиту «второй раз не запустишь», которую раньше давала сама модальность, теперь держит
+///   <see cref="LongOperationRegistry"/>: Segnetics Loader на машине один, и вторая операция
+///   получает внятный отказ вместо гонки за один USB.
+/// • Крестик во время работы СВОРАЧИВАЕТ окно, а не отменяет операцию: закрытое окно раньше молча
+///   рвало заливку, а при немодальном окне промахнуться по крестику стало гораздо проще.</summary>
 public partial class LoaderDialog : Window
 {
     private readonly ConfigService _cfg;
@@ -30,6 +48,17 @@ public partial class LoaderDialog : Window
     private readonly bool _isBuild;
     private readonly Stopwatch _operationStopwatch = new();
     private readonly DispatcherTimer _operationElapsedTimer;
+
+    /// <summary>Оболочка: индикатор внизу главного окна и уведомления. null в тестах/отладке —
+    /// тогда окно работает как раньше, просто без дублирования хода наружу.</summary>
+    private readonly IAppHost? _host;
+
+    /// <summary>Реестр долгих операций: пока право не отпущено, вторую загрузку не пустят.</summary>
+    private readonly LongOperationRegistry? _registry;
+
+    /// <summary>Что сообщить вызывающему по итогу. Раньше вызывающий просто читал Succeeded после
+    /// ShowDialog(); немодальное окно возвращается из метода сразу, поэтому итог — обратным вызовом.</summary>
+    private readonly Action<bool>? _onFinished;
 
     private LoaderJob _job;
     private CancellationTokenSource? _cts;
@@ -40,6 +69,28 @@ public partial class LoaderDialog : Window
     private DateTime _lastLogAtUtc;
     private bool _running;
     private bool _everStarted;
+    private ILongOperationLease? _lease;
+    private IBusyScope? _busy;
+
+    /// <summary>Текущий запуск форматирует проект и обновляет ядро ПЛК — от этого зависит, безопасно
+    /// ли его обрывать (см. LongOperationRules.SafeToCancel).</summary>
+    private bool _formatsController;
+
+    /// <summary>Оператор нажал «Остановить». Нужно, чтобы отличить остановку от провала в итоге:
+    /// пайплайн Loader на отмену отвечает обычным неуспехом, без OperationCanceledException.</summary>
+    private bool _cancelRequested;
+
+    /// <summary>Вид операции для реестра и правил отмены.</summary>
+    private LongOperationKind Kind => _isBuild ? LongOperationKind.LfsBuild : LongOperationKind.PlcDeploy;
+
+    /// <summary>Как операция называется человеку — в индикаторе, в уведомлении, в чужом отказе
+    /// («Segnetics Loader уже занят: …»).</summary>
+    private string OperationTitle =>
+        (_isBuild ? "Сборка LFS: " : "Загрузка в ПЛК: ") + _job.VersionName;
+
+    /// <summary>Папка версии, в которую операция пишет. Пока она занята, версию нельзя откатить,
+    /// удалить или перезалить (см. LongOperationRules.SubjectBusyReason).</summary>
+    private string SubjectKey => SubjectKeyFor(_job);
 
     private static readonly TimeSpan WorkspaceRetention = TimeSpan.FromDays(7);
     private static readonly TimeSpan ImmediateDuplicateWindow = TimeSpan.FromSeconds(1);
@@ -55,12 +106,23 @@ public partial class LoaderDialog : Window
     /// <see cref="PlcPreparationDialog"/>). null — вопрос не задавали (сборка LFS).</summary>
     private readonly PlcPreparationAnswer? _preparation;
 
-    public LoaderDialog(ConfigService cfg, LoaderJob job, PlcPreparationAnswer? preparation = null)
+    public LoaderDialog(
+        ConfigService cfg,
+        LoaderJob job,
+        PlcPreparationAnswer? preparation = null,
+        IAppHost? host = null,
+        LongOperationRegistry? registry = null,
+        ILongOperationLease? lease = null,
+        Action<bool>? onFinished = null)
     {
         InitializeComponent();
         _cfg = cfg;
         _job = job;
         _preparation = preparation;
+        _host = host;
+        _registry = registry;
+        _lease = lease;
+        _onFinished = onFinished;
         _isBuild = job.Operation == LoaderOperation.Build;
         _backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
 
@@ -142,17 +204,54 @@ public partial class LoaderDialog : Window
         return false;
     }
 
-    /// <summary>Загрузка в ПЛК с карточки версии. Возвращает true, если Loader отчитался об успехе.</summary>
-    public static bool ShowDeploy(Window? owner, ConfigService cfg, LoaderJob job) =>
-        Run(owner, cfg, job with { Operation = LoaderOperation.Deploy });
+    /// <summary>Папка версии, которую займёт задание. Сетевая папка — главная: именно в неё уезжает
+    /// собранный .lfs, и именно её нельзя трогать, пока операция идёт. Её может не быть (сборка из
+    /// произвольного файла) — тогда берём папку самого исходника, чтобы ключ всё равно был не пустым
+    /// и двойной запуск по тому же файлу отсекался.</summary>
+    private static string SubjectKeyFor(LoaderJob job)
+    {
+        if (!string.IsNullOrWhiteSpace(job.NetworkFolder)) return LongOperationSubject.Folder(job.NetworkFolder);
+        var source = job.SourcePath ?? "";
+        if (source.Length == 0) return LongOperationSubject.None;
+        try { return LongOperationSubject.Folder(Path.GetDirectoryName(source)); }
+        catch (Exception) { return LongOperationSubject.None; }
+    }
+
+    /// <summary>Загрузка в ПЛК с карточки версии. Возвращается СРАЗУ: окно немодальное, работа идёт
+    /// сама, итог приходит уведомлением и (если попросили) в <paramref name="onFinished"/>.
+    /// Результат метода — «запустилось ли», а не «получилось ли».</summary>
+    public static bool StartDeploy(
+        Window? owner, ConfigService cfg, LoaderJob job,
+        IAppHost? host = null, LongOperationRegistry? registry = null, Action<bool>? onFinished = null) =>
+        Start(owner, cfg, job with { Operation = LoaderOperation.Deploy }, host, registry, onFinished);
 
     /// <summary>Сборка .lfs из .psl без подключения к ПЛК (модерация, догрузка после выкладки).</summary>
-    public static bool ShowBuild(Window? owner, ConfigService cfg, LoaderJob job) =>
-        Run(owner, cfg, job with { Operation = LoaderOperation.Build });
+    public static bool StartBuild(
+        Window? owner, ConfigService cfg, LoaderJob job,
+        IAppHost? host = null, LongOperationRegistry? registry = null, Action<bool>? onFinished = null) =>
+        Start(owner, cfg, job with { Operation = LoaderOperation.Build }, host, registry, onFinished);
 
-    private static bool Run(Window? owner, ConfigService cfg, LoaderJob job)
+    private static bool Start(
+        Window? owner, ConfigService cfg, LoaderJob job,
+        IAppHost? host, LongOperationRegistry? registry, Action<bool>? onFinished)
     {
         if (!EnsureAvailable(owner, cfg)) return false;
+
+        // Право на операцию берём ДО всех вопросов: спрашивать про форматирование, чтобы потом
+        // сказать «Loader занят», — издевательство. Отказ показывается обычным сообщением, а не
+        // молча гасит кнопку: человек должен понять, почему ничего не произошло.
+        var kind = job.Operation == LoaderOperation.Build
+            ? LongOperationKind.LfsBuild
+            : LongOperationKind.PlcDeploy;
+        var title = (job.Operation == LoaderOperation.Build ? "Сборка LFS: " : "Загрузка в ПЛК: ") + job.VersionName;
+        ILongOperationLease? lease = null;
+        if (registry is not null &&
+            !registry.TryBegin(kind, SubjectKeyFor(job), title, out lease, out var refusal))
+        {
+            AppMessageBox.Show(refusal, LongOperationRules.Caption(kind),
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
 
         // Вопрос про форматирование — ДО открытия окна операции: окно стартует загрузку само, и
         // спрашивать внутри него было бы уже поздно (см. PlcPreparation).
@@ -160,14 +259,34 @@ public partial class LoaderDialog : Window
         if (PlcPreparation.ShouldAsk(job.Operation))
         {
             var answer = PlcPreparationDialog.Ask(owner, job.VersionName, cfg.LoaderFormatAndUpdateDefault());
-            if (PlcPreparation.IsCancelled(answer)) return false;
+            if (PlcPreparation.IsCancelled(answer))
+            {
+                lease?.Dispose();
+                return false;
+            }
             preparation = answer;
             cfg.SetLoaderFormatAndUpdateDefault(PlcPreparation.FormatFor(answer));
         }
 
-        var dialog = new LoaderDialog(cfg, job, preparation) { Owner = owner };
-        dialog.ShowDialog();
-        return dialog.Succeeded;
+        var dialog = new LoaderDialog(cfg, job, preparation, host, registry, lease, onFinished)
+        {
+            // Хозяин — ГЛАВНОЕ окно, а не то, откуда нажали. Кнопка «Собрать LFS» живёт в модальном
+            // окне модерации, и повесив окно операции на него, мы бы снова заперли программу: закрыть
+            // модерацию, не оборвав сборку, стало бы нельзя. С главным окном в хозяевах окно операции
+            // переживает закрытие модерации и не теряется за главным.
+            Owner = MainWindowOwner(owner),
+        };
+        dialog.Show();
+        return true;
+    }
+
+    /// <summary>Главное окно приложения, если оно есть и это не оно само нас открыло. Отдельный
+    /// метод, потому что Application.Current в тестах и отладочных прогонах бывает null.</summary>
+    private static Window? MainWindowOwner(Window? fallback)
+    {
+        var main = Application.Current?.MainWindow;
+        if (main is not null && main.IsLoaded) return main;
+        return fallback;
     }
 
     // ── Запуск операции ───────────────────────────────────────────────────
@@ -182,9 +301,25 @@ public partial class LoaderDialog : Window
             return;
         }
 
+        // Повтор («Запустить заново» / «Повторить попытку») — это НОВАЯ операция: право на прошлую
+        // уже отпущено в finally, и его надо взять снова. За это время коллега мог начать заливку
+        // с другой карточки — тогда честный отказ, а не тихая гонка за один и тот же Loader.
+        if (_lease is null && _registry is not null)
+        {
+            if (!_registry.TryBegin(Kind, SubjectKey, OperationTitle, out _lease, out var refusal))
+            {
+                AppendLog(refusal, LoaderLogLevel.Warning);
+                StageLabel.Text = "Не запускалось";
+                AppMessageBox.Show(refusal, LongOperationRules.Caption(Kind),
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+        }
+
         var source = _job.SourcePath?.Trim() ?? "";
         if (string.IsNullOrEmpty(source) || !File.Exists(source))
         {
+            ReleaseLease();
             FinishWithError(string.IsNullOrEmpty(source)
                 ? "Файл для загрузки не выбран."
                 : $"Файл не найден:\n{source}");
@@ -197,15 +332,31 @@ public partial class LoaderDialog : Window
         RefreshPreparationLabel();
 
         _everStarted = true;
+        _formatsController = prepareController;
+        Succeeded = false;
         SetRunning(true);
         _cts = new CancellationTokenSource();
         var cancellationToken = _cts.Token;
         var progress = new Progress<LoaderProgress>(OnProgress);
 
+        // Ход операции дублируется вниз главного окна: окно можно свернуть и уйти в поиск, но
+        // «программа чем-то занята и чем именно» должно оставаться на виду.
+        _busy = _host?.BeginBusy(OperationTitle);
+        _host?.ShowStatus(
+            (_isBuild ? "Запущена сборка LFS: " : "Запущена загрузка в ПЛК: ") + _job.VersionName +
+            ". Программой можно пользоваться — ход виден внизу.",
+            6000, NotificationCategory.FirmwareAndParams, Reveal);
+
+        var outcome = LoaderOutcome.Failed;
+        var outcomeMessage = "";
         try
         {
             if (_isBuild) await RunBuildAsync(progress, cancellationToken);
             else await RunDeployAsync(source, prepareController, progress, cancellationToken);
+            outcome = Succeeded ? LoaderOutcome.Succeeded
+                : _cancelRequested ? LoaderOutcome.Cancelled
+                : LoaderOutcome.Failed;
+            outcomeMessage = _lastLogMessage ?? "";
         }
         catch (OperationCanceledException ex)
         {
@@ -216,11 +367,15 @@ public partial class LoaderDialog : Window
             Progress.IsIndeterminate = false;
             PercentLabel.Text = "";
             StageLabel.Text = "Остановлено";
+            outcome = LoaderOutcome.Cancelled;
+            outcomeMessage = message;
         }
         catch (Exception ex)
         {
             AppendLog(ex.Message, LoaderLogLevel.Error);
             ShowFailedState("Ошибка");
+            outcome = LoaderOutcome.Failed;
+            outcomeMessage = ex.Message;
         }
         finally
         {
@@ -228,7 +383,63 @@ public partial class LoaderDialog : Window
             SetRunning(false);
             _cts?.Dispose();
             _cts = null;
+            _busy?.Dispose();
+            _busy = null;
+            // Право отпускаем ЗДЕСЬ, а не при закрытии окна: операция кончилась, версия свободна, и
+            // держать её занятой только потому, что оператор не закрыл окно с журналом, нельзя.
+            ReleaseLease();
+            ReportOutcome(outcome, outcomeMessage);
         }
+    }
+
+    private enum LoaderOutcome { Succeeded, Cancelled, Failed }
+
+    /// <summary>Сказать человеку, чем всё кончилось, ДАЖЕ ЕСЛИ окна перед глазами уже нет.
+    ///
+    /// ⚠️ Провал вдобавок разворачивает и поднимает окно. Уведомление одно спасти не может: категорию
+    /// «Прошивки и параметры» разрешено выключить в настройках, и тогда ShowStatus не покажет ничего
+    /// вовсе (см. MainWindowViewModel.ShowStatus). Модальное окно раньше показывало отказ в лицо —
+    /// потерять ошибку заливки из-за настройки уведомлений было бы прямым ухудшением.</summary>
+    private void ReportOutcome(LoaderOutcome outcome, string message)
+    {
+        var what = _isBuild ? "Сборка LFS" : "Загрузка в ПЛК";
+        switch (outcome)
+        {
+            case LoaderOutcome.Succeeded:
+                _host?.ShowStatus($"✓ {what} завершена: {_job.VersionName}",
+                    8000, NotificationCategory.FirmwareAndParams, Reveal);
+                break;
+
+            case LoaderOutcome.Cancelled:
+                _host?.ShowStatus($"{what} остановлена: {_job.VersionName}",
+                    8000, NotificationCategory.FirmwareAndParams, Reveal);
+                break;
+
+            default:
+                var tail = string.IsNullOrWhiteSpace(message) ? "" : " — " + message;
+                _host?.ShowStatus($"⚠ {what} не удалась: {_job.VersionName}{tail}",
+                    12000, NotificationCategory.FirmwareAndParams, Reveal);
+                Reveal();
+                break;
+        }
+
+        _onFinished?.Invoke(outcome == LoaderOutcome.Succeeded);
+    }
+
+    /// <summary>Показать окно операции и поднять его. Это же действие уезжает кнопкой «Показать» в
+    /// запись истории уведомлений — свёрнутое окно оттуда достаётся одним нажатием.</summary>
+    private void Reveal()
+    {
+        if (!IsLoaded) return;
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Show();
+        Activate();
+    }
+
+    private void ReleaseLease()
+    {
+        _lease?.Dispose();
+        _lease = null;
     }
 
     /// <summary>Готовит ПОДКЛЮЧЕНИЕ перед заливкой: переносит выбор наладчика (USB/Ethernet, адрес,
@@ -390,7 +601,21 @@ public partial class LoaderDialog : Window
         _running = running;
         StopBtn.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         StopBtn.IsEnabled = running;
+        MinimizeBtn.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         CloseBtn.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+
+        // Что будет, если нажать «Остановить» — видно ровно пока есть что останавливать.
+        CancelPolicyBox.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        if (running)
+        {
+            CancelPolicyLabel.Text = LongOperationRules.CancelHint(Kind, _formatsController);
+            CancelPolicyLabel.SetResourceReference(
+                System.Windows.Controls.TextBlock.ForegroundProperty,
+                LongOperationRules.SafeToCancel(Kind, _formatsController) ? "TextMutedBrush" : "WarningBrush");
+            CancelPolicyBox.SetResourceReference(
+                System.Windows.Controls.Border.BorderBrushProperty,
+                LongOperationRules.SafeToCancel(Kind, _formatsController) ? "BorderBrush2" : "WarningBrush");
+        }
         // «Рабочая папка» и «Сохранить журнал…» нужны только по итогу — до первого запуска их
         // показывать нечему, во время работы они только отвлекают.
         MoreBtn.Visibility = !running && _everStarted ? Visibility.Visible : Visibility.Collapsed;
@@ -511,11 +736,37 @@ public partial class LoaderDialog : Window
 
     // ── Кнопки ────────────────────────────────────────────────────────────
 
+    /// <summary>Остановка. Для заливки с форматированием сперва спрашиваем: оборвать её посреди
+    /// обновления ядра — оставить контроллер без рабочей прошивки. Кнопку при этом не прячем и не
+    /// гасим: бывает, что оборвать всё равно надо (не тот файл, не тот ПЛК), — но нажать её человек
+    /// должен осознанно, а не потому, что «Остановить» стоит там же, где всегда.</summary>
     private void Stop_Click(object sender, RoutedEventArgs e)
     {
+        if (!LongOperationRules.SafeToCancel(Kind, _formatsController))
+        {
+            var answer = AppMessageBox.Show(
+                LongOperationRules.CancelConfirmation(OperationTitle),
+                "Остановить операцию", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+
+        _cancelRequested = true;
         _cts?.Cancel();
         StopBtn.IsEnabled = false;
         StageLabel.Text = "Отправляю команду отмены…";
+    }
+
+    /// <summary>Убрать окно с глаз, не трогая операцию. Свёрнутое окно остаётся кнопкой на панели
+    /// задач, ход виден внизу главного окна, а по итогу придёт уведомление — потерять операцию,
+    /// свернув её, нельзя.</summary>
+    private void Minimize_Click(object sender, RoutedEventArgs e) => MinimizeAndExplain();
+
+    private void MinimizeAndExplain()
+    {
+        WindowState = WindowState.Minimized;
+        _host?.ShowStatus(
+            $"{OperationTitle} продолжается — ход внизу, окно на панели задач.",
+            6000, NotificationCategory.FirmwareAndParams, Reveal);
     }
 
     private void Restart_Click(object sender, RoutedEventArgs e) => _ = RunAsync();
@@ -589,6 +840,9 @@ public partial class LoaderDialog : Window
             Progress.IsIndeterminate = false;
             Progress.Value = Math.Clamp(value.Percent, 0, 100);
             PercentLabel.Text = $"{Progress.Value:0}%";
+            // Тот же процент — в индикатор внизу главного окна: свёрнутое окно операции не должно
+            // означать «непонятно, сколько ещё ждать».
+            _busy?.Report((int)Progress.Value, 100);
         }
         else if (Progress.Value == 0)
         {
@@ -597,7 +851,11 @@ public partial class LoaderDialog : Window
         }
 
         if (value.UpdatesStage)
+        {
             StageLabel.Text = value.Stage;
+            if (_busy is not null && !string.IsNullOrWhiteSpace(value.Stage))
+                _busy.Text = $"{OperationTitle} — {value.Stage}";
+        }
         if (value.Percent < 100 && !string.IsNullOrWhiteSpace(value.Message))
             AppendLog(value.Message, value.Level);
     }
@@ -708,10 +966,25 @@ public partial class LoaderDialog : Window
         return string.IsNullOrEmpty(stem) ? DateTime.Now.ToString("yyyyMMdd_HHmmss") : stem;
     }
 
+    /// <summary>Крестик во время работы СВОРАЧИВАЕТ окно, а не рвёт операцию.
+    ///
+    /// Раньше окно было модальным и стояло перед глазами до конца — закрыть его посреди заливки
+    /// можно было только намеренно. Немодальное окно живёт среди остальных, промахнуться по крестику
+    /// вместо «Свернуть» стало легко, и молча оборванная на середине заливка контроллера — слишком
+    /// дорогая цена за такой промах. Оборвать по-прежнему можно, но кнопкой «Остановить», которая
+    /// про форматирование ещё и переспросит.</summary>
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_running)
+        {
+            e.Cancel = true;
+            MinimizeAndExplain();
+            return;
+        }
+
         _cts?.Cancel();
         _operationElapsedTimer.Stop();
+        ReleaseLease();
         base.OnClosing(e);
     }
 

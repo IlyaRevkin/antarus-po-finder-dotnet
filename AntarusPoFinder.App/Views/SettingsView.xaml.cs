@@ -3056,7 +3056,7 @@ public partial class SettingsView : UserControl
         }
         var v = row.Record;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title, _host) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
@@ -3216,7 +3216,7 @@ public partial class SettingsView : UserControl
         var v = GetSelectedFwVersion();
         if (v is null) return;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title, _host) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         // Изменилось что-то или нет — считаем здесь только ради случая «ничего»: обо всём остальном
@@ -3258,6 +3258,10 @@ public partial class SettingsView : UserControl
             AppMessageBox.Show("Эта версия уже откатана.", "Откат версии", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+
+        // Пока в папку версии пишет долгая операция (сборка LFS, заливка), менять каталог
+        // нельзя: на диске остался бы файл, которому в базе больше ничего не отвечает.
+        if (BusySubjectGuard.Blocked(_services, v.DiskPath, "Откат версии")) return;
 
         var reply = AppMessageBox.Show(
             $"Откатить версию {v.VersionRaw}?\n\nЗапись в базе будет помечена как откатанная.\nСледующая загрузка получит тот же SW-номер заново.\nФайлы на диске останутся нетронутыми.",
@@ -3348,6 +3352,10 @@ public partial class SettingsView : UserControl
         var v = GetSelectedFwVersion();
         if (v is null) return;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+
+        // Пока в папку версии пишет долгая операция (сборка LFS, заливка), менять каталог
+        // нельзя: на диске остался бы файл, которому в базе больше ничего не отвечает.
+        if (BusySubjectGuard.Blocked(_services, v.DiskPath, "Удаление прошивки")) return;
 
         // Та же прошивка может быть заведена под несколькими подтипами шкафов — файлы на диске при
         // этом ОДНИ (см. FirmwareSubtypeLinkService). Тогда это удаление ссылки, а не прошивки:

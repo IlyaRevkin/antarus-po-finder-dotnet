@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -148,6 +148,10 @@ public partial class HistoryDialog : Window
     {
         if (_selectedRecord is not { Id: int id } r) return;
 
+        // Пока в папку версии пишет долгая операция (сборка LFS, заливка), менять каталог
+        // нельзя: на диске остался бы файл, которому в базе больше ничего не отвечает.
+        if (BusySubjectGuard.Blocked(_services, r.DiskPath, "Удалить версию")) return;
+
         var reply = AppMessageBox.Show(
             $"Удалить версию {r.VersionRaw} из каталога?\n\n" +
             "Запись исчезнет из истории и поиска на этом компьютере, а при синхронизации — и на других.\n" +
@@ -285,6 +289,10 @@ public partial class HistoryDialog : Window
             }
             return;
         }
+
+        // Пока в папку версии пишет долгая операция (сборка LFS, заливка), менять каталог
+        // нельзя: на диске остался бы файл, которому в базе больше ничего не отвечает.
+        if (BusySubjectGuard.Blocked(_services, r.DiskPath, "Откат версии")) return;
 
         var reply = AppMessageBox.Show(
             $"Откатить версию {r.VersionRaw}?\n\n" +

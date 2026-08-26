@@ -74,6 +74,16 @@
             <TextBlock x:Name="PreparationLabel" Style="{StaticResource MutedText}"
                        TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
 
+            <!-- Что будет, если нажать «Остановить». Окно больше не запирает программу, поэтому
+                 оператор вполне может уйти в поиск и вернуться сюда через полминуты — он обязан
+                 видеть, безопасно ли обрывать ЭТУ операцию, а не помнить это наизусть.
+                 Текст считает LongOperationRules.CancelWarning / CancelHint. -->
+            <Border x:Name="CancelPolicyBox" Style="{StaticResource CardBorder}" Margin="0,0,0,8"
+                    Visibility="Collapsed"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+                <TextBlock x:Name="CancelPolicyLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+            </Border>
+
             <!-- Что делать руками после провала. Появляется вместе с кнопкой «Повторить попытку»:
                  самая частая причина отказа Loader — не программа, а обвязка ПЛК (см. code-behind). -->
             <Border x:Name="FailureHintBox" Style="{StaticResource CardBorder}" Margin="0,0,0,8"
@@ -134,8 +144,11 @@
             </Expander>
         </StackPanel>
 
-        <!-- Внизу максимум две кнопки: пока идёт работа — «Остановить», после — «Закрыть».
-             Рабочая папка и сохранение лога нужны только по итогу и живут в одном меню «…». -->
+        <!-- Внизу во время работы — «Свернуть» и «Остановить», после — «Закрыть».
+             Рабочая папка и сохранение лога нужны только по итогу и живут в одном меню «…».
+             «Свернуть» появилось вместе с немодальностью: окно больше не запирает программу, но
+             всё ещё держится поверх главного (Owner), а искать за ним карточку прошивки неудобно.
+             Свёрнутое окно остаётся кнопкой на панели задач — то есть операция не теряется. -->
         <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
             <Button x:Name="MoreBtn" Content="…" Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0" Visibility="Collapsed" Click="More_Click"
@@ -151,6 +164,9 @@
                  после отказа Loader повтор — первое, что делают, и искать его под стрелочкой нельзя. -->
             <Button x:Name="RetryBtn" Content="Повторить попытку" Style="{StaticResource PrimaryButton}"
                     Margin="0,0,8,0" Visibility="Collapsed" Click="Restart_Click"/>
+            <Button x:Name="MinimizeBtn" Content="Свернуть" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Visibility="Collapsed" Click="Minimize_Click"
+                    ToolTip="Убрать окно с глаз — операция продолжится, ход виден внизу главного окна"/>
             <Button x:Name="StopBtn" Content="Остановить" Style="{StaticResource SecondaryButton}"
                     Click="Stop_Click"/>
             <Button x:Name="CloseBtn" Content="Закрыть" Style="{StaticResource SecondaryButton}"

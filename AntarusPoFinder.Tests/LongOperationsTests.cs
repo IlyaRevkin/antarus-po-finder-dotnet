@@ -169,6 +169,33 @@ public class LongOperationsTests
         Assert.True(LongOperationRules.SafeToCancel(LongOperationKind.LfsBuild, formatsController: true));
     }
 
+    /// <summary>Подсказка про отмену есть ВСЕГДА — и когда обрывать безопасно тоже. Молчание в
+    /// безопасном случае оператор читает как «а вдруг нельзя» и просто ждёт зря.</summary>
+    [Fact]
+    public void CancelHint_IsNeverEmpty()
+    {
+        foreach (var kind in Enum.GetValues<LongOperationKind>())
+        foreach (var formats in new[] { false, true })
+            Assert.False(string.IsNullOrWhiteSpace(LongOperationRules.CancelHint(kind, formats)));
+    }
+
+    [Fact]
+    public void CancelHint_ForFormattingDeploy_IsTheWarning()
+    {
+        Assert.Equal(
+            LongOperationRules.CancelWarning(LongOperationKind.PlcDeploy, formatsController: true),
+            LongOperationRules.CancelHint(LongOperationKind.PlcDeploy, formatsController: true));
+    }
+
+    [Fact]
+    public void CancelHint_ForPlainDeploy_PromisesTheOldFirmwareStays()
+    {
+        var hint = LongOperationRules.CancelHint(LongOperationKind.PlcDeploy, formatsController: false);
+
+        Assert.Contains("Остановить можно", hint);
+        Assert.Contains("прошивкой, что была", hint);
+    }
+
     [Fact]
     public void CancelConfirmation_AsksAndExplains()
     {

@@ -1126,18 +1126,20 @@ public partial class UploadView : UserControl
             "Собрать LFS", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
         if (reply != MessageBoxResult.Yes) return;
 
-        var built = LoaderDialog.ShowBuild(Window.GetWindow(this), _services.Cfg, new LoaderJob
+        // Сборка идёт минутами и больше не запирает программу: страница загрузки остаётся рабочей,
+        // можно сразу готовить следующую версию. Итог придёт уведомлением (см. LoaderDialog).
+        LoaderDialog.StartBuild(Window.GetWindow(this), _services.Cfg, new LoaderJob
         {
             VersionName = record.VersionRaw,
             SourcePath = decision.Plan.PslPath,
             NetworkFolder = decision.Plan.Publish.NetworkFolder ?? "",
-        });
-        if (built)
+        }, _host, _services.Operations, built =>
         {
+            if (!built) return;
             _host.ShowStatus($"LFS собран и выложен рядом с исходником: {record.VersionRaw}",
                 category: NotificationCategory.FirmwareAndParams);
             _host.InvalidateSearchResults();
-        }
+        });
     }
 
     private FirmwareUploadRequest BuildUploadRequest()
@@ -1244,6 +1246,10 @@ public partial class UploadView : UserControl
             AppMessageBox.Show("Нет активных версий для отката.", "Откат", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+        // Пока в папку версии пишет долгая операция (сборка LFS, заливка), менять каталог
+        // нельзя: на диске остался бы файл, которому в базе больше ничего не отвечает.
+        if (BusySubjectGuard.Blocked(_services, last.DiskPath, "Откат версии")) return;
+
         var reply = AppMessageBox.Show(
             $"Откатить версию {last.VersionRaw}?\n\nЗапись в базе будет помечена как откатанная.\nСледующая загрузка получит тот же SW-номер заново.\nФайлы на диске останутся нетронутыми.",
             "Откат версии", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);

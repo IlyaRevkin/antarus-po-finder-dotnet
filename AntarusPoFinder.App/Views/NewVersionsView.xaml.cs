@@ -53,7 +53,7 @@ public partial class NewVersionsView : UserControl
     {
         var v = row.Record;
         var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        var dlg = new EditFirmwareDialog(_services, v, title) { Owner = Window.GetWindow(this) };
+        var dlg = new EditFirmwareDialog(_services, v, title, _host) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
         EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
