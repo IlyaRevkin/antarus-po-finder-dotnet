@@ -2374,14 +2374,37 @@ public partial class SearchView : UserControl
             result.Name, result.VersionRaw, file);
     }
 
+    /// <summary>Открытые окна истории по паре подтип/контроллер. Появилось вместе с немодальностью:
+    /// пока окно держало программу, «нажали второй раз» было невозможно, а теперь два окна с одним и
+    /// тем же списком расходились бы после первой же правки.</summary>
+    private readonly Dictionary<(int SubtypeId, int ControllerId), HistoryDialog> _historyWindows = new();
+
     private void ShowHistory(HierarchyResult result)
     {
         var versions = _services.Db.GetFwVersionsHistory(result.SubtypeId, result.ControllerId);
+        // Немодально: из истории качают версию с шары — это сотни мегабайт и минуты, а запирать
+        // ради этого поиск незачем. Второе окно по той же паре подтип/контроллер не заводим: в нём
+        // был бы тот же список, и правки в одном не видел бы другой.
+        if (_historyWindows.TryGetValue((result.SubtypeId, result.ControllerId), out var opened) &&
+            opened.IsLoaded)
+        {
+            if (opened.WindowState == WindowState.Minimized) opened.WindowState = WindowState.Normal;
+            opened.Activate();
+            return;
+        }
+
         var dlg = new HistoryDialog(result.Name, versions, _services, result.SubtypeId, result.ControllerId, _host)
         {
             Owner = Window.GetWindow(this)
         };
-        dlg.ShowDialog();
+        _historyWindows[(result.SubtypeId, result.ControllerId)] = dlg;
+        dlg.Closed += (_, _) =>
+        {
+            _historyWindows.Remove((result.SubtypeId, result.ControllerId));
+            // Откат, удаление и смена контроллера правят каталог — показанная выдача устарела.
+            if (dlg.Changed) _host.InvalidateSearchResults();
+        };
+        dlg.Show();
     }
 
     /// <summary>Copies just the numeric version stem — since Round 31 (see FirmwareNaming.

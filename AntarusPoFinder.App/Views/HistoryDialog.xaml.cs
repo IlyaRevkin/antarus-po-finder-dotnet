@@ -396,6 +396,13 @@ public partial class HistoryDialog : Window
             return;
         }
 
+        // Окно истории больше не модальное — читаем диск, пока по нему может идти перестройка.
+        if (diskAvailable && _services.Operations.WholeDiskBusyReason() is { } busyReason)
+        {
+            AppMessageBox.Show(busyReason, "История", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         DownloadBtn.IsEnabled = false;
         PinBtn.IsEnabled = false;
         LocalStatus.Text = pin ? "Закрепление…" : "Скачивание…";
@@ -404,13 +411,19 @@ public partial class HistoryDialog : Window
             if (diskAvailable)
             {
                 var result = SearchService.ToHierarchyResult(r, localRoot: _services.Cfg.RootPath());
-                await Task.Run(() => FirmwareSync.CopyToLocal(result, cleanup: false));
+                // Ход — вниз главного окна: окно истории можно отодвинуть, а сотни мегабайт с шары
+                // не должны выглядеть как «программа ничего не делает».
+                using (_host.BeginBusy($"Скачивание версии: {r.VersionRaw}"))
+                    await Task.Run(() => FirmwareSync.CopyToLocal(result, cleanup: false));
             }
             if (pin) LocalFirmwareCache.SetKept(name, r.VersionRaw, true);
         }
         catch (Exception ex)
         {
-            AppMessageBox.Show($"Не удалось скачать версию на этот компьютер:\n{ex.Message}",
+            // И сообщением, и уведомлением: окно немодальное, за ним могли уже не следить.
+            _host.ShowStatus($"\u26a0 Не удалось скачать версию {r.VersionRaw}: {ex.Message}",
+                12000, NotificationCategory.FirmwareAndParams);
+            AppMessageBox.Show($"Не удалось скачать версию на этот компьютер:{Environment.NewLine}{ex.Message}",
                 "История", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
