@@ -297,7 +297,10 @@ public partial class ParamTableWindow : Window
         BindingLabel.Text = _binding.Describe();
         // Непривязанный документ — не мелочь: наладчик не поймёт, к какому шкафу таблица. Поэтому
         // строка не просто «пустая», а помечена цветом предупреждения.
-        BindingLabel.Foreground = (System.Windows.Media.Brush)FindResource(
+        //
+        // ⚠️ SetResourceReference, а не FindResource: присвоенная кисть перестала бы меняться со
+        // сменой темы — ровно то, от чего в этом коде и уходят к DynamicResource.
+        BindingLabel.SetResourceReference(ForegroundProperty,
             _binding.Links.Count == 0 ? "WarningBrush" : "TextBrush");
         BindingLabel.ToolTip = _binding.Links.Count == 0
             ? "Файл параметров в базе не значится: он есть на диске, но программа не знает, к какому шкафу он относится. «Подтипы…» это исправит."
