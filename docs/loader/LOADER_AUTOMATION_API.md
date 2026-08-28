@@ -28,10 +28,19 @@ API запускает production-пайплайн Loader без открыти�
 & .\SegneticsLoader.Automation.exe --stdio
 ```
 
+Однократная проверка связи с использованием сохранённых настроек Loader:
+
+```powershell
+& .\SegneticsLoader.Automation.exe --check-connection
+```
+
+Короткая команда формирует действие `checkConnection`, выводит те же JSONL-
+события, что и режим `--stdio`, и завершается после проверки SSH.
+
 `--capabilities` возвращает одну JSON-строку:
 
 ```json
-{"protocolVersion":1,"actions":["deploy","build","cancel"],"artifactTypes":["psl","lfs","zop","elf"],"buildArtifactTypes":["psl"],"preparations":["none","formatAndUpdateFirmware"],"events":["started","plan","progress","log","completed","failed","cancelled"]}
+{"protocolVersion":1,"actions":["deploy","build","checkConnection","cancel"],"artifactTypes":["psl","lfs","zop","elf"],"buildArtifactTypes":["psl"],"preparations":["none","formatAndUpdateFirmware"],"events":["started","plan","progress","log","completed","failed","cancelled"]}
 ```
 
 Коды завершения процесса:
@@ -47,7 +56,7 @@ API запускает production-пайплайн Loader без открыти�
 
 Режим `--stdio` использует UTF-8 JSON Lines:
 
-- первая строка `stdin` содержит запрос `deploy` или `build`;
+- первая строка `stdin` содержит запрос `deploy`, `build` или `checkConnection`;
 - каждая строка `stdout` содержит одно событие протокола;
 - `stdout` используется только для JSONL-событий;
 - после запуска операции `stdin` остаётся доступным для команды `cancel`;
@@ -67,8 +76,8 @@ API запускает production-пайплайн Loader без открыти�
 |---|---|---|
 | `protocolVersion` | number | Обязательное значение `1` |
 | `operationId` | string | Идентификатор операции и имя каталога её логов |
-| `action` | string | Первая команда процесса: `deploy` или `build` |
-| `artifactPath` | string | Путь к существующему локальному файлу проекта |
+| `action` | string | Первая команда процесса: `deploy`, `build` или `checkConnection` |
+| `artifactPath` | string | Для `deploy` и `build`: путь к существующему локальному файлу проекта |
 | `preparation` | string | Для `deploy`: `none` или `formatAndUpdateFirmware`; пустое поле эквивалентно `none` |
 | `outputPath` | string | Для `build` и `deploy` PSL: необязательный путь выходного `.lfs` |
 | `overwriteOutput` | boolean | Разрешение перезаписи указанного выходного файла; по умолчанию `true` |
@@ -85,6 +94,33 @@ Automation читает их из настроек Loader:
 
 Используются сохранённые режим подключения, IP-адрес, SSH-учётные данные,
 сетевой адаптер, путь к `firmware.frw` и режим загрузки ELF.
+
+## Проверка связи
+
+Действие `checkConnection` выполняет ту же проверку связи, что одноимённая
+кнопка GUI:
+
+```json
+{"protocolVersion":1,"operationId":"connection-20260828-001","action":"checkConnection"}
+```
+
+Loader читает режим подключения и выбранный сетевой адаптер из настроек. Для
+USB/RNDIS или Ethernet DHCP запускается общий `PlcConnectionResolver`: он
+подготавливает сетевой адаптер и при необходимости повторно выдаёт ПЛК
+сохранённый DHCP-адрес. После этого Loader проверяет SSH и определяет тип ПЛК.
+
+`checkConnection` не принимает `artifactPath`, `outputPath` и
+`overwriteOutput`. Поле `preparation` должно отсутствовать или иметь значение
+`none`. Событие `plan` для этой операции не создаётся. Успешная
+последовательность заканчивается событием:
+
+```json
+{"protocolVersion":1,"operationId":"connection-20260828-001","event":"completed","message":"Соединение подтверждено. SSH-подключение к 192.168.111.10 доступно."}
+```
+
+Флаг `--check-connection` является сокращением этой операции. Идентификатор
+операции создаётся автоматически; коды завершения и формат событий остаются
+общими для Automation API.
 
 ## Сборка PSL в LFS
 
@@ -314,7 +350,7 @@ GUI Loader и Automation используют общую межпроцессн�
 |---|---|
 | `requests.jsonl` | Исходный запрос и команда отмены |
 | `events.jsonl` | Все события, отправленные через `stdout` |
-| `result.json` | Полный результат операции загрузки или сборки |
+| `result.json` | Полный результат операции загрузки, сборки или проверки связи |
 | `lfs-deploy.log` | Технический вывод загрузки LFS |
 | `elf-deploy.log` | Технический вывод загрузки ELF |
 | `process.log` | Вывод дочернего процесса сборки |
