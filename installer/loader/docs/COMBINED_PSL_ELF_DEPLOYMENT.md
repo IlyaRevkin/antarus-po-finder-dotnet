@@ -85,6 +85,11 @@ Profile manager устанавливает общий router в `/projects/start
 сохраняя остальное содержимое hook-файлов. Имя конкретного ELF хранится в
 `companion.env`, а не в router-е.
 
+Managed guard не содержит безусловного `exit 0`: строки штатного vendor hook,
+расположенные после блока, продолжают выполняться. При сбое native только во
+время `autostart` manager завершает native-профиль безопасным `PROFILE=none` и
+возвращает `0`; прямой commit остаётся транзакционной ошибкой с rollback.
+
 ## Контракт Совместимости
 
 При первой загрузке companion ELF/ZOP текущий `/projects/load_files.srv`

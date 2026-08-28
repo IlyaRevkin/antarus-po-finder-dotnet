@@ -1,4 +1,4 @@
-﻿Segnetics Loader v2.8.6
+﻿Segnetics Loader v2.8.9
 
 Назначение:
 - загрузка ELF-бинарника в /projects на ПЛК;
