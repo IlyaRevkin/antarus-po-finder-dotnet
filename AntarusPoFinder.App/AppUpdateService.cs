@@ -585,15 +585,20 @@ public static class AppUpdateService
     /// Работает одинаково для обновления и для отката — единственное отличие в том, версия старше
     /// или новее текущей. Запущенный self-contained single-file .exe не может перезаписать сам
     /// себя напрямую (файл заблокирован, пока процесс жив), поэтому копия ставится рядом
-    /// (<c>*.update</c>), а вспомогательный PowerShell-скрипт дожидается завершения текущего
-    /// процесса, переносит файл на место оригинала и перезапускает его. Скрипт пишется во
-    /// временный .ps1-файл (UTF-8 с BOM, поэтому PowerShell читает кириллицу верно независимо от
-    /// текущей кодовой страницы консоли) и запускается через <c>-File</c> — раньше здесь был
-    /// <c>-EncodedCommand</c> (Base64), который решал ту же задачу с кодировкой, но на реальном
-    /// рабочем ПК периодически блокировался антивирусом/EDR: закодированная inline PowerShell-
-    /// команда — известная сигнатура вредоносных техник, и её блокировка выглядела как «скачалось,
-    /// но не открывается» — сам файл на месте, просто процесс его переноса/перезапуска тихо
-    /// убивался защитой до того, как успевал сработать.</summary>
+    /// (<c>*.update</c>), а вспомогательный .cmd-скрипт дожидается завершения текущего процесса,
+    /// переносит файл на место оригинала и перезапускает его.
+    ///
+    /// <b>Почему .cmd, а не PowerShell (прежняя реализация).</b> PowerShell запускался через
+    /// <c>-File</c>, и его исполнение подчиняется <c>ExecutionPolicy</c>. В корпоративном домене
+    /// групповая политика часто ставит <c>Restricted</c>/<c>AllSigned</c>, и <c>powershell -File</c>
+    /// тогда молча отказывался выполнять скрипт: приложение к этому моменту уже сделало
+    /// <c>Application.Current.Shutdown()</c> (закрылось), а подмена/перезапуск не отрабатывали — отсюда
+    /// жалоба «скачалось, закрылось, обратно не открылось, exe остался старым» ровно у части людей (у
+    /// кого политика мягче — RemoteSigned — всё работало). <c>cmd.exe</c> ExecutionPolicy не подчиняется
+    /// и исполняется в любой заблокированной среде; логику генерации скрипта см. в
+    /// <see cref="UpdateRestartScript"/> (там же тестируется экранирование и наличие перезапуска в
+    /// ветке ошибки). Файл пишется в кодировке cp866 и первой строкой делает <c>chcp 866</c>, поэтому
+    /// кириллица в логе ошибки печатается и читается одной и той же кодовой страницей.</summary>
     /// <summary>Fixed path (not per-PID) so the next app startup can find it regardless of which
     /// process wrote it — see <see cref="TakeLastUpdateError"/>.</summary>
     private static readonly string UpdateErrorLogPath = Path.Combine(Path.GetTempPath(), "antarus_update_error.log");
@@ -607,29 +612,19 @@ public static class AppUpdateService
         File.Copy(releaseFilePath, stagedExe, overwrite: true);
 
         // The script runs hidden, after this process (and its UI) is already gone — a failure here
-        // (e.g. Move-Item denied on a read-only network share, or an antivirus/EDR briefly locking the
+        // (e.g. move denied on a read-only network share, or an antivirus/EDR briefly locking the
         // staged .exe) used to be completely invisible: the app just closed and, on next manual
-        // launch, was still the old version with no clue why. Wrapping the risky part in try/catch and
-        // writing failures to a fixed log path lets TakeLastUpdateError surface it on next startup.
-        var script = $$"""
-            $ErrorActionPreference = 'Stop'
-            $targetPid = {{Environment.ProcessId}}
-            while (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }
-            try {
-                Move-Item -LiteralPath '{{EscapeSingleQuoted(stagedExe)}}' -Destination '{{EscapeSingleQuoted(currentExe)}}' -Force
-                Start-Process -FilePath '{{EscapeSingleQuoted(currentExe)}}'
-            } catch {
-                $_.Exception.Message | Out-File -LiteralPath '{{EscapeSingleQuoted(UpdateErrorLogPath)}}' -Encoding utf8
-                Start-Process -FilePath '{{EscapeSingleQuoted(currentExe)}}'
-            }
-            Remove-Item -LiteralPath $PSCommandPath -Force
-            """;
-        var scriptPath = Path.Combine(Path.GetTempPath(), $"antarus_update_{Environment.ProcessId}.ps1");
-        File.WriteAllText(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        // launch, was still the old version with no clue why. The generated .cmd writes such failures
+        // to a fixed log path so TakeLastUpdateError can surface it on next startup, and restarts the
+        // (still old) exe anyway so the app is never left closed.
+        var script = UpdateRestartScript.BuildCmd(Environment.ProcessId, stagedExe, currentExe, UpdateErrorLogPath);
+        var scriptPath = Path.Combine(Path.GetTempPath(), $"antarus_update_{Environment.ProcessId}.cmd");
+        File.WriteAllText(scriptPath, script, TextFileEncoding.Cp866);
 
-        Process.Start(new ProcessStartInfo("powershell.exe")
+        // cmd.exe /c — исполняется всегда, вне зависимости от PowerShell ExecutionPolicy/GPO.
+        Process.Start(new ProcessStartInfo("cmd.exe")
         {
-            Arguments = $"-NoProfile -NonInteractive -WindowStyle Hidden -File \"{scriptPath}\"",
+            Arguments = $"/c \"{scriptPath}\"",
             UseShellExecute = true,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
@@ -650,7 +645,9 @@ public static class AppUpdateService
         if (!File.Exists(UpdateErrorLogPath)) return null;
         try
         {
-            var message = File.ReadAllText(UpdateErrorLogPath).Trim();
+            // cp866: скрипт пишет лог именно этой кодовой страницей (chcp 866), и её же читаем —
+            // иначе кириллица причины ошибки превратилась бы в «крокозябры». См. UpdateRestartScript.
+            var message = File.ReadAllText(UpdateErrorLogPath, TextFileEncoding.Cp866).Trim();
             File.Delete(UpdateErrorLogPath);
             return string.IsNullOrEmpty(message) ? null : message;
         }
@@ -659,6 +656,4 @@ public static class AppUpdateService
         // layer of error reporting on top of the very mechanism that reports errors.
         catch { return null; }
     }
-
-    private static string EscapeSingleQuoted(string value) => value.Replace("'", "''");
 }
