@@ -47,6 +47,7 @@ public static class SelfCheckProbe
 
         var s3 = cfg.S3();
         var mapped = MappedDriveFor(root);
+        var install = ProbeInstallDir();
 
         // «Офисная сеть доступна» = дозвонились хоть куда-то внутрь конторы. Именно этим отличается
         // «наладчик вне офиса» (нормально, предупреждение) от «настроено противоречиво» (проблема).
@@ -114,6 +115,10 @@ public static class SelfCheckProbe
             GitHubProblem = updates.GitHub.Problem ?? "",
             UpdateAutoInstall = cfg.AppAutoUpdate(),
             LastUpdateFailure = LastUpdateFailure(),
+            InstallDir = install.Dir,
+            InstallDirWritable = install.Writable,
+            InstallDirWriteError = install.Error,
+            InstallUnderProgramFiles = install.UnderProgramFiles,
 
             SyncTransport = cfg.SyncTransport(),
             SyncTarget = sync.Target,
@@ -266,6 +271,64 @@ public static class SelfCheckProbe
         {
             return "";
         }
+    }
+
+    // ── Куда ставится обновление ─────────────────────────────────────────────
+
+    private record InstallProbe(string Dir, bool Writable, string Error, bool UnderProgramFiles);
+
+    /// <summary>Папка запущенного .exe и есть ли в неё право на запись — ровно то, что нужно
+    /// самоустановке (AppUpdateService.InstallAndRestart перезаписывает свой .exe на месте). Путь
+    /// берётся из того же источника, что и в самой установке — MainModule.FileName, а НЕ
+    /// AppContext.BaseDirectory: у single-file-сборки это одно и то же, но опираться надо на тот же
+    /// файл, который установка и будет двигать. Право на запись проверяется делом (создать и удалить
+    /// временный файл), а не разбором ACL: ACL врёт при runtime-виртуализации Program Files, а
+    /// фактическая запись — нет.</summary>
+    private static InstallProbe ProbeInstallDir()
+    {
+        string dir;
+        try
+        {
+            var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrEmpty(exe)) return new InstallProbe("", false, "", false);
+            dir = Path.GetDirectoryName(exe) ?? "";
+        }
+        catch (Exception ex)
+        {
+            // Определить свой путь не вышло (нет прав на MainModule и т.п.) — молчим, а не выдумываем.
+            return new InstallProbe("", false, ex.Message, false);
+        }
+
+        if (dir.Length == 0) return new InstallProbe("", false, "", false);
+
+        bool underProgramFiles = IsUnderProgramFiles(dir);
+
+        try
+        {
+            var probeFile = Path.Combine(dir, $".antarus_write_probe_{Guid.NewGuid():N}.tmp");
+            using (var fs = new FileStream(probeFile, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
+            {
+                fs.WriteByte(0);
+            }
+            return new InstallProbe(dir, true, "", underProgramFiles);
+        }
+        catch (Exception ex)
+        {
+            return new InstallProbe(dir, false, ex.Message, underProgramFiles);
+        }
+    }
+
+    private static bool IsUnderProgramFiles(string dir)
+    {
+        foreach (var special in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+        {
+            string root;
+            try { root = Environment.GetFolderPath(special); }
+            catch { continue; }
+            if (root.Length == 0) continue;
+            if (dir.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     // ── Мелочь ───────────────────────────────────────────────────────────────

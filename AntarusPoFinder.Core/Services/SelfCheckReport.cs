@@ -98,6 +98,7 @@ public static class SelfCheckReport
         sb.AppendLine($"    получилось: {Or(f.UpdatePathEffective)} — {(f.UpdatePathEffective.Length == 0 ? "папка не используется" : f.UpdateFolderReachable ? "доступна" : "НЕДОСТУПНА" + Suffix(f.UpdateFolderProblem))}");
         sb.AppendLine($"    GitHub: {(f.GitHubReachable ? "доступен" : "НЕДОСТУПЕН" + Suffix(f.GitHubProblem))}");
         sb.AppendLine($"    автоустановка: {(f.UpdateAutoInstall ? "включена" : "ВЫКЛЮЧЕНА")}");
+        sb.AppendLine($"    папка программы: {Or(f.InstallDir)} — {(f.InstallDir.Length == 0 ? "не определена" : f.InstallDirWritable ? "запись есть" : "ЗАПИСЬ НЕДОСТУПНА" + Suffix(f.InstallDirWriteError) + (f.InstallUnderProgramFiles ? "; под Program Files" : ""))}");
         if (f.LastUpdateFailure.Length > 0) sb.AppendLine($"    прошлая неудача: {f.LastUpdateFailure}");
 
         sb.AppendLine($"Обмен: {(f.SyncTransport == "server" ? "служба обмена" : "общая папка на диске")} — {Or(f.SyncTarget)}, {(f.SyncReachable ? "доступен" : "НЕДОСТУПЕН")}");

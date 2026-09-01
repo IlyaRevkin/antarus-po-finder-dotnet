@@ -680,7 +680,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // AppUpdateService.InstallAndRestart. Surface it now instead of leaving it invisible.
         var lastUpdateError = AppUpdateService.TakeLastUpdateError();
         if (lastUpdateError is not null)
+        {
             AddNotification($"Автообновление не удалось: {lastUpdateError}", NotificationCategory.AppUpdates);
+            // И в durable-журнал: уведомление показывается один раз и стирается, а «Проверка
+            // компьютера» читает именно update-check.log. Без этой строки провал переноса .exe
+            // (недоступная на запись папка программы, AV заблокировал staged-файл) не всплывал в
+            // отчёте ничем — ровно тот случай, когда «у всех ставится само, а у меня нет».
+            AppUpdateService.LogSourceFailure($"Прошлое автообновление не установилось: {lastUpdateError}");
+        }
 
         // 2500ms once: check for app updates (folder if configured, else GitHub — see AppUpdateService).
         // Then, while the app stays open, re-check every PeriodicUpdateCheckInterval — a release that
@@ -929,6 +936,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             UpdateBannerVisible = true;
             UpdateActionEnabled = true;
             AddNotification(UpdateBannerText, NotificationCategory.AppUpdates, reopen: () => UpdateBannerVisible = true);
+            // В durable-журнал тоже: провал установки (нет прав на запись в папку программы, файл
+            // повреждён, staged-.exe заблокирован) должен всплыть в «Проверке компьютера» и позже,
+            // а не только сейчас плашкой, которую человек закроет.
+            AppUpdateService.LogSourceFailure($"Установка обновления не удалась: {AppUpdateService.DescribeError(ex)}");
         }
     }
 

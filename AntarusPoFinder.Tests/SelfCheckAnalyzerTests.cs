@@ -45,6 +45,8 @@ public class SelfCheckAnalyzerTests
         UpdateFolderReachable = true,
         GitHubReachable = true,
         UpdateAutoInstall = true,
+        InstallDir = @"C:\Users\naladka3\AppData\Local\Programs\AntarusPoFinder",
+        InstallDirWritable = true,
         SyncTransport = "fileshare",
         SyncTarget = @"Z:\Software\Antarus Finder\Конфиг",
         SyncReachable = true,
@@ -304,6 +306,60 @@ public class SelfCheckAnalyzerTests
         Assert.Equal(SelfCheckSeverity.Warning, auto.Severity);
         Assert.Contains("не устанавливаются сами", auto.Reason);
         Assert.Contains("Настройки", auto.Fix);
+    }
+
+    /// <summary>Третья, самая незаметная причина «обновление не ставится само»: источник цел,
+    /// автоустановка включена, версия найдена — а .exe запущен из папки без прав на запись, и
+    /// самоустановка, которая перезаписывает себя на месте, молча срывается. До этого «Проверка
+    /// компьютера» не смотрела на права записи вовсе, и такая машина выглядела полностью здоровой.</summary>
+    [Fact]
+    public void InstallDirNotWritable_IsAProblemNamingSelfUpdate()
+    {
+        var facts = Healthy() with { InstallDirWritable = false, InstallDirWriteError = "Отказано в доступе" };
+
+        var install = Find(SelfCheckAnalyzer.Analyze(facts), "Куда ставится обновление");
+
+        Assert.Equal(SelfCheckSeverity.Problem, install.Severity);
+        Assert.Contains("нет прав на запись", install.Reason);
+        Assert.Contains("приходится вручную", install.Reason);
+        Assert.Contains("naladka3", install.Reason);
+        Assert.True(SelfCheckAnalyzer.HasProblems(SelfCheckAnalyzer.Analyze(facts)));
+    }
+
+    /// <summary>.exe под Program Files — портатив скопировали туда руками; починка другая (переустановить
+    /// per-user MSI), и совет обязан это назвать, а не советовать абстрактное «перенести».</summary>
+    [Fact]
+    public void InstallDirUnderProgramFiles_AdvisesReinstallingPerUserMsi()
+    {
+        var facts = Healthy() with
+        {
+            InstallDir = @"C:\Program Files\AntarusPoFinder",
+            InstallDirWritable = false,
+            InstallUnderProgramFiles = true,
+        };
+
+        var install = Find(SelfCheckAnalyzer.Analyze(facts), "Куда ставится обновление");
+
+        Assert.Equal(SelfCheckSeverity.Problem, install.Severity);
+        Assert.Contains("MSI", install.Fix);
+        Assert.Contains("LocalAppData", install.Fix);
+    }
+
+    /// <summary>Права на запись есть — всё в порядке, самоустановка сработает.</summary>
+    [Fact]
+    public void InstallDirWritable_IsOk() =>
+        Assert.Equal(SelfCheckSeverity.Ok, Find(SelfCheckAnalyzer.Analyze(Healthy()), "Куда ставится обновление").Severity);
+
+    /// <summary>Путь программы определить не удалось — не выдумываем отказ, просто «не проверялось».</summary>
+    [Fact]
+    public void InstallDirUnknown_IsInformationalOnly()
+    {
+        var facts = Healthy() with { InstallDir = "", InstallDirWritable = false };
+
+        var install = Find(SelfCheckAnalyzer.Analyze(facts), "Куда ставится обновление");
+
+        Assert.Equal(SelfCheckSeverity.Info, install.Severity);
+        Assert.False(SelfCheckAnalyzer.HasProblems(SelfCheckAnalyzer.Analyze(facts)));
     }
 
     /// <summary>«Почему не сработало в прошлый раз» — журнал проверок обновлений, который до сих пор

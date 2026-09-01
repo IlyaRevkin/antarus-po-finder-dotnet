@@ -95,6 +95,23 @@ public sealed record SelfCheckFacts
     /// прошлый раз», который иначе виден только тому, кто знает про этот файл.</summary>
     public string LastUpdateFailure { get; init; } = "";
 
+    /// <summary>Папка, в которой лежит запущенный .exe — та самая, куда самоустановка обязана
+    /// перезаписать себя (AppUpdateService.InstallAndRestart копирует «*.update» рядом и переносит
+    /// поверх оригинала). Пусто — путь определить не удалось, тогда проверку прав молча пропускаем.</summary>
+    public string InstallDir { get; init; } = "";
+    /// <summary>В папку с .exe удалось создать и удалить файл — значит самоустановка сможет
+    /// перезаписать себя. false + непустой <see cref="InstallDir"/> — вот она, тихая причина
+    /// «обновление не ставится само, приходится руками»: источник цел, версия найдена, а записать
+    /// некуда.</summary>
+    public bool InstallDirWritable { get; init; }
+    /// <summary>Текст системной ошибки записи, если она была — приложением к человеческому объяснению.</summary>
+    public string InstallDirWriteError { get; init; } = "";
+    /// <summary>.exe лежит под Program Files — самая частая причина «некуда писать»: штатная установка
+    /// идёт per-user в %LocalAppData% (installer/Package.wxs), а в Program Files .exe попадает, только
+    /// если портативную сборку скопировали туда руками. Меняет совет по починке, поэтому — отдельным
+    /// фактом.</summary>
+    public bool InstallUnderProgramFiles { get; init; }
+
     // ── Синхронизация конфига и тикетов ──────────────────────────────────────
 
     /// <summary>«fileshare» — общая папка на диске, «server» — служба обмена.</summary>

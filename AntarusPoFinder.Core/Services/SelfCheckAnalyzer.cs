@@ -55,6 +55,7 @@ public static class SelfCheckAnalyzer
             StoredPaths(f),
             UpdateSource(f),
             AutoInstall(f),
+            InstallLocation(f),
         };
         var history = UpdateHistory(f);
         if (history is not null) findings.Add(history);
@@ -302,6 +303,41 @@ public static class SelfCheckAnalyzer
                 "Выключена. Программа найдёт новую версию и сообщит о ней, но сама не поставит — обновляться придётся кнопкой. " +
                 "Если жалоба именно в том, что «обновления не устанавливаются сами», причина, скорее всего, здесь.",
                 "Настройки → Общие → «Устанавливать найденные обновления автоматически при запуске».");
+
+    /// <summary>Третья, до сих пор не проверявшаяся причина «обновление не ставится само» — и самая
+    /// незаметная: источник обновлений цел, галочка автоустановки стоит, новая версия найдена, а
+    /// самоустановка молча падает, потому что .exe запущен из папки, куда у пользователя нет прав на
+    /// запись. Самоустановка перезаписывает свой .exe НА МЕСТЕ (AppUpdateService.InstallAndRestart:
+    /// копия «*.update» рядом + перенос поверх оригинала) — без права записи в свою же папку это
+    /// невозможно, и человеку «приходится ставить руками». В отчёте это раньше не всплывало ничем:
+    /// провал переноса виден один раз уведомлением на следующем запуске и стирается, а «Проверка
+    /// компьютера» смотрела только на источник и галочку.</summary>
+    private static SelfCheckFinding InstallLocation(SelfCheckFacts f)
+    {
+        const string title = "Куда ставится обновление";
+
+        if (f.InstallDir.Length == 0)
+            return new SelfCheckFinding(title, SelfCheckSeverity.Info, "",
+                "Папку, из которой запущена программа, определить не удалось — права на запись не проверялись.");
+
+        if (f.InstallDirWritable)
+            return new SelfCheckFinding(title, SelfCheckSeverity.Ok, f.InstallDir,
+                "В папку программы есть права на запись — самоустановка сможет перезаписать .exe и обновиться сама.");
+
+        var reason =
+            $"Программа запущена из папки {f.InstallDir}, куда у пользователя «{f.WindowsUser}» нет прав на запись{Because(f.InstallDirWriteError)}. " +
+            "Обновление ставится так: программа копирует новую версию рядом со своим .exe и переносит её поверх старого — " +
+            "без права записи в эту папку перенос молча срывается, и обновляться приходится вручную. " +
+            "Это и есть причина «у всех обновляется само, а у меня нет».";
+
+        var fix = f.InstallUnderProgramFiles
+            ? "Переустановить программу штатным установщиком (MSI): он ставит её per-user в вашу папку %LocalAppData%\\Programs\\AntarusPoFinder, куда права на запись есть всегда. " +
+              "Portable-.exe в Program Files попал вручную — там самоустановка работать не будет без прав администратора при каждом обновлении."
+            : "Перенести программу в папку, куда есть права на запись (проще всего — переустановить штатным установщиком MSI, он ставит её в %LocalAppData%\\Programs\\AntarusPoFinder), " +
+              "либо обновлять вручную. Если .exe лежит на сетевом диске/в общей папке — запускать его надо из локальной установки, а не с сетевого диска.";
+
+        return new SelfCheckFinding(title, SelfCheckSeverity.Problem, f.InstallDir, reason, fix);
+    }
 
     private static SelfCheckFinding? UpdateHistory(SelfCheckFacts f) =>
         f.LastUpdateFailure.Length == 0
