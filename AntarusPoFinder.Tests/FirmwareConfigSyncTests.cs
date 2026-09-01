@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.App.Services;
@@ -161,6 +161,54 @@ public class FirmwareConfigSyncTests
 
         var configOnB = Assert.Single(m.DbB.GetFwVersionConfigs(primary.DiskPath, primary.VersionRaw));
         Assert.Equal("Два насоса", configOnB.ConfigName);
+    }
+
+    /// <summary>Случай Ильи (26.08.2026): залил две прошивки, отмодерировал — у коллеги их нет
+    /// НИГДЕ, ни в списке прошивок, ни в поиске. Файлы на диске лежат, ревизия сходится. Появились,
+    /// только когда он их продублировал.
+    ///
+    /// Причина была в правиле «удалённое не воскрешаем». Строка на приёме опознаётся по sync_id, а
+    /// если его нет — по натуральному ключу подтип+контроллер+номер+конфигурация. Когда-то удалённая
+    /// прошивка оставляет надгробие с тем же натуральным ключом, и НОВАЯ прошивка с тем же номером
+    /// версии попадала на это надгробие: приём считал её воскрешением и отбрасывал. Молча — счётчика
+    /// на это не было вовсе, поэтому «прошивки просто нет» и выглядело чертовщиной.
+    ///
+    /// Различаем по sync_id: он свой у каждой строки. Разные sync_id — разные прошивки, и новая
+    /// обязана приехать, даже если номер версии совпал с удалённой.</summary>
+    [Fact]
+    public void NewFirmwareReusingDeletedVersionNumber_StillReachesOtherMachine()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+        const string sameVersion = "1.99.7.1.20260801_1200";
+
+        // Первая прошивка доехала до коллеги, потом её удалили — у него легло надгробие.
+        var first = SeedFirmware(m.DbA, m.HierA, root, sameVersion);
+        SyncAtoB(m, root);
+        Assert.Contains(m.DbB.GetAllFwVersionsWithNames(), v => v.VersionRaw == sameVersion);
+
+        m.DbA.TombstoneFwVersion(first.Id!.Value);
+        SyncAtoB(m, root);
+        Assert.DoesNotContain(m.DbB.GetAllFwVersionsWithNames(), v => v.VersionRaw == sameVersion);
+
+        // Теперь заводим СОВСЕМ ДРУГУЮ прошивку с тем же номером версии — так и бывает, когда версию
+        // перевыпускают. У неё свой sync_id, и надгробие к ней отношения не имеет.
+        var again = SeedFirmware(m.DbA, m.HierA, root, sameVersion);
+        Assert.NotEqual(SyncIdOf(m.PathA, first.Id!.Value), SyncIdOf(m.PathA, again.Id!.Value));
+        SyncAtoB(m, root);
+
+        Assert.Contains(m.DbB.GetAllFwVersionsWithNames(), v => v.VersionRaw == sameVersion);
+    }
+
+    private static string SyncIdOf(string dbPath, int fwVersionId)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COALESCE(sync_id,'') FROM fw_versions WHERE id=@id";
+        cmd.Parameters.AddWithValue("@id", fwVersionId);
+        return (string)(cmd.ExecuteScalar() ?? "");
     }
 
     private static void RenameConfigDirectly(string dbPath, int fwVersionId, string newName)

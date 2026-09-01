@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -637,6 +637,17 @@ public class ImportCounts
     /// changed). See Database.ConflictResolution.cs — the caller checks
     /// Database.PendingHierarchyConflictCount()/GetPendingHierarchyConflicts() after a real Apply()
     /// to find out what's waiting on the operator.</summary>
+    /// <summary>Прошивки, которые приём МОЛЧА не взял. Два случая, и оба раньше не оставляли
+    /// вообще никакого следа: у коллеги прошивки просто не было, а сказать об этом было нечему.
+    ///
+    /// <see cref="FwVersionsSkippedNoParent"/> — не нашёлся подтип или контроллер, к которым запись
+    /// привязана. <see cref="FwVersionsSkippedTombstone"/> — на этой машине лежит надгробие с тем же
+    /// натуральным ключом (подтип+контроллер+номер), и правило «удалённое не воскрешать» отбрасывало
+    /// запись, даже если это СОВСЕМ ДРУГАЯ прошивка, просто с тем же номером версии.</summary>
+    public int FwVersionsSkippedNoParent { get; set; }
+
+    public int FwVersionsSkippedTombstone { get; set; }
+
     public int ConflictsFound { get; set; }
 
     public int TotalChanges =>

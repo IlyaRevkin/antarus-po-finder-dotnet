@@ -1184,7 +1184,14 @@ public partial class Database
         {
             var subId = ResolveId("equipment_subtypes", res.SubtypeSyncId, subtypeSyncToId, "name", res.SubtypeName);
             var ctrlId = ResolveId("controller_models", res.ControllerSyncId, controllerSyncToId, "name", res.ControllerName);
-            if (subId is null || ctrlId is null) continue;
+            if (subId is null || ctrlId is null)
+            {
+                // Раньше просто continue — и прошивка исчезала бесследно. Теперь считаем: «не
+                // приехало N прошивок, потому что не нашлось подтипа/контроллера» — это уже повод
+                // разбираться, а не гадать.
+                counts.FwVersionsSkippedNoParent++;
+                continue;
+            }
 
             var localStatus = ExecuteScalar(
                 "SELECT status FROM fw_version_reservations WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h AND version_raw=@v",
@@ -1275,6 +1282,28 @@ public partial class Database
 
             var existingRow = FindFwVersionRow(fv.SyncId, subId.Value, ctrlId.Value, fv.VersionRaw, fv.ConfigName);
 
+            // ⚠️ Надгробие обязано блокировать ТОЛЬКО ту же самую строку. Натуральный ключ
+            // (подтип+контроллер+номер+имя конфигурации) у новой прошивки вполне может совпасть с
+            // удалённой когда-то раньше — и тогда свежая, только что отмодерированная версия не
+            // приезжала к коллеге НИКОГДА и молча: у него лежит надгробие, значит «удалённое не
+            // воскрешаем». Так и было: прошивки не появлялись ни в списке, ни в поиске, файлы при
+            // этом лежали на диске, а ревизия сходилась — потому что снимок приходил исправно, его
+            // просто отбрасывали на приёме.
+            //
+            // Отличаем по sync_id: он свой у каждой строки и переживает правки контроллера и номера.
+            // Разные sync_id — это РАЗНЫЕ прошивки, и новую надо завести отдельной строкой, а не
+            // считать воскрешением старой. Пустой входящий sync_id — снимок со старой версии
+            // программы, различить нечем, поведение оставляем прежним.
+            if (existingRow is not null
+                && !string.IsNullOrEmpty(existingRow.DeletedAt)
+                && !string.IsNullOrEmpty(fv.SyncId)
+                && !string.IsNullOrEmpty(existingRow.SyncId)
+                && fv.SyncId != existingRow.SyncId)
+            {
+                counts.FwVersionsSkippedTombstone++;
+                existingRow = null;
+            }
+
             if (existingRow is not null)
             {
                 var id = existingRow.Id;
@@ -1297,6 +1326,15 @@ public partial class Database
 
                 // Rule 1 — already deleted here: permanent, never revived by an incoming row that
                 // just hasn't caught up yet (see class doc above).
+                //
+                // ⚠️ Но блокировать надгробие обязано ТОЛЬКО ту же самую строку. Натуральный ключ
+                // (подтип+контроллер+номер) у новой прошивки может совпасть с удалённой когда-то
+                // раньше — и тогда свежая, только что отмодерированная версия не приезжала к коллеге
+                // НИКОГДА и молча: у него надгробие, значит «удалённое не воскрешаем». Отличаем по
+                // sync_id: он у каждой строки свой и переживает правки. Разные sync_id — это разные
+                // прошивки, и новую надо принять как новую, а не считать воскрешением старой.
+                // Пустой входящий sync_id — снимок со старой версии программы, там различить нечем,
+                // поведение оставляем прежним.
                 if (!string.IsNullOrEmpty(localDeletedAt)) continue;
 
                 // Строка опознана по sync_id, но её натуральный ключ разошёлся — значит на машине-
