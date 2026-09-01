@@ -687,6 +687,10 @@ public partial class SearchView : UserControl
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint),
+                // Заливается ли контроллер через Segnetics Loader (SMH) или грузится проектом .psl в
+                // SMLogix (Pixel). По имени контроллера — обхода диска не требует, поэтому ставится
+                // сразу и переносится в baseFlags при досмотре диска ниже.
+                SupportsLoader = ControllerLoadMethod.SupportsLoader(result.Controller),
                 ConnectionMode = connectionMode,
                 ConnectionHint = connectionHint,
             };
@@ -2173,6 +2177,21 @@ public partial class SearchView : UserControl
     private void OpenLoader(HierarchyResult result)
     {
         var versionName = $"{result.Name} {result.VersionRaw}".Trim();
+
+        // Pixel через Segnetics Loader не заливается — его прошивка это проект SMLogix (.psl), его
+        // открывают в SMLogix. Кнопки «Загрузить в ПЛК» для Pixel быть не должно (см. FirmwareCard),
+        // но если этот путь всё же вызван — не гнать наладчика в лоадер (которого для Pixel нет), а
+        // сказать словами и сразу открыть проект в SMLogix.
+        if (!ControllerLoadMethod.SupportsLoader(result.Controller))
+        {
+            AppMessageBox.Show(
+                $"Контроллер {result.Controller} не заливается через Segnetics Loader — его прошивка " +
+                "это проект SMLogix (.psl). Открываю проект в SMLogix; заливать загрузчиком не нужно.",
+                "Загрузка в ПЛК", MessageBoxButton.OK, MessageBoxImage.Information);
+            OpenPlc(result);
+            return;
+        }
+
         if (!LoaderDialog.EnsureAvailable(Window.GetWindow(this), _services.Cfg)) return;
 
         // ExecutableHint — выбранный оператором в модерации файл. Он обязателен здесь: в папке версии

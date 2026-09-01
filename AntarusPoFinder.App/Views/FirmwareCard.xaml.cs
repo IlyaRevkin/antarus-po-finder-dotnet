@@ -68,6 +68,12 @@ public sealed record FirmwareCardFlags
     /// KINCO их не бывает, и «LFS —» там означало бы потерянный файл вместо «не про эту версию».</summary>
     public bool IsSegnetics { get; init; }
 
+    /// <summary>Заливается ли контроллер через Segnetics Loader (сборкой/заливкой .lfs) —
+    /// ControllerLoadMethod.SupportsLoader. Только у SMH; у Pixel (тоже Segnetics, тоже с .psl)
+    /// загрузчика нет — его прошивка открывается проектом .psl в SMLogix. От этого зависит, показывать
+    /// ли «Загрузить в ПЛК» вместо «Открыть прошивку ПЛК» и строку «LFS ✓/—».</summary>
+    public bool SupportsLoader { get; init; }
+
     /// <summary>Обход диска (LFS/PSL/HMI/карта) ещё идёт — карточка уже нарисована, но про файлы
     /// рядом с версией пока ничего не известно. Нужен, чтобы «нет LFS» не показывалось секунду как
     /// факт, пока сетевую папку ещё читают (см. SearchView.ScanDiskFlagsAsync).</summary>
@@ -256,7 +262,12 @@ public partial class FirmwareCard : UserControl
         // Дальше — HMI-проект и параметры отдельными кнопками, если есть. Всё прочее (второй файл
         // пары, открыть проект при заливке, папка, документация, история) — в «Ещё».
         var openExt = flags.PlcOpenExtension;
-        var showLoad = flags.HasLfs || flags.HasPsl;
+        // «Загрузить в ПЛК» — только там, где контроллер реально грузится Segnetics Loader'ом (SMH).
+        // У Pixel загрузчика нет: .psl там открывают в SMLogix, поэтому даже при наличии .psl/.lfs
+        // основной кнопкой остаётся «Открыть прошивку ПЛК (.psl)» — она и открывает проект в SMLogix
+        // через ассоциацию ОС (см. SearchView.OpenPlc / PlcOpenResolver). Ровно жалоба «на Pixel нет
+        // лоадера, а он через лоадер грузить пытается — должен открывать .psl».
+        var showLoad = (flags.HasLfs || flags.HasPsl) && flags.SupportsLoader;
 
         if (showLoad)
         {
@@ -469,8 +480,11 @@ public partial class FirmwareCard : UserControl
     private void ShowFilesLine(HierarchyResult result, FirmwareCardFlags flags)
     {
         FilesLabel.ToolTip = flags.IsSegnetics
-            ? ".LFS — скомпилированный файл, его заливают в контроллер лоадером.\n" +
-              ".PSL — исходный проект SMLogix, его открывают для правки."
+            ? flags.SupportsLoader
+                ? ".LFS — скомпилированный файл, его заливают в контроллер лоадером.\n" +
+                  ".PSL — исходный проект SMLogix, его открывают для правки."
+                : "Pixel не грузится через Segnetics Loader — прошивка это проект SMLogix (.psl), " +
+                  "его открывают в SMLogix. Собранный .lfs у Pixel не нужен."
             : null;
 
         if (flags.DiskScanPending)
@@ -482,10 +496,12 @@ public partial class FirmwareCard : UserControl
 
         var parts = new List<string>();
         // «LFS —»/«PSL —» — только там, где эти файлы бывают: у KINCO-шкафа их отсутствие не новость,
-        // а прочерк выглядел бы как потерянный файл (см. SegneticsProject).
+        // а прочерк выглядел бы как потерянный файл (см. SegneticsProject). У Pixel .lfs не бывает
+        // вовсе (грузится проектом .psl, не лоадером), поэтому строку LFS для него не показываем —
+        // иначе «LFS —» читалось бы как потерянный файл; .psl показываем как у любого Segnetics.
         if (flags.IsSegnetics)
         {
-            parts.Add(flags.HasLfs ? "LFS ✓" : "LFS —");
+            if (flags.SupportsLoader) parts.Add(flags.HasLfs ? "LFS ✓" : "LFS —");
             parts.Add(flags.HasPsl ? "PSL ✓" : "PSL —");
         }
         if (flags.HasHmi) parts.Add(HmiSourceVersion(result) is { } from ? $"HMI ✓ (от {from})" : "HMI ✓");

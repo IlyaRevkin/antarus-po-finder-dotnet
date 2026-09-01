@@ -266,8 +266,32 @@ public partial class EditFirmwareDialog : Window
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
 
-        _isSegnetics = SegneticsProject.IsRelevant(_record.CtrlName, _record.ExecutableHint, hasLfs, hasPsl);
-        if (!_isSegnetics) return; // не-Segnetics: одно поле «Файл прошивки», как было
+        // Имя контроллера в записи из поиска ПУСТОЕ: GetFwVersionById читает fw_versions без join'а к
+        // справочнику. Настоящее имя доносится из БД в _names (см. конструктор, тот же источник, что и
+        // для блока доп. файлов) — берём его, а _record.CtrlName как запасной вариант для остальных
+        // точек открытия диалога. Без этого SMH с пустым CtrlName ошибочно считался бы «без лоадера».
+        var controllerName = !string.IsNullOrWhiteSpace(_record.CtrlName)
+            ? _record.CtrlName
+            : _names?.ControllerName ?? "";
+
+        _isSegnetics = SegneticsProject.IsRelevant(controllerName, _record.ExecutableHint, hasLfs, hasPsl);
+        if (!_isSegnetics) return; // не-Segnetics (KINCO и т.п.): одно поле «Файл прошивки», как было
+
+        // Pixel — тоже Segnetics и тоже с исходником .psl, но Segnetics Loader его НЕ грузит: прошивка
+        // это сам проект .psl, его открывают в SMLogix. Значит ни отдельного загрузочного .lfs, ни его
+        // сборки у Pixel нет — поле остаётся одно («Файл прошивки», сюда кладут .psl), а вместо кнопки
+        // «Собрать LFS» показываем, ПОЧЕМУ её нет. Ровно жалоба «на Pixel он зачем-то LFS создал».
+        if (!ControllerLoadMethod.SupportsLoader(controllerName))
+        {
+            if (hasPsl)
+            {
+                BuildLfsPanel.Visibility = Visibility.Visible;
+                BuildLfsBtn.Visibility = Visibility.Collapsed;
+                BuildLfsHint.Text = "Pixel не грузится через Segnetics Loader — прошивка это проект " +
+                    ".psl, его открывают в SMLogix. Собирать .lfs не нужно.";
+            }
+            return;
+        }
 
         PlcFileLabel.Text = "Прошивка ПЛК (.lfs):";
         PlcFileLabel.ToolTip = "Загрузочный файл прошивки Segnetics (.lfs) — ложится в папку версии " +

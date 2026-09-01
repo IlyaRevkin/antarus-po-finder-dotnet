@@ -1106,6 +1106,13 @@ public partial class UploadView : UserControl
     {
         if (result.Record is not { } record) return;
 
+        // Pixel не грузится через Segnetics Loader — его прошивка это проект .psl, его открывают в
+        // SMLogix. Значит .lfs собирать не нужно (и нечем — загрузчика для Pixel нет). Предлагать
+        // сборку тут — ровно то, из-за чего «на Pixel зачем-то LFS создали». Имя контроллера берём с
+        // формы: в записи после загрузки CtrlName не заполняется.
+        var ctrlName = (CtrlCombo.SelectedItem as ControllerModification)?.ControllerName ?? "";
+        if (!ControllerLoadMethod.SupportsLoader(ctrlName)) return;
+
         var decision = LfsConversionService.Decide(result.DestinationFolder, null, record.ExecutableHint);
         if (decision.Need != LfsConversionNeed.Build || decision.Plan is null) return;
 
