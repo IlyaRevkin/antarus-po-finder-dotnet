@@ -1199,10 +1199,9 @@ public partial class Database
             var ctrlId = ResolveId("controller_models", res.ControllerSyncId, controllerSyncToId, "name", res.ControllerName);
             if (subId is null || ctrlId is null)
             {
-                // Раньше просто continue — и прошивка исчезала бесследно. Теперь считаем: «не
-                // приехало N прошивок, потому что не нашлось подтипа/контроллера» — это уже повод
-                // разбираться, а не гадать.
-                counts.FwVersionsSkippedNoParent++;
+                // Это цикл РЕЗЕРВОВ номеров, не самих прошивок: не нашлось подтипа/контроллера —
+                // резерв применить не к чему. Считаем отдельно от прошивок, иначе сводка врёт.
+                counts.ReservationsSkippedNoParent++;
                 continue;
             }
 
@@ -1291,7 +1290,16 @@ public partial class Database
         {
             var subId = ResolveId("equipment_subtypes", fv.SubtypeSyncId, subtypeSyncToId, "name", fv.SubtypeName, fv.GroupName);
             var ctrlId = ResolveId("controller_models", fv.ControllerSyncId, controllerSyncToId, "name", fv.CtrlName);
-            if (subId is null || ctrlId is null) continue;
+            if (subId is null || ctrlId is null)
+            {
+                // ⚠️ ВОТ ЗДЕСЬ прошивка и пропадала бесследно: подтип или контроллер, к которым она
+                // привязана, на этой машине не нашлись — и запись молча отбрасывалась. Со стороны это
+                // выглядело как «у меня прошивка есть, на диске есть, а у остальных её нет».
+                // Счётчик показывается в итоге синхронизации, чтобы причина была названа, а не
+                // выяснялась перебором.
+                counts.FwVersionsSkippedNoParent++;
+                continue;
+            }
 
             var existingRow = FindFwVersionRow(fv.SyncId, subId.Value, ctrlId.Value, fv.VersionRaw, fv.ConfigName);
 

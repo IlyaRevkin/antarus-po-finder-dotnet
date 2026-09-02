@@ -652,6 +652,10 @@ public class ImportCounts
     /// запись, даже если это СОВСЕМ ДРУГАЯ прошивка, просто с тем же номером версии.</summary>
     public int FwVersionsSkippedNoParent { get; set; }
 
+    /// <summary>Резервы номеров, которым не нашлось подтипа/контроллера. Отдельно от прошивок:
+    /// смешивать их в одном счётчике значит врать в сводке.</summary>
+    public int ReservationsSkippedNoParent { get; set; }
+
     public int FwVersionsSkippedTombstone { get; set; }
 
     public int ConflictsFound { get; set; }

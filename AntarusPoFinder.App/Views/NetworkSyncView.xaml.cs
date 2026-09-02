@@ -260,11 +260,26 @@ public partial class NetworkSyncView : UserControl
         LastSyncText.Text = $"Последняя синхронизация: {result.ExportedAt} (от {result.ExportedBy})";
 
         var conflictNote = result.Counts.ConflictsFound > 0 ? $"\nКонфликтов, требующих решения: {result.Counts.ConflictsFound}" : "";
+        // Прошивки, которые синхронизация НЕ приняла. Счётчики для этого завели давно, но нигде не
+        // показывали — и «у меня прошивка есть, а у остальных её нет» оставалось молчаливым: сводка
+        // бодро рапортовала «изменений столько-то», а про непринятые записи не говорила ничего.
+        // Показываем это заметно, а не сноской: человек открывает синхронизацию именно тогда, когда
+        // чего-то не хватает.
+        var skipNote = "";
+        if (result.Counts.FwVersionsSkippedNoParent > 0)
+            skipNote += $"\n\nНЕ ПРИНЯТО ПРОШИВОК: {result.Counts.FwVersionsSkippedNoParent}\n" +
+                        "У них не нашлось подтипа или контроллера — справочник на этой машине старее, " +
+                        "чем на той, откуда пришли прошивки. Обновите справочник и синхронизируйтесь ещё раз.";
+        if (result.Counts.FwVersionsSkippedTombstone > 0)
+            skipNote += $"\n\nПринято заново после удаления: {result.Counts.FwVersionsSkippedTombstone}\n" +
+                        "Это версии с номером, который здесь когда-то удаляли.";
+
         AppMessageBox.Show(
             $"Экспорт от: {result.ExportedAt} ({result.ExportedBy})\n\n" +
             $"Настроек применено: {result.SettingsApplied}\n" +
-            $"Изменений в справочнике: {result.Counts.TotalChanges}" + conflictNote,
-            "Синхронизация завершена", MessageBoxButton.OK, MessageBoxImage.Information);
+            $"Изменений в справочнике: {result.Counts.TotalChanges}" + conflictNote + skipNote,
+            "Синхронизация завершена", MessageBoxButton.OK,
+            skipNote.Length > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
         _host.ShowStatus($"Конфиг обновлён: настроек {result.SettingsApplied}, изменений {result.Counts.TotalChanges}", category: NotificationCategory.Sync);
 
         // A manual sync is already a deliberate, blocking action — open the resolution dialog right
