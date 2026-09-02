@@ -162,7 +162,9 @@ public sealed class HostingSyncService
                 Where: $"{version.GroupName} / {version.SubtypeName} / {version.CtrlName}",
                 Kind: file is null
                     ? "инструкции нет — нужна заглушка"
-                    : InstructionStub.IsStub(file) ? "заглушка «в разработке»" : "инструкция",
+                    // Видов страницы-заглушки теперь три, и подписывать их все «в разработке» значит
+                    // врать в списке ровно там, где человек и проверяет, что именно лежит на хостинге.
+                    : InstructionStub.KindOf(file) is { } stubKind ? $"заглушка: {stubKind.Label().ToLowerInvariant()}" : "инструкция",
                 SourcePath: file ?? "",
                 ObjectKey: key,
                 Url: url)
