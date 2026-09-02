@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Loader;
+﻿using AntarusPoFinder.Core.Loader;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -17,13 +17,25 @@ public class ControllerLoadMethodTests
     public void SmhControllers_SupportLoader(string controller) =>
         Assert.True(ControllerLoadMethod.SupportsLoader(controller));
 
+    /// <summary>Pixel2 (он же PXL2) заливается загрузчиком, как SMH. Отдельным набором, потому что
+    /// поколения Pixel различаются по способу заливки, а имена у них почти одинаковые: спутать
+    /// «PIXEL-2511» и «PIXEL2-1320» по одному префиксу PIXEL — ровно та ошибка, из-за которой у
+    /// Pixel2 пропала сборка LFS.</summary>
     [Theory]
-    // Pixel — тоже Segnetics и тоже с .psl, но загрузчика для него нет: грузится проектом SMLogix.
-    [InlineData("PIXEL")]
     [InlineData("PIXEL2")]
-    [InlineData("PIXEL-2511")]
     [InlineData("PIXEL2-1320")]
+    [InlineData("PIXEL2-1321")]
     [InlineData("pxl2")]
+    [InlineData("PXL2-1020")]
+    public void Pixel2Controllers_SupportLoader(string controller) =>
+        Assert.True(ControllerLoadMethod.SupportsLoader(controller));
+
+    [Theory]
+    // Pixel первого поколения — тоже Segnetics и тоже с .psl, но загрузчика для него нет:
+    // грузится проектом SMLogix.
+    [InlineData("PIXEL")]
+    [InlineData("PIXEL-2511")]
+    [InlineData("PIXEL-2515")]
     [InlineData("TRIM5")]
     // Не-Segnetics вообще: у них Segnetics Loader тем более ни при чём.
     [InlineData("KINCO")]

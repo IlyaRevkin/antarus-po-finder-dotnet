@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 
 namespace AntarusPoFinder.Core.Loader;
 
@@ -7,8 +7,11 @@ namespace AntarusPoFinder.Core.Loader;
 /// <list type="bullet">
 /// <item><description><b>SMH</b> (SMH2Gi/SMH4/SMH5…) — через Segnetics Loader: из .psl собирается
 /// загрузочный .lfs и заливается загрузчиком.</description></item>
-/// <item><description><b>Pixel/Pixel2</b> — Loader НЕ поддерживают вовсе: прошивка это сам проект
-/// SMLogix (.psl), его открывают в SMLogix, а не собирают в .lfs и не льют загрузчиком.</description></item>
+/// <item><description><b>Pixel</b> (первое поколение, PIXEL-25xx) — Loader НЕ поддерживает вовсе:
+/// прошивка это сам проект SMLogix (.psl), его открывают в SMLogix.</description></item>
+/// <item><description><b>Pixel2</b> (PIXEL2-xxxx, он же PXL2) — Loader ПОДДЕРЖИВАЕТ, как SMH: из .psl
+/// собирается .lfs и заливается загрузчиком. Поколения различаются: «Pixel» и «Pixel2» — разные ПЛК,
+/// и по одному лишь префиксу PIXEL их путать нельзя.</description></item>
 /// </list>
 ///
 /// До появления этого признака решение «Loader или SMLogix» принималось вслепую — по наличию .psl: у
@@ -28,7 +31,12 @@ public static class ControllerLoadMethod
 {
     /// <summary>Семейства контроллеров, которые заливаются Segnetics Loader'ом (.lfs). Всё остальное —
     /// открытием проекта в родной среде (для Segnetics-Pixel это .psl в SMLogix).</summary>
-    private static readonly string[] LoaderFamilies = ["SMH"];
+    // ⚠️ Порядок и точность префиксов здесь принципиальны: PIXEL2 начинается с тех же букв, что и
+    // PIXEL, но это РАЗНЫЕ ПЛК с разным способом заливки. Проверка идёт по StartsWith, поэтому
+    // "PIXEL2" отсекает "PIXEL-2511" сам собой (шестой символ '-' против '2'), а "PIXEL2-1321"
+    // распознаёт. Одного префикса "PIXEL" тут быть не должно ни при каких обстоятельствах — иначе
+    // первое поколение снова начнёт предлагать сборку .lfs, которой у него нет.
+    private static readonly string[] LoaderFamilies = ["SMH", "PIXEL2", "PXL2"];
 
     /// <summary>Поддерживает ли контроллер заливку через Segnetics Loader (сборку и заливку .lfs).
     /// false — прошивку открывают проектом в родной среде: у Pixel это .psl в SMLogix, у остальных
