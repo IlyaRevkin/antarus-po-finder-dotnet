@@ -186,7 +186,14 @@ public static class InstructionStub
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists) return null;
+            if (!info.Exists)
+            {
+                // Файла ещё (или уже) нет. Своё говорящее имя всё равно означает заглушку: этот ответ
+                // спрашивают и про ПРЕДПОЛАГАЕМЫЙ путь — например, планируя переименования при
+                // перестройке диска, где решают судьбу файла до того, как он появится. Отпечатка у
+                // несуществующего файла, разумеется, нет.
+                return byName is { } expected ? new StubInfo(expected, "") : null;
+            }
 
             var key = $"{path}|{info.LastWriteTimeUtc.Ticks}|{info.Length}";
             if (Memo.TryGetValue(key, out var known)) return known;
@@ -337,6 +344,14 @@ public static class InstructionStub
         }
     }
 
+    /// <summary>Файл существует. Отдельно и с проглатыванием ошибок: недоступная шара — это «нет», а
+    /// не повод падать посреди обхода диска.</summary>
+    private static bool Exists(string path)
+    {
+        try { return File.Exists(path); }
+        catch (Exception) { return false; }
+    }
+
     private static bool PathsSame(string a, string b) =>
         string.Equals(
             a.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
@@ -471,12 +486,16 @@ public static class InstructionStub
         if (writer is null) return StubAction.None;
 
         var wanted = writer.Layouts.Sane().Stamp(kind);
-        var existing = Describe(path);
+        // «Создали или перерисовали» решается по НАЛИЧИЮ ФАЙЛА, а не по ответу Describe: у страницы со
+        // своим постоянным именем он утвердительный и для ещё не существующего пути (см. Describe), и
+        // первое создание считалось бы перерисовкой.
+        var onDisk = Exists(path);
+        var existing = onDisk ? Describe(path) : null;
         // Тот же вид, тот же отпечаток — картинка получится байт в байт прежней, трогать сетевой диск
         // незачем.
         if (existing is not null && existing.Kind == kind && existing.Stamp == wanted) return StubAction.None;
 
-        var refreshing = existing is not null;
+        var refreshing = onDisk;
         try
         {
             var folder = Path.GetDirectoryName(path);
