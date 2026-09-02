@@ -32,7 +32,14 @@ public record HierarchyNames(
 
 /// <summary>Полный список папок, которые должны существовать на диске, плюс снимок имён для
 /// последующего разбора «неизвестного». Считается по БД, применяется без неё.</summary>
-public record StructurePlan(string Root, List<string> Folders, HierarchyNames Names);
+/// <param name="NoInstructionFolders">Папки «Инструкция» шкафов, на которые инструкции не будет вовсе
+/// (рациональные шкафы, см. EquipmentSubType.NoInstruction). В них не кладётся заглушка «в разработке»:
+/// она обещала бы документ, который никогда не появится. Такие шкафы ведут на ОДНУ общую страницу
+/// в корне диска (InstructionStub.SharedNotPlannedPath).</param>
+public record StructurePlan(string Root, List<string> Folders, HierarchyNames Names)
+{
+    public HashSet<string> NoInstructionFolders { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
 
 /// <summary>Одна папка контроллера, которую нужно просмотреть на предмет новых версий, вместе с уже
 /// известными БД номерами версий для этой пары подтип/контроллер.</summary>
@@ -672,6 +679,7 @@ public class HierarchyService
     public StructurePlan PlanStructure(string root)
     {
         var folders = new List<string>();
+        var noInstruction = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var controllers = _db.GetAllControllerModels();
         var manufacturers = _db.GetParamManufacturers();
 
@@ -692,7 +700,9 @@ public class HierarchyService
                 {
                     var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
                     folders.Add(ctrlPath);
-                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Instructions));
+                    var instructionsPath = Path.Combine(ctrlPath, HierarchyFolders.Instructions);
+                    folders.Add(instructionsPath);
+                    if (s.NoInstruction) noInstruction.Add(instructionsPath);
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Modbus));
                     folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
@@ -718,7 +728,7 @@ public class HierarchyService
         folders.Add(Path.Combine(root, FolderParams, HierarchyFolders.UnknownParams));
         folders.Add(Path.Combine(root, FolderConfig));
 
-        return new StructurePlan(root, folders, SnapshotNames());
+        return new StructurePlan(root, folders, SnapshotNames()) { NoInstructionFolders = noInstruction };
     }
 
     /// <summary>Дисковая фаза: создаёт недостающие папки и уносит нераспознанное в «Неизвестное».
@@ -744,7 +754,14 @@ public class HierarchyService
 
                 // Версии у этих папок нет (общая папка «Инструкция» контроллера принадлежит всем его
                 // версиям сразу), поэтому заглушка ложится под общим именем — см. InstructionStub.
-                if (stubs is not null && string.Equals(Path.GetFileName(path), HierarchyFolders.Instructions, StringComparison.Ordinal))
+                // Общая папка «Инструкция» контроллера заглушку получает, только если документы НЕ
+                // разложены по папкам версий: иначе на уровне контроллера появлялась бы «инструкция в
+                // разработке» при существующих документах уровнем ниже — см.
+                // InstructionStub.ShadowedByVersionDocuments и жалобу «на SMH5 2.0 ПЖ инструкция есть,
+                // а туда почему-то заглушка улетела».
+                if (stubs is not null && string.Equals(Path.GetFileName(path), HierarchyFolders.Instructions, StringComparison.Ordinal)
+                    && !plan.NoInstructionFolders.Contains(path)
+                    && !InstructionStub.ShadowedByVersionDocuments(path))
                     InstructionStub.EnsureIn(path, versionRaw: null, stubs, warnings: null);
             }
             catch (Exception e)
@@ -752,6 +769,11 @@ public class HierarchyService
                 errors.Add($"{path}: {e.Message}");
             }
         }
+
+        // Одна-на-всех страница «инструкции не будет» — рядом с созданием папок, а не отдельной
+        // кнопкой: она часть раскладки диска, а не разовое действие, и появляться обязана сама. Заодно
+        // здесь же она перерисовывается, если макет правили.
+        if (stubs is not null && InstructionStub.EnsureShared(plan.Root, stubs) == StubAction.Created) created++;
 
         var movedCount = CollectUnknowns(plan.Root, plan.Names).Moved;
 

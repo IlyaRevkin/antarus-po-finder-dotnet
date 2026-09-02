@@ -2388,9 +2388,31 @@ public partial class SearchView : UserControl
         // Документа ещё нет — берём заглушку: она лежит ровно по тому пути, по которому потом ляжет
         // настоящая инструкция, поэтому напечатанный сейчас QR не придётся переклеивать
         // (см. InstructionStub).
-        var file = doc.Pdf ?? doc.Newest ?? doc.Docx ?? InstructionStub.ExistingIn(instructionFolder);
+        //
+        // У шкафа, помеченного «инструкции не будет» (рациональные шкафы), ссылка ведёт на ОДНУ общую
+        // страницу в корне диска, а не на его собственную папку: своей страницы у него нет и не
+        // появится, а обещать «в разработке» на шкафу, где документа не будет никогда, — ровно то
+        // враньё, от которого заглушка и должна избавлять.
+        var file = doc.Pdf ?? doc.Newest ?? doc.Docx
+                   ?? NotPlannedPageFor(result)
+                   ?? InstructionStub.ExistingIn(instructionFolder);
         InstructionLabelWindow.ShowFor(Window.GetWindow(this), _services, _host,
             result.Name, result.VersionRaw, file);
+    }
+
+    /// <summary>Одна-на-всех страница «инструкции не будет» — если подтип этой версии так отмечен и
+    /// страница на диске действительно лежит. null во всех остальных случаях, включая «отмечен, но
+    /// страницы ещё нет»: строить QR на несуществующий файл нельзя, наклейка повела бы в пустоту.
+    /// Страница появляется сама при обходе диска и по кнопке «Перезалить всё» на «Хранилище».</summary>
+    private string? NotPlannedPageFor(HierarchyResult result)
+    {
+        try
+        {
+            if (!_services.Db.SubtypeHasNoInstruction(result.SubtypeId)) return null;
+            var path = InstructionStub.SharedNotPlannedPath(_services.Cfg.RootPath());
+            return System.IO.File.Exists(path) ? path : null;
+        }
+        catch (Exception) { return null; }
     }
 
     /// <summary>Открытые окна истории по паре подтип/контроллер. Появилось вместе с немодальностью:

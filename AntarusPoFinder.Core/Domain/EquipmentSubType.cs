@@ -15,4 +15,12 @@ public class EquipmentSubType
 
     /// <summary>Last local edit timestamp — see EquipmentGroup.UpdatedAt for format/purpose.</summary>
     public string UpdatedAt { get; set; } = "";
+
+    /// <summary>На этот шкаф инструкции НЕ БУДЕТ вовсе — рациональные шкафы (см. StubKind.NotPlanned).
+    ///
+    /// Признак стоит именно у ПОДТИПА, а не у версии и не у контроллера: «инструкция не пишется» — это
+    /// свойство шкафа как изделия, а подтип в этом справочнике и есть изделие (ПЖ-2.0, НГР-КНС, …).
+    /// Поставь его у версии — его пришлось бы вспоминать при каждой загрузке прошивки, и одна забытая
+    /// галочка давала бы шкафу обещание «инструкция в разработке», которое никогда не сбудется.</summary>
+    public bool NoInstruction { get; set; }
 }

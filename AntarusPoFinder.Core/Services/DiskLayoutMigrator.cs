@@ -696,7 +696,11 @@ public static class DiskLayoutMigrator
 
         // Настоящий документ в папке появился — заглушка уходит первой: имя у неё то же самое
         // каноническое, и пока она лежит, документу под него не встать (см. InstructionStub).
-        var removedStub = InstructionStub.HasRealInstruction(op.Source) && InstructionStub.RemoveFrom(op.Source) > 0;
+        // Убираются только заглушки-«вместо». Страница-дополнение («если остались вопросы»)
+        // рядом с документом лежать ОБЯЗАНА — снеси мы её здесь, следующий обход диска положил бы её
+        // обратно, и перестройка перестала бы быть идемпотентной — вечное «есть что делать» на ровном месте.
+        var removedStub = InstructionStub.HasRealInstruction(op.Source)
+                          && InstructionStub.RemoveFrom(op.Source, StubKind.InDevelopment, StubKind.NotPlanned) > 0;
 
         var renamed = new List<string>();
         foreach (var file in TopLevelFiles(op.Source))

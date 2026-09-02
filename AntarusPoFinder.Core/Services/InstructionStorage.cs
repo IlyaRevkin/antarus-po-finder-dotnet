@@ -32,8 +32,14 @@ public static class InstructionStorage
     ///
     /// <paramref name="publisher"/> = null — хостинг не настроен (или вызывающему он не нужен):
     /// выкладки просто не происходит, всё остальное работает как прежде.</summary>
+    /// <param name="stubs">Рисовальщик страниц-заглушек. Задан — рядом с легшей инструкцией
+    /// появляется страница «если остались вопросы» с телефоном сервиса
+    /// (<see cref="StubKind.ServiceNote"/>): документ у заказчика уже есть, а вот куда звонить, если
+    /// в нём что-то не сходится, из самого документа не следует. null — страница просто не кладётся,
+    /// всё остальное работает как раньше.</param>
     public static Placement Copy(string sourcePath, string instructionFolderOnFirstDisk,
-        string firstRoot, List<string> warnings, string versionRaw = "", IInstructionPublisher? publisher = null)
+        string firstRoot, List<string> warnings, string versionRaw = "", IInstructionPublisher? publisher = null,
+        IInstructionStubWriter? stubs = null)
     {
         if (string.IsNullOrEmpty(instructionFolderOnFirstDisk)) return new Placement("", null);
 
@@ -44,13 +50,18 @@ public static class InstructionStorage
         // вечно лежал бы файл, утверждающий, что документа нет. Убирать её надо ДО переименования:
         // имя у заглушки то же самое каноническое, и пока она лежит, настоящий документ не смог бы
         // под ним встать (см. InstructionStub).
-        InstructionStub.RemoveFrom(instructionFolderOnFirstDisk);
+        InstructionStub.RemoveFrom(instructionFolderOnFirstDisk, StubKind.InDevelopment, StubKind.NotPlanned);
 
         // Имя проверяется и правится ровно здесь — в единственном месте, через которое инструкция
         // попадает на диск и при загрузке версии, и при догрузке к уже существующей.
         actual = InstructionNaming.EnsureCanonicalName(actual, versionRaw);
 
         var published = publisher?.Publish(actual, actual, firstRoot, warnings);
+
+        // Страница-дополнение — ПОСЛЕ переименования: до него канонического документа в папке ещё
+        // нет, и «документ существует» не выполнено. Выкладывать её на хостинг не нужно: по ссылке с
+        // наклейки открывается сама инструкция, а дополнение живёт рядом с ней на диске.
+        InstructionStub.EnsureNoteIn(instructionFolderOnFirstDisk, versionRaw, stubs, warnings);
 
         return new Placement(actual, actual, published);
     }

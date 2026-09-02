@@ -24,6 +24,12 @@ public class ExportedSubType
     [JsonPropertyName("group_sync_id")] public string GroupSyncId { get; set; } = "";
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
     [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
+
+    /// <summary>«Инструкции на этот шкаф не будет» (см. EquipmentSubType.NoInstruction). Ездит в общем
+    /// конфиге: это свойство изделия, а не машины. Старый клиент поля не присылает вовсе — тогда
+    /// здесь false, и приём это учитывает (см. Database.ConfigExchange): молчание старой машины не должно
+    /// снимать галочку, поставленную на новой.</summary>
+    [JsonPropertyName("no_instruction")] public bool NoInstruction { get; set; }
 }
 
 public class ExportedController

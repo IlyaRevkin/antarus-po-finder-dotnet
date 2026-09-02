@@ -666,7 +666,13 @@ public partial class Database : IDisposable
     private void EnsureColumnsExist()
     {
         AddColumnsIfMissing("equipment_groups", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
-        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+        // no_instruction — «на этот шкаф инструкции не будет вовсе» (рациональные шкафы, см.
+        // EquipmentSubType.NoInstruction и StubKind.NotPlanned). Добавляется явной миграцией, а не
+        // через сид: сид применяется только к НОВОЙ базе, а признак нужен на уже установленных
+        // копиях — там-то эти шкафы и заведены. Умолчание 0 («инструкция будет») сохраняет прежнее
+        // поведение для всего, что уже лежит: ни одна папка не поменяется, пока человек сам не
+        // отметит подтип в справочнике.
+        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"), ("no_instruction", "INTEGER NOT NULL DEFAULT 0"));
         AddColumnsIfMissing("controller_models", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("controller_modifications", ("hw_version", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("description", "TEXT NOT NULL DEFAULT ''"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         // deleted_at: fw_versions' own tombstone marker (Задача 3) — '' means "not deleted". Unlike

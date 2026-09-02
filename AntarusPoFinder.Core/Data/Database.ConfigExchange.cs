@@ -46,7 +46,7 @@ public partial class Database
                 data.EquipmentGroups.Add(new ExportedGroup { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at") });
 
         using (var r = ExecuteReader("""
-            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, es.updated_at, eg.name AS group_name, eg.sync_id AS group_sync_id
+            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, es.updated_at, es.no_instruction, eg.name AS group_name, eg.sync_id AS group_sync_id
             FROM equipment_subtypes es JOIN equipment_groups eg ON es.group_id = eg.id
             ORDER BY es.sort_order
             """))
@@ -55,6 +55,7 @@ public partial class Database
                 {
                     Name = r.GetString(0), Prefix = r.GetInt32(1), FolderName = r.GetString(2),
                     SortOrder = r.GetInt32(3), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at"),
+                    NoInstruction = GetInt(r, "no_instruction") == 1,
                     GroupName = GetString(r, "group_name"), GroupSyncId = GetString(r, "group_sync_id"),
                 });
 
@@ -700,12 +701,13 @@ public partial class Database
                 {
                     var sync = string.IsNullOrEmpty(s.SyncId) ? Guid.NewGuid().ToString() : s.SyncId;
                     var updatedAt = string.IsNullOrEmpty(s.UpdatedAt) ? syncNow : s.UpdatedAt;
-                    ExecuteNonQuery("INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id,updated_at) VALUES(@g,@n,@p,@f,@s,@sy,@u)", cmd =>
+                    ExecuteNonQuery("INSERT INTO equipment_subtypes(group_id,name,prefix,folder_name,sort_order,sync_id,updated_at,no_instruction) VALUES(@g,@n,@p,@f,@s,@sy,@u,@ni)", cmd =>
                     {
                         cmd.Parameters.AddWithValue("@g", groupId.Value); cmd.Parameters.AddWithValue("@n", s.Name);
                         cmd.Parameters.AddWithValue("@p", s.Prefix); cmd.Parameters.AddWithValue("@f", string.IsNullOrEmpty(s.FolderName) ? s.Name : s.FolderName);
                         cmd.Parameters.AddWithValue("@s", s.SortOrder); cmd.Parameters.AddWithValue("@sy", sync);
                         cmd.Parameters.AddWithValue("@u", updatedAt);
+                        cmd.Parameters.AddWithValue("@ni", s.NoInstruction ? 1 : 0);
                     });
                     if (!string.IsNullOrEmpty(s.SyncId)) subtypeSyncToId[s.SyncId] = Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()"));
                     SetHierarchyWatermark(sync, syncNow);
@@ -714,6 +716,17 @@ public partial class Database
             }
             var (id, name, prefix, folder, sort, localSyncId, localUpdatedAt) = existing.Value;
             if (!string.IsNullOrEmpty(s.SyncId)) subtypeSyncToId[s.SyncId] = id;
+
+            // Признак «инструкции не будет» переносится ТОЛЬКО в сторону «поставлена» и мимо
+            // разбора конфликтов выше — по той же причине, по которой синхронизация не переносит
+            // удаления: машина со старой программой поля вовсе не присылает, и её молчание (false)
+            // снимало бы галочку туда-сюда при каждом обмене. Снятие делается на каждой машине своими
+            // руками — так же, как и удаление записей справочника.
+            if (s.NoInstruction && !SubtypeHasNoInstruction(id))
+            {
+                counts.SubtypesUpdated++;
+                if (apply) SetSubtypeNoInstruction(id, true);
+            }
             var wantFolder = string.IsNullOrEmpty(s.FolderName) ? s.Name : s.FolderName;
             var adoptSyncId = !string.IsNullOrEmpty(s.SyncId) && s.SyncId != localSyncId;
             var effectiveSyncId = adoptSyncId ? s.SyncId : localSyncId;

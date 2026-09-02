@@ -33,30 +33,39 @@ public sealed class InstructionStubWriter : IInstructionStubWriter
     public const int PageWidthPx = (int)(210 / 25.4 * Dpi);
     public const int PageHeightPx = (int)(297 / 25.4 * Dpi);
 
-    private readonly StubLayout _layout;
+    private readonly StubLayoutSet _layouts;
 
-    public InstructionStubWriter(StubLayout? layout = null) => _layout = (layout ?? StubLayout.Default).Sane();
+    public InstructionStubWriter(StubLayoutSet? layouts = null) => _layouts = (layouts ?? StubLayoutSet.Default).Sane();
 
-    /// <summary>Текстом сюда приходит заголовок (InstructionStub.Text) — он же подставляется в макет
-    /// как <see cref="StubLayout.Title"/>, если человек его не менял. Номер версии вытаскивается из
-    /// имени файла: заглушка называется «инструкция_&lt;версия&gt;.pdf», и другого источника версии у
-    /// рисовальщика нет — интерфейс на всех реализациях один и расширять его ради одного поля
-    /// значило бы трогать шесть точек вызова.</summary>
-    public void Write(string path, string text)
+    /// <summary>Набор из трёх макетов и общих контактов, которым рисует этот писатель. Читается
+    /// отсюда и Core — по нему считается отпечаток, которым помечается готовый файл.</summary>
+    public StubLayoutSet Layouts => _layouts;
+
+    /// <summary>Прежняя подпись без вида страницы. Рисует «в разработке» — единственный вид, который
+    /// существовал, пока вид был один.</summary>
+    public void Write(string path, string text) => Write(path, StubKind.InDevelopment, null);
+
+    /// <summary>Номер версии берётся из параметра, а если его не передали — из имени файла
+    /// («инструкция_&lt;версия&gt;.pdf»). Второе нужно перерисовке уже лежащей страницы: она идёт по
+    /// файлу, и версию вызывающему брать больше неоткуда.</summary>
+    public void Write(string path, StubKind kind, string? versionRaw)
     {
-        var version = InstructionNaming.VersionFromFileName(path);
+        var version = string.IsNullOrWhiteSpace(versionRaw) ? InstructionNaming.VersionFromFileName(path) : versionRaw;
+        var layout = _layouts.For(kind);
+        var contacts = _layouts.Contacts;
+
         var app = Application.Current;
         if (app is not null && !app.Dispatcher.CheckAccess())
         {
-            app.Dispatcher.Invoke(() => Render(path, _layout, version));
+            app.Dispatcher.Invoke(() => Render(path, layout, version, contacts));
             return;
         }
-        Render(path, _layout, version);
+        Render(path, layout, version, contacts);
     }
 
-    private static void Render(string path, StubLayout layout, string? versionRaw)
+    private static void Render(string path, StubLayout layout, string? versionRaw, string? contacts)
     {
-        var bitmap = Draw(layout, versionRaw);
+        var bitmap = Draw(layout, versionRaw, contacts);
 
         var encoder = new JpegBitmapEncoder { QualityLevel = 85 };
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -70,17 +79,17 @@ public sealed class InstructionStubWriter : IInstructionStubWriter
     /// Отдельного «почти такого же» кода для предпросмотра нет намеренно: разойдись он с настоящей
     /// отрисовкой хоть на отступ, и подгонять макет пришлось бы вслепую, ровно как когда-то с
     /// наклейкой («что 97, что 90 ставлю, верх обрезается»).</summary>
-    public static RenderTargetBitmap Draw(StubLayout raw, string? versionRaw)
+    public static RenderTargetBitmap Draw(StubLayout raw, string? versionRaw, string? contacts = null)
     {
         var layout = raw.Sane();
         var muted = new SolidColorBrush(Color.FromRgb((byte)layout.MutedTone, (byte)layout.MutedTone, (byte)layout.MutedTone));
 
-        var title = Formatted(layout.Fill(layout.Title, versionRaw), PageWidthPx * layout.TitleSize, Brushes.Black);
+        var title = Formatted(layout.Fill(layout.Title, versionRaw, contacts), PageWidthPx * layout.TitleSize, Brushes.Black);
         title.MaxTextWidth = PageWidthPx * 0.8;
 
         var blocks = new List<FormattedText> { title };
 
-        var hintText = layout.Fill(layout.Hint, versionRaw);
+        var hintText = layout.Fill(layout.Hint, versionRaw, contacts);
         if (hintText.Length > 0)
         {
             var hint = Formatted(hintText, PageWidthPx * layout.HintSize, muted);
@@ -88,7 +97,17 @@ public sealed class InstructionStubWriter : IInstructionStubWriter
             blocks.Add(hint);
         }
 
-        var footerText = layout.Fill(layout.Footer, versionRaw);
+        // Контакты сервиса — чёрным, а не серым: ради них страница и открывается. Телефон, который
+        // надо разглядеть на экране телефона в цеху, блеклым быть не имеет права.
+        var contactsText = layout.Fill(layout.Contacts, versionRaw, contacts);
+        if (contactsText.Length > 0)
+        {
+            var block = Formatted(contactsText, PageWidthPx * layout.ContactsSize, Brushes.Black);
+            block.MaxTextWidth = PageWidthPx * 0.8;
+            blocks.Add(block);
+        }
+
+        var footerText = layout.Fill(layout.Footer, versionRaw, contacts);
         FormattedText? footer = null;
         if (footerText.Length > 0)
         {

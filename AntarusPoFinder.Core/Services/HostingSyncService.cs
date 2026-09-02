@@ -263,8 +263,15 @@ public sealed class HostingSyncService
     ///
     /// Ошибка на одном файле не роняет прогон: остальные всё равно уезжают, а причина копится в
     /// сообщениях — иначе один битый документ в середине списка отменял бы работу по всем остальным.</summary>
+    /// <param name="stubs">Рисовальщик заглушек. Задан — перед отправкой каждая заглушка сверяется с
+    /// действующим макетом и, если нарисована по прошлому, перерисовывается на диске (см.
+    /// <see cref="InstructionStub.Refresh"/>). Без этого «Перезалить всё» после правки макета делало
+    /// ровно то, на что жаловались: аккуратно отправляло в бакет те же самые устаревшие байты с диска,
+    /// и заглушки «не менялись, хоть перезаливай, хоть удаляй и заливай». null — прежнее поведение
+    /// (например, на машине, где рисовать нечем).</param>
     public HostingRunResult Publish(S3Settings settings, string diskRoot, IEnumerable<HostingItem> items,
-        bool onlyMissing, IProgress<HostingProgress>? progress = null, CancellationToken ct = default)
+        bool onlyMissing, IProgress<HostingProgress>? progress = null, CancellationToken ct = default,
+        IInstructionStubWriter? stubs = null)
     {
         var list = items.ToList();
         var publisher = new InstructionPublisher(settings, _client, _pdf);
@@ -283,7 +290,15 @@ public sealed class HostingSyncService
                 messages.Add($"{item.VersionRaw}: файла инструкции на диске нет — выкладывать нечего");
                 continue;
             }
-            if (onlyMissing && item.State == HostingState.Published) { skipped++; continue; }
+            // Заглушка, нарисованная по прошлому макету, перерисовывается ДО отправки — иначе наверх
+            // уедет прежняя картинка. Перерисовка меняет файл на диске, поэтому она идёт и в режиме
+            // «догнать недостающее»: устаревшая на диске заглушка устарела и в бакете.
+            var refreshed = stubs is not null && InstructionStub.Refresh(item.SourcePath, stubs, null) == StubAction.Refreshed;
+            if (refreshed) messages.Add($"{item.VersionRaw}: заглушка перерисована по новому макету");
+
+            // Уже лежащая в бакете и не изменившаяся заглушка второй раз не отправляется; изменившаяся —
+            // отправляется всегда, иначе правка макета так и не доехала бы до хостинга.
+            if (onlyMissing && item.State == HostingState.Published && !refreshed) { skipped++; continue; }
 
             var warnings = new List<string>();
             var url = publisher.Publish(item.SourcePath, item.SourcePath, diskRoot, warnings);
@@ -323,14 +338,22 @@ public sealed class HostingSyncService
         return own;
     }
 
+    /// <summary>Настоящий документ в папке, а если его нет — заглушка-«вместо».
+    ///
+    /// Порядок именно такой, и он не косметика: рядом с настоящей инструкцией теперь лежит
+    /// страница-дополнение «если остались вопросы» (см. <see cref="StubKind.ServiceNote"/>), и она
+    /// тоже проходит проверку «это заглушка». Возьми мы просто первый подходящий файл, порядок обхода
+    /// папки решал бы, что считать инструкцией этой версии, — и на хостинг под адресом документа
+    /// иногда уезжала бы страница с одним телефоном.</summary>
     private static string? FirstDocumentIn(string? folder)
     {
         if (string.IsNullOrWhiteSpace(folder)) return null;
         try
         {
             if (!Directory.Exists(folder)) return null;
-            return Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault(f => !DocFileResolver.IsNotADocument(f) || InstructionStub.IsStub(f));
+            var files = Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly).ToList();
+            return files.FirstOrDefault(f => !DocFileResolver.IsNotADocument(f))
+                   ?? files.FirstOrDefault(f => InstructionStub.KindOf(f)?.ReplacesInstruction() == true);
         }
         catch (Exception) { return null; }
     }

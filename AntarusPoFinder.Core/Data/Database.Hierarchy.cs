@@ -123,7 +123,26 @@ public partial class Database
         SortOrder = GetInt(r, "sort_order"),
         SyncId = GetString(r, "sync_id"),
         UpdatedAt = GetString(r, "updated_at"),
+        NoInstruction = GetInt(r, "no_instruction") == 1,
     };
+
+    /// <summary>Отметить подтип как шкаф, на который инструкции не будет вовсе
+    /// (<see cref="AntarusPoFinder.Core.Domain.EquipmentSubType.NoInstruction"/>). updated_at трогается, как и при
+    /// любой другой правке справочника: без этого синхронизация сочла бы запись нетронутой и
+    /// переехала её чужим значением.</summary>
+    public void SetSubtypeNoInstruction(int subtypeId, bool value) =>
+        ExecuteNonQuery("UPDATE equipment_subtypes SET no_instruction=@v, updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@v", value ? 1 : 0);
+            cmd.Parameters.AddWithValue("@u", NowIso());
+            cmd.Parameters.AddWithValue("@id", subtypeId);
+        });
+
+    /// <summary>На этот подтип инструкции не будет. Ответ на один id — его спрашивают по карточке
+    /// версии, то есть по одной штуке, а не списком.</summary>
+    public bool SubtypeHasNoInstruction(int subtypeId) =>
+        ExecuteScalar("SELECT no_instruction FROM equipment_subtypes WHERE id=@id",
+            cmd => cmd.Parameters.AddWithValue("@id", subtypeId)) is long l && l == 1;
 
     public int UpsertEquipmentSubtype(EquipmentSubType s)
     {

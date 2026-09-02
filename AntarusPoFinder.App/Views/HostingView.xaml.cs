@@ -650,7 +650,18 @@ public partial class HostingView : UserControl
         await RunAsync(title, async (progress, ct) =>
         {
             var service = new HostingSyncService(_services.Db, client: null, new Services.DocxToPdfConverter.Adapter());
-            var result = await Task.Run(() => service.Publish(settings, root, items, onlyMissing, progress, ct), ct);
+            // Рисовальщик заглушек передаётся сюда ради одного: заглушка, нарисованная по прошлому
+            // макету, перерисовывается на диске ПЕРЕД отправкой. Без него «Перезалить всё» после
+            // правки макета аккуратно отправляло наверх те же самые старые байты — отсюда и «меняю
+            // макет, а заглушки не меняются, хоть перезаливай, хоть удаляй и заливай».
+            var stubs = _services.StubWriter();
+            var result = await Task.Run(() => service.Publish(settings, root, items, onlyMissing, progress, ct, stubs), ct);
+
+            // Одна-на-всех страница «инструкции не будет» в список строк не входит (она не
+            // принадлежит ни одной версии), но лежать на хостинге обязана — иначе наклейки
+            // рациональных шкафов ведут в пустоту. Заодно она тут же перерисуется, если макет правили.
+            await Task.Run(() => InstructionStub.EnsureShared(root, stubs, null,
+                InstructionPublisher.For(settings, new Services.DocxToPdfConverter.Adapter())), ct);
 
             foreach (var message in result.Messages) AppendLog(message);
 

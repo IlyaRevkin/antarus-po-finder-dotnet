@@ -49,7 +49,7 @@ public class AppServices
     /// по той же причине, что и выкладчик выше: макет настраивается, и забудь его подставить в одном
     /// из шести вызовов — с той страницы заглушки поедут в старом виде, а заметят это уже по QR
     /// со шкафа.</summary>
-    public Services.InstructionStubWriter StubWriter() => new(Cfg.StubLayout());
+    public Services.InstructionStubWriter StubWriter() => new(Cfg.StubLayouts());
 
     public AppServices()
     {

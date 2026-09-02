@@ -119,6 +119,10 @@ public class ConfigService
         // затычка. Общая настройка: заглушки на хостинг кладут разные машины, выглядеть они обязаны
         // одинаково. Пусто — вид по умолчанию (см. StubLayout.Default).
         ["stub_layout"] = "",
+        // Три макета сразу (в разработке / инструкции не будет / дополнение к готовой) и общий блок
+        // контактов сервиса — см. StubLayoutSet. Ключ отдельный от «stub_layout» выше: тот остаётся
+        // для машин, до которых обновление ещё не доехало. Пусто — вид по умолчанию.
+        ["stub_layouts"] = "",
         ["hosting_max_file_mb"] = "20",
         ["hosting_size_limit_hard"] = "true",
         // «Диск перестроен под новую раскладку» (docs/hierarchy-rework-plan.md, этап 4): у версии
@@ -472,10 +476,25 @@ public class ConfigService
 
     public void SetHostingSizeLimitHard(bool value) => Set("hosting_size_limit_hard", value ? "true" : "false");
 
-    /// <summary>Вид страницы-заглушки «Инструкция в разработке» (см. <see cref="StubLayout"/>).</summary>
-    public StubLayout StubLayout() => Services.StubLayout.Parse(Get("stub_layout")).Sane();
+    /// <summary>Три макета страниц-заглушек и общий блок контактов сервиса (см.
+    /// <see cref="StubLayoutSet"/>).
+    ///
+    /// Ключ НОВЫЙ, а прежний <c>stub_layout</c> остаётся лежать нетронутым и служит источником вида
+    /// «в разработке», пока набора ещё нет. Так сделано из-за общего конфига: он ездит между машинами,
+    /// и пока обновление доехало не до всех, машина со старой программой должна читать свой ключ и
+    /// видеть привычную настройку, а не разбирать незнакомый ей формат и молча откатываться на
+    /// умолчание.</summary>
+    public StubLayoutSet StubLayouts() =>
+        StubLayoutSet.Parse(Get("stub_layouts"), Get("stub_layout")).Sane();
 
-    public void SetStubLayout(StubLayout layout) => Set("stub_layout", layout.Sane().ToJson());
+    public void SetStubLayouts(StubLayoutSet layouts)
+    {
+        var sane = layouts.Sane();
+        Set("stub_layouts", sane.ToJson());
+        // Прежний ключ держим в согласии с новым — ровно ради машин, до которых обновление ещё не
+        // доехало: иначе они рисовали бы «в разработке» по позапрошлому макету.
+        Set("stub_layout", sane.InDevelopment.ToJson());
+    }
 
     /// <summary>Справочник написаний для адресов на хостинге. Читается из общей настройки, поэтому
     /// одинаков на всех машинах — от этого зависит, попадёт ли наклейка с QR в выложенный файл
