@@ -194,7 +194,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         IsDarkTheme = CurrentTheme == "dark";
         _suppressThemeToggleHandler = false;
 
-        CurrentAccent = AccentPalette.Find(_services.Cfg.Accent()).Id;
+        CurrentAccent = AccentPalette.NormalizeStored(_services.Cfg.Accent());
 
         ApplyRole(CurrentRole);
         ThemeManager.Apply(CurrentTheme, CurrentAccent);
@@ -579,23 +579,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         ThemeManager.Apply(CurrentTheme, CurrentAccent);
     }
 
-    /// <summary>Выбранный цвет акцента. Меняется независимо от светлой/тёмной темы — цвет остаётся
-    /// при переключении, поэтому он и хранится отдельной настройкой.</summary>
-    public string CurrentAccent { get; private set; } = AccentPalette.DefaultId;
-
-    public IReadOnlyList<AccentPalette> AccentPalettes => AccentPalette.All;
-
-    [RelayCommand]
-    private void SetAccent(string? accentId)
-    {
-        var chosen = AccentPalette.Find(accentId);
-        if (chosen.Id == CurrentAccent) return;
-
-        CurrentAccent = chosen.Id;
-        _services.Cfg.SetAccent(chosen.Id);
-        ThemeManager.Apply(CurrentTheme, CurrentAccent);
-        OnPropertyChanged(nameof(CurrentAccent));
-    }
+    /// <summary>Выбранный цвет. Здесь он только запоминается, чтобы передать его в ThemeManager при
+    /// смене темы: сам выбор цвета живёт в Настройках (см. SettingsView), а не в сайдбаре — с
+    /// палитрой это полноценная настройка, а не одна кнопка.</summary>
+    public string CurrentAccent { get; private set; } = AccentPalette.DefaultHex;
 
     // ── Status bar ────────────────────────────────────────────────────────────
 

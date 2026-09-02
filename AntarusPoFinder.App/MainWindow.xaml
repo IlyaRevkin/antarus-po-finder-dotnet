@@ -344,36 +344,6 @@
                                               ToolTip="Переключить светлую и тёмную тему"/>
                             </Grid>
 
-                            <!-- Цвет акцента. Кружки — сами себе подпись: название цвета словами тут
-                                 заняло бы всю ширину боковой панели, а цвет и так виден. Образец
-                                 показываем светлым вариантом палитры: он у всех пяти узнаваем и в
-                                 тёмной теме тоже, а два разных кружка на один цвет сбивали бы. -->
-                            <Grid Margin="0,4,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Цвет" VerticalAlignment="Center"
-                                           Style="{StaticResource MutedText}"/>
-                                <ItemsControl Grid.Column="1" ItemsSource="{Binding AccentPalettes}"
-                                              VerticalAlignment="Center">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Button Style="{StaticResource AccentSwatchButton}"
-                                                    Command="{Binding DataContext.SetAccentCommand,
-                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                    CommandParameter="{Binding Id}"
-                                                    ToolTip="{Binding DisplayName}">
-                                                <Ellipse Width="14" Height="14" Fill="{Binding LightAccent}"/>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </Grid>
-
                             <TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
                                     Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"

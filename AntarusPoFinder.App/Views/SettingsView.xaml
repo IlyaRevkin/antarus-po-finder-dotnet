@@ -97,6 +97,47 @@
                          его сюда означало бы заводить второй источник правды для одного и того же
                          переключателя. -->
 
+                    <!-- ─── Оформление ───
+                         Цвет живёт здесь, а не в сайдбаре: там ему место только пока он был «одной
+                         кнопкой», а с палитрой это полноценная настройка. Переключатель светлой и
+                         тёмной темы остаётся в сайдбаре — он там на виду и нажимается часто, а
+                         дублировать его сюда значило бы завести второй источник правды (см. коммент
+                         выше). Цвет же читается и пишется прямо в настройки, минуя MainWindowViewModel,
+                         поэтому раздвоения состояния здесь не возникает. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ЦВЕТ ОФОРМЛЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Цвет кнопок и выделения. Работает и в светлой, и в тёмной теме — при переключении сохраняется."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <ItemsControl x:Name="AccentSamples" Margin="0,0,0,10">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource AccentSwatchButton}" Tag="{Binding Hex}"
+                                                Click="AccentSample_Click" ToolTip="{Binding Name}">
+                                            <Border Width="26" Height="26" CornerRadius="13" Background="{Binding Hex}"
+                                                    BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="Свой цвет:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox x:Name="AccentHexBox" Width="110" VerticalAlignment="Center"
+                                         ToolTip="Код цвета, например #1E66F5" KeyDown="AccentHex_KeyDown"/>
+                                <Button Content="Применить" Margin="8,0,0,0" Click="AccentHexApply_Click"/>
+                                <Border x:Name="AccentPreview" Width="26" Height="26" CornerRadius="13" Margin="10,0,0,0"
+                                        BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                <TextBlock x:Name="AccentPreviewText" VerticalAlignment="Center" Margin="8,0,0,0"
+                                           Style="{StaticResource MutedText}"/>
+                            </StackPanel>
+                            <Button Content="Вернуть исходный цвет" HorizontalAlignment="Left" Click="AccentReset_Click"
+                                    Style="{StaticResource SecondaryButton}"/>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ─── Запуск и поведение ─── -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
@@ -388,6 +429,7 @@
                             <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
+                            <DataGridTextColumn Header="Инструкция" Binding="{Binding NoInstructionMark}" Width="Auto" MinWidth="100" IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*" MinWidth="140" ElementStyle="{StaticResource DataGridCellText}"/>
                         </DataGrid.Columns>
                     </DataGrid>
@@ -396,8 +438,10 @@
                                 ToolTip="Новый тип шкафа — заводится сразу с первым подтипом"/>
                         <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"
                                 ToolTip="Новый подтип внутри выбранного в таблице типа шкафа"/>
-                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DeleteSubtype_Click"
                                 ToolTip="Удалить выбранный подтип. Вместе с последним подтипом удаляется и сам тип шкафа"/>
+                        <Button Content="Инструкции не будет" Style="{StaticResource SecondaryButton}" Click="ToggleNoInstruction_Click"
+                                ToolTip="Рациональные шкафы: инструкции на них не пишется вовсе. QR у таких версий ведёт на одну общую страницу с телефоном сервиса — вместо обещания «инструкция в разработке», которое никогда не сбудется."/>
                     </StackPanel>
 
                     <TextBlock Text="КОНТРОЛЛЕРЫ И МОДИФИКАЦИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
