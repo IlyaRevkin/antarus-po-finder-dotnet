@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
@@ -70,6 +70,7 @@ public partial class NotificationCenter : ObservableObject
             existing.When = saved.When;
             existing.Repeats = saved.Repeats;
             existing.IsRead = false;
+            existing.IsNew = true;
             // Действие «Показать» обновляем только если пришло новое: у повтора баннера оно живое, а
             // у обычного ShowStatus его нет вовсе — и затирать им прежнее нельзя.
             if (reopen is not null)
@@ -111,11 +112,16 @@ public partial class NotificationCenter : ObservableObject
     {
         var changed = false;
         foreach (var entry in History)
+        {
             if (!entry.IsRead)
             {
                 entry.IsRead = true;
                 changed = true;
             }
+            // Пометку «новое» снимаем тоже: человек нажал «всё прочитано» — значит и подсветке
+            // новизны взяться неоткуда (см. NotificationEntry.IsNew).
+            entry.IsNew = false;
+        }
         if (!changed) return;
         _db.MarkAllNotificationsRead();
         Refresh();

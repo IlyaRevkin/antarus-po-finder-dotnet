@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
@@ -170,6 +170,32 @@ public class NotificationReadStateTests
         Assert.False(center.History[0].IsRead);
         Assert.Equal(1, center.UnreadCount);
         Assert.Contains("×2", center.History[0].DisplayText);
+    }
+
+    /// <summary>Пометка «новое» (точка и полужирный в списке) живёт отдельно от «прочитано»:
+    /// «прочитано» гаснет в тот же миг, когда строку показали, и по нему пометку не нарисовать —
+    /// она пропала бы за один кадр. Снимает её только повторное открытие окна или «Всё прочитано».</summary>
+    [Fact]
+    public void IsNew_SurvivesMarkRead_ButNotMarkAllRead()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
+
+        var entry = center.Add("свежее", NotificationCategory.General);
+        Assert.True(entry.IsNew);
+
+        center.MarkRead(entry);
+        Assert.True(entry.IsNew);
+        Assert.True(entry.IsRead);
+
+        center.MarkAllRead();
+        Assert.False(entry.IsNew);
+
+        // Пришло снова — снова новость, и пометка возвращается вместе со снятым «прочитано».
+        center.Add("свежее", NotificationCategory.General);
+        Assert.True(entry.IsNew);
+        Assert.False(entry.IsRead);
     }
 
     /// <summary>Свежая запись непрочитана — иначе счётчик не вырос бы никогда.</summary>

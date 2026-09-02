@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,7 +19,8 @@ namespace AntarusPoFinder.App.Views;
 /// Воспроизведено живым прогоном scratchpad/live/notifications_run.py: первое открытие — две записи,
 /// второе — ноль. Теперь:
 /// <list type="bullet">
-/// <item>список показывает ВСЁ, что есть в истории; непрочитанное отмечено точкой и полужирным;</item>
+/// <item>список показывает ВСЁ, что есть в истории; новое отмечено точкой и полужирным
+/// (NotificationEntry.IsNew — пометка держится всё открытие окна);</item>
 /// <item>«прочитано» ставится построчно, в момент, когда строку реально построили и показали
 /// (<see cref="NotificationRow_Loaded"/>), — только это и убавляет счётчик на колокольчике;</item>
 /// <item>убирает записи из списка ТОЛЬКО человек: крестиком у строки или кнопкой «Очистить».</item>
@@ -29,9 +30,9 @@ public partial class NotificationHistoryWindow : Window
     private readonly NotificationCenter _center;
     private readonly ConfigService _cfg;
 
-    /// <summary>Показывать только непрочитанные. Живёт на время одного открытия окна: «покажи, что
-    /// нового» — разовый жест, а не настройка. По умолчанию выключен, иначе окно снова могло бы
-    /// оказаться пустым при полной истории.</summary>
+    /// <summary>Показывать только новые. Живёт на время одного открытия окна: «покажи, что нового» —
+    /// разовый жест, а не настройка. По умолчанию выключен, иначе окно снова могло бы оказаться
+    /// пустым при полной истории.</summary>
     private bool _onlyUnread;
 
     /// <summary>Своё представление коллекции, а НЕ CollectionViewSource.GetDefaultView(...).
@@ -46,12 +47,18 @@ public partial class NotificationHistoryWindow : Window
         _center = center;
         _cfg = cfg;
 
+        // Пометка «новое» пересобирается на КАЖДОЕ открытие окна: что не успели прочитать в прошлый
+        // раз, тем и осталось новым. См. NotificationEntry.IsNew — по IsRead её не нарисовать.
+        foreach (var entry in center.History)
+            entry.IsNew = !entry.IsRead;
+
         _view = new ListCollectionView(center.History)
         {
-            // ⚠️ Живой фильтрации (IsLiveFiltering) здесь нет намеренно: строка помечается
-            // прочитанной ровно в тот момент, когда её показали, и с живой фильтрацией она исчезала
-            // бы у человека из-под курсора. Отбор пересчитывается только по нажатию кнопки.
-            Filter = o => !_onlyUnread || o is not NotificationEntry entry || !entry.IsRead,
+            // Отбор идёт по IsNew, а не по IsRead: IsRead гаснет в тот же миг, когда строку
+            // показали, и «только новые» опустел бы через секунду после нажатия.
+            // ⚠️ Живой фильтрации (IsLiveFiltering) здесь нет намеренно — отбор пересчитывается
+            // только по нажатию кнопки, иначе строка исчезала бы у человека из-под курсора.
+            Filter = o => !_onlyUnread || o is not NotificationEntry entry || entry.IsNew,
         };
         ListBoxHistory.ItemsSource = _view;
 
@@ -63,10 +70,10 @@ public partial class NotificationHistoryWindow : Window
     /// состав или счётчик.</summary>
     private void RefreshHeader()
     {
-        var unread = _center.History.Count(x => !x.IsRead);
-        OnlyUnreadToggle.Content = _onlyUnread ? "Показать все" : $"Только новые ({unread})";
-        OnlyUnreadToggle.IsEnabled = _onlyUnread || unread > 0;
-        MarkAllReadBtn.IsEnabled = unread > 0;
+        var fresh = _center.History.Count(x => x.IsNew);
+        OnlyUnreadToggle.Content = _onlyUnread ? "Показать все" : $"Только новые ({fresh})";
+        OnlyUnreadToggle.IsEnabled = _onlyUnread || fresh > 0;
+        MarkAllReadBtn.IsEnabled = fresh > 0 || _center.UnreadCount > 0;
 
         var shown = _view.Count;
         EmptyHint.Visibility = shown == 0 ? Visibility.Visible : Visibility.Collapsed;

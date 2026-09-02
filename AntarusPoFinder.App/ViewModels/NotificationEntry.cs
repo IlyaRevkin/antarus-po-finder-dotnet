@@ -25,6 +25,7 @@ public partial class NotificationEntry : ObservableObject
         _when = stored.When;
         _repeats = stored.Repeats;
         _isRead = stored.IsRead;
+        _isNew = !stored.IsRead;
         _reopen = reopen;
         ReopenIsModal = reopenIsModal;
     }
@@ -124,5 +125,22 @@ public partial class NotificationEntry : ObservableObject
     {
         get => _isRead;
         set => SetProperty(ref _isRead, value);
+    }
+
+    private bool _isNew;
+
+    /// <summary>Пометка «это было новым, когда вы открыли окно» — точка акцентным цветом и
+    /// полужирный текст в списке.
+    ///
+    /// ⚠️ Почему отдельно от <see cref="IsRead"/>, а не по нему. «Прочитано» ставится в тот же миг,
+    /// когда строку нарисовали, — иначе счётчик гас бы не по прочтении. Если бы по нему же рисовалась
+    /// и пометка, она пропадала бы за один кадр: человек открыл окно и не увидел вообще ничего, что
+    /// отличало бы новое от вчерашнего. Поэтому пометка снимается не показом, а только следующим
+    /// открытием окна (NotificationHistoryWindow ставит её заново по IsRead) или кнопкой «Всё
+    /// прочитано». Повтор возвращает её: случилось снова — снова новость.</summary>
+    public bool IsNew
+    {
+        get => _isNew;
+        set => SetProperty(ref _isNew, value);
     }
 }

@@ -52,10 +52,12 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Метка «ещё не прочитано»: точка акцентным цветом у левого края строки. Гаснет, когда
-             запись помечена прочитанной, — то есть прямо на глазах, пока человек её читает.
-             Прочитанные записи из списка при этом НЕ пропадают (см. NotificationEntry.IsRead):
-             именно их исчезновение и делало окно пустым при втором открытии. -->
+        <!-- Метка «новое»: точка акцентным цветом у левого края строки. Держится всё время, пока
+             окно открыто, и снимается только следующим открытием (или кнопкой «Всё прочитано») —
+             см. NotificationEntry.IsNew. По IsRead её рисовать нельзя: он гаснет в тот же миг, когда
+             строку нарисовали, и пометка исчезла бы за один кадр.
+             Сами записи из списка не пропадают ни прочитанными, ни старыми: именно их исчезновение
+             и делало окно пустым при втором открытии. -->
         <Style x:Key="UnreadDotStyle" TargetType="Border">
             <Setter Property="Width" Value="7"/>
             <Setter Property="Height" Value="7"/>
@@ -64,21 +66,21 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,7,0"/>
             <Style.Triggers>
-                <DataTrigger Binding="{Binding IsRead}" Value="True">
+                <DataTrigger Binding="{Binding IsNew}" Value="False">
                     <Setter Property="Background" Value="Transparent"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>
 
-        <!-- Непрочитанное — полужирным. Отдельно от точки: цвет виден плохо у тех, кто его не
-             различает, а начертание читается всегда. -->
+        <!-- Новое — полужирным. Отдельно от точки: цвет виден плохо у тех, кто его не различает,
+             а начертание читается всегда. -->
         <Style x:Key="NotificationTextStyle" TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Style.Triggers>
-                <DataTrigger Binding="{Binding IsRead}" Value="True">
+                <DataTrigger Binding="{Binding IsNew}" Value="False">
                     <Setter Property="FontWeight" Value="Normal"/>
                 </DataTrigger>
             </Style.Triggers>
