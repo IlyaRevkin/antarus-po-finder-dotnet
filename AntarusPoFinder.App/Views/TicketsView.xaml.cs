@@ -23,7 +23,12 @@ public partial class TicketsView : UserControl
         public string Text => Ticket.Text;
         public string StatusLabel => TicketStatus.Label(Ticket.Status);
         public string CreatedBy => Ticket.CreatedBy;
-        public string CreatedByRoleLabel => RolesConfig.RoleLabel(Ticket.CreatedByRole);
+        /// <summary>У автоотчёта роль — «system», и RolesConfig её не знает: в столбце «Роль»
+        /// стояло бы английское слово. Пишем по-русски, как и все остальные роли.</summary>
+        public string CreatedByRoleLabel =>
+            string.Equals(Ticket.CreatedByRole, TicketAutoReports.SystemRole, StringComparison.OrdinalIgnoreCase)
+                ? "программа"
+                : RolesConfig.RoleLabel(Ticket.CreatedByRole);
         public string CreatedAtLabel => DateTime.TryParse(Ticket.CreatedAt, out var dt) ? dt.ToString("dd.MM.yyyy HH:mm") : Ticket.CreatedAt;
     }
 
@@ -99,12 +104,32 @@ public partial class TicketsView : UserControl
         _host.OnTicketsViewed();
     }
 
+    /// <summary>Список: сперва отбор по роли (свои/все), затем автоотчёты о сбоях —
+    /// см. TicketAutoReports. Порядок именно такой: число у галки должно считаться по тому, что
+    /// человек в принципе может увидеть, иначе наладчику обещали бы чужие спрятанные отчёты.</summary>
     private void ReloadGrid()
     {
         var all = _services.Db.GetTickets();
-        var visible = IsAdmin ? all : all.Where(t => string.Equals(t.CreatedBy, _services.CurrentUserName, StringComparison.OrdinalIgnoreCase));
+        var mine = IsAdmin
+            ? all
+            : all.Where(t => string.Equals(t.CreatedBy, _services.CurrentUserName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var autoCount = TicketAutoReports.Count(mine);
+        ShowAutoReportsCheck.Content = autoCount > 0
+            ? $"Показывать автоматические отчёты о сбоях ({autoCount})"
+            : "Автоматических отчётов о сбоях нет";
+        ShowAutoReportsCheck.IsEnabled = autoCount > 0;
+
+        var visible = TicketAutoReports.Visible(mine, ShowAutoReportsCheck.IsChecked == true);
         TicketsGrid.ItemsSource = visible.Select(t => new TicketRow { Ticket = t }).ToList();
         UpdateActionButtons();
+    }
+
+    private void ShowAutoReports_Changed(object sender, RoutedEventArgs e)
+    {
+        // Загружается страница — обработчик срабатывает до того, как построен сам список.
+        if (TicketsGrid is null) return;
+        ReloadGrid();
     }
 
     private void TicketsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActionButtons();

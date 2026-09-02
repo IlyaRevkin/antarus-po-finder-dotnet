@@ -254,10 +254,10 @@ public partial class App : Application
             {
                 Id = Guid.NewGuid().ToString(),
                 Type = TicketType.Bug,
-                Text = $"[Автоматический отчёт о сбое]\n{ex.GetType().FullName}: {ex.Message}\n\n{ex}",
+                Text = $"{TicketAutoReports.TextPrefix}\n{ex.GetType().FullName}: {ex.Message}\n\n{ex}",
                 Status = TicketStatus.Open,
                 CreatedBy = _services.CurrentUserName,
-                CreatedByRole = "system",
+                CreatedByRole = TicketAutoReports.SystemRole,
                 CreatedAt = now,
                 UpdatedAt = now,
             };

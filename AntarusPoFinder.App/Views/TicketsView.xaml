@@ -1,8 +1,9 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.TicketsView"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.TicketsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Margin="24">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -50,7 +51,17 @@
         <!-- ScrollUnit=Pixel — прокрутка по пикселям вместо прыжков через целую строку (виртуализация
              при этом остаётся включённой, в отличие от CanContentScroll=False). На списке с длинными
              тикетами построчные прыжки читались как рывки. -->
-        <DataGrid Grid.Row="3" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
+        <!-- Отбор автоотчётов о сбоях. Тикет: «по умолчанию автоотчёты скрыты, для более читаемого
+             просмотра предложенных тем» — их было 7 из 28, и каждый со стектрейсом в поле «Текст».
+             Галка снята при каждом открытии программы: «по умолчанию скрыты» — это про умолчание, а
+             не про запомненный выбор. Число рядом обязательно: без него «скрыты» читается как
+             «потерялись». -->
+        <CheckBox Grid.Row="3" x:Name="ShowAutoReportsCheck" Margin="0,0,0,8"
+                  Content="Показывать автоматические отчёты о сбоях"
+                  Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
+                  ToolTip="Отчёты, которые программа заводит сама при падении. Живые предложения и баги от людей видно и без них."/>
+
+        <DataGrid Grid.Row="4" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
                   VirtualizingPanel.ScrollUnit="Pixel"
                   IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
             <DataGrid.Columns>
@@ -69,7 +80,7 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal">
+        <StackPanel Grid.Row="5" Orientation="Horizontal">
             <Button Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"
                     ToolTip="Полный текст тикета и вложения — то же, что двойной клик по строке"/>
             <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"
