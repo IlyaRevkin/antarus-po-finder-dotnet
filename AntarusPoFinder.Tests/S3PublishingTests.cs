@@ -486,4 +486,69 @@ public class S3PublishingTests
 
         Assert.Contains("не задан", without.ToString());
     }
+
+    // ── Выкладка с потока интерфейса ─────────────────────────────────────────
+
+    /// <summary>Подставной хостинг, отвечающий ПО-НАСТОЯЩЕМУ асинхронно: продолжение после
+    /// <c>SendAsync</c> достаётся уже другому потоку. Обычный FakeStorage выше для этой проверки не
+    /// годится — он отвечает так быстро, что задача успевает завершиться синхронно, продолжение
+    /// никуда не ставится, и взаимная блокировка не воспроизводится.</summary>
+    private sealed class SlowStorage : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(20, cancellationToken).ConfigureAwait(false);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") };
+        }
+    }
+
+    /// <summary>Поток с очередью, которую НИКТО не разбирает, — так выглядит поток интерфейса WPF,
+    /// пока он стоит внутри синхронного вызова: диспетчер жив, но занят и сообщений не обрабатывает.</summary>
+    private sealed class NeverPumpedContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { /* очередь не разбирается */ }
+        public override void Send(SendOrPostCallback d, object? state) =>
+            throw new InvalidOperationException("сюда попадать не должны");
+    }
+
+    /// <summary>Выкладка, вызванная С ПОТОКА ИНТЕРФЕЙСА, обязана завершаться.
+    ///
+    /// Это регрессия на живую жалобу: «когда в модерации прошивки указываю инструкцию, всё зависает
+    /// и инструкция не публикуется». Сохранение модерации зовёт выкладку синхронно
+    /// (<see cref="IInstructionPublisher"/> — обычный метод, внутри GetAwaiter().GetResult()), и пока
+    /// в S3Client не было ConfigureAwait(false), продолжение после запроса вставало в очередь
+    /// диспетчера — а диспетчер в этот момент стоял на GetResult() и очередь не разбирал. Окно
+    /// замирало навсегда, файл на хостинг не уезжал, и на его место потом вставала заглушка.
+    ///
+    /// Проверка идёт на отдельном потоке с таким же «непрокачиваемым» контекстом: при возврате
+    /// поломки тест не зависнет, а честно упадёт по времени ожидания.</summary>
+    [Fact]
+    public void Publish_FromAUiLikeThread_DoesNotDeadlock()
+    {
+        using var first = new TempRoot();
+        var folder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
+        Directory.CreateDirectory(folder);
+        var file = Path.Combine(folder, "инструкция_2.1.pdf");
+        File.WriteAllText(file, new string('x', 64 * 1024));
+
+        var publisher = new InstructionPublisher(Settings(), new S3Client(new HttpClient(new SlowStorage())));
+        var warnings = new List<string>();
+        string? url = null;
+        var finished = new ManualResetEventSlim(false);
+
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new NeverPumpedContext());
+            try { url = publisher.Publish(file, file, first.Path, warnings); }
+            finally { finished.Set(); }
+        }) { IsBackground = true };
+        thread.Start();
+
+        Assert.True(finished.Wait(TimeSpan.FromSeconds(30)),
+            "выкладка не вернулась — в S3Client снова потерян ConfigureAwait(false), " +
+            "и сохранение модерации будет вешать окно намертво");
+        Assert.Equal("https://fs.elitacompany.ru/PO/PZH/SMH5/Instrukciya/instrukciya_2.1.pdf", url);
+        Assert.Empty(warnings);
+    }
 }

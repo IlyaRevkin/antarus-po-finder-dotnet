@@ -17,7 +17,21 @@ namespace AntarusPoFinder.Core.Services;
 /// Адресация ПУТЁМ (<c>https://s3.twcstorage.ru/amperus/ключ</c>), а не поддоменом
 /// (<c>https://amperus.s3.twcstorage.ru/ключ</c>): второй способ требует, чтобы у хостинга был
 /// сертификат на поддомен с именем бакета, — у части провайдеров его нет, и тогда запрос падает
-/// на проверке сертификата ещё до всякой подписи. Путь работает у всех.</summary>
+/// на проверке сертификата ещё до всякой подписи. Путь работает у всех.
+///
+/// <b>⚠️ КАЖДЫЙ await здесь обязан быть с <c>ConfigureAwait(false)</c>. Это не стилистика, а условие
+/// работоспособности программы.</b> Выкладка снаружи выглядит синхронной
+/// (<see cref="IInstructionPublisher"/> — обычный метод, внутри <c>GetAwaiter().GetResult()</c>), и
+/// зовут её в том числе с потока интерфейса — например, при сохранении модерации прошивки. Без
+/// <c>ConfigureAwait(false)</c> продолжение после <c>SendAsync</c> ставится в очередь диспетчера WPF,
+/// а диспетчер в этот момент СТОИТ на <c>GetResult()</c> и эту очередь не разбирает: классическая
+/// взаимная блокировка «синхронно поверх асинхронного». Наблюдалось ровно так, как и должно было:
+/// «когда в модерации прошивки указываю инструкцию, всё зависает и инструкция не публикуется» —
+/// окно замирало навсегда, файл на хостинг не уезжал, а следом за версией без инструкции на её
+/// место вставала заглушка и уезжала на хостинг ПОД ИМЕНЕМ инструкции.
+///
+/// Контекст здесь не нужен ни одной строчке: класс не трогает ни визуалы, ни что-либо ещё,
+/// привязанное к потоку. Добавляя сюда новый запрос — добавляйте и <c>ConfigureAwait(false)</c>.</summary>
 public sealed class S3Client
 {
     private readonly HttpClient _http;
@@ -58,10 +72,10 @@ public sealed class S3Client
         if (!s.CanPublish) return Result.Fail("Хранилище на хостинге не настроено");
 
         byte[] content;
-        try { content = await File.ReadAllBytesAsync(filePath, ct); }
+        try { content = await File.ReadAllBytesAsync(filePath, ct).ConfigureAwait(false); }
         catch (Exception ex) { return Result.Fail($"не прочитать файл — {ex.Message}"); }
 
-        return await PutBytesAsync(s, key, content, ContentTypeFor(filePath), ct);
+        return await PutBytesAsync(s, key, content, ContentTypeFor(filePath), ct).ConfigureAwait(false);
     }
 
     /// <summary>То же самое для уже готового содержимого — им пользуются и выкладка файла выше, и
@@ -74,9 +88,9 @@ public sealed class S3Client
         try
         {
             var request = BuildRequest(s, HttpMethod.Put, key, content, contentType, DateTimeOffset.UtcNow);
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return Result.Fail(await DescribeFailureAsync(response, ct));
+                return Result.Fail(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return Result.Success(PublicUrl(s, key));
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -112,10 +126,10 @@ public sealed class S3Client
         try
         {
             var request = BuildRequest(s, HttpMethod.Head, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.NotFound) return Presence.Missing();
-            if (!response.IsSuccessStatusCode) return Presence.Unknown(await DescribeFailureAsync(response, ct));
+            if (!response.IsSuccessStatusCode) return Presence.Unknown(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return Presence.Found(response.Content.Headers.ContentLength);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -170,9 +184,9 @@ public sealed class S3Client
         try
         {
             var request = BuildRequest(s, HttpMethod.Get, "", Array.Empty<byte>(), null, DateTimeOffset.UtcNow, query);
-            using var response = await _http.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return ListPage.Fail(await DescribeFailureAsync(response, ct));
-            return ParseListing(await response.Content.ReadAsStringAsync(ct));
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return ListPage.Fail(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
+            return ParseListing(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -247,9 +261,9 @@ public sealed class S3Client
         try
         {
             var request = BuildRequest(s, HttpMethod.Delete, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
-                return Result.Fail(await DescribeFailureAsync(response, ct));
+                return Result.Fail(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return Result.Success(PublicUrl(s, key));
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -276,9 +290,9 @@ public sealed class S3Client
         {
             var request = BuildRequest(s, HttpMethod.Get, "", Array.Empty<byte>(), null,
                 DateTimeOffset.UtcNow, query: "list-type=2&max-keys=1");
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return Result.Fail(await DescribeFailureAsync(response, ct));
+                return Result.Fail(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return Result.Success(s.Endpoint.TrimEnd('/') + "/" + s.Bucket);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -396,7 +410,7 @@ public sealed class S3Client
     private static async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken ct)
     {
         var body = "";
-        try { body = await response.Content.ReadAsStringAsync(ct); }
+        try { body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false); }
         catch (Exception) { /* тело читать необязательно — код ответа уже есть */ }
 
         var code = Between(body, "<Code>", "</Code>");

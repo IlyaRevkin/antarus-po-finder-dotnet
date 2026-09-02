@@ -895,9 +895,17 @@ public partial class EditFirmwareDialog : Window
     private void PslFileBrowse_Click(object sender, RoutedEventArgs e) => _pslFilePicker.BrowseFile();
     private void PslFileClear_Click(object sender, RoutedEventArgs e) => _pslFilePicker.Clear();
 
-    private void ApplyAttachments()
+    /// <summary>Приложить выбранные файлы. Работа тут ДИСКОВАЯ И СЕТЕВАЯ: копирование на сетевую
+    /// шару, сборка PDF из docx (запуск Word или LibreOffice) и выкладка в хранилище на хостинге —
+    /// секунды в лучшем случае и минуты на тяжёлом скане по слабому каналу.
+    ///
+    /// Поэтому зовётся она с ФОНОВОГО потока (см. <see cref="Save_Click"/>), а не прямо из
+    /// обработчика кнопки. Отсюда и разделение: поля формы читаются на потоке интерфейса
+    /// (<see cref="BuildAttachmentsRequest"/>), а работа делается отдельно — трогать TextBox из
+    /// фонового потока нельзя.</summary>
+    private FirmwareAttachmentsRequest? BuildAttachmentsRequest()
     {
-        if (_names is null || _record.Id is null) return;
+        if (_names is null || _record.Id is null) return null;
         var request = new FirmwareAttachmentsRequest
         {
             RootPath = _services.Cfg.RootPath(),
@@ -915,6 +923,12 @@ public partial class EditFirmwareDialog : Window
             // .psl-поле только у Segnetics; у остальных оно скрыто и в запрос не идёт.
             PslFileSourcePath = PslFilePanel.Visibility == Visibility.Visible ? PslFileInput.Text.Trim() : null,
         };
+        return request;
+    }
+
+    private void ApplyAttachments(FirmwareAttachmentsRequest? request)
+    {
+        if (request is null) return;
         var result = FirmwareAttachmentsService.Apply(_db, _services.Hierarchy, _record, request,
             new Services.ShortcutCreator(), _services.StubWriter());
         if (result.Applied.Count > 0 || result.Warnings.Count > 0) AttachmentsResult = result;
@@ -948,7 +962,11 @@ public partial class EditFirmwareDialog : Window
         RefreshExecutableTexts();
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    /// <summary>async void здесь — обычный для WPF случай обработчика события: ждать сохранение
+    /// некому, а окно на время работы держится собственным индикатором занятости. Исключения из
+    /// ApplyAttachments наружу не выходят — сервис возвращает их предупреждениями (см.
+    /// FirmwareAttachmentsResult.Warnings), которые показывает ReportAttachments.</summary>
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
         // Сохранение модерации докладывает файлы В ПАПКУ ВЕРСИИ (вложения, заглушки, PDF на хостинг).
         // Пока туда же пишет сборка LFS или заливка, делать это нельзя — два писателя в одну папку.
@@ -964,7 +982,20 @@ public partial class EditFirmwareDialog : Window
         ResultLaunchTypes = _checks.Selected;
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
-        ApplyAttachments();
+        // Приложение файлов — единственный шаг сохранения, который ходит на сетевую шару и на
+        // хостинг, и потому единственный, который здесь уводится с потока интерфейса. Раньше он шёл
+        // прямо тут, и выкладка инструкции (синхронная поверх асинхронной, см. S3Client) вешала окно
+        // насмерть: «когда в модерации прошивки указываю инструкцию, всё зависает и инструкция не
+        // публикуется». Взаимную блокировку починил ConfigureAwait(false) в S3Client, но само
+        // ожидание никуда не делось — минуту неподвижного окна человек всё равно читает как
+        // зависание, поэтому оно идёт в фоне и под индикатором занятости.
+        var attachments = BuildAttachmentsRequest();
+        if (attachments is not null)
+        {
+            using (_host?.BeginBusy("Прикладываем файлы…"))
+                await Task.Run(() => ApplyAttachments(attachments));
+        }
+
         ApplyExtraFiles();
         ApplySubtypeLinks();
         // После ApplySubtypeLinks и после того, как ResultTags/ResultDescription уже посчитаны: базовые

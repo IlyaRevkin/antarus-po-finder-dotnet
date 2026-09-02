@@ -194,7 +194,7 @@ public static class FirmwareAttachmentsService
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
             () => SlotFolder(HierarchyFolders.Instructions), applied, warnings,
             copy: (src, folder) => InstructionStorage.Copy(src, folder, root, warnings, record.VersionRaw,
-                request.InstructionPublisher).StoredPath);
+                request.InstructionPublisher, stubs).StoredPath);
 
         // Ссылку на инструкцию убрали — папка снова остаётся без документа, и вместо пустоты в ней
         // должна лежать заглушка (см. InstructionStub). Ровно тот же случай, что и загрузка версии
@@ -320,6 +320,18 @@ public static class FirmwareAttachmentsService
             var stored = copy is null
                 ? FileSystemHelpers.CopyFileOrFolderShallow(requested, destFolder())
                 : copy(requested, destFolder());
+
+            // Пустой ответ на НЕПУСТУЮ просьбу — это неудача копирования, а не «ссылку убрали». Разница
+            // не косметическая: пустую строку вызывающий понимает как «документа больше нет» и кладёт
+            // на его место заглушку — то есть просьба «приложи вот эту инструкцию» заканчивалась бы
+            // страницей «инструкция в разработке» ПОД ИМЕНЕМ инструкции, да ещё и выложенной на
+            // хостинг. Ровно на это и жаловались: «инструкция есть, а туда почему-то заглушка улетела».
+            if (string.IsNullOrEmpty(stored))
+            {
+                warnings.Add($"{label}: файл не скопирован (источник пуст или недоступен) — {requested}");
+                return null;
+            }
+
             applied.Add(label);
             return stored;
         }

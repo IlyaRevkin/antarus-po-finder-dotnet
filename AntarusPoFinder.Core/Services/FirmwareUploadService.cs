@@ -609,19 +609,36 @@ public static class FirmwareUploadService
             try
             {
                 instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
-                    request.RootPath, warnings, plan.Version.Raw, request.InstructionPublisher).StoredPath;
+                    request.RootPath, warnings, plan.Version.Raw, request.InstructionPublisher, stubs).StoredPath;
             }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
         if (string.IsNullOrEmpty(instrStored))
         {
-            // Инструкции к версии нет — кладём заглушку, чтобы папка «Инструкция» не выглядела
-            // потерянной (см. InstructionStub). Имя у неё то же каноническое «инструкция_<версия>.pdf»,
-            // под которым потом ляжет настоящий документ, — наклейку с QR можно печатать и клеить уже
-            // сейчас. Настоящей инструкцией она не считается ни одним резолвером, поэтому «инструкция ✓»
-            // на карточке не загорится.
-            InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath,
-                plan.Version.Raw, stubs, warnings, request.InstructionPublisher);
+            // Инструкцию ПРОСИЛИ приложить, а она не легла (копирование упало, источник пуст) —
+            // заглушки здесь быть не должно. Имя у заглушки то же каноническое, что у документа, и
+            // она к тому же уезжает на хостинг: положи мы её сейчас, человек получил бы по QR
+            // «инструкция в разработке» вместо инструкции, которую только что прикладывал, а
+            // единственным следом неудачи осталась бы строчка в предупреждениях. Ровно так и вышло:
+            // «на SMH5 2.0 ПЖ инструкция есть, а туда почему-то заглушка улетела». Пусть папка
+            // останется пустой — это честное «не получилось», и предупреждение рядом объясняет, что
+            // именно.
+            if (!string.IsNullOrEmpty(request.InstructionsSourcePath))
+            {
+                warnings.Add("Инструкция не приложена — заглушку на её место не кладём, " +
+                             "иначе по ссылке с наклейки открывалась бы «инструкция в разработке». " +
+                             "Приложите документ ещё раз через «Редактировать».");
+            }
+            else
+            {
+                // Инструкции к версии нет и не просили — кладём заглушку, чтобы папка «Инструкция» не
+                // выглядела потерянной (см. InstructionStub). Имя у неё то же каноническое
+                // «инструкция_<версия>.pdf», под которым потом ляжет настоящий документ, — наклейку с QR
+                // можно печатать и клеить уже сейчас. Настоящей инструкцией она не считается ни одним
+                // резолвером, поэтому «инструкция ✓» на карточке не загорится.
+                InstructionStub.EnsureForVersion(plan.InstructionsFolder, request.RootPath,
+                    plan.Version.Raw, stubs, warnings, request.InstructionPublisher);
+            }
         }
         string modbusStored = "";
         if (!string.IsNullOrEmpty(request.ModbusMapSourcePath))
