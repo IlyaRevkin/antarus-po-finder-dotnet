@@ -268,11 +268,7 @@ public static class InstructionStub
     /// нет» значило бы вернуть ровно ту ложь, ради которой всё это заведено.</summary>
     public static string? ExistingIn(string? folder) => ExistingIn(folder, replacingOnly: true);
 
-    /// <summary>Страница-дополнение, лежащая в этой папке, или null.</summary>
-    public static string? ExistingNoteIn(string? folder) =>
-        EnumerateStubs(folder).FirstOrDefault(f => KindOf(f) == StubKind.ServiceNote);
-
-    private static string? ExistingIn(string? folder, bool replacingOnly) =>
+        private static string? ExistingIn(string? folder, bool replacingOnly) =>
         EnumerateStubs(folder).FirstOrDefault(f => !replacingOnly || KindOf(f)?.ReplacesInstruction() != false);
 
     private static IEnumerable<string> EnumerateStubs(string? folder)
@@ -409,8 +405,12 @@ public static class InstructionStub
         var hasReal = HasRealInstruction(folder);
         if (hasReal || PointsElsewhere(folder))
         {
-            RemoveFrom(folder, StubKind.InDevelopment, StubKind.NotPlanned);
-            if (hasReal) WriteNote(folder!, versionRaw, writer, warnings);
+            // Документ есть — заглушкам рядом с ним места нет НИ ОДНОЙ. Страница с обращением
+            // в сервис тоже не кладётся файлом: она ВШИВАЕТСЯ последней страницей в сам документ
+            // при выкладке на хостинг (см. ServicePageStitcher) — именно там её увидит заказчик, открыв QR.
+            // Файл-спутник рядом был бы виден только тому, кто смотрит папку на диске, и плодил бы сотни
+            // одинаковых файлов на сетевой шаре.
+            RemoveFrom(folder);
             return StubAction.None;
         }
 
@@ -431,25 +431,7 @@ public static class InstructionStub
         List<string>? warnings = null) =>
         Ensure(folder, versionRaw, writer, warnings) == StubAction.Created;
 
-    /// <summary>Страница-дополнение рядом с настоящим документом: «инструкция лежит рядом, но если
-    /// что-то непонятно или она устарела — вот телефон». Кладётся ТОЛЬКО когда в этой самой папке
-    /// лежит настоящий документ.
-    ///
-    /// Именно <see cref="HasRealInstruction"/>, а не <see cref="DocumentExists"/>: у папки с одним
-    /// лишь ярлыком-пережитком документ живёт в другом месте, и «инструкция лежит рядом» было бы
-    /// неправдой — а рядом с ярлыком появился бы файл, которого там сроду не было.</summary>
-    public static StubAction EnsureNoteIn(string? folder, string? versionRaw, IInstructionStubWriter? writer,
-        List<string>? warnings = null)
-    {
-        if (string.IsNullOrWhiteSpace(folder) || !HasRealInstruction(folder)) return StubAction.None;
-        return WriteNote(folder!, versionRaw, writer, warnings);
-    }
-
-    private static StubAction WriteNote(string folder, string? versionRaw, IInstructionStubWriter? writer,
-        List<string>? warnings) =>
-        WriteStub(Path.Combine(folder, NoteFileName), StubKind.ServiceNote, versionRaw, writer, warnings);
-
-    /// <summary>Одна-на-всех страница «инструкции не будет» в корне диска. Возвращает, что с ней
+/// <summary>Одна-на-всех страница «инструкции не будет» в корне диска. Возвращает, что с ней
     /// сделали; выкладывает на хостинг, если выкладчик задан (адрес постоянный, наклейки на
     /// рациональные шкафы ведут именно на него).</summary>
     public static StubAction EnsureShared(string? root, IInstructionStubWriter? writer,

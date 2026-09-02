@@ -562,6 +562,19 @@ public partial class Database : IDisposable
                  change_type TEXT NOT NULL DEFAULT '',
                  description TEXT NOT NULL DEFAULT ''
              );
+
+             -- История уведомлений (колокольчик в строке состояния) — см. Database.Notifications.cs.
+             -- Раньше жила только в памяти и умирала вместе с процессом; тикет требует её сохранять.
+             -- Machine-local: в общий конфиг не уезжает и с других машин не приезжает — уведомление
+             -- описывает то, что случилось на ЭТОМ компьютере.
+             CREATE TABLE IF NOT EXISTS notifications (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 text       TEXT    NOT NULL,
+                 category   TEXT    NOT NULL DEFAULT 'General',
+                 created_at TEXT    NOT NULL DEFAULT '',
+                 repeats    INTEGER NOT NULL DEFAULT 1,
+                 is_read    INTEGER NOT NULL DEFAULT 0
+             );
              """);
 
         // Порядок важен: EnsureColumnsExist сначала — индексы строятся по колонкам, которых на старой

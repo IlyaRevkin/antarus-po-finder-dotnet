@@ -10,6 +10,17 @@
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="SharpCompress" Version="0.50.0" />
+    <!-- Дописать страницу в готовый PDF инструкции (см. ServicePageStitcher). Свой SimplePdfWriter
+         умеет ровно одно — завернуть JPEG в новый документ, а тут нужно править ЧУЖОЙ готовый PDF.
+         PDFsharp выбран по трём условиям, которые здесь важнее удобства:
+           * лицензия MIT — коммерческое использование без оговорок (у iText — AGPL, у QuestPDF —
+             ограничение по выручке, оба не годятся);
+           * НИ ОДНОГО нативного бинарника (в пакете нет runtimes/) — приложение собирается
+             одним самодостаточным файлом, и нативная зависимость это ломает;
+           * полтора мегабайта управляемых сборок — приемлемо.
+         Шрифты ему не нужны: мы не рисуем текст, а ПЕРЕНОСИМ готовую страницу из одного
+         документа в другой — именно поэтому не нужен и резолвер шрифтов. -->
+    <PackageReference Include="PdfSharp" Version="6.1.1" />
     <!-- Кодовые страницы 1251/866: в .NET Core их нет в коробке (только UTF-*/ASCII/Latin1), а
          текстовые файлы параметров ПЧ приходят и в той, и в другой — см. TextFileEncoding. -->
     <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />

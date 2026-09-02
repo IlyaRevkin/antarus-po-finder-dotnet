@@ -1,30 +1,58 @@
 using AntarusPoFinder.Core.Domain;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AntarusPoFinder.App.ViewModels;
 
-/// <summary>One entry in the notification history — every ShowStatus() call and every banner
-/// (update/firmware-update/config-sync) appearance gets recorded here so a message that only
-/// flashed on screen for a few seconds is still findable afterwards. Reopen lets a banner-backed
-/// entry re-show its interactive banner (e.g. "Обновить сейчас") instead of just restating text.
-/// Category is carried per-entry (Round 43 — previously entries had no category of their own, so
-/// the history list couldn't show what kind of notification each row was, only the Настройки →
-/// Уведомления panel elsewhere knew about categories at all).</summary>
-public record NotificationEntry(string Text, DateTime When, NotificationCategory Category, Action? Reopen = null)
+/// <summary>Одна строка в окне истории уведомлений — надстройка над <see cref="StoredNotification"/>
+/// (то, что лежит в базе) с тем, что в базу не кладётся: действием «Показать».
+///
+/// Сюда попадает каждый вызов ShowStatus() и каждое появление баннера (обновление приложения,
+/// обновление прошивок, синхронизация конфига), так что сообщение, мигнувшее в строке состояния на
+/// четыре секунды, потом всё равно можно найти.
+///
+/// ⚠️ Это НЕ record, хотя им было. Признак «прочитано» и счётчик повторов теперь меняются у живого
+/// объекта и обязаны доходить до уже нарисованной строки списка: у record'а «пометить прочитанным»
+/// означало замену элемента коллекции целиком, из-за чего ListBox пересоздавал контейнер строки —
+/// а именно контейнер и сообщает, что строку показали. Получалась петля «показали → заменили →
+/// показали».</summary>
+public partial class NotificationEntry : ObservableObject
 {
-    public string WhenLabel => When.ToString("HH:mm:ss");
-    public bool CanReopen => Reopen is not null;
-    public string CategoryLabel => NotificationCategoryInfo.Label(Category);
+    public NotificationEntry(StoredNotification stored, Action? reopen = null, bool reopenIsModal = false)
+    {
+        Id = stored.Id;
+        Text = stored.Text;
+        Category = stored.Category;
+        _when = stored.When;
+        _repeats = stored.Repeats;
+        _isRead = stored.IsRead;
+        _reopen = reopen;
+        ReopenIsModal = reopenIsModal;
+    }
 
-    /// <summary>Сколько раз пришло ровно это же сообщение. Повторы не заводят новую строку, а
-    /// поднимают эту наверх и увеличивают счётчик — иначе одна залипшая фоновая ошибка (падающий на
-    /// каждом тике приём конфига) за рабочий день превращала историю в несколько сотен одинаковых
-    /// строк, среди которых уже не найти ничего другого. Ровно эта жалоба и была: «за рабочий день
-    /// под 500 уведомлений».</summary>
-    public int Repeats { get; init; } = 1;
+    /// <summary>id строки в таблице notifications — по нему уведомление помечается прочитанным и
+    /// удаляется поштучно.</summary>
+    public long Id { get; }
 
-    /// <summary>Текст для списка: у повторов — со счётчиком, чтобы «случилось один раз» и
-    /// «повторяется каждую минуту» различались с одного взгляда.</summary>
-    public string DisplayText => Repeats > 1 ? $"{Text}  ×{Repeats}" : Text;
+    public string Text { get; }
+
+    public NotificationCategory Category { get; }
+
+    /// <summary>Действие «Показать»: вернуть тот самый баннер («Обновить сейчас») или открыть окно
+    /// подробностей, вместо того чтобы просто пересказать текст.
+    ///
+    /// ⚠️ В базе не хранится и храниться не может — это делегат на живые объекты приложения. У
+    /// записей, поднятых из базы после перезапуска, его нет, и кнопка «Показать» у них не
+    /// показывается. Сам текст уведомления при этом на месте — а он и есть главное.</summary>
+    private Action? _reopen;
+
+    public Action? Reopen
+    {
+        get => _reopen;
+        set
+        {
+            if (SetProperty(ref _reopen, value)) OnPropertyChanged(nameof(CanReopen));
+        }
+    }
 
     /// <summary>Reopen открывает МОДАЛЬНОЕ окно подробностей поверх (напр. «Что нового»), а не
     /// баннер-призыв на главном окне. Тогда окно истории уведомлений закрывать НЕ надо: подробности
@@ -33,20 +61,68 @@ public record NotificationEntry(string Text, DateTime When, NotificationCategory
     /// приходится открывать заново, чтобы прочитать остальные»). Для баннер-reopen (UpdateBannerVisible
     /// и т.п.) флаг остаётся false: баннер рисуется на главном окне, за модальным окном истории его не
     /// видно, поэтому его как раз надо закрыть — прежнее поведение.</summary>
-    public bool ReopenIsModal { get; init; }
+    public bool ReopenIsModal { get; set; }
 
-    /// <summary>Оператор уже видел это уведомление в окне истории. Такие записи по умолчанию не
-    /// показываются — их видно по кнопке «Показать прочитанные».
+    private DateTime _when;
+
+    /// <summary>Время последнего появления. У повтора обновляется — запись поднимается наверх.</summary>
+    public DateTime When
+    {
+        get => _when;
+        set
+        {
+            if (SetProperty(ref _when, value)) OnPropertyChanged(nameof(WhenLabel));
+        }
+    }
+
+    /// <summary>Дата в подписи появилась вместе с сохранением истории: пока она жила в памяти одного
+    /// запуска, «11:36:50» однозначно означало «сегодня». Теперь в списке лежат и позавчерашние
+    /// записи, и одно время суток без даты вводит в заблуждение. Сегодняшние остаются короткими —
+    /// иначе узкая колонка слева заполнится датами, одинаковыми у всего списка.</summary>
+    public string WhenLabel => When.Date == DateTime.Today
+        ? When.ToString("HH:mm:ss")
+        : When.ToString("dd.MM HH:mm");
+
+    public bool CanReopen => Reopen is not null;
+
+    public string CategoryLabel => NotificationCategoryInfo.Label(Category);
+
+    private int _repeats;
+
+    /// <summary>Сколько раз пришло ровно это же сообщение. Повторы не заводят новую строку, а
+    /// поднимают эту наверх и увеличивают счётчик — иначе одна залипшая фоновая ошибка (падающий на
+    /// каждом тике приём конфига) за рабочий день превращала историю в несколько сотен одинаковых
+    /// строк, среди которых уже не найти ничего другого. Ровно эта жалоба и была: «за рабочий день
+    /// под 500 уведомлений».</summary>
+    public int Repeats
+    {
+        get => _repeats;
+        set
+        {
+            if (SetProperty(ref _repeats, value)) OnPropertyChanged(nameof(DisplayText));
+        }
+    }
+
+    /// <summary>Текст для списка: у повторов — со счётчиком, чтобы «случилось один раз» и
+    /// «повторяется каждую минуту» различались с одного взгляда.</summary>
+    public string DisplayText => Repeats > 1 ? $"{Text}  ×{Repeats}" : Text;
+
+    private bool _isRead;
+
+    /// <summary>Оператор уже видел это уведомление в окне истории.
     ///
-    /// Тикет коллеги: «авто скрытие уведомления после его просмотра». История не удалялась никогда,
-    /// кроме кнопки «Очистить» и обрезки по лимиту в 100 строк, — поэтому открыв её на второй день,
-    /// человек снова разбирал вчерашнее, чтобы найти сегодняшнее. Счётчик на кнопке этого не решал:
-    /// он гас в момент ОТКРЫТИЯ окна, независимо от того, дочитал ли оператор список.
+    /// ⚠️ Прочитанные БОЛЬШЕ НЕ ПРЯЧУТСЯ. Раньше окно при закрытии метило прочитанным ВЕСЬ список, а
+    /// список по умолчанию показывал только непрочитанное, — и второе открытие колокольчика давало
+    /// пустое окно. Это и есть жалоба «практически всегда уведомления остаются пустыми»
+    /// (воспроизведено живым прогоном scratchpad/live/notifications_run.py: при первом открытии две
+    /// записи, при втором — ноль). Теперь признак решает ровно одно: считать ли уведомление в
+    /// счётчике на колокольчике. Убирает записи из списка только человек — кнопкой удаления.
     ///
-    /// Записи именно скрываются, а не удаляются: уведомление — единственный след события, которое
-    /// нигде больше не записано, и молча стирать его через несколько секунд после показа нельзя.
-    ///
-    /// Повтор снимает признак (см. NotificationHistoryOps.CollapseRepeat): ошибка, случившаяся
-    /// снова, — это новая информация, и залипать в «прочитанном» она не должна.</summary>
-    public bool IsRead { get; init; }
+    /// Повтор снимает признак (см. Database.SaveNotification): ошибка, случившаяся снова, — это
+    /// новая информация.</summary>
+    public bool IsRead
+    {
+        get => _isRead;
+        set => SetProperty(ref _isRead, value);
+    }
 }

@@ -691,10 +691,7 @@ public static class DiskCleanupScanner
         // Настоящая инструкция едет под каноническим именем, а его в папке уже занимает заглушка
         // «Инструкция в разработке» — она уходит первой, иначе документу под это имя не встать
         // (тот же порядок, что и в DiskLayoutMigrator.RenameInstructionsIn).
-        // Только заглушки-«вместо»: страница-дополнение «если остались вопросы» лежит РЯДОМ с
-        // документом и канонического имени не занимает — сносить её незачем (см. StubKind).
-        if (LooksLikeInstruction(f.Path))
-            InstructionStub.RemoveFrom(targetDir, StubKind.InDevelopment, StubKind.NotPlanned);
+        if (LooksLikeInstruction(f.Path)) InstructionStub.RemoveFrom(targetDir);
 
         if (File.Exists(f.Target)) return false;
         File.Move(f.Path, f.Target);

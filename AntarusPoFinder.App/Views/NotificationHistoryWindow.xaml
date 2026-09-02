@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
-        Title="Уведомления" Width="480" Height="640"
+        Title="Уведомления" Width="620" Height="640"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource BgBrush}">
     <Window.Resources>
         <!-- Чередование фона строк — жалоба на плохую читаемость длинных уведомлений: без визуального
@@ -51,6 +51,38 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Метка «ещё не прочитано»: точка акцентным цветом у левого края строки. Гаснет, когда
+             запись помечена прочитанной, — то есть прямо на глазах, пока человек её читает.
+             Прочитанные записи из списка при этом НЕ пропадают (см. NotificationEntry.IsRead):
+             именно их исчезновение и делало окно пустым при втором открытии. -->
+        <Style x:Key="UnreadDotStyle" TargetType="Border">
+            <Setter Property="Width" Value="7"/>
+            <Setter Property="Height" Value="7"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,7,0"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsRead}" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Непрочитанное — полужирным. Отдельно от точки: цвет виден плохо у тех, кто его не
+             различает, а начертание читается всегда. -->
+        <Style x:Key="NotificationTextStyle" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsRead}" Value="True">
+                    <Setter Property="FontWeight" Value="Normal"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -68,7 +100,7 @@
              ширине не конкурирует, а кнопки — строкой ниже, прижаты вправо. -->
         <StackPanel Grid.Row="0" Margin="0,0,0,8">
             <TextBlock Text="История уведомлений" Style="{StaticResource TitleText}" Margin="0,0,0,4" TextWrapping="Wrap"/>
-            <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся."
+            <TextBlock Text="Всё, что показывалось в статус-баре или баннером сверху — включая уже скрывшееся. Хранится между запусками программы."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
         </StackPanel>
 
@@ -78,14 +110,18 @@
              time it opened), crowding the one thing the window is mostly opened for: reading the
              history. -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
-            <!-- Прочитанные по умолчанию скрыты (см. NotificationEntry.IsRead) — кнопка появляется,
-                 только когда им есть что показать, иначе она была бы вечной пустой заглушкой. -->
-            <Button x:Name="ShowReadToggle" Style="{StaticResource SecondaryButton}"
-                    Margin="0,0,8,0" Visibility="Collapsed" Click="ShowReadToggle_Click"/>
+            <!-- Отбор «только новые» — разовый жест на одно открытие окна, а не настройка. По
+                 умолчанию выключен: список обязан показывать ВСЁ, что в нём есть. -->
+            <Button x:Name="OnlyUnreadToggle" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="OnlyUnreadToggle_Click"
+                    ToolTip="Показать только уведомления, которых вы ещё не видели"/>
+            <Button x:Name="MarkAllReadBtn" Content="Всё прочитано" Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0" Click="MarkAllRead_Click"
+                    ToolTip="Погасить счётчик на колокольчике целиком, не перечитывая список"/>
             <Button x:Name="CategorySettingsToggle" Content="⚙ Настройки" Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0" Click="CategorySettingsToggle_Click"/>
-            <Button Content="Очистить уведомления" Style="{StaticResource SecondaryButton}"
-                    Click="ClearAll_Click"/>
+            <Button Content="Очистить" Style="{StaticResource SecondaryButton}"
+                    Click="ClearAll_Click" ToolTip="Удалить всю историю уведомлений"/>
         </StackPanel>
 
         <Border Grid.Row="2" x:Name="CategorySettingsPanel" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Visibility="Collapsed">
@@ -106,98 +142,110 @@
             </StackPanel>
         </Border>
 
-        <!-- Скролл списка. Проверено: вложенных конфликтующих ScrollViewer здесь нет — ItemsControl-
-             стиль в Styles.xaml оборачивает ItemsPresenter РОВНО в один ScrollViewer, и внутрь записи
-             (DataTemplate ниже) сознательно не добавлен свой ScrollViewer — вложенный ScrollViewer
-             внутри строки внутри ScrollViewer списка это классическая причина «скролл дёргается/не
-             прокручивает то, что нужно», а не решение проблемы. Сама «плохая прокрутка» длинных записей
-             была не про верстку, а про единицу прокрутки: ListBox по умолчанию виртуализируется с
-             ScrollViewer.CanContentScroll=True, т.е. колесо мыши и полоса прокрутки двигают список НА
-             ЦЕЛЫЙ ЭЛЕМЕНТ за раз (VirtualizingStackPanel, item-based scrolling). Пока записи короткие и
-             примерно одной высоты, это незаметно, а как только среди них попадается запись с длинным
-             текстом на 10+ строк, один «тик» колеса мыши либо не двигает список вовсе, либо прыгает
-             через всю эту огромную запись целиком — из-за этого скролл и ощущался «сломанным» на длинных
-             уведомлениях. VirtualizingPanel.ScrollUnit="Pixel" переключает на попиксельную прокрутку
-             (виртуализация при этом остаётся — элементы вне видимой области всё так же не создаются),
-             и колесо мыши/полоса прокрутки двигают список плавно независимо от того, насколько высокая
-             конкретная запись. -->
-        <ListBox Grid.Row="3" x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent"
-                 ItemContainerStyle="{StaticResource NotificationRowItem}"
-                 VirtualizingPanel.ScrollUnit="Pixel" AlternationCount="2">
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <!-- Padding увеличен (было 0,8) — жалоба была и на читаемость: у длинной
-                         многострочной записи 8px сверху/снизу почти не отделяли её от соседних записей,
-                         из-за чего плотный текст сливался в одну "стену". Style — чередующийся фон (см.
-                         NotificationRowBorderStyle выше), BorderThickness/BorderBrush — как и раньше,
-                         тонкая линия-разделитель поверх чередующегося фона (задаются локально, поверх
-                         Style, а не в нём самом — это обычные локальные значения на элементе). -->
-                    <Border Style="{StaticResource NotificationRowBorderStyle}" Padding="8,12"
-                            BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}">
-                        <!-- DockPanel вместо Grid с колонками Auto/Auto/*/Auto — реальная причина
-                             наезда текста на кнопку была не в отсутствии обрезки (ClipToBounds
-                             это не лечит), а в самой раскладке: внутри виртуализированного ListBox
-                             звёздная колонка Grid с TextWrapping-содержимым может получить неверно
-                             посчитанную ширину (известная особенность двухпроходного алгоритма
-                             звёздных колонок Grid — TextBlock меряется по одной ширине, а
-                             отрисовывается по другой), и тогда его граница на самом деле заезжает
-                             в соседнюю Auto-колонку с кнопкой. ClipToBounds обрезает элемент по
-                             ЕГО ЖЕ (уже неверно широким) границам — то есть ничего не спасает,
-                             если сама граница колонки посчитана неправильно, что и наблюдалось
-                             живьём. DockPanel считает ширины иначе: сначала «пристыкованные»
-                             элементы (время, бейдж — слева; кнопка — Dock="Right", т.е. её
-                             фиксированная по содержимому ширина «вычитается» из доступного места
-                             первой), и только потом весь остаток ширины отдаётся заполняющему
-                             (последнему, без Dock) элементу — тексту. Это один детерминированный
-                             проход без пересчётов, поэтому кнопка гарантированно получает свою
-                             ширину, а тексту физически не может достаться больше места, чем
-                             осталось — переносится он ДО кнопки, а не под неё. -->
-                        <DockPanel LastChildFill="True">
-                            <!-- Время и категория — компактной колонкой слева (жалоба: раньше они
-                                 занимали много места по горизонтали в ущерб самому тексту уведомления).
-                                 Мелкий шрифт, время над бейджем, минимальные отступы. -->
-                            <StackPanel DockPanel.Dock="Left" Margin="0,0,10,0" VerticalAlignment="Center" Width="112">
-                                <TextBlock Text="{Binding WhenLabel}" Style="{StaticResource MutedText}" FontSize="11"
-                                           TextTrimming="CharacterEllipsis"/>
-                                <!-- Category badge — clickable, opens the per-category settings panel above
-                                     (item 9: "no way to configure per-category behavior directly from a
-                                     notification"). Not just decorative text: this is the reachable path
-                                     from a notification row to its category's on/off and unread-count switches. -->
-                                <!-- Длинные категории («Прошивки и параметры», «Синхронизация и сетевой
-                                     диск») в 112px одной строкой не помещаются. Раньше они обрезались
-                                     многоточием — и выглядело это как поломка: «Синхронизация и се…»
-                                     ничего не сообщает. Переносим на вторую строку: колонка узкая, и
-                                     лишняя строка ей ничего не стоит, а название читается целиком.
+        <Grid Grid.Row="3">
+            <!-- Скролл списка. Проверено: вложенных конфликтующих ScrollViewer здесь нет — ItemsControl-
+                 стиль в Styles.xaml оборачивает ItemsPresenter РОВНО в один ScrollViewer, и внутрь записи
+                 (DataTemplate ниже) сознательно не добавлен свой ScrollViewer — вложенный ScrollViewer
+                 внутри строки внутри ScrollViewer списка это классическая причина «скролл дёргается/не
+                 прокручивает то, что нужно», а не решение проблемы. Сама «плохая прокрутка» длинных записей
+                 была не про верстку, а про единицу прокрутки: ListBox по умолчанию виртуализируется с
+                 ScrollViewer.CanContentScroll=True, т.е. колесо мыши и полоса прокрутки двигают список НА
+                 ЦЕЛЫЙ ЭЛЕМЕНТ за раз (VirtualizingStackPanel, item-based scrolling). Пока записи короткие и
+                 примерно одной высоты, это незаметно, а как только среди них попадается запись с длинным
+                 текстом на 10+ строк, один «тик» колеса мыши либо не двигает список вовсе, либо прыгает
+                 через всю эту огромную запись целиком — из-за этого скролл и ощущался «сломанным» на длинных
+                 уведомлениях. VirtualizingPanel.ScrollUnit="Pixel" переключает на попиксельную прокрутку
+                 (виртуализация при этом остаётся — элементы вне видимой области всё так же не создаются),
+                 и колесо мыши/полоса прокрутки двигают список плавно независимо от того, насколько высокая
+                 конкретная запись.
 
-                                     Бейдж больше НЕ КЛИКАЕТСЯ. Он открывал панель настроек категорий,
-                                     и это удивляло: человек жмёт на подпись у сообщения, а ему выезжают
-                                     настройки. Путь к ним остался один и очевидный — кнопка
-                                     «⚙ Настройки» сверху. -->
-                                <Border Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="5,1" Margin="0,3,0,0"
-                                        HorizontalAlignment="Left">
-                                    <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="10"
-                                               TextWrapping="Wrap" LineHeight="12" LineStackingStrategy="BlockLineHeight"/>
-                                </Border>
-                            </StackPanel>
-                            <!-- Кнопка пристыкована справа (DockPanel.Dock="Right") — своя,
-                                 фиксированная по содержимому ширина, всегда у правого края строки;
-                                 её место вычитается из доступной ширины ДО того, как текст ниже
-                                 получает свой остаток, так что она физически не может оказаться
-                                 под текстом или наоборот. -->
-                            <Button DockPanel.Dock="Right" Content="Показать" Style="{StaticResource SecondaryButton}"
-                                    VerticalAlignment="Center"
-                                    Visibility="{Binding CanReopen, Converter={StaticResource BoolToVis}}" Click="Reopen_Click"/>
-                            <!-- Заполняющий элемент (последний, без Dock) — вся оставшаяся ширина
-                                 строки. Правый отступ — небольшой зазор перед кнопкой, чтобы перенос
-                                 срабатывал чуть раньше её левого края, а не впритык. ClipToBounds
-                                 оставлен как страховка на редкий экстремальный случай (сама
-                                 раскладка теперь корректна и без неё), но в норме уже не требуется. -->
-                            <TextBlock Text="{Binding DisplayText}" TextWrapping="Wrap" Margin="0,0,10,0" VerticalAlignment="Center"
-                                       ClipToBounds="True" Foreground="{DynamicResource TextBrush}"/>
-                        </DockPanel>
-                    </Border>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+                 ⚠️ Виртуализация здесь ещё и НЕСЁТ СМЫСЛ: «прочитано» ставится в момент, когда строка
+                 реально построена (NotificationRow_Loaded), то есть попала человеку на глаза. Выключите
+                 виртуализацию — и открытие окна разом пометит прочитанной всю историю, вернув ровно ту
+                 беду, из-за которой счётчик гас сам собой. -->
+            <ListBox x:Name="ListBoxHistory" BorderThickness="0" Background="Transparent"
+                     ItemContainerStyle="{StaticResource NotificationRowItem}"
+                     VirtualizingPanel.ScrollUnit="Pixel" AlternationCount="2">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <!-- Padding увеличен (было 0,8) — жалоба была и на читаемость: у длинной
+                             многострочной записи 8px сверху/снизу почти не отделяли её от соседних записей,
+                             из-за чего плотный текст сливался в одну "стену". Style — чередующийся фон (см.
+                             NotificationRowBorderStyle выше), BorderThickness/BorderBrush — как и раньше,
+                             тонкая линия-разделитель поверх чередующегося фона (задаются локально, поверх
+                             Style, а не в нём самом — это обычные локальные значения на элементе).
+
+                             Loaded — момент «строку показали»: только он и гасит запись в счётчике. -->
+                        <Border Style="{StaticResource NotificationRowBorderStyle}" Padding="8,12"
+                                BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderBrush2}"
+                                Loaded="NotificationRow_Loaded">
+                            <!-- DockPanel вместо Grid с колонками Auto/Auto/*/Auto — реальная причина
+                                 наезда текста на кнопку была не в отсутствии обрезки (ClipToBounds
+                                 это не лечит), а в самой раскладке: внутри виртуализированного ListBox
+                                 звёздная колонка Grid с TextWrapping-содержимым может получить неверно
+                                 посчитанную ширину (известная особенность двухпроходного алгоритма
+                                 звёздных колонок Grid — TextBlock меряется по одной ширине, а
+                                 отрисовывается по другой), и тогда его граница на самом деле заезжает
+                                 в соседнюю Auto-колонку с кнопкой. ClipToBounds обрезает элемент по
+                                 ЕГО ЖЕ (уже неверно широким) границам — то есть ничего не спасает,
+                                 если сама граница колонки посчитана неправильно, что и наблюдалось
+                                 живьём. DockPanel считает ширины иначе: сначала «пристыкованные»
+                                 элементы (время, бейдж — слева; кнопки — Dock="Right", т.е. их
+                                 фиксированная по содержимому ширина «вычитается» из доступного места
+                                 первой), и только потом весь остаток ширины отдаётся заполняющему
+                                 (последнему, без Dock) элементу — тексту. -->
+                            <DockPanel LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Style="{StaticResource UnreadDotStyle}"/>
+                                <!-- Время и категория — компактной колонкой слева (жалоба: раньше они
+                                     занимали много места по горизонтали в ущерб самому тексту уведомления).
+                                     Мелкий шрифт, время над бейджем, минимальные отступы. -->
+                                <StackPanel DockPanel.Dock="Left" Margin="0,0,10,0" VerticalAlignment="Center" Width="112">
+                                    <TextBlock Text="{Binding WhenLabel}" Style="{StaticResource MutedText}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <!-- Длинные категории («Прошивки и параметры», «Синхронизация и сетевой
+                                         диск») в 112px одной строкой не помещаются. Раньше они обрезались
+                                         многоточием — и выглядело это как поломка: «Синхронизация и се…»
+                                         ничего не сообщает. Переносим на вторую строку: колонка узкая, и
+                                         лишняя строка ей ничего не стоит, а название читается целиком.
+
+                                         Бейдж НЕ КЛИКАЕТСЯ. Он открывал панель настроек категорий,
+                                         и это удивляло: человек жмёт на подпись у сообщения, а ему выезжают
+                                         настройки. Путь к ним остался один и очевидный — кнопка
+                                         «⚙ Настройки» сверху. -->
+                                    <Border Background="{DynamicResource BgCardBrush}" CornerRadius="3" Padding="5,1" Margin="0,3,0,0"
+                                            HorizontalAlignment="Left">
+                                        <TextBlock Text="{Binding CategoryLabel}" Style="{StaticResource MutedText}" FontSize="10"
+                                                   TextWrapping="Wrap" LineHeight="12" LineStackingStrategy="BlockLineHeight"/>
+                                    </Border>
+                                </StackPanel>
+                                <!-- Удаление ПОШТУЧНО (тикет: «сделать возможность удалять каждое
+                                     уведомление поштучно»). Стоит правее всех: промахнуться по нему,
+                                     целясь в «Показать», сложнее, чем наоборот. -->
+                                <Button DockPanel.Dock="Right" Content="✕" Style="{StaticResource IconButton}"
+                                        Width="24" Height="24" Padding="0" Margin="6,0,0,0"
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="DeleteNotificationButton"
+                                        ToolTip="Удалить это уведомление" Click="DeleteOne_Click"/>
+                                <Button DockPanel.Dock="Right" Content="Показать" Style="{StaticResource SecondaryButton}"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding CanReopen, Converter={StaticResource BoolToVis}}" Click="Reopen_Click"/>
+                                <!-- Заполняющий элемент (последний, без Dock) — вся оставшаяся ширина
+                                     строки. Правый отступ — небольшой зазор перед кнопками, чтобы перенос
+                                     срабатывал чуть раньше их левого края, а не впритык. -->
+                                <TextBlock Text="{Binding DisplayText}" Style="{StaticResource NotificationTextStyle}"
+                                           Margin="0,0,10,0" ClipToBounds="True"/>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Пустой список обязан объяснять себя словами. Молчащее пустое окно — ровно то, на что
+                 жаловались («уведомления остаются пустыми»): по нему невозможно понять, ничего не
+                 случилось или программа потеряла историю. -->
+            <TextBlock x:Name="EmptyHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                       TextAlignment="Center" VerticalAlignment="Center" HorizontalAlignment="Center"
+                       Margin="24" Visibility="Collapsed"/>
+        </Grid>
     </Grid>
 </Window>

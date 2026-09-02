@@ -107,7 +107,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Задача 4 (приёмник) — «Поступили изменения (N): […]», см. ShowIncomingChangesBanner.</summary>
     [ObservableProperty] private bool _incomingChangesBannerVisible;
     [ObservableProperty] private string _incomingChangesBannerText = "";
-    [ObservableProperty] private int _unseenNotificationsCount;
+    // Счётчик уведомлений отдельным числом больше не хранится — он считается по самой истории, см.
+    // NotificationCenter.UnreadCount и привязку {Binding Notifications.UnreadCount} в MainWindow.xaml.
+    // Прежнее число расходилось с содержимым: оно обнулялось по факту ОТКРЫТИЯ окна истории.
     /// <summary>Сумма бейджей компактных пунктов (Тикеты/Сетевые диски), спрятанных в свёрнутой по
     /// умолчанию секции «ДОПОЛНИТЕЛЬНО». Всплывает на её заголовок, пока секция не раскрыта — иначе
     /// пришедший тикет ставит бейдж на пункт, которого на экране НЕТ, и оператор его не видит (ровно
@@ -162,9 +164,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
     public ObservableCollection<NavItem> NavItems { get; } = new();
     public ObservableCollection<QuickAppItem> QuickApps { get; } = new();
-    public ObservableCollection<NotificationEntry> NotificationHistory { get; } = new();
+    /// <summary>История уведомлений и счётчик к ней. Заводится в конструкторе — ей нужна база.</summary>
+    public NotificationCenter Notifications { get; private set; } = null!;
 
-    private const int NotificationHistoryLimit = 100;
+    public ObservableCollection<NotificationEntry> NotificationHistory => Notifications.History;
+
     private const int BannerAutoHideMs = 10000;
     /// <summary>Задача 3 — интервал fallback-опроса маркера ревизии, см. _revisionPollTimer.</summary>
     private static readonly TimeSpan RevisionPollInterval = TimeSpan.FromSeconds(75);
@@ -179,6 +183,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     public MainWindowViewModel(AppServices services)
     {
         _services = services;
+        Notifications = new NotificationCenter(services.Db, services.Cfg);
 
         foreach (var (pageId, label, section) in RolesConfig.NavItems)
             NavItems.Add(new NavItem(pageId, label, section));
@@ -613,19 +618,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Callers that raise a banner directly (app/firmware update) rather than going through
     /// ShowStatus must check IsNotificationCategoryEnabled themselves before calling this AND before
     /// setting their *BannerVisible flag — this only guards the history entry, not the banner.</summary>
-    private void AddNotification(string text, NotificationCategory category, Action? reopen = null, bool reopenIsModal = false)
-    {
-        // Повтор уже показанного сообщения не заводит новую строку — поднимает существующую наверх
-        // со счётчиком (см. NotificationHistoryOps.CollapseRepeat). UnseenNotificationsCount при
-        // этом не растёт: это не новая информация.
-        if (NotificationHistoryOps.CollapseRepeat(NotificationHistory, text, reopen, DateTime.Now)) return;
-
-        NotificationHistory.Insert(0, new NotificationEntry(text, DateTime.Now, category, reopen) { ReopenIsModal = reopenIsModal });
-        while (NotificationHistory.Count > NotificationHistoryLimit)
-            NotificationHistory.RemoveAt(NotificationHistory.Count - 1);
-        if (_services.Cfg.IsNotificationCategoryCountedUnread(category))
-            UnseenNotificationsCount++;
-    }
+    private void AddNotification(string text, NotificationCategory category, Action? reopen = null, bool reopenIsModal = false) =>
+        Notifications.Add(text, category, reopen, reopenIsModal);
 
     /// <summary>Interactive banners (update available, firmware update available) get 10 seconds
     /// before hiding themselves — long enough to read, short enough not to sit there forever if the
@@ -638,11 +632,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         timer.Start();
     }
 
+    /// <summary>⚠️ Счётчик здесь НЕ обнуляется. Раньше обнулялся — и это была ровно та жалоба, что
+    /// «из счётчика убирается не только прочитанное»: достаточно было нажать колокольчик и тут же
+    /// закрыть окно. Теперь каждая запись гасит себя сама в тот момент, когда её показали в списке
+    /// (NotificationHistoryWindow.NotificationRow_Loaded).</summary>
     [RelayCommand]
     private void ShowNotificationHistory()
     {
-        UnseenNotificationsCount = 0;
-        var win = new NotificationHistoryWindow(NotificationHistory, _services.Cfg) { Owner = Application.Current.MainWindow };
+        var win = new NotificationHistoryWindow(Notifications, _services.Cfg) { Owner = Application.Current.MainWindow };
         win.ShowDialog();
     }
 

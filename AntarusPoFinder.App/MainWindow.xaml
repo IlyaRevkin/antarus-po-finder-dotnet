@@ -730,8 +730,8 @@
                             Padding="3,0" MinWidth="12" Height="12"
                             HorizontalAlignment="Right" VerticalAlignment="Top"
                             Margin="0,-2,-4,0" IsHitTestVisible="False"
-                            Visibility="{Binding UnseenNotificationsCount, Converter={StaticResource CountToVis}}">
-                        <TextBlock Text="{Binding UnseenNotificationsCount}" FontSize="8" FontWeight="Bold"
+                            Visibility="{Binding Notifications.UnreadCount, Converter={StaticResource CountToVis}}">
+                        <TextBlock x:Name="NotificationsBadgeText" Text="{Binding Notifications.UnreadCount}" FontSize="8" FontWeight="Bold"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextOnAccentBrush}"/>
                     </Border>
