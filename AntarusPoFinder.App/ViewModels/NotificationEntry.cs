@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Domain;
+﻿using AntarusPoFinder.Core.Domain;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AntarusPoFinder.App.ViewModels;
@@ -15,7 +15,7 @@ namespace AntarusPoFinder.App.ViewModels;
 /// означало замену элемента коллекции целиком, из-за чего ListBox пересоздавал контейнер строки —
 /// а именно контейнер и сообщает, что строку показали. Получалась петля «показали → заменили →
 /// показали».</summary>
-public partial class NotificationEntry : ObservableObject
+public class NotificationEntry : ObservableObject
 {
     public NotificationEntry(StoredNotification stored, Action? reopen = null, bool reopenIsModal = false)
     {
@@ -38,14 +38,14 @@ public partial class NotificationEntry : ObservableObject
 
     public NotificationCategory Category { get; }
 
+    private Action? _reopen;
+
     /// <summary>Действие «Показать»: вернуть тот самый баннер («Обновить сейчас») или открыть окно
     /// подробностей, вместо того чтобы просто пересказать текст.
     ///
     /// ⚠️ В базе не хранится и храниться не может — это делегат на живые объекты приложения. У
     /// записей, поднятых из базы после перезапуска, его нет, и кнопка «Показать» у них не
     /// показывается. Сам текст уведомления при этом на месте — а он и есть главное.</summary>
-    private Action? _reopen;
-
     public Action? Reopen
     {
         get => _reopen;

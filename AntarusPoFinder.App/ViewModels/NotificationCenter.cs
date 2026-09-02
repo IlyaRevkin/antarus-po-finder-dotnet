@@ -28,7 +28,7 @@ namespace AntarusPoFinder.App.ViewModels;
 ///
 /// Потокобезопасности здесь нет и не задумано: зовётся только из потока интерфейса, как и прежний
 /// код в MainWindowViewModel.</summary>
-public partial class NotificationCenter : ObservableObject
+public class NotificationCenter : ObservableObject
 {
     /// <summary>Сколько уведомлений держим. Было 100 на память одного запуска; теперь история живёт
     /// между запусками, и на этом же числе она перестала бы доживать до конца недели. Верхнюю
