@@ -38,7 +38,7 @@ public class AppServices
     /// приложении. Забудь его подставить в одном из вызовов — и с той страницы docx молча перестанет
     /// выкладываться.</summary>
     public IInstructionPublisher? Publisher() =>
-        InstructionPublisher.For(Cfg.S3(), new Services.DocxToPdfConverter.Adapter());
+        InstructionPublisher.For(Cfg.S3(), new Services.DocxToPdfConverter.Adapter(), StubWriter());
 
     /// <summary>Кто убирает выложенное с хостинга (удаление инструкции). Тот же самый объект, что и
     /// <see cref="Publisher"/>: выкладка и снятие — две стороны одного клиента, и null у них означает

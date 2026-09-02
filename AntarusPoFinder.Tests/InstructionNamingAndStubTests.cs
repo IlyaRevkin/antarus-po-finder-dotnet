@@ -385,17 +385,12 @@ public class InstructionNamingAndStubTests : IDisposable
 
         HierarchyService.ApplyStructurePlan(plan, writer);
 
-        // Заглушки «вместо инструкции» тут быть не должно — документ уже лежит.
+        // Документ уже лежит — заглушке рядом с ним места нет НИ ОДНОЙ. Страница с обращением в
+        // сервис тоже не кладётся файлом: она вшивается в сам документ при выкладке на хостинг
+        // (см. ServicePageStitcher), а на диске рядом с инструкцией ничего лишнего не появляется.
         Assert.Null(InstructionStub.ExistingIn(folder));
         Assert.True(File.Exists(Path.Combine(folder, "уже лежит.pdf")), "документ не тронут");
-
-        // А вот страница-дополнение появляется РЯДОМ с ним — «если остались вопросы, звоните»
-        // (см. StubKind.ServiceNote). Она не документ и не заглушка-«вместо»: карточка по-прежнему
-        // показывает «инструкция ✓» по настоящему файлу, а QR ведёт на него же.
-        var note = Path.Combine(folder, InstructionStub.NoteFileName);
-        Assert.True(File.Exists(note));
-        Assert.True(DocFileResolver.IsNotADocument(note));
-        Assert.Equal(2, Directory.EnumerateFiles(folder).Count());
+        Assert.Single(Directory.EnumerateFiles(folder));
     }
 
     // ── Перестройка диска ────────────────────────────────────────────────────

@@ -51,6 +51,7 @@ public sealed class InstructionPublisher : IInstructionPublisher, IInstructionUn
     private readonly S3Settings _settings;
     private readonly S3Client _client;
     private readonly IDocumentToPdf? _pdf;
+    private readonly IInstructionStubWriter? _stubs;
 
     /// <summary>Сколько файлов из одной папки сканов выкладываем за раз — защита от того, чтобы
     /// случайно выбранная папка на тысячу файлов не превратила загрузку версии в получасовое
@@ -64,19 +65,25 @@ public sealed class InstructionPublisher : IInstructionPublisher, IInstructionUn
     /// и выкладывать наружу редактируемый документ незачем.</summary>
     private static readonly string[] WordExtensions = { ".docx", ".doc", ".rtf", ".odt" };
 
-    public InstructionPublisher(S3Settings settings, S3Client? client = null, IDocumentToPdf? pdf = null)
+    /// <param name="stubs">Чем рисовать страницу «обратитесь в сервис», которая вшивается последней
+    /// страницей в выкладываемый PDF инструкции (см. <see cref="ServicePageStitcher"/>). null —
+    /// выкладываем документ как есть: рисовать страницу Core сам не умеет, она собирается средствами WPF.</param>
+    public InstructionPublisher(S3Settings settings, S3Client? client = null, IDocumentToPdf? pdf = null,
+        IInstructionStubWriter? stubs = null)
     {
         _settings = settings;
         _client = client ?? new S3Client();
         _pdf = pdf;
+        _stubs = stubs;
     }
 
     /// <summary>Выкладчик по текущим настройкам — или null, если выкладывать некуда (ключи ещё не
     /// выданы, выкладка выключена, адрес не заполнен). Одно место, где принимается это решение:
     /// иначе каждый вызывающий проверял бы «настроено ли» по-своему, и рано или поздно один из них
     /// проверил бы не то. null здесь — штатное состояние, а не отсутствие возможности.</summary>
-    public static IInstructionPublisher? For(S3Settings settings, IDocumentToPdf? pdf = null) =>
-        settings.CanPublish ? new InstructionPublisher(settings, client: null, pdf) : null;
+    public static IInstructionPublisher? For(S3Settings settings, IDocumentToPdf? pdf = null,
+        IInstructionStubWriter? stubs = null) =>
+        settings.CanPublish ? new InstructionPublisher(settings, client: null, pdf, stubs) : null;
 
     /// <summary>Сколько страниц перечисления забираем, разбирая «папку» сканов перед её удалением.
     /// Столько же, сколько берёт обзор бакета: тысяча ключей на страницу, двадцать страниц — это
@@ -129,10 +136,52 @@ public sealed class InstructionPublisher : IInstructionPublisher, IInstructionUn
             if (converted is null) return null;
 
             using var temp = converted;
-            return Put(temp.Path, _settings.KeyFor(AsPublishedName(relative)), warnings);
+            return PutWithServicePage(temp.Path, _settings.KeyFor(AsPublishedName(relative)), warnings);
         }
 
-        return Put(filePath, _settings.KeyFor(relative), warnings);
+        return PutWithServicePage(filePath, _settings.KeyFor(relative), warnings);
+    }
+
+    /// <summary>Отправить документ, вшив в него последней страницей обращение в сервис.
+    ///
+    /// Сшивается ВРЕМЕННАЯ копия — оригинал на сетевой шаре остаётся ровно тем документом, который
+    /// туда положил человек. Отсюда же и главное свойство: страница не может накопиться от повторных
+    /// выкладок, потому что каждая начинается с чистого оригинала.
+    ///
+    /// Не вшивается в трёх случаях: рисовать нечем, это не PDF (скан картинкой) или это сама
+    /// заглушка — у неё телефон сервиса уже напечатан на единственной странице, и вторая такая же
+    /// выглядела бы поломкой.</summary>
+    private string? PutWithServicePage(string filePath, string key, List<string> warnings)
+    {
+        if (_stubs is null
+            || !string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase)
+            || InstructionStub.IsStub(filePath))
+            return Put(filePath, key, warnings);
+
+        var folder = Path.Combine(Path.GetTempPath(), "antarus-stitch-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(folder);
+
+            var page = Path.Combine(folder, "service.pdf");
+            _stubs.Write(page, StubKind.ServiceNote, InstructionNaming.VersionFromFileName(filePath));
+
+            var stitched = ServicePageStitcher.Append(filePath, page,
+                Path.Combine(folder, Path.GetFileName(filePath)),
+                _stubs.Layouts.Sane().Stamp(StubKind.ServiceNote), warnings);
+
+            return Put(stitched.Path, key, warnings);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"«{Path.GetFileName(filePath)}»: страницу с телефоном сервиса вшить не удалось "
+                         + $"({ex.Message}) — документ выложен без неё.");
+            return Put(filePath, key, warnings);
+        }
+        finally
+        {
+            TempPdf.Cleanup(folder);
+        }
     }
 
     /// <summary>Собственно отправка одного файла, с проверкой размера перед ней. Размер проверяется

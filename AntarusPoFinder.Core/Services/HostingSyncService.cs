@@ -276,7 +276,9 @@ public sealed class HostingSyncService
         IInstructionStubWriter? stubs = null)
     {
         var list = items.ToList();
-        var publisher = new InstructionPublisher(settings, _client, _pdf);
+        // Рисовальщик отдаётся и выкладчику: им он рисует страницу обращения в сервис, которая
+        // вшивается в выкладываемый PDF последней страницей (см. ServicePageStitcher).
+        var publisher = new InstructionPublisher(settings, _client, _pdf, stubs);
         var messages = new List<string>();
         int published = 0, skipped = 0, failed = 0, done = 0;
 

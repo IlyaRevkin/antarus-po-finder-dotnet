@@ -487,6 +487,114 @@ public class S3PublishingTests
         Assert.Contains("не задан", without.ToString());
     }
 
+    // ── Страница «обратитесь в сервис» внутри выложенного документа ──────────
+
+    /// <summary>Подставной хостинг, сохраняющий ТЕЛО запроса на диск: только так можно посмотреть, что
+    /// именно уехало наверх, — а весь смысл вшивания в том, каким документ оказался в бакете.</summary>
+    private sealed class BodyCapturingStorage : HttpMessageHandler
+    {
+        private readonly string _folder;
+        public List<string> Saved { get; } = new();
+
+        public BodyCapturingStorage(string folder) => _folder = folder;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var bytes = request.Content is null
+                ? Array.Empty<byte>()
+                : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            var path = Path.Combine(_folder, $"uploaded-{Saved.Count}.pdf");
+            File.WriteAllBytes(path, bytes);
+            Saved.Add(path);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") };
+        }
+    }
+
+    /// <summary>Рисовальщик страницы: отдаёт настоящий одностраничный PDF — сшивать пустышку нельзя.</summary>
+    private sealed class PdfPageWriter : IInstructionStubWriter
+    {
+        public void Write(string path, string text) => Write(path, StubKind.ServiceNote, null);
+
+        public void Write(string path, StubKind kind, string? versionRaw)
+        {
+            using var doc = new PdfSharp.Pdf.PdfDocument();
+            var page = doc.AddPage();
+            using (var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(page))
+                gfx.DrawRectangle(PdfSharp.Drawing.XBrushes.White, 0, 0, page.Width.Point, page.Height.Point);
+            doc.Save(path);
+        }
+    }
+
+    private static string MakePdf(string path, int pages)
+    {
+        using var doc = new PdfSharp.Pdf.PdfDocument();
+        for (var i = 0; i < pages; i++)
+        {
+            var page = doc.AddPage();
+            using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(page);
+            gfx.DrawRectangle(PdfSharp.Drawing.XBrushes.White, 0, 0, page.Width.Point, page.Height.Point);
+        }
+        doc.Save(path);
+        return path;
+    }
+
+    /// <summary>Выложенная инструкция приезжает в бакет со страницей сервиса в конце — и сколько раз
+    /// её ни перезаливай, страница остаётся ОДНА. Это и есть то, ради чего всё затевалось: заказчик
+    /// открывает по QR один файл, и телефон сервиса должен быть в нём же.</summary>
+    [Fact]
+    public void PublishedInstruction_CarriesTheServicePage_AndRepublishingDoesNotAddASecond()
+    {
+        using var first = new TempRoot();
+        var folder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
+        Directory.CreateDirectory(folder);
+        var doc = MakePdf(Path.Combine(folder, "инструкция_2.1.pdf"), 3);
+
+        var storage = new BodyCapturingStorage(first.Path);
+        var publisher = new InstructionPublisher(Settings(), new S3Client(new HttpClient(storage)),
+            pdf: null, stubs: new PdfPageWriter());
+        var warnings = new List<string>();
+
+        publisher.Publish(doc, doc, first.Path, warnings);
+        publisher.Publish(doc, doc, first.Path, warnings);
+
+        Assert.Empty(warnings);
+        Assert.Equal(2, storage.Saved.Count);
+        foreach (var uploaded in storage.Saved)
+        {
+            Assert.Equal(4, ServicePageStitcher.PageCount(uploaded));
+            Assert.Equal(1, ServicePageStitcher.CountStitchedPages(uploaded));
+        }
+
+        // Оригинал на диске не тронут — вшивание идёт во временную копию.
+        Assert.Equal(3, ServicePageStitcher.PageCount(doc));
+        Assert.Equal(0, ServicePageStitcher.CountStitchedPages(doc));
+    }
+
+    /// <summary>В саму заглушку страница сервиса не вшивается: телефон на ней уже напечатан, и вторая
+    /// такая же страница выглядела бы поломкой.</summary>
+    [Fact]
+    public void PublishedStub_DoesNotGetASecondServicePage()
+    {
+        using var first = new TempRoot();
+        var folder = Path.Combine(first.Path, "ПО", "ПЖ", "SMH5", "Инструкция");
+        Directory.CreateDirectory(folder);
+
+        var stub = InstructionStub.PathFor(folder, "2.1");
+        MakePdf(stub, 1);
+        File.AppendAllText(stub, "\n" + InstructionStub.Marker + " kind=dev stamp=abc\n");
+        Assert.True(InstructionStub.IsStub(stub));
+
+        var storage = new BodyCapturingStorage(first.Path);
+        var publisher = new InstructionPublisher(Settings(), new S3Client(new HttpClient(storage)),
+            pdf: null, stubs: new PdfPageWriter());
+
+        publisher.Publish(stub, stub, first.Path, new List<string>());
+
+        var uploaded = Assert.Single(storage.Saved);
+        Assert.Equal(0, ServicePageStitcher.CountStitchedPages(uploaded));
+    }
+
     // ── Выкладка с потока интерфейса ─────────────────────────────────────────
 
     /// <summary>Подставной хостинг, отвечающий ПО-НАСТОЯЩЕМУ асинхронно: продолжение после

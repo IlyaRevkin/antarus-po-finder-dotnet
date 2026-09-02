@@ -661,7 +661,7 @@ public partial class HostingView : UserControl
             // принадлежит ни одной версии), но лежать на хостинге обязана — иначе наклейки
             // рациональных шкафов ведут в пустоту. Заодно она тут же перерисуется, если макет правили.
             await Task.Run(() => InstructionStub.EnsureShared(root, stubs, null,
-                InstructionPublisher.For(settings, new Services.DocxToPdfConverter.Adapter())), ct);
+                InstructionPublisher.For(settings, new Services.DocxToPdfConverter.Adapter(), stubs)), ct);
 
             foreach (var message in result.Messages) AppendLog(message);
 

@@ -194,7 +194,7 @@ public static class FirmwareAttachmentsService
         string? instr = Resolve("Инструкция", request.InstructionsSourcePath, record.InstructionsPath,
             () => SlotFolder(HierarchyFolders.Instructions), applied, warnings,
             copy: (src, folder) => InstructionStorage.Copy(src, folder, root, warnings, record.VersionRaw,
-                request.InstructionPublisher, stubs).StoredPath);
+                request.InstructionPublisher).StoredPath);
 
         // Ссылку на инструкцию убрали — папка снова остаётся без документа, и вместо пустоты в ней
         // должна лежать заглушка (см. InstructionStub). Ровно тот же случай, что и загрузка версии

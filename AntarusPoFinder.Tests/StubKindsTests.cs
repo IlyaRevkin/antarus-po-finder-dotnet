@@ -154,10 +154,11 @@ public class StubKindsTests : IDisposable
 
     // ── Три вида ─────────────────────────────────────────────────────────────
 
-    /// <summary>Рядом с настоящей инструкцией появляется страница-дополнение — ВМЕСТЕ с документом, а
-    /// не вместо него, и настоящей инструкцией она не считается.</summary>
+    /// <summary>Рядом с настоящей инструкцией НЕ ПОЯВЛЯЕТСЯ ничего. Страница с обращением в сервис
+    /// вшивается в сам документ при выкладке (см. ServicePageStitcher), а не кладётся файлом-спутником:
+    /// спутник виден только тому, кто смотрит папку на диске, а заказчик открывает по QR один файл.</summary>
     [Fact]
-    public void AServiceNote_LandsNextToARealInstruction_WithoutPretendingToBeOne()
+    public void NextToARealInstruction_NoCompanionFileAppears()
     {
         var folder = Folder();
         var real = Path.Combine(folder, $"инструкция_{Version}.pdf");
@@ -166,39 +167,26 @@ public class StubKindsTests : IDisposable
         var writer = new FakeWriter();
         Assert.Equal(StubAction.None, InstructionStub.Ensure(folder, Version, writer));
 
-        var note = Path.Combine(folder, InstructionStub.NoteFileName);
-        Assert.True(File.Exists(note));
-        Assert.Equal(StubKind.ServiceNote, InstructionStub.KindOf(note));
+        Assert.Empty(writer.Written);
+        Assert.Single(Directory.GetFiles(folder));
         Assert.True(File.Exists(real), "настоящий документ не тронут");
-
-        // Дополнение — не документ и не «заглушка вместо документа»: ни признак «инструкция ✓», ни
-        // наклейка с QR не должны на неё указывать.
-        Assert.True(DocFileResolver.IsNotADocument(note));
         Assert.Null(InstructionStub.ExistingIn(folder));
-        Assert.Equal(note, InstructionStub.ExistingNoteIn(folder));
-        Assert.True(InstructionStub.HasRealInstruction(folder));
-
-        // Повторный проход ничего не добавляет.
-        Assert.Equal(StubAction.None, InstructionStub.Ensure(folder, Version, new FakeWriter()));
-        Assert.Equal(2, Directory.GetFiles(folder).Length);
     }
 
-    /// <summary>Документ убрали — дополнение уходит вместе с ним: «инструкция лежит рядом» рядом с
-    /// пустотой это та же ложь, только наоборот.</summary>
+    /// <summary>Документ убрали — на освободившееся место встаёт обычная заглушка «в разработке».</summary>
     [Fact]
-    public void TheServiceNote_LeavesWhenTheInstructionDoes()
+    public void WhenTheInstructionGoes_TheOrdinaryStubComesBack()
     {
         var folder = Folder();
         var real = Path.Combine(folder, $"инструкция_{Version}.pdf");
         File.WriteAllText(real, "настоящий документ");
         InstructionStub.Ensure(folder, Version, new FakeWriter());
-        Assert.True(File.Exists(Path.Combine(folder, InstructionStub.NoteFileName)));
 
         File.Delete(real);
         Assert.Equal(StubAction.Created, InstructionStub.Ensure(folder, Version, new FakeWriter()));
 
-        Assert.False(File.Exists(Path.Combine(folder, InstructionStub.NoteFileName)));
         Assert.NotNull(InstructionStub.ExistingIn(folder));
+        Assert.Equal(StubKind.InDevelopment, InstructionStub.KindOf(InstructionStub.ExistingIn(folder)));
     }
 
     /// <summary>Страница «инструкции не будет» — ОДНА на всех и лежит в корне диска: в её адресе нет

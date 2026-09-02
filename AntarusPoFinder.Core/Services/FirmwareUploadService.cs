@@ -609,7 +609,7 @@ public static class FirmwareUploadService
             try
             {
                 instrStored = InstructionStorage.Copy(request.InstructionsSourcePath, plan.InstructionsFolder,
-                    request.RootPath, warnings, plan.Version.Raw, request.InstructionPublisher, stubs).StoredPath;
+                    request.RootPath, warnings, plan.Version.Raw, request.InstructionPublisher).StoredPath;
             }
             catch (Exception ex) { warnings.Add($"Инструкция: {ex.Message}"); }
         }
