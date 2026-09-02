@@ -681,6 +681,12 @@ public static class DiskLayoutMigrator
             Directory.Move(stray, dst);
             moved++;
         }
+
+        // Ещё раз — уже ПОСЛЕ переноса папок проекта. Подпапка проекта могла называться «hmi» (KINCO
+        // разворачивается в «plc» и «hmi», см. VersionLayout.IsProjectPartFolder): для EnsureFolders
+        // выше она выглядела существующей папкой панели, поэтому своей «HMI» версия не получила, а
+        // теперь папка уехала вниз — и без второго вызова версия осталась бы без одной из пяти папок.
+        createdFolders += VersionLayout.EnsureFolders(versionDir);
         return moved > 0 || createdFolders > 0;
     }
 

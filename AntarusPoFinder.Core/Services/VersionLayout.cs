@@ -88,16 +88,79 @@ public static class VersionLayout
         || string.Equals(folderName, HierarchyFolders.Passports, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Подпапки в корне версии, которые на самом деле принадлежат проекту прошивки и должны
-    /// жить в «Прошивка\» рядом с ним. Недоступная папка — пустой список: чинить недоступное нельзя.</summary>
+    /// жить в «Прошивка\» рядом с ним. Недоступная папка — пустой список: чинить недоступное нельзя.
+    ///
+    /// Имя папки — не единственный признак, и вот почему. Проекты, где программа ПЛК и панель лежат
+    /// одной папкой (KINCO и подобные), разворачиваются подпапками <c>plc</c> и <c>hmi</c> — а «hmi»
+    /// это ЕЩЁ И имя одной из пяти папок раскладки, и файловая система Windows разницы в регистре не
+    /// видит. Пока признак был чисто именной, перестройка диска уносила в «Прошивка\» только
+    /// <c>plc</c>, а <c>hmi</c> оставляла наверху: проект разрывался пополам («пол папок пропало,
+    /// исполняемый потерялся»), а его половина заодно становилась для программы папкой панели этой
+    /// версии — и карточка показывала кусок проекта ПЛК как HMI-проект. См.
+    /// <see cref="IsProjectPartFolder"/>.</summary>
     public static IReadOnlyList<string> StrayProjectFolders(string versionDir)
     {
         try
         {
-            return Directory.EnumerateDirectories(versionDir, "*", SearchOption.TopDirectoryOnly)
-                .Where(d => !IsVersionOwnFolder(Path.GetFileName(d)))
-                .ToList();
+            var dirs = Directory.EnumerateDirectories(versionDir, "*", SearchOption.TopDirectoryOnly).ToList();
+            // Корень версии ВИДИМО содержит распакованный проект — есть хотя бы одна подпапка, к
+            // раскладке отношения не имеющая («plc»). Без такого соседа спорную «hmi» не трогаем.
+            var unpackedProject = dirs.Any(d => !IsVersionOwnFolder(Path.GetFileName(d)));
+            return dirs.Where(d => IsProjectPartFolder(d, unpackedProject)).ToList();
         }
         catch (Exception) { return Array.Empty<string>(); }
+    }
+
+    /// <summary>Эта подпапка корня версии — часть проекта прошивки (её место в «Прошивка\»), а не
+    /// папка самой раскладки.
+    ///
+    /// Разбирается ровно один спорный случай — «HMI». Остальные три папки документов названы
+    /// по-русски («Инструкция», «Карта Modbus», «Карта ВВ») и с подпапкой проекта совпасть не могут,
+    /// а «Прошивка», «ОПЦ» и «Паспорт» — соседние узлы дерева, их не трогаем никогда.
+    ///
+    /// Два признака, по которым спорная папка признаётся ЧУЖОЙ:
+    /// <list type="number">
+    /// <item><description><b>Регистр имени.</b> Свою папку заводит программа и всегда под именем
+    /// <c>HMI</c> (<see cref="HierarchyFolders.Hmi"/>). Проекты называют свою подпапку <c>hmi</c> — и
+    /// Windows, у которой имена регистронезависимы, ВТОРУЮ папку рядом уже не создаст: пришедшая с
+    /// проектом <c>hmi</c> так и останется на диске под своим именем и будет молча работать за папку
+    /// панели версии. Отличающийся регистр — значит имя пришло не от нас.</description></item>
+    /// <item><description><b>Вторая половина проекта рядом.</b> Даже <c>HMI</c> в «правильном»
+    /// регистре — часть проекта, если в корне версии лежит ещё и явная папка проекта
+    /// (<paramref name="unpackedProjectInRoot"/>, тот самый <c>plc</c>).</description></item>
+    /// </list>
+    ///
+    /// И два стоп-условия поверх них: папка ПУСТА (ровно то, что заводит <see cref="EnsureFolders"/>)
+    /// или внутри лежит НАША копия проекта панели «{версия}_hmi»
+    /// (<see cref="HmiProjectFormat.StoredFolderSuffix"/>) — обе означают «папка наша», и трогать её
+    /// нельзя. Любое сомнение решается так же: лишний раз не перенести дешевле, чем утащить в
+    /// «Прошивка\» настоящую папку панели версии.</summary>
+    public static bool IsProjectPartFolder(string folder, bool unpackedProjectInRoot)
+    {
+        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!IsVersionOwnFolder(name)) return true;
+        if (!string.Equals(name, HierarchyFolders.Hmi, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var ourName = string.Equals(name, HierarchyFolders.Hmi, StringComparison.Ordinal);
+        if (ourName && !unpackedProjectInRoot) return false;
+        try
+        {
+            var entries = Directory.EnumerateFileSystemEntries(folder, "*", SearchOption.TopDirectoryOnly).ToList();
+            if (entries.Count == 0) return false;
+            return !entries.Any(IsOurStoredPanelProject);
+        }
+        catch (Exception) { return false; }
+    }
+
+    /// <summary>Запись внутри папки HMI — это копия проекта панели, положенная самой программой
+    /// («{версия}_hmi», папкой или файлом). Имя папки при этом состоит из точек, и
+    /// <c>GetFileNameWithoutExtension</c> откусил бы у неё «расширение» <c>.0001_hmi</c> — поэтому у
+    /// папки берётся имя целиком, а «без расширения» только у файла.</summary>
+    private static bool IsOurStoredPanelProject(string entry)
+    {
+        var trimmed = entry.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = SafeDirExists(trimmed) ? Path.GetFileName(trimmed) : Path.GetFileNameWithoutExtension(trimmed);
+        return name.EndsWith(HmiProjectFormat.StoredFolderSuffix, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string FirmwareFolder(string versionDir) => Path.Combine(versionDir, FirmwareFolderName);

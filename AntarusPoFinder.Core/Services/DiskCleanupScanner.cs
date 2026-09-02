@@ -293,13 +293,16 @@ public static class DiskCleanupScanner
         }
 
         // Папки в корне версии: «Прошивка» и четыре папки документов — свои, всё остальное похоже на
-        // проект ПЛК, оставленный в корне (тот самый «plc» рядом с файлом прошивки).
-        if (newLayout)
-            foreach (var sub in TopLevelDirs(dir))
+        // проект ПЛК, оставленный в корне (тот самый «plc» рядом с файлом прошивки). Спорную «hmi»
+        // (так называется подпапка проектов, где программа ПЛК и панель лежат вместе) разбирает
+        // VersionLayout — одно правило и для перестройки диска, и для чистильщика.
+        // IsLink и здесь: символическая ссылка/junction ВЫГЛЯДИТ подпапкой версии, а ведёт куда
+        // угодно — предложить «перенести» её значит предложить утащить чужое дерево.
+        if (newLayout && !IsLink(dir))
+            foreach (var sub in VersionLayout.StrayProjectFolders(dir))
             {
                 var name = Path.GetFileName(sub);
-                if (IsVersionOwnFolder(name)) continue;
-                if (ctx.Referenced(sub)) continue;
+                if (IsLink(sub) || ctx.Referenced(sub)) continue;
                 findings.Add(new Finding
                 {
                     Issue = Issue.WrongFolder,
@@ -311,7 +314,12 @@ public static class DiskCleanupScanner
                     Action = Act.Move,
                     Selected = true,
                     Reason = $"Папка «{name}» в корне версии похожа на проект ПЛК. Все файлы прошивки " +
-                             $"версии живут в «{VersionLayout.FirmwareFolderName}» — там их ищет программа.",
+                             $"версии живут в «{VersionLayout.FirmwareFolderName}» — там их ищет программа."
+                             + (string.Equals(name, HierarchyFolders.Hmi, StringComparison.OrdinalIgnoreCase)
+                                 ? " Это подпапка проекта, а не папка панели версии: рядом лежит вторая его " +
+                                   "половина, а свою копию проекта панели программа кладёт папкой " +
+                                   $"«{record.VersionRaw}{HmiProjectFormat.StoredFolderSuffix}»."
+                                 : ""),
                 });
             }
 
@@ -466,12 +474,6 @@ public static class DiskCleanupScanner
         return name.Contains("инструкц", StringComparison.OrdinalIgnoreCase)
                || name.Contains("руководств", StringComparison.OrdinalIgnoreCase);
     }
-
-    /// <summary>Папка, которая у версии своя по раскладке, — её содержимое не «мусор в корне».</summary>
-    private static bool IsVersionOwnFolder(string name) =>
-        string.Equals(name, VersionLayout.FirmwareFolderName, StringComparison.OrdinalIgnoreCase)
-        || VersionLayout.SlotFolderNames.Contains(name, StringComparer.OrdinalIgnoreCase)
-        || string.Equals(name, HierarchyFolders.Opc, StringComparison.OrdinalIgnoreCase);
 
     private static string Ext(string file)
     {
@@ -716,16 +718,6 @@ public static class DiskCleanupScanner
         {
             if (IsLink(dir)) return new List<string>();
             return Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly).ToList();
-        }
-        catch (Exception) { return new List<string>(); }
-    }
-
-    private static List<string> TopLevelDirs(string dir)
-    {
-        try
-        {
-            if (IsLink(dir)) return new List<string>();
-            return Directory.EnumerateDirectories(dir).Where(d => !IsLink(d)).ToList();
         }
         catch (Exception) { return new List<string>(); }
     }
