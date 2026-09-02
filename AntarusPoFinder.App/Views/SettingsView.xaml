@@ -1,4 +1,4 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.SettingsView"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
@@ -98,11 +98,11 @@
                          переключателя. -->
 
                     <!-- ─── Оформление ───
-                         Цвет живёт здесь, а не в сайдбаре: там ему место только пока он был «одной
+                         Цвет живёт здесь, а не в сайдбаре: там ему было место, пока он был «одной
                          кнопкой», а с палитрой это полноценная настройка. Переключатель светлой и
-                         тёмной темы остаётся в сайдбаре — он там на виду и нажимается часто, а
-                         дублировать его сюда значило бы завести второй источник правды (см. коммент
-                         выше). Цвет же читается и пишется прямо в настройки, минуя MainWindowViewModel,
+                         тёмной темы остаётся в сайдбаре — он на виду и нажимается часто, а
+                         дублировать его сюда значило бы завести второй источник правды о теме.
+                         Цвет же читается и пишется прямо в настройки, минуя MainWindowViewModel,
                          поэтому раздвоения состояния здесь не возникает. -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
@@ -429,7 +429,6 @@
                             <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
-                            <DataGridTextColumn Header="Инструкция" Binding="{Binding NoInstructionMark}" Width="Auto" MinWidth="100" IsReadOnly="True" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*" MinWidth="140" ElementStyle="{StaticResource DataGridCellText}"/>
                         </DataGrid.Columns>
                     </DataGrid>
@@ -438,10 +437,8 @@
                                 ToolTip="Новый тип шкафа — заводится сразу с первым подтипом"/>
                         <Button Content="Добавить подтип" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddSubtype_Click"
                                 ToolTip="Новый подтип внутри выбранного в таблице типа шкафа"/>
-                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DeleteSubtype_Click"
+                        <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteSubtype_Click"
                                 ToolTip="Удалить выбранный подтип. Вместе с последним подтипом удаляется и сам тип шкафа"/>
-                        <Button Content="Инструкции не будет" Style="{StaticResource SecondaryButton}" Click="ToggleNoInstruction_Click"
-                                ToolTip="Рациональные шкафы: инструкции на них не пишется вовсе. QR у таких версий ведёт на одну общую страницу с телефоном сервиса — вместо обещания «инструкция в разработке», которое никогда не сбудется."/>
                     </StackPanel>
 
                     <TextBlock Text="КОНТРОЛЛЕРЫ И МОДИФИКАЦИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>

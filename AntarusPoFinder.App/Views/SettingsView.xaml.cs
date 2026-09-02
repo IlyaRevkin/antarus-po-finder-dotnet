@@ -46,11 +46,6 @@ public partial class SettingsView : UserControl
         public string SubtypeName => Subtype?.Name ?? "(нет подтипов)";
         public string SubtypePrefix => Subtype is null ? "—" : Subtype.Prefix.ToString();
         public string FolderName => Subtype?.FolderName ?? Group.Name;
-
-        /// <summary>«Инструкции на этот шкаф не будет» — рациональные шкафы (см.
-        /// EquipmentSubType.NoInstruction). Галочкой прямо в таблице, а не отдельным диалогом: это
-        /// свойство, которое хочется видеть списком по всем подтипам сразу, а не выяснять по одному.</summary>
-        public string NoInstructionMark => Subtype?.NoInstruction == true ? "не будет" : "";
     }
 
     /// <summary>Flattens controller types + their modifications into one grid: one row per modification,
@@ -600,6 +595,7 @@ public partial class SettingsView : UserControl
         FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
         RefreshUsageMultiplierUi();
         RefreshUsageStats();
+        InitAccentUi();
     }
 
     // ── Поиск и лоадер ─────────────────────────────────────────────────────
@@ -2368,43 +2364,6 @@ public partial class SettingsView : UserControl
         LoadHierarchy();
         AutoRebuild();
         _host.PushCatalogChange($"Подтип добавлен: {folderName}");
-    }
-
-    /// <summary>Отметить подтип как шкаф, на который инструкции не будет вовсе, — «рациональные
-    /// шкафы» (см. EquipmentSubType.NoInstruction и StubKind.NotPlanned).
-    ///
-    /// Признак живёт у ПОДТИПА, а не у версии: «инструкция не пишется» — свойство изделия, а не
-    /// конкретной прошивки, и требовать галочку при каждой загрузке значило бы гарантированно её
-    /// когда-нибудь забыть — а забытая галочка обещает заказчику «инструкция в разработке», которая
-    /// не появится никогда.
-    ///
-    /// Снятие галочки НЕ разъезжается по машинам (синхронизация переносит только постановку — см.
-    /// Database.ConfigExchange), поэтому об этом сказано прямо в подтверждении: то же самое
-    /// осознанное ограничение, что и «синхронизация не переносит удаления».</summary>
-    private void ToggleNoInstruction_Click(object sender, RoutedEventArgs e)
-    {
-        if (HierarchyGrid.SelectedItem is not HierarchyRow row || row.Subtype?.Id is not int id)
-        {
-            AppMessageBox.Show("Выберите подтип.", "Подтип", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        var turningOn = !row.Subtype.NoInstruction;
-        var question = turningOn
-            ? $"Отметить «{row.GroupName} / {row.SubtypeName}» как шкаф, на который инструкции не будет?\n\n" +
-              "У всех его версий QR перестанет обещать «инструкция в разработке» и будет вести на одну общую " +
-              "страницу с телефоном сервиса."
-            : $"Снять отметку «инструкции не будет» с «{row.GroupName} / {row.SubtypeName}»?\n\n" +
-              "Снятие не разъезжается по машинам — на остальных отметку придётся снять так же, руками.";
-
-        if (AppMessageBox.Show(question, "Инструкция", MessageBoxButton.YesNo, MessageBoxImage.Question,
-                MessageBoxResult.No) != MessageBoxResult.Yes) return;
-
-        _services.Db.SetSubtypeNoInstruction(id, turningOn);
-        LoadHierarchy();
-        _host.PushCatalogChange(turningOn
-            ? $"«{row.GroupName} / {row.SubtypeName}»: инструкции не будет"
-            : $"«{row.GroupName} / {row.SubtypeName}»: инструкция снова ожидается");
     }
 
     private void EditSubtypePrefix_Click(object sender, RoutedEventArgs e)
