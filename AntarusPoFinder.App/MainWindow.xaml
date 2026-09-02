@@ -332,19 +332,7 @@
                                  про настройку программы, а это рабочая печать. -->
 
                             <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
-                            <Grid Margin="0,2,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{Binding ThemeLabel}" VerticalAlignment="Center"
-                                           Style="{StaticResource MutedText}"/>
-                                <ToggleButton x:Name="ThemeToggleControl" Grid.Column="1" Style="{StaticResource ThemeToggleSwitch}"
-                                              IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"
-                                              ToolTip="Переключить светлую и тёмную тему"/>
-                            </Grid>
-
-                            <TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
+<TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
                                     Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"
                                     ToolTip="Пройти вводный тур по программе заново"/>

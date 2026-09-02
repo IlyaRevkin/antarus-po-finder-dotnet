@@ -1065,6 +1065,29 @@ public partial class SettingsView : UserControl
     // MainWindowViewModel: тема и цвет — разные настройки, и заводить ради цвета второй источник
     // правды о теме не нужно. Текущая тема берётся у самого ThemeManager, он её и так помнит.
 
+    /// <summary>Тема переехала сюда из сайдбара по просьбе владельца. Раньше её здесь не было из
+    /// опасения завести второй источник правды: страница настроек — отдельный UserControl без доступа
+    /// к MainWindowViewModel.IsDarkTheme. Но опасение снимается тем, что переключатель в сайдбаре
+    /// убран совсем: правда теперь одна — сохранённая настройка, а её текущее значение помнит сам
+    /// ThemeManager. Дублирования не осталось.</summary>
+    private void InitThemeUi()
+    {
+        _loadingGeneral = true;
+        DarkThemeCheck.IsChecked = ThemeManager.Current == "dark";
+        _loadingGeneral = false;
+    }
+
+    private void DarkTheme_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        var theme = DarkThemeCheck.IsChecked == true ? "dark" : "light";
+        _services.Cfg.SetTheme(theme);
+        ThemeManager.Apply(theme, ThemeManager.CurrentAccent);
+        // Образец цвета перерисовываем: подпись «надписи белые/тёмные» зависит от темы не напрямую,
+        // но оттенок под курсором и подсветка строки считаются с оглядкой на неё.
+        ShowAccent(AccentPalette.NormalizeStored(_services.Cfg.Accent()));
+    }
+
     private void InitAccentUi()
     {
         AccentSamples.ItemsSource = AccentPalette.Samples

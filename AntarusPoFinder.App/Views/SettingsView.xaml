@@ -1,4 +1,4 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.SettingsView"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
@@ -87,15 +87,10 @@
                      страницу "Сетевые диски", доступную всем ролям (см. NetworkSyncView) — здесь
                      остаётся только то, что реально требует прав администратора. -->
                 <StackPanel x:Name="GeneralTab">
-                    <!-- Порядок разделов ниже: часто нужное и простое выше, редко-настраиваемое
-                         (AD, лоадер) — ниже. Каждый логический раздел — отдельная карточка
-                         (CardBorder); там, где раздел состоит из нескольких карточек сразу (Доступ;
-                         Поиск и загрузка), над ними стоит общий заголовок группы, чтобы было видно,
-                         что карточки ниже — про одно и то же. Настройки темы оформления в этой вкладке
-                         нет — переключатель светлая/тёмная живёт в сайдбаре (MainWindow, снизу слева),
-                         это отдельный UserControl без доступа к MainWindowViewModel.IsDarkTheme, дублировать
-                         его сюда означало бы заводить второй источник правды для одного и того же
-                         переключателя. -->
+                    <!-- Тема и цвет теперь здесь, в разделе «Оформление». Раньше переключатель темы жил в
+                         сайдбаре, и переносить его сюда опасались из-за второго источника правды.
+                         Опасение снято тем, что в сайдбаре его больше нет вовсе: правда одна —
+                         сохранённая настройка, текущее значение помнит ThemeManager. -->
 
                     <!-- ─── Оформление ───
                          Цвет живёт здесь, а не в сайдбаре: там ему место только пока он был «одной
@@ -106,7 +101,11 @@
                          поэтому раздвоения состояния здесь не возникает. -->
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
-                            <TextBlock Text="ЦВЕТ ОФОРМЛЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="ОФОРМЛЕНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <CheckBox x:Name="DarkThemeCheck" Content="Тёмная тема" Margin="0,0,0,12"
+                                      Checked="DarkTheme_Changed" Unchecked="DarkTheme_Changed"/>
+
+                            <TextBlock Text="ЦВЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Цвет кнопок и выделения. Работает и в светлой, и в тёмной теме — при переключении сохраняется."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <ItemsControl x:Name="AccentSamples" Margin="0,0,0,10">
@@ -118,7 +117,7 @@
                                         <Button Style="{StaticResource AccentSwatchButton}" Tag="{Binding Hex}"
                                                 Click="AccentSample_Click" ToolTip="{Binding Name}">
                                             <Border Width="26" Height="26" CornerRadius="13" Background="{Binding Hex}"
-                                                    BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                                    BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}"/>
                                         </Button>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -129,7 +128,7 @@
                                          ToolTip="Код цвета, например #1E66F5" KeyDown="AccentHex_KeyDown"/>
                                 <Button Content="Применить" Margin="8,0,0,0" Click="AccentHexApply_Click"/>
                                 <Border x:Name="AccentPreview" Width="26" Height="26" CornerRadius="13" Margin="10,0,0,0"
-                                        BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                        BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}"/>
                                 <TextBlock x:Name="AccentPreviewText" VerticalAlignment="Center" Margin="8,0,0,0"
                                            Style="{StaticResource MutedText}"/>
                             </StackPanel>
