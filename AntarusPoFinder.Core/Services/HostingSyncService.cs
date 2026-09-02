@@ -295,7 +295,12 @@ public sealed class HostingSyncService
             // Заглушка, нарисованная по прошлому макету, перерисовывается ДО отправки — иначе наверх
             // уедет прежняя картинка. Перерисовка меняет файл на диске, поэтому она идёт и в режиме
             // «догнать недостающее»: устаревшая на диске заглушка устарела и в бакете.
-            var refreshed = stubs is not null && InstructionStub.Refresh(item.SourcePath, stubs, null) == StubAction.Refreshed;
+            // Причину неудачной перерисовки собираем в те же сообщения, что и всё остальное: молча
+            // отправить наверх прежнюю картинку — это ровно то поведение, из-за которого «макет меняю,
+            // а заглушки прежние» и осталось незамеченным.
+            var redraw = new List<string>();
+            var refreshed = stubs is not null && InstructionStub.Refresh(item.SourcePath, stubs, redraw) == StubAction.Refreshed;
+            foreach (var m in redraw) messages.Add($"{item.VersionRaw}: {m}");
             if (refreshed) messages.Add($"{item.VersionRaw}: заглушка перерисована по новому макету");
 
             // Уже лежащая в бакете и не изменившаяся заглушка второй раз не отправляется; изменившаяся —
