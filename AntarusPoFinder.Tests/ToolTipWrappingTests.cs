@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -57,15 +57,26 @@ public class ToolTipWrappingTests
     /// <summary>Словарь стилей грузится из САМОЙ СБОРКИ приложения — проверяем то, что уедет
     /// пользователю, а не копию разметки в тесте.
     ///
-    /// Экземпляр Application при этом не создаётся сознательно: он глобален на весь процесс, и
+    /// Экземпляр Application здесь не создаётся сознательно: он глобален на весь процесс, и
     /// появившийся Application.Current увёл бы в маршалинг на мёртвый Dispatcher соседние тесты
-    /// (BusyTracker специально рассчитан на Application.Current == null). Достаточно указать сборку
-    /// ресурсов — Application.Current для этого не нужен.</summary>
+    /// (BusyTracker специально рассчитан на Application.Current == null).
+    ///
+    /// ⚠️ Адрес словаря — АБСОЛЮТНЫЙ pack-URI, и это не украшательство. Относительный
+    /// «/AntarusPoFinder.App;component/…» WPF разрешает относительно «сборки ресурсов»
+    /// (Application.ResourceAssembly), а ею он назначает входную сборку процесса — в тестах это
+    /// testhost. Раньше это лечилось присваиванием ResourceAssembly, но присвоить его можно только
+    /// ДО первого чтения: ViewsRenderTests в этом же процессе поднимает Application, свойство
+    /// читается, и «??=» уже ничего не делает. Дальше всё зависело от того, какой класс тестов
+    /// успел первым: в одиночку класс проходил, в полном прогоне все три теста падали разом.
+    /// Абсолютный адрес называет сборку сам, и порядок тестов перестаёт что-либо значить.</summary>
     private static Style ToolTipStyle()
     {
-        Application.ResourceAssembly ??= typeof(QrArt).Assembly;
-        var dict = (ResourceDictionary)Application.LoadComponent(
-            new Uri("/AntarusPoFinder.App;component/Themes/Styles.xaml", UriKind.Relative));
+        var dict = new ResourceDictionary
+        {
+            Source = new Uri(
+                $"pack://application:,,,/{typeof(QrArt).Assembly.GetName().Name};component/Themes/Styles.xaml",
+                UriKind.Absolute),
+        };
         return (Style)dict[typeof(ToolTip)];
     }
 
