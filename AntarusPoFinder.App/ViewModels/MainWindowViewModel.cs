@@ -194,8 +194,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         IsDarkTheme = CurrentTheme == "dark";
         _suppressThemeToggleHandler = false;
 
+        CurrentAccent = AccentPalette.Find(_services.Cfg.Accent()).Id;
+
         ApplyRole(CurrentRole);
-        ThemeManager.Apply(CurrentTheme);
+        ThemeManager.Apply(CurrentTheme, CurrentAccent);
         ReloadSidebarApps();
         Navigate(FirstAllowedPageId(CurrentRole));
 
@@ -574,7 +576,25 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (_suppressThemeToggleHandler) return;
         CurrentTheme = value ? "dark" : "light";
         _services.Cfg.SetTheme(CurrentTheme);
-        ThemeManager.Apply(CurrentTheme);
+        ThemeManager.Apply(CurrentTheme, CurrentAccent);
+    }
+
+    /// <summary>Выбранный цвет акцента. Меняется независимо от светлой/тёмной темы — цвет остаётся
+    /// при переключении, поэтому он и хранится отдельной настройкой.</summary>
+    public string CurrentAccent { get; private set; } = AccentPalette.DefaultId;
+
+    public IReadOnlyList<AccentPalette> AccentPalettes => AccentPalette.All;
+
+    [RelayCommand]
+    private void SetAccent(string? accentId)
+    {
+        var chosen = AccentPalette.Find(accentId);
+        if (chosen.Id == CurrentAccent) return;
+
+        CurrentAccent = chosen.Id;
+        _services.Cfg.SetAccent(chosen.Id);
+        ThemeManager.Apply(CurrentTheme, CurrentAccent);
+        OnPropertyChanged(nameof(CurrentAccent));
     }
 
     // ── Status bar ────────────────────────────────────────────────────────────

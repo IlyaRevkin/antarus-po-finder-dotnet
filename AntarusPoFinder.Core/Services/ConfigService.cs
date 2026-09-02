@@ -947,6 +947,12 @@ public class ConfigService
     public void SetRole(string role) => Set("current_role", role);
 
     public string Theme() => Get("theme");
+
+    /// <summary>Цвет акцента — отдельно от темы: светлая/тёмная и цвет выбираются независимо,
+    /// поэтому и хранятся порознь. Пусто = синий, исходный цвет приложения.</summary>
+    public string Accent() => Get("accent");
+
+    public void SetAccent(string accent) => Set("accent", accent);
     public void SetTheme(string theme) => Set("theme", theme);
 
     public bool KeepArchives() => Get("keep_archives").Equals("true", StringComparison.OrdinalIgnoreCase);

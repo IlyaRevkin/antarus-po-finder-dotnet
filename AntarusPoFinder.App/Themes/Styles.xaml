@@ -1000,6 +1000,32 @@
     <!-- Theme switch: single pill slider whose thumb contains a sun icon (light) or a moon
          icon (dark) — the icon swaps in place via IsChecked triggers instead of sitting next
          to the slider as separate text/graphics. -->
+    <!-- Кружок выбора цвета акцента. Кнопка без фона и рамки: фоном служит сам кружок, а любая
+         рамка вокруг него спорила бы с цветом, который она обрамляет. При наведении — светлое
+         кольцо, чтобы было видно, что это кнопка, а не просто точка. -->
+    <Style x:Key="AccentSwatchButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="2"/>
+        <Setter Property="Margin" Value="2,0,0,0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Ring" CornerRadius="9" Padding="{TemplateBinding Padding}"
+                            Background="Transparent" BorderThickness="1" BorderBrush="Transparent">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource TextMutedBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ThemeToggleSwitch" TargetType="ToggleButton">
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
