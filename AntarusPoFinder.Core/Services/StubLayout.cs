@@ -57,6 +57,14 @@ public sealed record StubLayout
     /// <summary>Рамка по краю страницы: на печати помогает увидеть, что лист не обрезан.</summary>
     public bool ShowFrame { get; init; }
 
+    /// <summary>Фирменный знак и название компании в шапке. По умолчанию есть: страница уходит
+    /// заказчику и должна выглядеть документом ANTARUS, а не запиской.</summary>
+    public bool ShowLogo { get; init; } = true;
+
+    /// <summary>QR в блоке контактов — «навёл и звонишь». Нужен, когда страницу печатают и кладут в
+    /// карман шкафа: с бумаги ссылку не нажать, а одиннадцать цифр руками набирают с ошибками.</summary>
+    public bool ShowQr { get; init; } = true;
+
     /// <summary>Серый тон подсказки и подписи, 0 — чёрный, 255 — белый. Заголовок всегда чёрный:
     /// он обязан читаться и на плохой печати, и с экрана телефона под углом.</summary>
     public int MutedTone { get; init; } = 0x66;
@@ -155,7 +163,8 @@ public sealed record StubLayout
             sane.Title, sane.Hint, sane.Contacts, sane.Footer,
             sane.TitleSize.ToString("R"), sane.HintSize.ToString("R"),
             sane.ContactsSize.ToString("R"), sane.FooterSize.ToString("R"),
-            sane.ShowFrame ? "1" : "0", sane.MutedTone.ToString(),
+            sane.ShowFrame ? "1" : "0", sane.ShowLogo ? "1" : "0", sane.ShowQr ? "1" : "0",
+            sane.MutedTone.ToString(),
             (contacts ?? ServiceContacts.Block).Trim());
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));

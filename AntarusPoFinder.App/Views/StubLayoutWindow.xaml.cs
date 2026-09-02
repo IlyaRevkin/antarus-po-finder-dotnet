@@ -89,6 +89,8 @@ public partial class StubLayoutWindow : Window
             ContactsSizeInput.Text = Percent(layout.ContactsSize);
             FooterSizeInput.Text = Percent(layout.FooterSize);
             FrameCheck.IsChecked = layout.ShowFrame;
+            LogoCheck.IsChecked = layout.ShowLogo;
+            QrCheck.IsChecked = layout.ShowQr;
             ToneInput.Text = layout.MutedTone.ToString(CultureInfo.InvariantCulture);
             ServiceContactsInput.Text = _edited.ServiceContacts;
             KindHint.Text = HintFor(layout.Kind);
@@ -116,6 +118,8 @@ public partial class StubLayoutWindow : Window
             ContactsSize = Share(ContactsSizeInput.Text, previous.ContactsSize),
             FooterSize = Share(FooterSizeInput.Text, previous.FooterSize),
             ShowFrame = FrameCheck.IsChecked == true,
+            ShowLogo = LogoCheck.IsChecked == true,
+            ShowQr = QrCheck.IsChecked == true,
             MutedTone = Int(ToneInput.Text, previous.MutedTone),
         }.Sane();
     }

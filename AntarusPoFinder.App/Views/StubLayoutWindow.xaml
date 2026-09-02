@@ -73,6 +73,10 @@
                 <TextBlock x:Name="PlaceholderHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                 <TextBlock Text="ОФОРМЛЕНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <CheckBox x:Name="LogoCheck" Content="Шапка со знаком ANTARUS" Margin="0,0,0,6" Click="Layout_Changed"
+                          ToolTip="Фирменный знак и название компании вверху листа. Страница уходит заказчику — снимать его стоит разве что для печати на фирменном бланке."/>
+                <CheckBox x:Name="QrCheck" Content="QR «позвонить в сервис» в блоке контактов" Margin="0,0,0,6" Click="Layout_Changed"
+                          ToolTip="Навёл телефон — номер уже набирается. Нужен, когда страницу печатают и кладут в карман шкафа: с бумаги ссылку не нажать."/>
                 <CheckBox x:Name="FrameCheck" Content="Рамка по краю листа" Margin="0,0,0,8" Click="Layout_Changed"/>
                 <TextBlock Text="Серый тон пояснения и подписи (0 — чёрный, 200 — светло-серый)"
                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,2"/>
