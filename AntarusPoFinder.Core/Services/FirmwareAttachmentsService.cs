@@ -254,10 +254,25 @@ public static class FirmwareAttachmentsService
         return new FirmwareAttachmentsResult(applied, warnings);
     }
 
-    /// <summary>Копирует один файл прошивки (.lfs/.psl или сам проект) в САМУ папку версии
-    /// (disk_path), а не в общие папки контроллера. Путь версии мог быть записан коллегой в его форме
-    /// диска — приводим к нашей (FirmwarePathLocalizer), тот же приём, что при правке hw/поиске.
-    /// null/пусто — ничего не делает (поле «не трогать»).</summary>
+    /// <summary>Копирует один файл прошивки (.lfs/.psl или сам проект) к файлам ЭТОЙ версии, а не в
+    /// общие папки контроллера. Путь версии мог быть записан коллегой в его форме диска — приводим к
+    /// нашей (FirmwarePathLocalizer), тот же приём, что при правке hw/поиске.
+    /// null/пусто — ничего не делает (поле «не трогать»).
+    ///
+    /// Две вещи здесь легко сделать неправильно, и обе делались:
+    /// <list type="number">
+    /// <item><description><b>Куда класть.</b> У перестроенной версии файлы прошивки живут в
+    /// «Прошивка\», а не в корне папки версии — спрашиваем об этом
+    /// <see cref="VersionLayout.FirmwareWriteFolder"/>, единственное место, знающее раскладку. Класть
+    /// в корень значило дописывать к перестроенной версии файл мимо её же раскладки: чистильщик потом
+    /// честно предлагал перенести его вниз («Файл прошивки лежит в корне папки версии»).</description></item>
+    /// <item><description><b>Родитель — не запасной вариант.</b> Прежний код при отсутствии папки
+    /// брал её РОДИТЕЛЯ, и у записи, чья папка версии на диске исчезла (переименовали, удалили,
+    /// disk_path разошёлся с диском), родителем оказывалась папка КОНТРОЛЛЕРА — и файл прошивки
+    /// ложился прямо туда, рядом с папками версий. Поэтому родитель берётся, только когда disk_path
+    /// действительно указывает на ФАЙЛ; во всех остальных случаях — честное предупреждение и ничего не
+    /// трогаем.</description></item>
+    /// </list></summary>
     private static void CopyFirmwareFileIntoVersionFolder(FwVersionRecord record, string root,
         string? src, List<string> applied, List<string> warnings)
     {
@@ -269,7 +284,9 @@ public static class FirmwareAttachmentsService
         }
         var versionFolder = FirmwarePathLocalizer.Localize(record.DiskPath, root);
         // disk_path мог указывать на одиночный файл (не папку) — тогда «папка версии» это его родитель.
-        if (!Directory.Exists(versionFolder)) versionFolder = Path.GetDirectoryName(versionFolder) ?? "";
+        // Именно ФАЙЛ: у пути, которого на диске нет вовсе, родитель — это папка контроллера.
+        if (!Directory.Exists(versionFolder) && File.Exists(versionFolder))
+            versionFolder = Path.GetDirectoryName(versionFolder) ?? "";
         if (string.IsNullOrEmpty(versionFolder) || !Directory.Exists(versionFolder))
         {
             warnings.Add("Файл прошивки: папка версии на диске недоступна — файл не добавлен.");
@@ -277,7 +294,9 @@ public static class FirmwareAttachmentsService
         }
         try
         {
-            var dst = Path.Combine(versionFolder, Path.GetFileName(src));
+            var targetFolder = VersionLayout.FirmwareWriteFolder(versionFolder);
+            Directory.CreateDirectory(targetFolder);
+            var dst = Path.Combine(targetFolder, Path.GetFileName(src));
             // Оператор выбрал файл, который УЖЕ лежит в папке версии — а это ровно то, что предлагает
             // диалог по умолчанию (он открывается в папке версии на сервере). Копирование файла в
             // самого себя Windows отвергает как «файл занят другим процессом», и модерация падала с

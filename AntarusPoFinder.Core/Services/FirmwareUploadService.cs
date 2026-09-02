@@ -249,14 +249,36 @@ public class FirmwareUploadPlan
     public string DestinationFolder { get; init; } = "";
 
     /// <summary>Версия заводится по новой раскладке: пять своих папок, прошивка внутри «Прошивка»
-    /// (см. FirmwareUploadRequest.NewDiskLayout). Папки документов ниже к этому моменту уже посчитаны
-    /// с учётом флага — здесь он нужен ровно для файла прошивки и для создания самих папок.</summary>
+    /// (см. FirmwareUploadRequest.NewDiskLayout).</summary>
     public bool NewLayout { get; init; }
 
-    public string IoMapFolder { get; init; } = "";
-    public string InstructionsFolder { get; init; } = "";
-    public string ModbusMapFolder { get; init; } = "";
-    public string HmiFolder { get; init; } = "";
+    /// <summary>Папка КОНТРОЛЛЕРА этой версии — старое, общее место документов. Нужна для той же
+    /// развилки «своя папка перестроенной версии / общая папка контроллера», по которой документы
+    /// кладут все остальные операции (см. <see cref="SlotFolder"/>).</summary>
+    public string ControllerFolder { get; init; } = "";
+
+    /// <summary>Куда класть документ этой загрузки — ОДИН И ТОТ ЖЕ вопрос и один и тот же ответчик,
+    /// что и у модерации (VersionDocFolders.WriteFolder) и у доп. материалов
+    /// (VersionLayout.ExtrasWriteFolder): решает ДИСК — есть ли у версии её «Прошивка\».
+    ///
+    /// Раньше загрузка решала это иначе — по флагу NewDiskLayout, и считала ответ ЗАРАНЕЕ, в
+    /// планировании, когда папки версии на диске ещё не было. Пока флаг и диск сходятся, разницы нет;
+    /// расходятся они у версии, чья папка на диске уже есть, а «Прошивка\» в ней нет (загружена
+    /// прежним клиентом либо перестройка до неё не дошла). Тогда одна и та же версия получала свои
+    /// документы на ДВУХ уровнях сразу: загрузка клала их внутрь папки версии, а любая последующая
+    /// правка в модерации — в общую папку контроллера. Ровно это и видно на диске: «HMI на
+    /// контроллере, HMI в версии, и ещё папка внутри неё».
+    ///
+    /// Свойство вычисляемое, а не посчитанное в Prepare, именно поэтому: спрашивать диск надо ПОСЛЕ
+    /// того, как дисковая фаза завела папки версии (см. <see cref="CopyFiles"/>), иначе ответ снова
+    /// будет про несуществующую папку.</summary>
+    public string SlotFolder(string slot) =>
+        VersionLayout.SlotWriteFolder(DestinationFolder, ControllerFolder, slot);
+
+    public string IoMapFolder => SlotFolder(HierarchyFolders.IoMap);
+    public string InstructionsFolder => SlotFolder(HierarchyFolders.Instructions);
+    public string ModbusMapFolder => SlotFolder(HierarchyFolders.Modbus);
+    public string HmiFolder => SlotFolder(HierarchyFolders.Hmi);
 
     public int? AuthorId { get; init; }
 
@@ -444,15 +466,12 @@ public static class FirmwareUploadService
         var dstFolder = hierarchy.FwPath(root, group.Name, subOption.Name, mod.ControllerName, fwv.Raw,
             isOpc, reqNum, cabinetSn);
 
-        // Куда лягут документы: свои папки внутри версии на перестроенном диске, общие папки
-        // контроллера — на прежнем. Папки версии на этот момент ещё нет, поэтому решает флаг, а не
-        // VersionLayout.SlotWriteFolder (тот смотрит на диск и у несуществующей папки честно ответил
-        // бы «старое место»).
+        // Куда лягут документы, здесь НЕ решается: папки версии на этот момент ещё нет, а вопрос
+        // «своя папка версии или общая папка контроллера» задаётся диску — и задавать его надо после
+        // того, как дисковая фаза их заведёт (см. FirmwareUploadPlan.SlotFolder). Планирование
+        // запоминает только папку контроллера — второе плечо этой развилки.
         var ctrlFolder = Path.Combine(HierarchyService.GroupSubFolder(root, group.Name, subOption.Name),
             mod.ControllerName);
-        string SlotFolder(string slot) => request.NewDiskLayout
-            ? VersionLayout.SlotFolder(dstFolder, slot)
-            : Path.Combine(ctrlFolder, slot);
 
         if (Directory.Exists(dstFolder) && !request.ConfirmOverwriteExisting)
         {
@@ -513,10 +532,7 @@ public static class FirmwareUploadService
             ExtraFilesInFolder = ExtraFilesToCopy(request.SourcePath, mainRelative, request.SourceFolderFiles),
             DestinationFolder = dstFolder,
             NewLayout = request.NewDiskLayout,
-            IoMapFolder = SlotFolder(HierarchyFolders.IoMap),
-            InstructionsFolder = SlotFolder(HierarchyFolders.Instructions),
-            ModbusMapFolder = SlotFolder(HierarchyFolders.Modbus),
-            HmiFolder = SlotFolder(HierarchyFolders.Hmi),
+            ControllerFolder = ctrlFolder,
             AuthorId = user.Id,
             InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
             InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
