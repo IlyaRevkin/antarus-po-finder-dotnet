@@ -20,12 +20,19 @@
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
                        Style="{StaticResource MutedText}"
                        Text="Эти страницы видит заказчик, наведя телефон на наклейку. Ссылка постоянная. Справа — что написано и как это выглядит, слева — та самая страница, которая уйдёт в файл."/>
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="Страница:" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource MutedText}"/>
-                <ComboBox x:Name="KindCombo" Width="260" SelectionChanged="Kind_Changed"/>
-                <TextBlock x:Name="KindHint" VerticalAlignment="Center" Margin="12,0,0,0"
+            <!-- Сеткой, а не StackPanel: в горизонтальной стопке пояснение получает бесконечную
+                 ширину, никогда не переносится и уезжает за край окна. Живой прогон это и показал. -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Страница:" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource MutedText}"/>
+                <ComboBox Grid.Column="1" x:Name="KindCombo" Width="260" SelectionChanged="Kind_Changed"/>
+                <TextBlock Grid.Column="2" x:Name="KindHint" VerticalAlignment="Center" Margin="12,0,0,0"
                            TextWrapping="Wrap" Style="{StaticResource MutedText}"/>
-            </StackPanel>
+            </Grid>
         </StackPanel>
 
         <!-- Предпросмотр рисуется ТЕМ ЖЕ кодом, что и настоящая заглушка (InstructionStubWriter.Draw):
