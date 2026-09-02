@@ -102,8 +102,23 @@
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="ОФОРМЛЕНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                            <CheckBox x:Name="DarkThemeCheck" Content="Тёмная тема" Margin="0,0,0,12"
-                                      Checked="DarkTheme_Changed" Unchecked="DarkTheme_Changed"/>
+                            <!-- Тот же переключатель-слайдер, что стоял в боковой панели: галочка на его
+                                 месте выглядела как обычная настройка-флажок, а тема переключается часто
+                                 и жестом «влево-вправо» читается привычнее. Стиль общий (ThemeToggleSwitch),
+                                 поэтому вид совпадает с прежним один в один. -->
+                            <Grid Margin="0,0,0,12" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="ThemeLabelText" Text="Тёмная тема"
+                                           VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <ToggleButton Grid.Column="1" x:Name="DarkThemeCheck"
+                                              Style="{StaticResource ThemeToggleSwitch}"
+                                              VerticalAlignment="Center"
+                                              ToolTip="Переключить светлую и тёмную тему"
+                                              Checked="DarkTheme_Changed" Unchecked="DarkTheme_Changed"/>
+                            </Grid>
 
                             <TextBlock Text="ЦВЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Цвет кнопок и выделения. Работает и в светлой, и в тёмной теме — при переключении сохраняется."

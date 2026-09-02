@@ -1070,6 +1070,7 @@ public partial class SettingsView : UserControl
     {
         _loadingGeneral = true;
         DarkThemeCheck.IsChecked = ThemeManager.Current == "dark";
+        ThemeLabelText.Text = ThemeManager.Current == "dark" ? "Тёмная тема" : "Светлая тема";
         _loadingGeneral = false;
     }
 
@@ -1077,6 +1078,9 @@ public partial class SettingsView : UserControl
     {
         if (_loadingGeneral) return;
         var theme = DarkThemeCheck.IsChecked == true ? "dark" : "light";
+        // Подпись рядом со слайдером показывает ТЕКУЩЕЕ состояние, как и в прежней боковой панели:
+        // у переключателя без подписи не понять, «тёмная сейчас» или «включить тёмную».
+        ThemeLabelText.Text = theme == "dark" ? "Тёмная тема" : "Светлая тема";
         _services.Cfg.SetTheme(theme);
         ThemeManager.Apply(theme, ThemeManager.CurrentAccent);
         // Образец цвета перерисовываем: подпись «надписи белые/тёмные» зависит от темы не напрямую,
