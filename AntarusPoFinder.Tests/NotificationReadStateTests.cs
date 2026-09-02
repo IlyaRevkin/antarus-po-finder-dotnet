@@ -1,60 +1,225 @@
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
+using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
+using AntarusPoFinder.Tests.TestHelpers;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
 
-/// <summary>Тикет: «авто скрытие уведомления после его просмотра». История уведомлений не
-/// очищалась никогда — кроме кнопки «Очистить» и обрезки по лимиту, — и на второй день оператор
-/// снова разбирал вчерашнее, чтобы найти сегодняшнее.
+/// <summary>Тикет kiselyov.a: «Настроить правильность работы уведомлений, практически всегда
+/// уведомления остаются пустыми. Оставить счётчик уведомлений при наличии новых и убирать из
+/// счётчика количество ТОЛЬКО прочитанные. Сохранять историю уведомлений, сделать возможность
+/// удалять каждое уведомление поштучно».
 ///
-/// Здесь проверяется правило, которое можно проверить без поднятия WPF: повтор уже показанного
-/// сообщения снимает признак «прочитано». Иначе залипшая фоновая ошибка, один раз прочитанная,
-/// больше никогда бы не всплыла — а она как раз и есть то, что нужно увидеть.</summary>
+/// «Пустыми» окно оказывалось не потому, что терялся текст: текст был на месте. Прежнее окно при
+/// ЗАКРЫТИИ метило прочитанным ВЕСЬ список, а список по умолчанию показывал только непрочитанное, —
+/// значит второе и любое следующее открытие колокольчика давало пустое окно. Вдобавок история жила
+/// только в памяти и умирала вместе с процессом. Воспроизведено живым прогоном
+/// scratchpad/live/notifications_run.py: первое открытие — 2 записи, второе — 0.
+///
+/// Здесь закреплено то, что проверяется без поднятия WPF: хранение, схлопывание повторов, счётчик,
+/// поштучное удаление.</summary>
 public class NotificationReadStateTests
 {
-    private static NotificationEntry Entry(string text, bool isRead = false) =>
-        new(text, DateTime.Now, NotificationCategory.General) { IsRead = isRead };
+    private static NotificationCenter Center(Database db) => new(db, new ConfigService(db));
 
+    /// <summary>Главная защита от возврата бага: прочитанное ОСТАЁТСЯ в истории.</summary>
     [Fact]
-    public void Repeat_UnmarksRead()
+    public void MarkingEverythingRead_DoesNotEmptyTheHistory()
     {
-        var history = new List<NotificationEntry>
-        {
-            Entry("свежее"),
-            Entry("Не удалось принять конфиг с диска", isRead: true),
-        };
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
 
-        var collapsed = NotificationHistoryOps.CollapseRepeat(
-            history, "Не удалось принять конфиг с диска", reopen: null, DateTime.Now);
+        center.Add("Структура диска создана: 701 папок", NotificationCategory.Sync);
+        center.Add("Проверка обновлений не удалась", NotificationCategory.AppUpdates);
 
-        Assert.True(collapsed);
-        // Поднялась наверх, счётчик вырос, признак «прочитано» снят.
-        Assert.Equal("Не удалось принять конфиг с диска", history[0].Text);
-        Assert.Equal(2, history[0].Repeats);
-        Assert.False(history[0].IsRead);
+        center.MarkAllRead();
+
+        Assert.Equal(2, center.History.Count);
+        Assert.All(center.History, e => Assert.False(string.IsNullOrWhiteSpace(e.Text)));
+        Assert.Equal(0, center.UnreadCount);
     }
 
+    /// <summary>Счётчик убавляется РОВНО на прочитанном — по одной записи, а не всем списком по
+    /// факту открытия окна.</summary>
+    [Fact]
+    public void UnreadCount_DropsOnlyForEntriesActuallyMarkedRead()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
+
+        center.Add("первое", NotificationCategory.General);
+        center.Add("второе", NotificationCategory.General);
+        center.Add("третье", NotificationCategory.General);
+        Assert.Equal(3, center.UnreadCount);
+
+        center.MarkRead(center.History.First(e => e.Text == "второе"));
+
+        Assert.Equal(2, center.UnreadCount);
+        Assert.Equal(3, center.History.Count);
+    }
+
+    /// <summary>Категория, исключённая из счётчика, в истории остаётся, но на колокольчик не
+    /// влияет — и переключение настройки пересчитывает счётчик сразу.</summary>
+    [Fact]
+    public void MutedCategory_StaysInHistoryButIsNotCounted()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var cfg = new ConfigService(db);
+        var center = new NotificationCenter(db, cfg);
+
+        center.Add("Путь сохранён", NotificationCategory.Sync);
+        Assert.Equal(1, center.UnreadCount);
+
+        cfg.SetNotificationCategoryCountedUnread(NotificationCategory.Sync, false);
+        center.Refresh();
+
+        Assert.Equal(0, center.UnreadCount);
+        Assert.Single(center.History);
+    }
+
+    /// <summary>История переживает перезапуск: тикет «Сохранять историю уведомлений». Признак
+    /// «прочитано» переживает тоже — иначе после каждого запуска счётчик оживал бы целиком.</summary>
+    [Fact]
+    public void History_SurvivesRestart_WithTextCategoryAndReadFlag()
+    {
+        using var dbFile = new TempDb();
+        using (var db = new Database(dbFile.Path))
+        {
+            var center = Center(db);
+            center.Add("Обновлено прошивок: 3", NotificationCategory.FirmwareAndParams);
+            center.Add("Не удалось принять конфиг", NotificationCategory.Sync);
+            center.MarkRead(center.History.First(e => e.Text == "Обновлено прошивок: 3"));
+        }
+
+        using var reopened = new Database(dbFile.Path);
+        var after = Center(reopened);
+
+        Assert.Equal(2, after.History.Count);
+        var fw = after.History.First(e => e.Text == "Обновлено прошивок: 3");
+        Assert.Equal(NotificationCategory.FirmwareAndParams, fw.Category);
+        Assert.True(fw.IsRead);
+        Assert.Equal(1, after.UnreadCount);
+    }
+
+    /// <summary>Поштучное удаление — и оно тоже переживает перезапуск (удалили в базе, а не только
+    /// в списке на экране).</summary>
+    [Fact]
+    public void DeleteOne_RemovesExactlyThatEntry_AndItDoesNotComeBack()
+    {
+        using var dbFile = new TempDb();
+        using (var db = new Database(dbFile.Path))
+        {
+            var center = Center(db);
+            center.Add("оставить", NotificationCategory.General);
+            center.Add("убрать", NotificationCategory.General);
+
+            center.Delete(center.History.First(e => e.Text == "убрать"));
+
+            Assert.Single(center.History);
+            Assert.Equal("оставить", center.History[0].Text);
+        }
+
+        using var reopened = new Database(dbFile.Path);
+        var after = Center(reopened);
+        Assert.Single(after.History);
+        Assert.Equal("оставить", after.History[0].Text);
+    }
+
+    [Fact]
+    public void Clear_EmptiesHistoryAndCounter()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
+        center.Add("что-то", NotificationCategory.General);
+
+        center.Clear();
+
+        Assert.Empty(center.History);
+        Assert.Equal(0, center.UnreadCount);
+        Assert.Empty(db.GetNotifications());
+    }
+
+    /// <summary>Повтор поднимает запись наверх, растит счётчик повторов и СНИМАЕТ «прочитано»:
+    /// ошибка, случившаяся снова, — это новая информация, и залипать в прочитанном она не должна.</summary>
+    [Fact]
+    public void Repeat_BubblesUp_AndUnmarksRead()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
+
+        center.Add("Не удалось принять конфиг с диска", NotificationCategory.Sync);
+        center.Add("свежее", NotificationCategory.General);
+        center.MarkAllRead();
+        Assert.Equal(0, center.UnreadCount);
+
+        center.Add("Не удалось принять конфиг с диска", NotificationCategory.Sync);
+
+        Assert.Equal(2, center.History.Count);
+        Assert.Equal("Не удалось принять конфиг с диска", center.History[0].Text);
+        Assert.Equal(2, center.History[0].Repeats);
+        Assert.False(center.History[0].IsRead);
+        Assert.Equal(1, center.UnreadCount);
+        Assert.Contains("×2", center.History[0].DisplayText);
+    }
+
+    /// <summary>Свежая запись непрочитана — иначе счётчик не вырос бы никогда.</summary>
     [Fact]
     public void NewEntryIsUnreadByDefault()
     {
-        Assert.False(Entry("что угодно").IsRead);
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var entry = Center(db).Add("что угодно", NotificationCategory.General);
+
+        Assert.False(entry.IsRead);
+        Assert.Equal("что угодно", entry.DisplayText);
     }
 
+    /// <summary>Обрезка по лимиту выкидывает самое старое, а не самое новое.</summary>
     [Fact]
-    public void MarkingReadKeepsEverythingElse()
+    public void Trim_KeepsNewest()
     {
-        var before = Entry("Теги обновлены") with { Repeats = 3, ReopenIsModal = true };
-        var after = before with { IsRead = true };
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var start = new DateTime(2026, 9, 1, 8, 0, 0);
 
-        Assert.True(after.IsRead);
-        Assert.Equal(before.Text, after.Text);
-        Assert.Equal(3, after.Repeats);
-        Assert.True(after.ReopenIsModal);
-        Assert.Equal("Теги обновлены  ×3", after.DisplayText);
+        for (var i = 0; i < 10; i++)
+            db.SaveNotification($"сообщение {i}", NotificationCategory.General, start.AddMinutes(i), limit: 4);
+
+        var kept = db.GetNotifications();
+        Assert.Equal(4, kept.Count);
+        Assert.Equal("сообщение 9", kept[0].Text);
+        Assert.DoesNotContain(kept, k => k.Text == "сообщение 5");
+    }
+
+    /// <summary>Всё, что попало в историю, показывается с непустым текстом — та самая «пустота» из
+    /// тикета не должна возникнуть и на уровне модели строки.</summary>
+    [Fact]
+    public void EveryLoadedEntry_HasTextAndCategoryLabel()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var center = Center(db);
+        foreach (var (category, _) in NotificationCategoryInfo.All)
+            center.Add($"сообщение категории {category}", category);
+
+        using var reopened = new Database(dbFile.Path);
+        foreach (var entry in Center(reopened).History)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(entry.DisplayText));
+            Assert.False(string.IsNullOrWhiteSpace(entry.CategoryLabel));
+            Assert.False(string.IsNullOrWhiteSpace(entry.WhenLabel));
+        }
     }
 }
 

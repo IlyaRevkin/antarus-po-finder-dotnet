@@ -1,10 +1,8 @@
 using System;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Input;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -13,71 +11,106 @@ namespace AntarusPoFinder.App.Views;
 
 /// <summary>Уведомления: история + (перенесено сюда из Настройки → Прочее — логичнее настраивать
 /// видимость категорий прямо там же, где видна сама история, чем в отдельном разделе Настроек)
-/// какие категории вообще показывать. Обычное окно, не страница с RefreshIfActive — категории
-/// заполняются один раз при открытии, как и остальной контент окна.</summary>
+/// какие категории вообще показывать.
+///
+/// ⚠️ Главная правка по тикету kiselyov.a («практически всегда уведомления остаются пустыми»).
+/// Прежнее окно при ЗАКРЫТИИ метило прочитанным весь список, а список по умолчанию показывал только
+/// непрочитанное — значит второе и любое следующее открытие колокольчика давало ПУСТОЕ окно.
+/// Воспроизведено живым прогоном scratchpad/live/notifications_run.py: первое открытие — две записи,
+/// второе — ноль. Теперь:
+/// <list type="bullet">
+/// <item>список показывает ВСЁ, что есть в истории; непрочитанное отмечено точкой и полужирным;</item>
+/// <item>«прочитано» ставится построчно, в момент, когда строку реально построили и показали
+/// (<see cref="NotificationRow_Loaded"/>), — только это и убавляет счётчик на колокольчике;</item>
+/// <item>убирает записи из списка ТОЛЬКО человек: крестиком у строки или кнопкой «Очистить».</item>
+/// </list></summary>
 public partial class NotificationHistoryWindow : Window
 {
-    private readonly ObservableCollection<NotificationEntry> _entries;
+    private readonly NotificationCenter _center;
     private readonly ConfigService _cfg;
 
-    /// <summary>Показывать ли уже прочитанные записи. Живёт только на время одного открытия окна:
-    /// «показать прочитанные» — разовый жест, а не настройка.</summary>
-    private bool _showRead;
+    /// <summary>Показывать только непрочитанные. Живёт на время одного открытия окна: «покажи, что
+    /// нового» — разовый жест, а не настройка. По умолчанию выключен, иначе окно снова могло бы
+    /// оказаться пустым при полной истории.</summary>
+    private bool _onlyUnread;
 
-    public NotificationHistoryWindow(ObservableCollection<NotificationEntry> entries, ConfigService cfg)
+    /// <summary>Своё представление коллекции, а НЕ CollectionViewSource.GetDefaultView(...).
+    /// Представление по умолчанию одно на всё приложение и переживает закрытие окна: прошлая версия
+    /// вешала на него фильтр и снимала его вручную в OnClosed — забудь эту строку, и главный список
+    /// уведомлений остался бы отфильтрованным навсегда.</summary>
+    private readonly ListCollectionView _view;
+
+    public NotificationHistoryWindow(NotificationCenter center, ConfigService cfg)
     {
         InitializeComponent();
-        _entries = entries;
+        _center = center;
         _cfg = cfg;
 
-        // Список идёт через представление с фильтром, а не напрямую по коллекции: прочитанные
-        // записи надо СКРЫТЬ, но оставить в истории (см. NotificationEntry.IsRead).
-        var view = CollectionViewSource.GetDefaultView(entries);
-        view.Filter = o => _showRead || o is not NotificationEntry entry || !entry.IsRead;
-        ListBoxHistory.ItemsSource = view;
+        _view = new ListCollectionView(center.History)
+        {
+            // ⚠️ Живой фильтрации (IsLiveFiltering) здесь нет намеренно: строка помечается
+            // прочитанной ровно в тот момент, когда её показали, и с живой фильтрацией она исчезала
+            // бы у человека из-под курсора. Отбор пересчитывается только по нажатию кнопки.
+            Filter = o => !_onlyUnread || o is not NotificationEntry entry || !entry.IsRead,
+        };
+        ListBoxHistory.ItemsSource = _view;
 
-        RefreshShowReadToggle();
+        RefreshHeader();
         LoadNotificationCategories();
     }
 
-    /// <summary>Кнопка «Показать прочитанные (N)» — только когда таких записей действительно
-    /// сколько-то есть.</summary>
-    private void RefreshShowReadToggle()
+    /// <summary>Подписи кнопки отбора и заглушки пустого списка. Зовётся после всего, что меняет
+    /// состав или счётчик.</summary>
+    private void RefreshHeader()
     {
-        var readCount = _entries.Count(x => x.IsRead);
-        if (readCount == 0 && !_showRead)
-        {
-            ShowReadToggle.Visibility = Visibility.Collapsed;
-            return;
-        }
-        ShowReadToggle.Visibility = Visibility.Visible;
-        ShowReadToggle.Content = _showRead ? "Скрыть прочитанные" : $"Показать прочитанные ({readCount})";
+        var unread = _center.History.Count(x => !x.IsRead);
+        OnlyUnreadToggle.Content = _onlyUnread ? "Показать все" : $"Только новые ({unread})";
+        OnlyUnreadToggle.IsEnabled = _onlyUnread || unread > 0;
+        MarkAllReadBtn.IsEnabled = unread > 0;
+
+        var shown = _view.Count;
+        EmptyHint.Visibility = shown == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyHint.Text = _center.History.Count == 0
+            ? "Уведомлений пока нет.\nЗдесь окажется всё, что программа показывала в строке состояния и баннерами."
+            : "Новых уведомлений нет — нажмите «Показать все», чтобы увидеть всю историю.";
     }
 
-    private void ShowReadToggle_Click(object sender, RoutedEventArgs e)
-    {
-        _showRead = !_showRead;
-        CollectionViewSource.GetDefaultView(_entries).Refresh();
-        RefreshShowReadToggle();
-    }
-
-    /// <summary>Всё, что оператор мог прочитать за этот заход, помечается прочитанным — при
-    /// следующем открытии останется только новое. Момент выбран на закрытии окна, а не на
-    /// открытии: пометить заранее значило бы спрятать запись у человека из-под курсора.
+    /// <summary>Строку построили — значит человек её видит. Только это и гасит уведомление в
+    /// счётчике: открытие окна само по себе больше не значит «всё прочитано» (тикет: «убирать из
+    /// счётчика количество ТОЛЬКО прочитанные»).
     ///
-    /// Записи — record'ы, поэтому «пометить» это замена элемента коллекции. Коллекция та же
-    /// самая, что живёт в MainWindowViewModel, так что признак переживает закрытие окна.</summary>
-    protected override void OnClosed(EventArgs e)
+    /// Работает благодаря виртуализации списка: контейнеры создаются под видимую область, а не на
+    /// всю историю. Строки, до которых не долистали, прочитанными не становятся.</summary>
+    private void NotificationRow_Loaded(object sender, RoutedEventArgs e)
     {
-        for (var i = 0; i < _entries.Count; i++)
-        {
-            if (_entries[i].IsRead) continue;
-            _entries[i] = _entries[i] with { IsRead = true };
-        }
-        // Представление у коллекции одно на всё приложение, и фильтр на нём переживёт это окно.
-        // Снимаем — следующее открытие поставит свой.
-        CollectionViewSource.GetDefaultView(_entries).Filter = null;
-        base.OnClosed(e);
+        if (sender is not FrameworkElement { DataContext: NotificationEntry entry }) return;
+        if (entry.IsRead) return;
+        _center.MarkRead(entry);
+        RefreshHeader();
+    }
+
+    private void OnlyUnreadToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _onlyUnread = !_onlyUnread;
+        _view.Refresh();
+        RefreshHeader();
+    }
+
+    private void MarkAllRead_Click(object sender, RoutedEventArgs e)
+    {
+        _center.MarkAllRead();
+        if (_onlyUnread) _view.Refresh();
+        RefreshHeader();
+    }
+
+    /// <summary>Удаление ПОШТУЧНО. Без вопроса «точно ли»: это одна строка журнала, а не данные, —
+    /// переспрашивать на каждый крестик утомительнее, чем потерять одно сообщение. «Очистить» ниже
+    /// переспрашивает, потому что стирает всё разом.</summary>
+    private void DeleteOne_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.DataContext is not NotificationEntry entry) return;
+        _center.Delete(entry);
+        RefreshHeader();
     }
 
     /// <summary>Built in code, not XAML-bound — one row per NotificationCategoryInfo.All entry, with
@@ -136,17 +169,14 @@ public partial class NotificationHistoryWindow : Window
     {
         if (sender is not CheckBox { Tag: NotificationCategory category } cb) return;
         _cfg.SetNotificationCategoryCountedUnread(category, cb.IsChecked == true);
+        // Категория перестала (или начала) считаться — счётчик обязан пересчитаться сразу, а не
+        // ждать следующего уведомления.
+        _center.Refresh();
     }
 
     private void CategorySettingsToggle_Click(object sender, RoutedEventArgs e) =>
         CategorySettingsPanel.Visibility = CategorySettingsPanel.Visibility == Visibility.Visible
             ? Visibility.Collapsed : Visibility.Visible;
-
-    /// <summary>Clicking a notification row's category badge is the "directly from a notification"
-    /// path to that category's settings — opens the (possibly still collapsed) settings panel above
-    /// so the operator doesn't have to hunt for the gear button first.</summary>
-    private void CategoryBadge_Click(object sender, MouseButtonEventArgs e) =>
-        CategorySettingsPanel.Visibility = Visibility.Visible;
 
     private void Reopen_Click(object sender, RoutedEventArgs e)
     {
@@ -167,11 +197,11 @@ public partial class NotificationHistoryWindow : Window
 
     private void ClearAll_Click(object sender, RoutedEventArgs e)
     {
-        if (_entries.Count == 0) return;
+        if (_center.History.Count == 0) return;
         var reply = AppMessageBox.Show("Очистить всю историю уведомлений?", "Уведомления",
             MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (reply != MessageBoxResult.Yes) return;
-        _entries.Clear();
-        RefreshShowReadToggle();
+        _center.Clear();
+        RefreshHeader();
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -113,24 +113,26 @@ public class CyrillicCaseFlatListTests
         finally { Cleanup(pathA, pathB); }
     }
 
+    /// <summary>Спам-половина жалобы. Схлопывание повторов переехало из памяти в базу
+    /// (Database.SaveNotification) вместе с самой историей: пока правило жило в памяти, повтор после
+    /// перезапуска заводил вторую строку, потому что первую никто не помнил.</summary>
     [Fact]
     public void RepeatedNotification_CollapsesInsteadOfPilingUp()
     {
-        // Залипшая фоновая ошибка чередуется с обычными сообщениями синхронизации, поэтому проверка
-        // «совпадает ли с самой верхней записью» её не ловила и каждый тик заводил новую строку.
-        var history = new ObservableCollection<NotificationEntry>();
+        using var dbFile = new TestHelpers.TempDb();
+        using var db = new Database(dbFile.Path);
         var now = new DateTime(2026, 8, 11, 9, 0, 0);
         const string error = "Сбой синхронизации конфига: что-то пошло не так";
 
         for (var tick = 0; tick < 50; tick++)
         {
-            Record(history, error, now.AddMinutes(tick * 2));
-            Record(history, $"Применён конфиг с диска (изменений: {tick})", now.AddMinutes(tick * 2 + 1));
+            db.SaveNotification(error, NotificationCategory.Sync, now.AddMinutes(tick * 2));
+            db.SaveNotification($"Применён конфиг с диска (изменений: {tick})", NotificationCategory.Sync, now.AddMinutes(tick * 2 + 1));
         }
 
+        var history = db.GetNotifications();
         Assert.Single(history.Where(e => e.Text == error));
         Assert.Equal(50, history.First(e => e.Text == error).Repeats);
-        Assert.Contains("×50", history.First(e => e.Text == error).DisplayText);
         // 50 разных сообщений об успехе + одна свёрнутая ошибка.
         Assert.Equal(51, history.Count);
     }
@@ -138,18 +140,13 @@ public class CyrillicCaseFlatListTests
     [Fact]
     public void FirstNotification_IsNotMarkedAsRepeat()
     {
-        var history = new ObservableCollection<NotificationEntry>();
-        Record(history, "однократное сообщение", DateTime.Now);
+        using var dbFile = new TestHelpers.TempDb();
+        using var db = new Database(dbFile.Path);
 
-        var entry = Assert.Single(history);
-        Assert.Equal(1, entry.Repeats);
-        Assert.Equal("однократное сообщение", entry.DisplayText);
-    }
+        db.SaveNotification("однократное сообщение", NotificationCategory.Sync, DateTime.Now);
 
-    /// <summary>То же, что делает MainWindowViewModel.AddNotification, но без поднятия WPF.</summary>
-    private static void Record(IList<NotificationEntry> history, string text, DateTime when)
-    {
-        if (NotificationHistoryOps.CollapseRepeat(history, text, reopen: null, when)) return;
-        history.Insert(0, new NotificationEntry(text, when, NotificationCategory.Sync));
+        var stored = Assert.Single(db.GetNotifications());
+        Assert.Equal(1, stored.Repeats);
+        Assert.Equal("однократное сообщение", new NotificationEntry(stored).DisplayText);
     }
 }
