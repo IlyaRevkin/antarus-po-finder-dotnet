@@ -443,6 +443,20 @@
                             <DataGridTextColumn Header="Префикс типа" Binding="{Binding GroupPrefix}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="100" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
                             <DataGridTextColumn Header="Префикс подтипа" Binding="{Binding SubtypePrefix}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
+                            <!-- Галочка, а не текстовая колонка с двойным кликом, как всё остальное в
+                                 этой таблице: остальные колонки правят ЗНАЧЕНИЕ (имя, префикс), а это
+                                 переключатель на два положения — диалог здесь был бы лишним шагом.
+                                 Пишется сразу по клику, как список быстрого доступа (см. SaveApps). -->
+                            <DataGridTemplateColumn Header="Инструкции не будет" Width="Auto" MinWidth="150"
+                                                    HeaderStyle="{StaticResource CenteredColumnHeader}">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding NoInstruction, Mode=OneWay}" Click="SubtypeNoInstruction_Click"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  ToolTip="Рациональные шкафы, на которые инструкции не будет вовсе. Наклейка такого шкафа ведёт на одну общую страницу с телефоном сервиса, а «инструкция в разработке» в его папках больше не заводится."/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Папка" Binding="{Binding FolderName}" Width="*" MinWidth="140" ElementStyle="{StaticResource DataGridCellText}"/>
                         </DataGrid.Columns>
                     </DataGrid>

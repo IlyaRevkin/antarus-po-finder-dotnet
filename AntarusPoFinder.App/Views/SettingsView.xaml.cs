@@ -46,6 +46,11 @@ public partial class SettingsView : UserControl
         public string SubtypeName => Subtype?.Name ?? "(нет подтипов)";
         public string SubtypePrefix => Subtype is null ? "—" : Subtype.Prefix.ToString();
         public string FolderName => Subtype?.FolderName ?? Group.Name;
+
+        /// <summary>«Инструкции на этот шкаф не будет» (см. EquipmentSubType.NoInstruction). В отличие
+        /// от соседей — обычное поле, а не вычисление по Subtype: галочку переключают прямо в таблице,
+        /// и строка обязана показать новое положение, не перечитывая всю иерархию из базы.</summary>
+        public bool NoInstruction { get; set; }
     }
 
     /// <summary>Flattens controller types + their modifications into one grid: one row per modification,
@@ -2153,7 +2158,7 @@ public partial class SettingsView : UserControl
             if (subtypes.Count == 0)
                 hierarchyRows.Add(new HierarchyRow { Group = g, Subtype = null });
             else
-                hierarchyRows.AddRange(subtypes.Select(s => new HierarchyRow { Group = g, Subtype = s }));
+                hierarchyRows.AddRange(subtypes.Select(s => new HierarchyRow { Group = g, Subtype = s, NoInstruction = s.NoInstruction }));
         }
         HierarchyGrid.ItemsSource = hierarchyRows;
 
@@ -2270,8 +2275,70 @@ public partial class SettingsView : UserControl
             case "Префикс типа": EditGroupPrefix_Click(sender, e); break;
             case "Подтип": RenameSubtype_Click(sender, e); break;
             case "Префикс подтипа": EditSubtypePrefix_Click(sender, e); break;
+            // Галочка обрабатывает свои клики сама. Без этой строки двойной клик по ней попадал бы в
+            // default и поверх двух переключений открывал окно переименования подтипа.
+            case "Инструкции не будет": break;
             default: RenameSubtype_Click(sender, e); break;
         }
+    }
+
+    /// <summary>Отметка «на этот шкаф инструкции не будет» — рациональные шкафы (см.
+    /// EquipmentSubType.NoInstruction, StubKind.NotPlanned). Пишется сразу по клику: это переключатель
+    /// на два положения, диалог с «Сохранить» был бы лишним шагом.
+    ///
+    /// ⚠️ Вместе с отметкой заводится ОДНА-НА-ВСЕХ страница в корне диска и уходит на хостинг. Иначе
+    /// признак наполовину мёртв: наклейка такого шкафа ведёт именно на неё, а окно QR подставляет её
+    /// только когда файл РЕАЛЬНО лежит (SearchView.NotPlannedPageFor) — нет файла, и наклейка повела бы
+    /// в пустоту. Сама по себе страница появлялась лишь при обходе диска или по «Перезалить всё», то
+    /// есть неизвестно когда, а галочку ставят ровно затем, чтобы напечатать наклейку.
+    ///
+    /// Снятие отметки страницу НЕ удаляет: на других подтипах она может быть ещё нужна, а её адрес уже
+    /// напечатан на наклейках.</summary>
+    private void SubtypeNoInstruction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox box || box.DataContext is not HierarchyRow row) return;
+
+        if (row.Subtype?.Id is not int subtypeId)
+        {
+            box.IsChecked = false;
+            AppMessageBox.Show("У этого типа шкафа ещё нет подтипов — отмечать нечего.",
+                "Инструкции не будет", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var value = box.IsChecked == true;
+        _services.Db.SetSubtypeNoInstruction(subtypeId, value);
+        row.NoInstruction = value;
+        row.Subtype.NoInstruction = value;
+
+        _host.PushCatalogChange(value
+            ? $"«{row.SubtypeName}»: инструкции не будет, наклейки ведут на страницу сервиса"
+            : $"«{row.SubtypeName}»: отметка «инструкции не будет» снята");
+
+        if (!value) return;
+
+        var root = _services.Cfg.RootPath();
+        var stubs = _services.StubWriter();
+        var publisher = _services.Publisher();
+        _ = Task.Run(() =>
+        {
+            var warnings = new List<string>();
+            string message;
+            try
+            {
+                var action = InstructionStub.EnsureShared(root, stubs, warnings, publisher);
+                message = warnings.Count > 0
+                    ? warnings[0]
+                    : action == StubAction.None
+                        ? "Страница «Инструкции не будет» уже на месте"
+                        : "Страница «Инструкции не будет» готова — на диске и на хостинге";
+            }
+            catch (Exception ex)
+            {
+                message = $"Страницу «Инструкции не будет» подготовить не удалось: {ex.Message}";
+            }
+            Dispatcher.BeginInvoke(new Action(() => _host.ShowStatus(message)));
+        });
     }
 
     private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject

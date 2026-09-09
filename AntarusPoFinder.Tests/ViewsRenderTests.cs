@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -183,6 +184,26 @@ public class ViewsRenderTests
                 // получил бы приложение в чужой роли.
                 services.Cfg.SetRole(before);
             }
+        });
+    }
+
+    /// <summary>Отметить подтип «инструкции не будет» человеку есть чем. Признак поддержан всюду —
+    /// база, обмен конфигом, раскладка диска, ссылка под QR, — но ставится он ровно в одном месте:
+    /// галочкой в таблице подтипов. Полгода этот признак пролежал без неё и был мёртв целиком, снаружи
+    /// неотличимо от «функции нет». Поэтому проверяем не поведение, а наличие единственной двери.</summary>
+    [Fact]
+    public void TheHierarchyTable_HasTheNoInstructionCheckbox()
+    {
+        Ui.Run(() =>
+        {
+            var services = Services();
+            var view = new SettingsView(services, new MainWindowViewModel(services));
+
+            var column = view.HierarchyGrid.Columns.FirstOrDefault(c => (c.Header as string) == "Инструкции не будет");
+            Assert.NotNull(column);
+            // Именно шаблон с галочкой: текстовая колонка выглядела бы так же в заголовке, но
+            // переключить признак ею нельзя.
+            Assert.IsType<DataGridTemplateColumn>(column);
         });
     }
 
