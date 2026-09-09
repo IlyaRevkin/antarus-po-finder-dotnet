@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Linq;
 using System.Windows;
 using AntarusPoFinder.App.Services;
@@ -70,7 +70,7 @@ public partial class StubLayoutWindow : Window
         StubKind.NotPlanned =>
             "Одна на всех, лежит в корне диска. Ведут на неё шкафы, у которых в справочнике отмечено «инструкции не будет».",
         StubKind.ServiceNote =>
-            "Кладётся РЯДОМ с готовой инструкцией, а не вместо неё.",
+            "Вшивается ПОСЛЕДНЕЙ страницей в сам PDF инструкции при выкладке. Отдельным файлом не лежит.",
         _ =>
             "Лежит вместо инструкции, пока её не дописали, и уходит сама, как только документ появился.",
     };
