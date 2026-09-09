@@ -1060,7 +1060,16 @@ public partial class UploadView : UserControl
                 return;
 
             case FirmwareUploadOutcome.Success:
-                _host.ShowStatus($"Загружено: {result.Record!.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+                // ⚠️ Не просто «Загружено», а РЕГИСТРАЦИЯ правки в накопителе (см.
+                // MainWindowViewModel.PushCatalogChange). Строка новой прошивки уезжает к коллегам
+                // только полным экспортом администратора, а он по умолчанию не делается вовсе
+                // (config_push_interval_min = 0) — узкий канал модерации несёт РЕШЕНИЕ, но не саму
+                // запись («версия могла ещё не доехать сюда» — Database.ApplyModerationDecisions).
+                // Раньше загрузка в накопитель не попадала, плашка «изменений не отправлено» не
+                // появлялась, и человек узнавал о том, что прошивки у коллег нет, через день и три
+                // скриншота — дословная жалоба «залил две прошивки, у коллеги их наотрез нет».
+                _host.PushCatalogChange($"Загружена прошивка {result.Record!.VersionRaw}",
+                    result.Record.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
                 // We just wrote files to the disk — refresh the footer file count now instead of
                 // letting it sit stale until the next periodic RunSync tick.
                 _host.RefreshDiskStatus();
@@ -1265,6 +1274,9 @@ public partial class UploadView : UserControl
         _services.Db.RollbackFwVersion(last.Id!.Value);
         UpdatePreview();
         _host.InvalidateSearchResults();
-        _host.ShowStatus($"Откатано: {last.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        // Откат меняет то, что коллеги видят в выдаче, — значит это тоже неотправленная правка, а не
+        // просто сообщение в статус-строке (см. случай Success выше).
+        _host.PushCatalogChange($"Откатана версия {last.VersionRaw}",
+            last.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
     }
 }

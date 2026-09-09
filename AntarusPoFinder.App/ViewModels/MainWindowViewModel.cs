@@ -1782,9 +1782,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     ///
     /// Автоотправка по таймеру (PushConfigNowAsync), если администратор её включил, по-прежнему
     /// уносит накопленное сама — эта настройка не менялась.</summary>
-    public void PushCatalogChange(string what, string subjectKey = "") => _ = PushCatalogChangeAsync(what, subjectKey);
+    public void PushCatalogChange(string what, string subjectKey = "",
+        NotificationCategory category = NotificationCategory.Hierarchy) =>
+        _ = PushCatalogChangeAsync(what, subjectKey, category);
 
-    private Task PushCatalogChangeAsync(string what, string subjectKey)
+    private Task PushCatalogChangeAsync(string what, string subjectKey, NotificationCategory category)
     {
         // Накопитель (Database.SyncPendingChange) — и счётчик на плашке, и источник описаний для
         // журнала маркера ревизии при отправке (ExportAsync(changeDescriptions:)). subjectKey даёт
@@ -1796,7 +1798,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // ролям обещать отправку нельзя, у них правка так и останется локальной.
         ShowStatus(CurrentRole == "administrator"
             ? $"{what}. Чтобы изменение увидели коллеги — «Отправить всё» на плашке сверху"
-            : what, category: NotificationCategory.Hierarchy);
+            : what, category: category);
         return Task.CompletedTask;
     }
 

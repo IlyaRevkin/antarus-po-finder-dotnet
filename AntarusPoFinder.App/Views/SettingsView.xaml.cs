@@ -3452,7 +3452,11 @@ public partial class SettingsView : UserControl
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.RollbackFwVersion(v.Id!.Value);
-        _host.ShowStatus($"Откатано: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        // Правка состояния прошивки — такая же неотправленная правка, как правка справочника: без
+        // регистрации в накопителе плашка «изменений не отправлено» молчит, и у коллег версия
+        // остаётся прежней (см. UploadView, случай Success).
+        _host.PushCatalogChange($"Откатана версия {v.VersionRaw}",
+            v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
@@ -3486,7 +3490,8 @@ public partial class SettingsView : UserControl
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.SetFwVersionManualCurrent(v.Id!.Value);
-        _host.ShowStatus($"Отмечена текущей: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        _host.PushCatalogChange($"Отмечена текущей версия {v.VersionRaw}",
+            v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
@@ -3511,7 +3516,8 @@ public partial class SettingsView : UserControl
         if (reply != MessageBoxResult.Yes) return;
 
         _services.Db.UnrollbackFwVersion(v.Id!.Value);
-        _host.ShowStatus($"Возвращена в активные: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        _host.PushCatalogChange($"Возвращена в активные версия {v.VersionRaw}",
+            v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 

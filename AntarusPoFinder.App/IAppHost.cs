@@ -1,4 +1,4 @@
-using AntarusPoFinder.App.ViewModels;
+﻿using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App;
@@ -64,7 +64,8 @@ public interface IAppHost
     /// subjectKey — к какому объекту относится правка (для правок прошивки — её FwVersionId в виде
     /// строки), чтобы карточка выдачи точечно показала «правки этой прошивки ещё не на диске»; пусто —
     /// правка без привязки к конкретной прошивке (тип/подтип/контроллер и т.п.).</summary>
-    void PushCatalogChange(string what, string subjectKey = "");
+    void PushCatalogChange(string what, string subjectKey = "",
+        NotificationCategory category = NotificationCategory.Hierarchy);
 
     /// <summary>Пометить показанную выдачу поиска устаревшей — вызывается после локальных изменений
     /// данных прошивок (загрузка, откат), чтобы при следующем заходе на «Поиск» выдача обновилась.
