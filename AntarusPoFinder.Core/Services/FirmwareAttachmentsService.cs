@@ -81,7 +81,18 @@ public static class FirmwareAttachmentsService
         var sourceFolder = Directory.Exists(sourcePath) ? sourcePath : HmiProjectFormat.ProjectFolderOf(sourcePath);
         if (sourceFolder is not null)
         {
-            var hmiDstFolder = Path.Combine(hmiRootFolder, $"{versionRaw}_hmi");
+            // Имя «{версия}_hmi» пошло от ОБЩЕЙ папки HMI контроллера: там рядом лежат проекты
+            // разных версий, и без версии в имени они бы смешались. Внутри СВОЕЙ папки версии этот
+            // уровень лишний — папка и так принадлежит одной версии, а получается
+            // «…\<версия>\HMI\<версия>_hmi». Отсюда жалоба: «в папке HMI ещё одну папку создавала».
+            //
+            // Определяем по расположению: родитель папки HMI — это папка версии (новая раскладка)
+            // или папка контроллера (старая). Уже разложенное на диске НЕ трогаем: чтение обоих
+            // вариантов поддержано (см. HierarchyService, проверка префикса «{версия}_hmi»), а
+            // массовый перенос на сетевой шаре ради косметики — риск больший, чем сам лишний уровень.
+            var hmiParent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(hmiRootFolder));
+            var insideVersionFolder = hmiParent is not null && VersionLayout.IsNewLayout(hmiParent);
+            var hmiDstFolder = insideVersionFolder ? hmiRootFolder : Path.Combine(hmiRootFolder, $"{versionRaw}_hmi");
             // Проект УЖЕ лежит там, куда мы собрались его класть — оператор выбрал сохранённый проект
             // повторно (или через другую букву сетевого диска). Копировать нечего, а копирование
             // папки в саму себя раньше падало «файл занят другим процессом».
