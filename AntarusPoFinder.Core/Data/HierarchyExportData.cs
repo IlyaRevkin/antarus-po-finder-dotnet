@@ -25,6 +25,14 @@ public class ExportedSubType
     [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
     [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
 
+    /// <summary>Имя, которое подтип носил ДО переименования. Нужно приёмнику, у которого sync_id
+    /// этого подтипа ещё не согласован с отправителем: по НОВОМУ имени он подтип не найдёт и заведёт
+    /// второй, оставив старый рядом — прошивки повиснут на старом, а поиск разъедется. Ровно это и
+    /// случилось, когда «НГР / 2.0» переименовали в «КПЧ».
+    ///
+    /// Старая версия программы поля не присылает — тогда пусто, и приём ведёт себя как прежде.</summary>
+    [JsonPropertyName("prev_name")] public string PrevName { get; set; } = "";
+
     /// <summary>«Инструкции на этот шкаф не будет» (см. EquipmentSubType.NoInstruction). Ездит в общем
     /// конфиге: это свойство изделия, а не машины. Старый клиент поля не присылает вовсе — тогда
     /// здесь false, и приём это учитывает (см. Database.ConfigExchange): молчание старой машины не должно
@@ -655,6 +663,10 @@ public class ImportCounts
     /// <summary>Резервы номеров, которым не нашлось подтипа/контроллера. Отдельно от прошивок:
     /// смешивать их в одном счётчике значит врать в сводке.</summary>
     public int ReservationsSkippedNoParent { get; set; }
+
+    /// <summary>Сколько путей переписано после переименования подтипа, приехавшего с другой
+    /// машины. Ноль при обычном обмене; ненулевое значит, что здесь чинились привязки.</summary>
+    public int PathsRemappedAfterRename { get; set; }
 
     public int FwVersionsSkippedTombstone { get; set; }
 

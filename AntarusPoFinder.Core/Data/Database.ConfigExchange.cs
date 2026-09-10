@@ -46,7 +46,7 @@ public partial class Database
                 data.EquipmentGroups.Add(new ExportedGroup { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at") });
 
         using (var r = ExecuteReader("""
-            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, es.updated_at, es.no_instruction, eg.name AS group_name, eg.sync_id AS group_sync_id
+            SELECT es.name, es.prefix, es.folder_name, es.sort_order, es.sync_id, es.updated_at, es.no_instruction, es.prev_name, eg.name AS group_name, eg.sync_id AS group_sync_id
             FROM equipment_subtypes es JOIN equipment_groups eg ON es.group_id = eg.id
             ORDER BY es.sort_order
             """))
@@ -56,6 +56,7 @@ public partial class Database
                     Name = r.GetString(0), Prefix = r.GetInt32(1), FolderName = r.GetString(2),
                     SortOrder = r.GetInt32(3), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at"),
                     NoInstruction = GetInt(r, "no_instruction") == 1,
+                    PrevName = GetString(r, "prev_name"),
                     GroupName = GetString(r, "group_name"), GroupSyncId = GetString(r, "group_sync_id"),
                 });
 
@@ -730,7 +731,7 @@ public partial class Database
             var groupId = ResolveId("equipment_groups", s.GroupSyncId, groupSyncToId, "name", s.GroupName);
             if (groupId is null) continue;
 
-            var existing = FindSubtype(s.SyncId, groupId.Value, s.Name);
+            var existing = FindSubtype(s.SyncId, groupId.Value, s.Name, s.PrevName);
             if (existing is null)
             {
                 counts.SubtypesAdded++;
@@ -796,6 +797,22 @@ public partial class Database
                             cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(s.UpdatedAt) ? syncNow : s.UpdatedAt);
                         });
                         SetHierarchyWatermark(effectiveSyncId, syncNow);
+
+                        // Подтип переименован — значит и папка на общем диске уже называется по-новому
+                        // (её переименовала та машина, где правили). А пути прошивок И ФАЙЛОВ ПАРАМЕТРОВ
+                        // на ЭТОЙ машине по-прежнему ведут на старое имя: у себя переименовывающая
+                        // машина их переписала (HierarchyService.RenameSubtypeFolder → RemapPathPrefix),
+                        // а до нас доехало только новое имя подтипа.
+                        //
+                        // Без этого у всех, кроме автора правки, ломались привязки: прошивки указывали
+                        // в несуществующую папку, старое имя продолжало вылезать в путях, и поиск их
+                        // не находил. Ровно это и случилось, когда «НГР / 2.0» переименовали в «КПЧ».
+                        //
+                        // Чиним заменой СЕГМЕНТА пути, а не его начала: корень у машин разный —
+                        // у кого буква диска, у кого сетевой адрес (см. FirmwarePathLocalizer), и
+                        // склеивать полный путь тут было бы неверно.
+                        if (name != s.Name)
+                            counts.PathsRemappedAfterRename += RemapSubtypeSegment(s.GroupName, name, s.Name);
                     }
                 }
                 else if (apply)
@@ -2178,7 +2195,7 @@ public partial class Database
         return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
     }
 
-    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId, string UpdatedAt)? FindSubtype(string syncId, int groupId, string name)
+    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId, string UpdatedAt)? FindSubtype(string syncId, int groupId, string name, string prevName = "")
     {
         if (!string.IsNullOrEmpty(syncId))
         {
@@ -2188,7 +2205,28 @@ public partial class Database
         }
         using var r2 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND name=@n",
             cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@n", name); });
-        return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
+        if (r2.Read()) return (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id"), GetString(r2, "updated_at"));
+
+        // Третья попытка — по ПРЕЖНЕМУ имени. Без неё переименование на машине, чей sync_id ещё не
+        // согласован с нашим, выглядит здесь как «появился новый подтип»: старый остаётся рядом,
+        // прошивки висят на нём, а поиск разъезжается. Ровно это и случилось, когда «НГР / 2.0»
+        // переименовали в «КПЧ».
+        //
+        // Ищем в ОБЕ стороны: их prev_name против нашего имени (переименовали у них — догоняем мы),
+        // и наш prev_name против их имени (переименовали у нас, а они прислали снимок постарше —
+        // тогда это та же строка, а не новая).
+        if (!string.IsNullOrEmpty(prevName))
+        {
+            using var r3 = ExecuteReader(
+                "SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND name=@p",
+                cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@p", prevName); });
+            if (r3.Read()) return (r3.GetInt32(0), r3.GetString(1), r3.GetInt32(2), r3.GetString(3), r3.GetInt32(4), GetString(r3, "sync_id"), GetString(r3, "updated_at"));
+        }
+
+        using var r4 = ExecuteReader(
+            "SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND prev_name<>'' AND prev_name=@n",
+            cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@n", name); });
+        return r4.Read() ? (r4.GetInt32(0), r4.GetString(1), r4.GetInt32(2), r4.GetString(3), r4.GetInt32(4), GetString(r4, "sync_id"), GetString(r4, "updated_at")) : null;
     }
 
     private (int Id, string Name, int HwVersion, int SortOrder, string Description, string SyncId, string UpdatedAt)? FindModification(string syncId, int controllerId, string displayName)
@@ -2352,6 +2390,72 @@ public partial class Database
     /// renaming an equipment group/subtype's disk folder (see SettingsView RenameGroup/RenameSubtype),
     /// where only the group/subtype segment of the path changes, not the whole root. Returns how many
     /// rows were touched, so the caller can report it.</summary>
+    /// <summary>Переписывает в путях один сегмент — папку подтипа внутри его группы:
+    /// <c>…\ПО\НГР.0\…</c> → <c>…\ПО\НГР\КПЧ\…</c>. Именно сегмент, а не начало пути:
+    /// корень у машин разный (у кого буква диска, у кого сетевой адрес), и склеивать полный путь
+    /// здесь было бы неверно — см. FirmwarePathLocalizer.
+    ///
+    /// Нужно на ПРИЁМЕ переименования: у себя переименовывающая машина пути уже переписала
+    /// (HierarchyService.RenameSubtypeFolder), а к остальным доезжает только новое имя подтипа —
+    /// и их прошивки продолжают указывать на папку, которой на диске больше нет.</summary>
+    public int RemapSubtypeSegment(string groupName, string oldSubtypeName, string newSubtypeName)
+    {
+        if (string.IsNullOrEmpty(groupName) || string.IsNullOrEmpty(oldSubtypeName)
+            || oldSubtypeName == newSubtypeName) return 0;
+
+        // Оба разделителя: пути в базе могли прийти с машины, писавшей их по-своему.
+        var changed = 0;
+        foreach (var sep in new[] { '\\', '/' })
+        {
+            var from = $"{sep}{groupName}{sep}{oldSubtypeName}{sep}";
+            var to = $"{sep}{groupName}{sep}{newSubtypeName}{sep}";
+            changed += ReplaceInPathColumns(from, to);
+
+            // Хвост пути без завершающего разделителя — сама папка подтипа как конечная точка.
+            var fromEnd = $"{sep}{groupName}{sep}{oldSubtypeName}";
+            var toEnd = $"{sep}{groupName}{sep}{newSubtypeName}";
+            changed += ReplaceInPathColumnsSuffix(fromEnd, toEnd);
+        }
+        return changed;
+    }
+
+    private int ReplaceInPathColumns(string from, string to)
+    {
+        var n = 0;
+        foreach (var (table, col) in PathColumns)
+            n += ExecuteNonQuery($"UPDATE {table} SET {col} = REPLACE({col}, @f, @t) WHERE {col} LIKE @like",
+                cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@f", from);
+                    cmd.Parameters.AddWithValue("@t", to);
+                    cmd.Parameters.AddWithValue("@like", "%" + from + "%");
+                });
+        return n;
+    }
+
+    private int ReplaceInPathColumnsSuffix(string from, string to)
+    {
+        var n = 0;
+        foreach (var (table, col) in PathColumns)
+            n += ExecuteNonQuery($"UPDATE {table} SET {col} = SUBSTR({col}, 1, LENGTH({col}) - LENGTH(@f)) || @t WHERE {col} LIKE @like",
+                cmd =>
+                {
+                    cmd.Parameters.AddWithValue("@f", from);
+                    cmd.Parameters.AddWithValue("@t", to);
+                    cmd.Parameters.AddWithValue("@like", "%" + from);
+                });
+        return n;
+    }
+
+    /// <summary>Все колонки, где лежат пути к файлам на общем диске. Держим списком в одном месте:
+    /// забыть колонку здесь значит оставить часть записей указывать в старую папку.</summary>
+    private static readonly (string Table, string Column)[] PathColumns =
+    {
+        ("fw_versions", "disk_path"), ("fw_versions", "io_map_path"), ("fw_versions", "instructions_path"),
+        ("fw_versions", "hmi_path"), ("fw_versions", "modbus_map_path"),
+        ("param_files", "disk_path"),
+    };
+
     public int RemapPathPrefix(string oldPrefix, string newPrefix)
     {
         var oldNorm = Path.TrimEndingDirectorySeparator(oldPrefix);

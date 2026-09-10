@@ -685,7 +685,13 @@ public partial class Database : IDisposable
         // копиях — там-то эти шкафы и заведены. Умолчание 0 («инструкция будет») сохраняет прежнее
         // поведение для всего, что уже лежит: ни одна папка не поменяется, пока человек сам не
         // отметит подтип в справочнике.
-        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"), ("no_instruction", "INTEGER NOT NULL DEFAULT 0"));
+        AddColumnsIfMissing("equipment_subtypes", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("folder_name", "TEXT NOT NULL DEFAULT ''"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"), ("no_instruction", "INTEGER NOT NULL DEFAULT 0"),
+            // Прежнее имя подтипа — чтобы переименование доехало до машины, где sync_id ещё не
+            // согласован. Без него приём искал подтип по НОВОМУ имени, не находил и заводил
+            // второй: у коллег оставался старый «2.0» рядом с новым «КПЧ», прошивки висели на
+            // старом, поиск разъезжался. Хранится до первого успешного опознания и не растёт:
+            // это одно предыдущее имя, а не история.
+            ("prev_name", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("controller_models", ("prefix", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("controller_modifications", ("hw_version", "INTEGER NOT NULL DEFAULT 0"), ("sort_order", "INTEGER NOT NULL DEFAULT 0"), ("description", "TEXT NOT NULL DEFAULT ''"), ("sync_id", "TEXT NOT NULL DEFAULT ''"), ("updated_at", "TEXT NOT NULL DEFAULT ''"));
         // deleted_at: fw_versions' own tombstone marker (Задача 3) — '' means "not deleted". Unlike

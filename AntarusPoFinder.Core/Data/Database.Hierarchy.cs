@@ -188,7 +188,19 @@ public partial class Database
     /// AddSubtype_Click) — kept in sync here purely for cosmetic consistency; nothing reads it to
     /// build the actual on-disk path, that's always live off Name (see HierarchyService).</summary>
     public void RenameEquipmentSubtype(int id, string newName, string newFolderName) =>
-        ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, folder_name=@f, updated_at=@u WHERE id=@id", cmd =>
+        // prev_name запоминает имя ДО правки — по нему переименование опознается на машине, где
+        // sync_id этого подтипа ещё не согласован с нашим. Раньше там искали по новому имени, не
+        // находили и заводили второй подтип: у коллег оставался старый рядом с новым, прошивки
+        // висели на старом, поиск разъезжался.
+        //
+        // Пишем только при РЕАЛЬНОЙ смене имени: иначе правка одного лишь префикса затирала бы
+        // прежнее имя своим же текущим, и подсказка для приёмника пропадала бы впустую.
+        ExecuteNonQuery("""
+            UPDATE equipment_subtypes
+               SET prev_name = CASE WHEN name <> @n THEN name ELSE prev_name END,
+                   name=@n, folder_name=@f, updated_at=@u
+             WHERE id=@id
+            """, cmd =>
         {
             cmd.Parameters.AddWithValue("@n", newName);
             cmd.Parameters.AddWithValue("@f", newFolderName);
