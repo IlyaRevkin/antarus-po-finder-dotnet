@@ -1164,6 +1164,32 @@ public static class ConfigSyncService
         catch { return false; }
     }
 
+    /// <summary>Догоняющая отправка того, что умеет уехать БЕЗ администратора: строки прошивок из
+    /// накопителя неотправленных правок (у них subject — id прошивки числом; у файла параметров это
+    /// «param:12», у правки справочника пусто) уходят узким каналом одним снимком. Обычно отправка
+    /// уже случилась сама, в момент правки (MainWindowViewModel.PushCatalogChange); сюда попадает
+    /// то, что тогда не доехало — не было сети, файл был занят.
+    ///
+    /// Всё разом, а не по строке: канал каждый раз перечитывает и переписывает общий конфиг, и
+    /// десять правок десятью проходами — это десять лишних гонок за один и тот же файл.
+    ///
+    /// Возвращает, сколько правок снято с очереди. Ноль значит «прошивок в очереди не было или
+    /// отправка не удалась» — очередь в обоих случаях цела, и плашка продолжает честно их называть.
+    /// Правки справочника из очереди не снимаются никогда: их этот канал не переносит.</summary>
+    public static int SendPendingFirmwareChanges(AppServices services, string author)
+    {
+        var pending = services.Db.GetSyncPendingChanges()
+            .Where(c => int.TryParse(c.Subject, out _))
+            .ToList();
+        if (pending.Count == 0) return 0;
+
+        var ids = pending.Select(c => int.Parse(c.Subject)).Distinct().ToList();
+        if (!PushFirmwareChange(services, ids, author, pending.Select(c => c.Description)))
+            return 0;
+
+        return services.Db.ClearSyncPendingChangesForSubjects(pending.Select(c => c.Subject));
+    }
+
     private static int CountSettingsChanges(AppServices services, JsonObject rootNode, string exportedAt)
     {
         var changed = 0;

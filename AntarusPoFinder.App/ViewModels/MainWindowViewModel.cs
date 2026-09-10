@@ -1447,9 +1447,21 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (CurrentRole != "administrator")
         {
             // Полный экспорт — привилегия администратора (см. PushCatalogChangeAsync ниже за тем же
-            // объяснением) — у остальных ролей накопитель просто ждёт, пока администратор отправит
-            // свой собственный экспорт (тот подхватит всё текущее состояние локальной БД целиком).
-            ShowStatus("Отправка на диск доступна только администратору — изменения останутся в очереди", 8000, NotificationCategory.Sync);
+            // объяснением), и правки справочника у остальных ролей по-прежнему ждут его экспорта.
+            // А вот прошивки узкий канал отправляет с любой машины — и кнопка обязана это делать, а
+            // не отвечать «не положено»: человек, залив прошивку без сети, нажмёт её именно затем,
+            // чтобы догнать отправку.
+            var sentFirmware = await Task.Run(() => ConfigSyncService.SendPendingFirmwareChanges(
+                _services, $"{_services.CurrentUserName} ({RoleLabel})"));
+            RefreshPendingChangesBanner();
+            var left = _services.Db.SyncPendingChangeCount();
+            ShowStatus(
+                sentFirmware == 0
+                    ? "Отправка справочника на диск доступна только администратору — изменения останутся в очереди"
+                    : left == 0
+                        ? $"Прошивки отправлены коллегам (правок: {sentFirmware})"
+                        : $"Прошивки отправлены коллегам (правок: {sentFirmware}). Осталось в очереди: {left} — правки справочника отправляет администратор",
+                8000, NotificationCategory.Sync);
             return;
         }
 
@@ -1781,25 +1793,47 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// Сама отправка — SendPendingChangesNow, там же и порядок «сначала забрать, потом отдать».
     ///
     /// Автоотправка по таймеру (PushConfigNowAsync), если администратор её включил, по-прежнему
-    /// уносит накопленное сама — эта настройка не менялась.</summary>
+    /// уносит накопленное сама — эта настройка не менялась.
+    ///
+    /// ⚠️ <b>Правка ПРОШИВКИ — исключение, и оно тут главное.</b> Справочник без администратора
+    /// действительно не отправить: полный снимок перезаписывает файл целиком. А вот сама прошивка
+    /// уезжает узким каналом (ConfigSyncService.PushFirmwareChange) сразу и с любой машины — и это
+    /// та самая беда, ради которой канал расширяли: «залил прошивку, отмодерировал — у коллеги её
+    /// наотрез нет», потому что ждать приходилось администраторского «Отправить всё», которого по
+    /// умолчанию не бывает вовсе. Узнаём такую правку по subjectKey: у прошивки это её id числом
+    /// (у файла параметров — «param:12», у правки справочника пусто).</summary>
     public void PushCatalogChange(string what, string subjectKey = "",
         NotificationCategory category = NotificationCategory.Hierarchy) =>
         _ = PushCatalogChangeAsync(what, subjectKey, category);
 
-    private Task PushCatalogChangeAsync(string what, string subjectKey, NotificationCategory category)
+    private async Task PushCatalogChangeAsync(string what, string subjectKey, NotificationCategory category)
     {
         // Накопитель (Database.SyncPendingChange) — и счётчик на плашке, и источник описаний для
         // журнала маркера ревизии при отправке (ExportAsync(changeDescriptions:)). subjectKey даёт
         // карточке выдачи точечную подсветку «правки этой прошивки ещё не на диске».
+        //
+        // Запись в накопитель делается ДО попытки отправки, а не вместо неё: не доехало — правка
+        // осталась в очереди и видна на плашке, ровно как было до появления канала.
         _services.Db.AddSyncPendingChange("catalog", what, _services.CurrentUserName, subjectKey);
         RefreshPendingChangesBanner();
+
+        if (int.TryParse(subjectKey, out var fwVersionId) &&
+            await Task.Run(() => ConfigSyncService.PushFirmwareChange(
+                _services, new[] { fwVersionId }, $"{_services.CurrentUserName} ({RoleLabel})", new[] { what })))
+        {
+            // Уехало — снимаем из очереди правки именно по этой прошивке, остальное (справочник,
+            // который узкий канал не переносит) в очереди остаётся.
+            _services.Db.ClearSyncPendingChangesForSubjects(new[] { subjectKey });
+            RefreshPendingChangesBanner();
+            ShowStatus($"{what}. Отправлено коллегам", category: category);
+            return;
+        }
 
         // Полный экспорт разрешён только администратору (см. SendPendingChangesNow) — остальным
         // ролям обещать отправку нельзя, у них правка так и останется локальной.
         ShowStatus(CurrentRole == "administrator"
             ? $"{what}. Чтобы изменение увидели коллеги — «Отправить всё» на плашке сверху"
             : what, category: category);
-        return Task.CompletedTask;
     }
 
     /// <summary>Runs silently on SUCCESS — no status-bar toast — same reasoning as

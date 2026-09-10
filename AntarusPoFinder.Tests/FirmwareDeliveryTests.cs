@@ -238,6 +238,55 @@ public class FirmwareDeliveryTests
         Assert.DoesNotContain("..", pushed.DiskPath);
     }
 
+    /// <summary>Плашка «N изменений не отправлено» обязана называть ровно то, что действительно не
+    /// отправлено. Прошивка, уехавшая узким каналом, из очереди уходит; правка справочника и файл
+    /// параметров, которые канал не переносит, в ней остаются и продолжают ждать администратора.
+    /// Соврать здесь можно в обе стороны, и обе — та же беда, из-за которой человек не узнаёт, что
+    /// его работа осталась дома.</summary>
+    [Fact]
+    public void DeliveredFirmwareLeavesTheQueue_CatalogEditsStayInIt()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        SeedAndShare(m);
+
+        var idOnB = Upload(m.DbB, m.Root.Path, Raw);
+        m.DbB.AddSyncPendingChange("catalog", $"Загружена прошивка {Raw}", "наладчик", idOnB.ToString());
+        m.DbB.AddSyncPendingChange("catalog", "Тип шкафа добавлен: ПИ", "наладчик");
+        m.DbB.AddSyncPendingChange("catalog", "Файл параметров загружен", "наладчик", "param:1");
+        Assert.Equal(3, m.DbB.SyncPendingChangeCount());
+
+        Assert.Equal(1, ConfigSyncService.SendPendingFirmwareChanges(m.SvcB, "наладчик"));
+
+        var left = m.DbB.GetSyncPendingChanges();
+        Assert.Equal(2, left.Count);
+        Assert.DoesNotContain(left, c => c.Subject == idOnB.ToString());
+        Assert.Contains(left, c => c.Subject == "param:1");
+        Assert.Contains(left, c => c.Subject == "");
+
+        // И прошивка при этом действительно у коллеги, а не «списана с очереди» впустую.
+        var incoming = ConfigSyncService.CheckForUpdate(m.SvcA, out _);
+        Assert.NotNull(incoming);
+        ConfigSyncService.Apply(m.SvcA, incoming!.ConfigPath, m.Root.Path);
+        Assert.NotNull(Row(m.DbA, Raw));
+    }
+
+    /// <summary>Не доехало — очередь цела. Отправка best-effort, и «снять с плашки» разрешено только
+    /// после подтверждённой записи в общий конфиг: иначе первый же поход без сети молча стёр бы
+    /// единственный след того, что работа не отправлена.</summary>
+    [Fact]
+    public void FailedDelivery_KeepsTheQueueIntact()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot(); // общего конфига на диске ещё нет — узкий канал его не создаёт
+
+        var id = Upload(m.DbB, m.Root.Path, Raw);
+        m.DbB.AddSyncPendingChange("catalog", $"Загружена прошивка {Raw}", "наладчик", id.ToString());
+
+        Assert.Equal(0, ConfigSyncService.SendPendingFirmwareChanges(m.SvcB, "наладчик"));
+        Assert.Equal(1, m.DbB.SyncPendingChangeCount());
+    }
+
     /// <summary>Прошивка, заведённая под несколькими подтипами шкафа, физически одна — и приехать к
     /// коллеге половиной записей она не должна. Канал сам добирает копии-ссылки
     /// (Database.GetFwVersionIdsSharingFiles), как это давно делает доставка решений модерации.</summary>

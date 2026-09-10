@@ -12,6 +12,11 @@ public class SyncPendingChange
     public string Author { get; set; } = "";
     public string ChangeType { get; set; } = "";
     public string Description { get; set; } = "";
+
+    /// <summary>К какому объекту относится правка — id прошивки числом, «param:12» у файла
+    /// параметров, пусто у правки справочника. По нему отбирается то, что умеет уехать узким каналом
+    /// без администратора (см. MainWindowViewModel.SendPendingChangesNow).</summary>
+    public string Subject { get; set; } = "";
 }
 
 public partial class Database
@@ -45,12 +50,13 @@ public partial class Database
     public List<SyncPendingChange> GetSyncPendingChanges()
     {
         var result = new List<SyncPendingChange>();
-        using var r = ExecuteReader("SELECT id, ts, author, change_type, description FROM sync_pending_changes ORDER BY id");
+        using var r = ExecuteReader("SELECT id, ts, author, change_type, description, subject FROM sync_pending_changes ORDER BY id");
         while (r.Read())
             result.Add(new SyncPendingChange
             {
                 Id = r.GetInt32(0), Ts = GetString(r, "ts"), Author = GetString(r, "author"),
                 ChangeType = GetString(r, "change_type"), Description = GetString(r, "description"),
+                Subject = GetString(r, "subject"),
             });
         return result;
     }
@@ -62,4 +68,22 @@ public partial class Database
     /// определению уносит на диск ВСЁ текущее состояние этой машины, значит и всё, что накопилось
     /// здесь, уже отправлено.</summary>
     public void ClearSyncPendingChanges() => ExecuteNonQuery("DELETE FROM sync_pending_changes");
+
+    /// <summary>Снимает из накопителя правки ПО НАЗВАННЫМ объектам — то, что зовут после успешной
+    /// отправки прошивки узким каналом (ConfigSyncService.PushFirmwareChange). Полного экспорта при
+    /// этом не было, и остальное в очереди (правки справочника, которые узкий канал не переносит)
+    /// обязано в ней остаться: плашка «N изменений не отправлено» должна называть ровно то, что
+    /// действительно не отправлено, иначе она врёт в одну или в другую сторону.
+    ///
+    /// Сравнение subject'ов — точное и по байтам. Это не имена из справочника, а машинные ключи
+    /// («37», «param:12»), собранные нами же; регистронезависимость тут не нужна и опасна ровно по
+    /// той же причине, по какой она подводит с кириллицей (см. правило про COLLATE NOCASE).</summary>
+    public int ClearSyncPendingChangesForSubjects(IEnumerable<string> subjects)
+    {
+        var cleared = 0;
+        foreach (var subject in subjects.Where(s => !string.IsNullOrEmpty(s)).Distinct(StringComparer.Ordinal))
+            cleared += ExecuteNonQuery("DELETE FROM sync_pending_changes WHERE subject = @s",
+                cmd => cmd.Parameters.AddWithValue("@s", subject));
+        return cleared;
+    }
 }
