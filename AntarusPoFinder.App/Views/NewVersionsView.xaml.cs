@@ -67,7 +67,7 @@ public partial class NewVersionsView : UserControl
         if (release)
         {
             _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
-            // Узкий канал доставки решения (см. ConfigSyncService.PushModerationOnly): страница
+            // Узкий канал доставки решения (см. ConfigSyncService.PushFirmwareAndModerationOnly): страница
             // модерации доступна и наладчику, а полный экспорт — только администратору, поэтому без
             // этого решение, принятое здесь, у коллег никогда бы не появилось.
             delivered = ConfigSyncService.RecordAndPushModeration(_services,

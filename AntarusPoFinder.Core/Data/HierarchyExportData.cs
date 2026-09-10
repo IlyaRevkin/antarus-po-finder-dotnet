@@ -321,7 +321,7 @@ public class ExportedHwRewrite
 }
 
 /// <summary>Одно решение модерации (вывод из модерации, архивирование, откат, удаление), принятое на
-/// какой-то машине — см. Database.ModerationLog.cs и ConfigSyncService.PushModerationOnly. Отдельная
+/// какой-то машине — см. Database.ModerationLog.cs и ConfigSyncService.PushFirmwareAndModerationOnly. Отдельная
 /// секция общего конфига именно потому, что полный снимок выгружает только администратор: решение
 /// наладчика/программиста иначе физически не могло уехать к остальным, ведь fw_versions в снимке —
 /// это состояние БД машины-экспортёра, а не чужой.
@@ -351,7 +351,7 @@ public class ExportedModerationDecision
     [JsonPropertyName("author")] public string Author { get; set; } = "";
 
     /// <summary>Ключ дедупликации при склейке журналов разных машин (см.
-    /// ConfigSyncService.PushModerationOnly и Database.AbsorbModerationDecisions): одно и то же
+    /// ConfigSyncService.PushFirmwareAndModerationOnly и Database.AbsorbModerationDecisions): одно и то же
     /// решение приезжает обратно на машину-автора при каждом полном экспорте, и без ключа журнал
     /// разрастался бы копиями. Отметка времени входит в ключ намеренно — два РАЗНЫХ решения по одной
     /// версии (сначала выпустили, потом откатили) обязаны остаться двумя записями.</summary>

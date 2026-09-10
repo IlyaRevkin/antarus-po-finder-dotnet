@@ -119,40 +119,7 @@ public partial class Database
                     ControllerName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
                 });
 
-        using (var r = ExecuteReader("""
-            SELECT fv.version_raw, fv.hw_version, fv.sw_version, fv.eq_prefix, fv.sub_prefix,
-                   fv.dt_str, fv.filename, fv.disk_path, fv.local_path, fv.description,
-                   fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
-                   fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
-                   fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
-                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of,
-                   eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
-                   cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
-            FROM fw_versions fv
-            JOIN equipment_subtypes es ON fv.subtype_id  = es.id
-            JOIN equipment_groups   eg ON es.group_id    = eg.id
-            JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.is_local_only = 0
-            ORDER BY fv.id
-            """))
-            while (r.Read())
-                data.FwVersions.Add(new ExportedFwVersion
-                {
-                    VersionRaw = r.GetString(0), HwVersion = r.GetInt32(1), SwVersion = r.GetInt32(2),
-                    EqPrefix = r.GetInt32(3), SubPrefix = r.GetInt32(4), DtStr = r.GetString(5),
-                    Filename = r.GetString(6), DiskPath = r.GetString(7), LocalPath = r.GetString(8),
-                    Description = r.GetString(9), Changelog = r.GetString(10), LaunchTypes = r.GetString(11),
-                    IoMapPath = r.GetString(12), InstructionsPath = r.GetString(13), IsOpc = r.GetInt32(14),
-                    RequestNum = r.GetString(15), UploadDate = r.GetString(16), Archived = r.GetInt32(17),
-                    Tags = r.GetString(18), Status = GetString(r, "status"), Released = GetInt(r, "released"),
-                    HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
-                    HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
-                    DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
-                    ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
-                    GroupName = GetString(r, "group_name"),
-                    SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
-                    CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
-                });
+        data.FwVersions = ExportFwVersions();
 
         // Файлы параметров выгружаются ЦЕЛИКОМ, вместе с архивными (archived=1) — они и есть
         // тумбстоуны удаления. Раньше здесь стоял «WHERE pf.archived = 0», и снятая запись просто
@@ -179,38 +146,7 @@ public partial class Database
                     GroupName = GetString(r, "group_name"),
                 });
 
-        // Доп. материалы прошивок (см. ExportedFwAttachment) — ЦЕЛИКОМ, вместе со снятыми: снятые и
-        // есть тумбстоуны, без них удаление не доехало бы до коллег (тот же довод, что у param_files
-        // выше). Строки прошивок, помеченных «не выгружать» (is_local_only), выпадают вместе со своей
-        // прошивкой — иначе вложение уехало бы, а версии, к которой его цеплять, у получателя нет.
-        data.FwAttachments = new();
-        using (var r = ExecuteReader("""
-            SELECT a.sync_id, a.filename, a.disk_path, a.kind, a.comment, a.added_by, a.added_at,
-                   a.deleted_at, a.updated_at,
-                   fv.sync_id AS fw_sync_id, fv.version_raw, fv.config_name,
-                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name,
-                   cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
-            FROM fw_attachments a
-            JOIN fw_versions       fv ON a.fw_version_id = fv.id
-            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
-            JOIN equipment_groups   eg ON es.group_id     = eg.id
-            JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.is_local_only = 0
-            ORDER BY a.id
-            """))
-            while (r.Read())
-                data.FwAttachments.Add(new ExportedFwAttachment
-                {
-                    SyncId = GetString(r, "sync_id"), FwSyncId = GetString(r, "fw_sync_id"),
-                    Filename = GetString(r, "filename"), DiskPath = GetString(r, "disk_path"),
-                    Kind = GetString(r, "kind"), Comment = GetString(r, "comment"),
-                    AddedBy = GetString(r, "added_by"), AddedAt = GetString(r, "added_at"),
-                    DeletedAt = GetString(r, "deleted_at"), UpdatedAt = GetString(r, "updated_at"),
-                    VersionRaw = GetString(r, "version_raw"), ConfigName = GetString(r, "config_name"),
-                    SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
-                    GroupName = GetString(r, "group_name"),
-                    ControllerName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
-                });
+        data.FwAttachments = ExportFwAttachments();
 
         // Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — ЦЕЛИКОМ, вместе со снятыми: снятые и
         // есть тумбстоуны, без них удаление не доехало бы до коллег (тот же довод, что у param_files
@@ -304,6 +240,107 @@ public partial class Database
         data.CtrlReassignments = GetRecentCtrlReassigns();
 
         return data;
+    }
+
+    /// <summary>Строки прошивок для общего конфига. <paramref name="onlyIds"/> = null — весь список,
+    /// как его всегда собирал ExportHierarchyData. Непустой список — ТОЛЬКО названные строки: это
+    /// узкий канал доставки (см. ConfigSyncService.PushFirmwareAndModerationOnly), который дописывает
+    /// в чужой снимок несколько своих записей, не трогая всё остальное.
+    ///
+    /// Записи, помеченные «сохранить у себя, не выгружать» (is_local_only), не уходят ни в том, ни в
+    /// другом случае — фильтр здесь один на оба пути намеренно: разойдись он, узкий канал стал бы
+    /// дырой в этой пометке.
+    ///
+    /// Снятые строки (deleted_at) выгружаются наравне с живыми: они и есть тумбстоуны, без них
+    /// удаление не доехало бы до коллег.</summary>
+    public List<ExportedFwVersion> ExportFwVersions(IReadOnlyCollection<int>? onlyIds = null)
+    {
+        var result = new List<ExportedFwVersion>();
+        if (onlyIds is not null && onlyIds.Count == 0) return result;
+        // Идентификаторы — целые числа из нашей же БД, подставляются в текст запроса напрямую:
+        // параметров переменного числа в SQLite нет, а инъекции из int быть не может.
+        var filter = onlyIds is null ? "" : $" AND fv.id IN ({string.Join(",", onlyIds)})";
+
+        using var r = ExecuteReader($"""
+            SELECT fv.version_raw, fv.hw_version, fv.sw_version, fv.eq_prefix, fv.sub_prefix,
+                   fv.dt_str, fv.filename, fv.disk_path, fv.local_path, fv.description,
+                   fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
+                   fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
+                   fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
+                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of,
+                   eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
+                   cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
+            FROM fw_versions fv
+            JOIN equipment_subtypes es ON fv.subtype_id  = es.id
+            JOIN equipment_groups   eg ON es.group_id    = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.is_local_only = 0{filter}
+            ORDER BY fv.id
+            """);
+        while (r.Read())
+            result.Add(new ExportedFwVersion
+            {
+                VersionRaw = r.GetString(0), HwVersion = r.GetInt32(1), SwVersion = r.GetInt32(2),
+                EqPrefix = r.GetInt32(3), SubPrefix = r.GetInt32(4), DtStr = r.GetString(5),
+                Filename = r.GetString(6), DiskPath = r.GetString(7), LocalPath = r.GetString(8),
+                Description = r.GetString(9), Changelog = r.GetString(10), LaunchTypes = r.GetString(11),
+                IoMapPath = r.GetString(12), InstructionsPath = r.GetString(13), IsOpc = r.GetInt32(14),
+                RequestNum = r.GetString(15), UploadDate = r.GetString(16), Archived = r.GetInt32(17),
+                Tags = r.GetString(18), Status = GetString(r, "status"), Released = GetInt(r, "released"),
+                HmiPath = GetString(r, "hmi_path"), ExecutableHint = GetString(r, "executable_hint"),
+                HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
+                DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
+                ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
+                GroupName = GetString(r, "group_name"),
+                SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
+                CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
+            });
+        return result;
+    }
+
+    /// <summary>Доп. материалы прошивок (см. ExportedFwAttachment) — ЦЕЛИКОМ, вместе со снятыми:
+    /// снятые и есть тумбстоуны, без них удаление не доехало бы до коллег (тот же довод, что у
+    /// param_files). Строки прошивок, помеченных «не выгружать» (is_local_only), выпадают вместе со
+    /// своей прошивкой — иначе вложение уехало бы, а версии, к которой его цеплять, у получателя нет.
+    ///
+    /// <paramref name="onlyFwVersionIds"/> — та же пара режимов, что у ExportFwVersions выше: null
+    /// значит «все», список значит «материалы только этих прошивок» (узкий канал доставки). Правка
+    /// прошивки почти всегда задевает и её документы, поэтому канал несёт обе секции сразу — иначе
+    /// он обещал бы доставку, а половину правки оставлял дома.</summary>
+    public List<ExportedFwAttachment> ExportFwAttachments(IReadOnlyCollection<int>? onlyFwVersionIds = null)
+    {
+        var result = new List<ExportedFwAttachment>();
+        if (onlyFwVersionIds is not null && onlyFwVersionIds.Count == 0) return result;
+        var filter = onlyFwVersionIds is null ? "" : $" AND fv.id IN ({string.Join(",", onlyFwVersionIds)})";
+
+        using var r = ExecuteReader($"""
+            SELECT a.sync_id, a.filename, a.disk_path, a.kind, a.comment, a.added_by, a.added_at,
+                   a.deleted_at, a.updated_at,
+                   fv.sync_id AS fw_sync_id, fv.version_raw, fv.config_name,
+                   es.name AS subtype_name, es.sync_id AS subtype_sync_id, eg.name AS group_name,
+                   cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
+            FROM fw_attachments a
+            JOIN fw_versions       fv ON a.fw_version_id = fv.id
+            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+            JOIN equipment_groups   eg ON es.group_id     = eg.id
+            JOIN controller_models  cm ON fv.controller_id = cm.id
+            WHERE fv.is_local_only = 0{filter}
+            ORDER BY a.id
+            """);
+        while (r.Read())
+            result.Add(new ExportedFwAttachment
+            {
+                SyncId = GetString(r, "sync_id"), FwSyncId = GetString(r, "fw_sync_id"),
+                Filename = GetString(r, "filename"), DiskPath = GetString(r, "disk_path"),
+                Kind = GetString(r, "kind"), Comment = GetString(r, "comment"),
+                AddedBy = GetString(r, "added_by"), AddedAt = GetString(r, "added_at"),
+                DeletedAt = GetString(r, "deleted_at"), UpdatedAt = GetString(r, "updated_at"),
+                VersionRaw = GetString(r, "version_raw"), ConfigName = GetString(r, "config_name"),
+                SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
+                GroupName = GetString(r, "group_name"),
+                ControllerName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
+            });
+        return result;
     }
 
     /// <summary>Computes what an import WOULD do without writing anything — powers the config-update
@@ -2213,9 +2250,13 @@ public partial class Database
     /// Прав этот канал не выдаёт: он доставляет уже принятое решение, а кто вправе его принимать,
     /// решает роль на стороне UI (страница «Модерация прошивок», см. RolesConfig.RoleAccess).
     ///
-    /// Строки, для которой решение, здесь ещё нет — пропускаем: она приедет обычным блоком
-    /// fw_versions (в снимке она уже с нужным состоянием, если экспортёр его к тому моменту принял),
-    /// а решение всё равно ляжет в местный журнал ниже и уедет дальше.</summary>
+    /// Строки, для которой решение, здесь ещё нет — пропускаем: применять решение не к чему. Раньше
+    /// это была настоящая дыра в доставке — прошивка, залитая на машине наладчика, к коллеге не
+    /// приезжала вовсе, и решение по ней тихо утекало в никуда. Теперь узкий канал отправляет решение
+    /// ВМЕСТЕ с самой строкой (ConfigSyncService.PushFirmwareAndModerationOnly), а этот метод вызван
+    /// ПОСЛЕ блока fw_versions — то есть к моменту разбора решений строка в базе уже есть. Пропуск
+    /// остался предохранителем на редкий случай (решение из старого снимка про версию, которой здесь
+    /// не было и нет): решение всё равно ляжет в местный журнал ниже и уедет дальше.</summary>
     private void ApplyModerationDecisions(List<ExportedModerationDecision>? decisions, ImportCounts counts, bool apply,
         Dictionary<string, int> subtypeSyncToId, Dictionary<string, int> controllerSyncToId)
     {

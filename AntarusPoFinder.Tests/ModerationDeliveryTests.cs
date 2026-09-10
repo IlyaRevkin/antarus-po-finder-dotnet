@@ -14,7 +14,7 @@ namespace AntarusPoFinder.Tests;
 /// / MainWindowViewModel.SendPendingChangesNow), и выгружает он СВОЮ базу — поэтому «вывести из
 /// модерации», «откатить» или «удалить», сделанные на машине наладчика, физически не имели пути к
 /// остальным. Механизм: журнал moderation_log + секция moderation_decisions в общем конфиге, которую
-/// любая машина дописывает узким каналом ConfigSyncService.PushModerationOnly, не трогая ничего
+/// любая машина дописывает узким каналом ConfigSyncService.PushFirmwareAndModerationOnly, не трогая ничего
 /// больше, а приём применяет монотонно (Database.ApplyModerationDecisions).</summary>
 public class ModerationDeliveryTests
 {
@@ -90,9 +90,14 @@ public class ModerationDeliveryTests
         Assert.True(err is null, err);
         Assert.NotNull(incoming);
         Assert.Equal(1, incoming!.Diff.ModerationApplied);
-        // Узкий канал не притащил с чужой машины ни настроек, ни иерархии — только решение.
+        // Узкий канал не притащил с чужой машины ни настроек, ни иерархии — только работу по этой
+        // прошивке. Изменений ДВА, а не одно: канал теперь несёт вместе с решением и саму строку
+        // версии (см. FirmwareDeliveryTests), поэтому её продвигает и обычный дифф fw_versions, и
+        // разбор решений. Обе половины монотонные, применяются в одну сторону и друг другу не
+        // мешают.
         Assert.Equal(0, incoming.SettingsChanged);
-        Assert.Equal(1, incoming.Diff.TotalChanges);
+        Assert.Equal(1, incoming.Diff.FwVersions);
+        Assert.Equal(2, incoming.Diff.TotalChanges);
 
         ConfigSyncService.Apply(m.SvcA, incoming.ConfigPath, root);
         Assert.True(Row(m.DbA).Released);
@@ -108,7 +113,7 @@ public class ModerationDeliveryTests
     /// Здесь машина B уже дотянулась до текущей ревизии (ей «нечего применять»), и увидеть решение
     /// она может ТОЛЬКО если ревизия выросла.</summary>
     [Fact]
-    public void PushModerationOnly_BumpsRevision_SoReceiversActuallyLook()
+    public void PushFirmwareAndModerationOnly_BumpsRevision_SoReceiversActuallyLook()
     {
         using var m = new TwoMachines();
         m.SetSharedRoot();
@@ -134,7 +139,7 @@ public class ModerationDeliveryTests
     /// нет» и зеркалил бы их удаление (блоки *Removed в ImportHierarchyDataCore безусловные). Решение
     /// при этом не теряется: оно уже в местном журнале и уедет первым же полным экспортом.</summary>
     [Fact]
-    public void PushModerationOnly_NoSharedConfigYet_WritesNothing()
+    public void PushFirmwareAndModerationOnly_NoSharedConfigYet_WritesNothing()
     {
         using var m = new TwoMachines();
         m.SetSharedRoot();

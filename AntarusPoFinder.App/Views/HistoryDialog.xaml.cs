@@ -162,7 +162,7 @@ public partial class HistoryDialog : Window
 
         _services.Db.TombstoneFwVersion(id);
         // Решение модерации (удаление) уезжает узким каналом с любой машины — см.
-        // ConfigSyncService.PushModerationOnly.
+        // ConfigSyncService.PushFirmwareAndModerationOnly.
         ConfigSyncService.RecordAndPushModeration(_services, id, _services.CurrentUserName);
         Changed = true;
         _host.InvalidateSearchResults();

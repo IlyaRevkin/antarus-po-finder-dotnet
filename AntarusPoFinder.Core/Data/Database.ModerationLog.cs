@@ -8,7 +8,7 @@ public partial class Database
     /// <summary>Записывает текущее состояние модерации прошивки в журнал решений — узкий канал,
     /// которым решение уезжает к остальным машинам НЕЗАВИСИМО от того, кто выгружает полный снимок
     /// (см. таблицу moderation_log, ExportedModerationDecision и
-    /// ConfigSyncService.PushModerationOnly).
+    /// ConfigSyncService.PushFirmwareAndModerationOnly).
     ///
     /// Вызывается ПОСЛЕ того, как решение уже применено к строке (MarkFwVersionReleased,
     /// TombstoneFwVersion, откат, архивирование): метод не решает ничего сам, он лишь снимает с

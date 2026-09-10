@@ -3253,7 +3253,7 @@ public partial class SettingsView : UserControl
         {
             _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
             // Узкий канал доставки решения модерации — работает с любой машины, не только с
-            // администраторской (см. ConfigSyncService.PushModerationOnly).
+            // администраторской (см. ConfigSyncService.PushFirmwareAndModerationOnly).
             delivered = ConfigSyncService.RecordAndPushModeration(_services,
                 _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
         }
@@ -3585,7 +3585,7 @@ public partial class SettingsView : UserControl
 
         _services.Db.TombstoneFwVersion(v.Id!.Value);
         // Удаление — такое же решение модерации, как «выпустить», и точно так же обязано доехать до
-        // коллег с любой машины: узкий канал (ConfigSyncService.PushModerationOnly) дописывает
+        // коллег с любой машины: узкий канал (ConfigSyncService.PushFirmwareAndModerationOnly) дописывает
         // tombstone в общий конфиг, не дожидаясь полного экспорта администратора.
         ConfigSyncService.RecordAndPushModeration(_services, v.Id!.Value, _services.CurrentUserName);
         _host.ShowStatus($"Удалено: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);

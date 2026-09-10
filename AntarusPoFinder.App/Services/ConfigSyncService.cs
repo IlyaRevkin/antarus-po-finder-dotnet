@@ -935,37 +935,51 @@ public static class ConfigSyncService
     /// чем на столько решений, получит верное состояние из самих строк fw_versions снимка.</summary>
     private const int MaxModerationDecisions = 500;
 
-    /// <summary>Узкий канал доставки РЕШЕНИЙ МОДЕРАЦИИ с ЛЮБОЙ машины — сделан по образцу
-    /// PushAppUsersOnly выше и существует ровно по той же причине, только для другой беды.
+    /// <summary>Узкий канал доставки С ЛЮБОЙ машины — сделан по образцу PushAppUsersOnly выше и
+    /// существует ровно по той же причине, только для другой беды.
     ///
     /// Полный экспорт (Export) — привилегия администратора: он перезаписывает ВЕСЬ общий снимок, и
     /// случайная машина наладчика/программиста, отправив свою возможно устаревшую иерархию, стёрла бы
     /// теги/производителей, которые уже есть у остальных. Побочный эффект этого ограничения:
-    /// fw_versions в общем снимке — это состояние базы машины-ЭКСПОРТЁРА, поэтому решение модерации
-    /// (вывод из модерации, архивирование, откат, удаление), принятое на машине наладчика, физически
-    /// не имело пути к коллегам: своего экспорта у неё нет, а в чужом её решения нет.
+    /// fw_versions в общем снимке — это состояние базы машины-ЭКСПОРТЁРА, поэтому ни решение модерации
+    /// (вывод из модерации, архивирование, откат, удаление), ни САМА новая прошивка, залитая на машине
+    /// наладчика, физически не имели пути к коллегам: своего экспорта у неё нет, а в чужом её работы нет.
     ///
-    /// Здесь читается существующий общий файл (если он есть), дописывается ТОЛЬКО секция
+    /// ⚠️ <b>Канал несёт и решение, и саму строку прошивки — и это не роскошь.</b> Пока он нёс одно
+    /// решение, на приёме честно срабатывало «версии ещё нет — пропускаем» (см.
+    /// Database.ApplyModerationDecisions): доставка новой прошивки всё равно ждала полного экспорта
+    /// администратора, а он по умолчанию не делается вовсе (config_push_interval_min = 0). Отсюда и
+    /// жалоба «залил две прошивки, отмодерировал — у коллеги их наотрез нет». Теперь строка едет
+    /// вместе с решением и в том же снимке, а порядок применения на приёме уже правильный: блок
+    /// fw_versions идёт ПЕРЕД разбором решений.
+    ///
+    /// Здесь читается существующий общий файл (если он есть), в него дописываются ТОЛЬКО секции
     /// moderation_decisions (объединение того, что уже лежит на диске, и журнала этой машины,
     /// дедупликация по ExportedModerationDecision.DedupKey, хвост обрезается до
-    /// MaxModerationDecisions), и файл пишется обратно — все остальные ключи остаются ровно такими,
+    /// MaxModerationDecisions), fw_versions и fw_attachments (названные строки заменяются нашими,
+    /// незнакомые дописываются, чужие НЕ трогаются) — все остальные ключи остаются ровно такими,
     /// какими были прочитаны. Ни иерархия, ни настройки этой машины наружу не уходят.
     ///
-    /// Прав канал не выдаёт: он доставляет уже принятое решение, а кто вправе его принимать, решает
-    /// роль (страница «Модерация прошивок» — RolesConfig.RoleAccess) на стороне UI.
+    /// Удаления канал не переносит и переносить не может: строки из массива он только заменяет и
+    /// дописывает. Снятие прошивки едет своим способом — тумбстоуном в самой строке (deleted_at),
+    /// которая точно так же уезжает этим каналом.
+    ///
+    /// Прав канал не выдаёт: он доставляет уже сделанную работу, а кто вправе её делать, решают роли
+    /// на стороне UI (страница «Модерация прошивок» — RolesConfig.RoleAccess).
     ///
     /// В отличие от PushAppUsersOnly здесь ОБЯЗАТЕЛЬНО поднимается маркер ревизии: получатели с
     /// версии, где появился маркер, до самого конфига вообще не доходят, пока revision не вырос (см.
-    /// ReadShared) — без этого решение лежало бы в файле мёртвым грузом до ближайшего экспорта
+    /// ReadShared) — без этого отправленное лежало бы в файле мёртвым грузом до ближайшего экспорта
     /// администратора, то есть задача «работает у всех» не решалась бы вовсе.
     ///
     /// Возвращает false и НИЧЕГО не пишет, если общего конфига на диске ещё нет вовсе: дописывать
-    /// решение некуда, а создавать файл с одной только своей секцией нельзя категорически — снимок с
-    /// пустой иерархией для получателя означает «на источнике этих типов/подтипов/контроллеров нет»,
+    /// некуда, а создавать файл с одними своими секциями нельзя категорически — снимок с пустой
+    /// иерархией для получателя означает «на источнике этих типов/подтипов/контроллеров нет»,
     /// и он честно зеркалит их удаление (см. блоки *Removed в ImportHierarchyDataCore — там оно
-    /// безусловное). Решение при этом уже лежит в местном журнале и уедет первым же полным
+    /// безусловное). Сделанное при этом уже лежит в местной базе и уедет первым же полным
     /// экспортом.</summary>
-    public static bool PushModerationOnly(AppServices services, string root, string exportedBy)
+    public static bool PushFirmwareAndModerationOnly(AppServices services, string root, string exportedBy,
+        IReadOnlyCollection<int>? fwVersionIds = null, IEnumerable<string>? changeDescriptions = null)
     {
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             throw new DirectoryNotFoundException("Сетевой диск недоступен.");
@@ -989,6 +1003,36 @@ public static class ConfigSyncService
             .ToList();
 
         rootNode["moderation_decisions"] = JsonSerializer.SerializeToNode(merged);
+
+        if (fwVersionIds is { Count: > 0 })
+        {
+            // Пути в снимке записаны в нотации ТОГО корня, что назван в source_root_path: получатель
+            // переставляет на свой корень ровно этот префикс (см. ApplyToDatabase → RemapFwPaths).
+            // Мы дописываем свои строки в ЧУЖОЙ файл и его source_root_path не трогаем — значит
+            // обязаны сами переписать свои пути в его нотацию, иначе у коллеги наши папки указывают
+            // в никуда (одна и та же шара у машин бывает то буквой диска, то UNC-адресом).
+            var fileRoot = rootNode["source_root_path"]?.GetValue<string>() ?? "";
+
+            var rows = services.Db.ExportFwVersions(fwVersionIds);
+            foreach (var row in rows)
+            {
+                row.DiskPath = ReRoot(row.DiskPath, root, fileRoot);
+                row.IoMapPath = ReRoot(row.IoMapPath, root, fileRoot);
+                row.InstructionsPath = ReRoot(row.InstructionsPath, root, fileRoot);
+                row.HmiPath = ReRoot(row.HmiPath, root, fileRoot);
+                row.ModbusMapPath = ReRoot(row.ModbusMapPath, root, fileRoot);
+            }
+
+            var attachments = services.Db.ExportFwAttachments(fwVersionIds);
+            foreach (var a in attachments)
+                a.DiskPath = ReRoot(a.DiskPath, root, fileRoot);
+
+            rootNode["fw_versions"] = JsonSerializer.SerializeToNode(
+                MergeById(existingHierarchy.FwVersions, rows, FwVersionKey));
+            rootNode["fw_attachments"] = JsonSerializer.SerializeToNode(
+                MergeById(existingHierarchy.FwAttachments, attachments, FwAttachmentKey));
+        }
+
         rootNode["exported_at"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
         rootNode["exported_by"] = exportedBy;
 
@@ -997,16 +1041,73 @@ public static class ConfigSyncService
         FileSystemHelpers.ProtectFromExternalEdits(path);
 
         // Без этого получатели даже не заглянут в файл (revision-гейт в ReadShared) — см. class doc.
-        BumpRevisionMarkerCas(root, exportedBy, new[] { $"Модерация: решение от {exportedBy}" });
+        BumpRevisionMarkerCas(root, exportedBy,
+            changeDescriptions ?? new[] { $"Модерация: решение от {exportedBy}" });
         return true;
+    }
+
+    /// <summary>Замена «своих» строк в чужом массиве снимка: что нашлось по ключу — заменяем, чего не
+    /// было — дописываем в конец, чужое оставляем как лежало и в том же порядке. Удалять из массива
+    /// нельзя ничем: узкий канал знает только про свои несколько строк, а всё остальное в файле —
+    /// работа других машин.
+    ///
+    /// ⚠️ Сравнение ключей — <see cref="StringComparer.Ordinal"/>, и это не придирка. Ключ склеен из
+    /// имён подтипа/контроллера, пришедших из SQLite, где COLLATE NOCASE сворачивает регистр только у
+    /// латиницы: «ПИ» и «пи» в базе — РАЗНЫЕ строки, а для OrdinalIgnoreCase — одна. Словарь с игнором
+    /// регистра слил бы две живые записи в одну и потерял бы вторую (см. правило в CLAUDE.md и
+    /// Database.ConfigExchange.ImportFlatList).</summary>
+    private static List<T> MergeById<T>(List<T>? onDisk, List<T> mine, Func<T, string> key)
+    {
+        var result = new List<T>(onDisk ?? new List<T>());
+        var index = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < result.Count; i++)
+            index[key(result[i])] = i;
+
+        foreach (var row in mine)
+        {
+            var k = key(row);
+            if (index.TryGetValue(k, out var at)) result[at] = row;
+            else { index[k] = result.Count; result.Add(row); }
+        }
+        return result;
+    }
+
+    /// <summary>Чем строка прошивки опознаётся в чужом снимке — тем же, чем её опознаёт приём
+    /// (Database.ImportHierarchyDataCore): sync_id, а при его отсутствии (снимок со старой версии
+    /// программы) прежним натуральным ключом.</summary>
+    private static string FwVersionKey(ExportedFwVersion f) =>
+        string.IsNullOrEmpty(f.SyncId)
+            ? string.Join("|", f.GroupName, f.SubtypeSyncId, f.SubtypeName, f.ControllerSyncId, f.CtrlName, f.VersionRaw, f.ConfigName)
+            : "sync:" + f.SyncId;
+
+    private static string FwAttachmentKey(ExportedFwAttachment a) =>
+        string.IsNullOrEmpty(a.SyncId)
+            ? string.Join("|", a.FwSyncId, a.VersionRaw, a.ConfigName, a.Filename)
+            : "sync:" + a.SyncId;
+
+    /// <summary>Переписывает абсолютный путь с одного корня общего диска на другой. Нужен ровно в
+    /// одном месте — когда мы дописываем свои строки в снимок, снятый машиной, у которой та же шара
+    /// названа иначе (буква диска против UNC). Сравнение путей регистронезависимое: это файловая
+    /// система Windows, а не строки из БД.</summary>
+    private static string ReRoot(string value, string fromRoot, string toRoot)
+    {
+        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(fromRoot) || string.IsNullOrEmpty(toRoot)) return value;
+        var from = Path.TrimEndingDirectorySeparator(fromRoot);
+        var to = Path.TrimEndingDirectorySeparator(toRoot);
+        if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return value;
+        if (string.Equals(value, from, StringComparison.OrdinalIgnoreCase)) return to;
+        return value.StartsWith(from + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            ? to + value[from.Length..]
+            : value;
     }
 
     /// <summary>То, что зовёт UI сразу после принятого решения модерации: записать решение в местный
     /// журнал (это делается ВСЕГДА — тогда его унесёт и обычный полный экспорт) и best-effort
-    /// дописать его в общий конфиг узким каналом выше, чтобы оно доехало до коллег с ЛЮБОЙ машины, а
-    /// не только с администраторской. Возвращает true, если решение реально ушло на диск; false —
-    /// решение сохранено локально и ждёт ближайшего обмена (диск недоступен, файл занят и т.п.).
-    /// Никогда не бросает: сорвать саму модерацию из-за недоступной шары нельзя.</summary>
+    /// дописать его в общий конфиг узким каналом выше ВМЕСТЕ С САМИМИ СТРОКАМИ прошивки, чтобы
+    /// решение доехало до коллег с ЛЮБОЙ машины и не пропало у того, к кому сама версия ещё не
+    /// добралась. Возвращает true, если отправка реально ушла на диск; false — решение сохранено
+    /// локально и ждёт ближайшего обмена (диск недоступен, файл занят и т.п.). Никогда не бросает:
+    /// сорвать саму модерацию из-за недоступной шары нельзя.</summary>
     public static bool RecordAndPushModeration(AppServices services, int fwVersionId, string author) =>
         RecordAndPushModeration(services, new[] { fwVersionId }, author);
 
@@ -1016,9 +1117,10 @@ public static class ConfigSyncService
     /// уходят одной записью в общий конфиг.</summary>
     public static bool RecordAndPushModeration(AppServices services, IEnumerable<int> fwVersionIds, string author)
     {
+        var ids = fwVersionIds.Distinct().ToList();
         try
         {
-            foreach (var id in fwVersionIds)
+            foreach (var id in ids)
                 services.Db.RecordModerationDecision(id, author);
         }
         catch { return false; }
@@ -1027,7 +1129,37 @@ public static class ConfigSyncService
         {
             var root = services.Cfg.RootPath();
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return false;
-            return PushModerationOnly(services, root, author);
+            return PushFirmwareAndModerationOnly(services, root, author, ids);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Отправка САМОЙ прошивки коллегам сразу после того, как её завели или поправили
+    /// (загрузка, откат, возврат в активные, отметка «текущей», правка карточки) — без ожидания
+    /// полного экспорта администратора и без его участия вообще.
+    ///
+    /// Вместе с названной строкой уезжают её копии-ссылки под другими подтипами шкафа
+    /// (Database.GetFwVersionIdsSharingFiles): физически это одна и та же прошивка, и приехать к
+    /// коллеге половиной записей она не должна.
+    ///
+    /// Best-effort и никогда не бросает: не доехало — сделанное остаётся в накопителе неотправленных
+    /// правок (плашка «N изменений не отправлено»), как было до появления канала. Возвращает true,
+    /// только если строка реально легла в общий конфиг.</summary>
+    public static bool PushFirmwareChange(AppServices services, IEnumerable<int> fwVersionIds, string author,
+        IEnumerable<string>? changeDescriptions = null)
+    {
+        try
+        {
+            var root = services.Cfg.RootPath();
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return false;
+
+            var ids = fwVersionIds
+                .SelectMany(id => services.Db.GetFwVersionIdsSharingFiles(id).Append(id))
+                .Distinct()
+                .ToList();
+            if (ids.Count == 0) return false;
+
+            return PushFirmwareAndModerationOnly(services, root, author, ids, changeDescriptions);
         }
         catch { return false; }
     }
