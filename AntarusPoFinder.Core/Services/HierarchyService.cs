@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -700,12 +700,21 @@ public class HierarchyService
                 {
                     var ctrlPath = Path.Combine(groupSubPath, ctrl.Name);
                     folders.Add(ctrlPath);
+
+// «Инструкция» ОСТАЁТСЯ: в ней живёт заглушка, на которую ведёт QR с наклейки, и общие
+                    // документы контроллера. Убрать её значило бы сломать инструкции у версий, чьи
+                    // документы не разложены по папкам версий.
+                    //
+                    // А вот «Карта ВВ», «Карта Modbus» и «HMI» на уровне контроллера заводить
+                    // ПЕРЕСТАЛИ: туда ничего не кладётся само, и в папке контроллера они выглядят
+                    // рудиментом — там должны быть папки версий, «ОПЦ» и «Инструкция». Уже созданные
+                    // не трогаем, если в них что-то лежит; пустые подбирает уборка ниже.
+                    //
+                    // Та же логика, что и с папкой «ОПЦ» уровня подтипа абзацем ниже: старое
+                    // продолжает читаться, новое больше не плодится.
                     var instructionsPath = Path.Combine(ctrlPath, HierarchyFolders.Instructions);
                     folders.Add(instructionsPath);
                     if (s.NoInstruction) noInstruction.Add(instructionsPath);
-                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.IoMap));
-                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Modbus));
-                    folders.Add(Path.Combine(ctrlPath, HierarchyFolders.Hmi));
                     // «ОПЦ» теперь внутри контроллера (этап 5). Прежнюю папку на уровне подтипа в план
                     // БОЛЬШЕ НЕ добавляем: она остаётся на диске со всем содержимым и читается, но
                     // заводить её заново под каждый подтип — плодить пустые папки старой раскладки.
@@ -775,9 +784,47 @@ public class HierarchyService
         // здесь же она перерисовывается, если макет правили.
         if (stubs is not null && InstructionStub.EnsureShared(plan.Root, stubs) == StubAction.Created) created++;
 
+        // Убираем ПУСТЫЕ служебные папки уровня контроллера, оставшиеся от старой раскладки:
+        // «Инструкция», «Карта ВВ», «Карта Modbus», «HMI» заводились каждому контроллеру безусловно,
+        // и в папке контроллера они выглядят рудиментом — там должны быть папки версий и «ОПЦ».
+        // Непустые не трогаем: в них лежат настоящие документы, на которые ссылаются версии в режиме
+        // совместимости и коллеги со старым клиентом.
+        RemoveEmptyLegacyControllerFolders(plan, errors);
+
         var movedCount = CollectUnknowns(plan.Root, plan.Names).Moved;
 
         return new EnsureStructureResult(errors.Count == 0, created, errors, movedCount);
+    }
+
+    /// <summary>Удаляет ПУСТЫЕ служебные папки в папках контроллеров — след старой раскладки.
+    ///
+    /// Осторожность здесь важнее полноты: удаляем только те, где нет ни файлов, ни подпапок, и
+    /// только те четыре имени, которые заводились автоматически. Что угодно другое, что оператор
+    /// положил рядом руками, остаётся на месте — разбирать это дело обхода «неизвестного», а не
+    /// молчаливой уборки.</summary>
+    private static void RemoveEmptyLegacyControllerFolders(StructurePlan plan, List<string> errors)
+    {
+        // «Инструкция» здесь намеренно НЕ значится: она штатная, в ней заглушка для QR.
+        string[] legacy = { HierarchyFolders.IoMap, HierarchyFolders.Modbus, HierarchyFolders.Hmi };
+
+        foreach (var ctrlPath in plan.Folders)
+        {
+            foreach (var name in legacy)
+            {
+                var path = Path.Combine(ctrlPath, name);
+                try
+                {
+                    if (!Directory.Exists(path)) continue;
+                    if (Directory.EnumerateFileSystemEntries(path).Any()) continue;
+                    Directory.Delete(path);
+                }
+                catch (Exception e)
+                {
+                    // Не смогли убрать — это не повод валить всю перестройку: папка просто останется.
+                    errors.Add($"{path}: {e.Message}");
+                }
+            }
+        }
     }
 
     // ── Collect / scan unknown files ─────────────────────────────────────────
