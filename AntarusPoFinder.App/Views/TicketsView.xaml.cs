@@ -102,6 +102,36 @@ public partial class TicketsView : UserControl
         // Показали актуальный список (в т.ч. только что подтянутые с диска тикеты) — просим шелл
         // сдвинуть watermark «просмотрено» и погасить бейдж на пункте меню.
         _host.OnTicketsViewed();
+
+        // Вторая половина синхронизации — обмен с хранилищем на хостинге (TicketStorageSync). Он
+        // ходит в сеть, поэтому не задерживает показ списка: страница уже нарисована местными
+        // тикетами, а приехавшее из бакета досыпается в неё, когда придёт. Не await'им намеренно —
+        // Activate зовут из Loaded и из «Обновить», обоим нельзя вставать на время похода в сеть.
+        _ = SyncWithStorageAsync();
+    }
+
+    /// <summary>Сходить в хранилище и показать то, что пришло. Замок и обработка ошибок — в
+    /// оболочке (MainWindowViewModel.SyncTicketsWithStorageAsync): обмен идёт ещё и фоном, и два
+    /// прохода наперегонки выкладывали бы каждый своё состояние.</summary>
+    private async Task SyncWithStorageAsync()
+    {
+        try
+        {
+            await _host.SyncTicketsWithStorageAsync(force: true);
+        }
+        catch { /* обмен сам сообщает о своих бедах; страница из-за них не должна падать */ }
+
+        if (!IsLoaded) return; // страницу успели закрыть, пока ходили в сеть
+        ReloadRows();
+        _host.OnTicketsViewed();
+    }
+
+    /// <summary>Перечитать строки списка БЕЗ синхронизации. Нужно фоновому обмену: он сам только
+    /// что сходил в сеть, и полный Activate() запустил бы с открытой страницы второй проход.</summary>
+    public void ReloadRows()
+    {
+        if (!IsLoaded) return;
+        ReloadGrid();
     }
 
     /// <summary>Список: сперва отбор по роли (свои/все), затем автоотчёты о сбоях —
@@ -165,6 +195,9 @@ public partial class TicketsView : UserControl
         TicketTextInput.Clear();
         _host.ShowStatus("Тикет создан", category: NotificationCategory.General);
         ReloadGrid();
+        // И сразу в хранилище — иначе тикет, заведённый вне офисной сети (сетевого диска нет),
+        // ждал бы ближайшего фонового тика, а его причина ждала бы вместе с ним.
+        _ = SyncWithStorageAsync();
     }
 
     // ── Attachments (staged before creation, then copied straight onto the shared drive —
@@ -399,6 +432,10 @@ public partial class TicketsView : UserControl
 
         _host.ShowStatus($"Статус тикета: {TicketStatus.Label(newStatus)}", category: NotificationCategory.General);
         ReloadGrid();
+        // Смена статуса — это ровно то, что должно доехать до остальных быстро: и до коллег в
+        // конторе (событие на сетевом диске, TryFlush выше), и до того, кто чинит, — а он видит
+        // только хранилище.
+        _ = SyncWithStorageAsync();
     }
 
     private void TryFlush()

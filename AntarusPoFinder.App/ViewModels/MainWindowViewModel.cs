@@ -56,6 +56,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// _lastUnseenTickets — прежнее число непросмотренных (всплывашку показываем только на РОСТ, как
     /// у бейджа модерации), чтобы каждый тик не гудел о том же.</summary>
     private bool _ticketSyncRunning;
+    /// <summary>Замок обмена тикетами с хранилищем на хостинге. Отдельный от _ticketSyncRunning:
+    /// это два независимых канала (сетевой диск конторы и бакет), и занятость одного не повод
+    /// пропускать другой — см. SyncTicketsWithStorageAsync.</summary>
+    private bool _ticketStorageSyncRunning;
+    private bool _ticketStorageLastFailed;
+    private DateTime _lastTicketStorageSyncAt = DateTime.MinValue;
+    /// <summary>Как часто фон ходит в бакет за тикетами. Не привязано к sync_interval_min: та
+    /// настройка про сетевой диск конторы (он бесплатный и быстрый), а здесь платный хостинг.</summary>
+    private static readonly TimeSpan TicketStorageQuietPeriod = TimeSpan.FromMinutes(5);
     private int? _lastUnseenTickets;
 
     /// <summary>Сколько операций синхронизации (приём/отправка конфига, тикеты) идёт прямо сейчас —
@@ -316,6 +325,82 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         catch { /* best effort — локальные тикеты всё равно видны, повтор на следующем тике */ }
         finally { _ticketSyncRunning = false; }
+    }
+
+    /// <summary>Обмен тикетами с хранилищем на хостинге — вторая половина синхронизации тикетов,
+    /// см. TicketStorageSync. Сетевой диск и бакет тут независимы намеренно: у кого-то из двоих
+    /// может не быть, и это не повод не синхронизироваться со вторым. Именно бакет и есть то
+    /// единственное место, куда достаёт тот, кто тикеты чинит: сетевой диск конторы ему не виден.
+    ///
+    /// Ходит в сеть, поэтому асинхронно и БЕЗ ConfigureAwait(false) по всей цепочке до самой базы
+    /// (см. TicketStorageSync.RunAsync): соединение SQLite одно и не потокобезопасно, работа с ним
+    /// обязана остаться на потоке интерфейса, как и у синхронизации через диск выше.</summary>
+    /// <param name="force">Человек нажал «Обновить» или открыл страницу «Тикеты» — идём в
+    /// хранилище немедленно. Фоновые тики приходят каждые 75 секунд (опрос метки ревизии, см.
+    /// RevisionPollInterval), и ходить в бакет так часто незачем: это платный хостинг, а тикеты —
+    /// не то, что обязано доезжать за минуту. Поэтому фон соблюдает TicketStorageQuietPeriod.</param>
+    public async Task SyncTicketsWithStorageAsync(bool force = false)
+    {
+        if (_ticketStorageSyncRunning) return;
+        if (!force && DateTime.UtcNow - _lastTicketStorageSyncAt < TicketStorageQuietPeriod) return;
+
+        var storage = new S3TicketStorage(_services.Cfg.S3());
+        // Ключей нет или выкладка выключена — ШТАТНОЕ состояние (см. S3Settings.CanPublish):
+        // молча ничего не делаем, ровно как выкладка инструкций.
+        if (!storage.CanSync) return;
+
+        _ticketStorageSyncRunning = true;
+        // Отметка ставится ДО прохода, а не после: медленный проход иначе разрешал бы следующий
+        // сразу же, как только закончился.
+        _lastTicketStorageSyncAt = DateTime.UtcNow;
+        using var activity = BeginSyncActivity("тикеты в хранилище");
+        try
+        {
+            var result = await TicketStorageSync.RunAsync(_services.Db, storage);
+
+            if (!result.Ok)
+            {
+                NoteSyncOutcome($"Тикеты в хранилище: {result.Error}", isError: true);
+                // Всплывашка — только на ПЕРЕХОД в неудачу, как у синхронизации через диск: бакет,
+                // недоступный второй час, не должен гудеть каждый тик. Но и молчать нельзя —
+                // молчащая синхронизация уже дважды стоила дней поисков (автообновление, автоотправка
+                // конфига).
+                if (!_ticketStorageLastFailed)
+                {
+                    _ticketStorageLastFailed = true;
+                    ShowStatus($"Тикеты не синхронизируются с хранилищем: {result.Error}", 8000, NotificationCategory.Sync);
+                }
+                return;
+            }
+
+            if (_ticketStorageLastFailed)
+            {
+                _ticketStorageLastFailed = false;
+                ShowStatus("Синхронизация тикетов с хранилищем восстановлена", 6000, NotificationCategory.Sync);
+            }
+
+            if (result.Failed > 0)
+                NoteSyncOutcome($"Тикеты в хранилище: не разобрано объектов: {result.Failed}", isError: true);
+            else if (!result.Quiet)
+                NoteSyncOutcome($"Тикеты в хранилище: получено {result.Pulled}, отправлено {result.Pushed}", isError: false);
+
+            if (result.Pulled > 0)
+            {
+                RefreshTicketsBadge(notify: true);
+                // Страница открыта прямо сейчас — обновляем ТОЛЬКО строки. Полный Activate() запустил
+                // бы с неё второй обмен, и два прохода ходили бы по кругу друг за другом.
+                if (CurrentPageId == "tickets" && _pageCache.TryGetValue("tickets", out var page) && page is TicketsView view)
+                    view.ReloadRows();
+            }
+        }
+        catch (Exception e)
+        {
+            NoteSyncOutcome($"Сбой обмена тикетами с хранилищем: {e.Message}", isError: true);
+        }
+        finally
+        {
+            _ticketStorageSyncRunning = false;
+        }
     }
 
     /// <summary>Тикеты, видимые ТЕКУЩЕЙ роли (администратор — все, остальные — только свои, по имени
@@ -1278,6 +1363,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // Тикеты тянем тем же фоном (независимо от гейта конфига ниже — у SyncTicketsNow свой
         // guard): раньше о новом тикете узнавали, только зайдя на страницу «Тикеты».
         SyncTicketsNow();
+        // Вторая половина: обмен с хранилищем на хостинге. Тем же тиком, но отдельным вызовом —
+        // сетевого диска может не быть, а бакет при этом доступен (и наоборот).
+        // ⚠️ БЕЗ await намеренно. Запрос к хостингу ждёт ответа до пяти минут (S3Client.DefaultTimeout),
+        // и на мёртвом бакете ожидание здесь задержало бы на столько же приём конфига — беду
+        // «тикеты не ездят» вылечили бы бедой «справочник не ездит». Метод не бросает ни при каких
+        // обстоятельствах (всё внутри в try/catch), поэтому брошенной задаче тут нечего терять.
+        _ = SyncTicketsWithStorageAsync();
 
         if (_configSyncRunning) return; // тик пришёл, пока предыдущий ещё тянет диск — просто пропускаем
         _configSyncRunning = true;
