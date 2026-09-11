@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -428,5 +428,70 @@ public class DiskCleanupScannerTests
 
         Assert.Empty(plan.Findings);
         Assert.True(File.Exists(outsideJunk));
+    }
+
+    // ── Дерево проекта: имя исполняемого файла трогать нельзя ────────────────
+
+    /// <summary>Жалоба владельца (09.09.2026): «переименовывание файла исполняемого ломает логику
+    /// работы: что HMI-файл, что ПЛК не могут найти все дополнения, драйвера и т.п., потому что
+    /// папки могут отличаться по названию».
+    ///
+    /// Проект — это не одинокий файл, а дерево: исполняемый файл плюс драйверы, библиотеки и
+    /// ресурсы в подпапках. Среда связывает их с именем исполняемого файла, и переименование в
+    /// каноническое имя эту связь рвёт — проект открывается, а дополнений не находит.
+    ///
+    /// Прежняя защита («в папке больше одного файла — не трогаем») дерево не ловила: файл-то в
+    /// корне ОДИН, остальное лежит в подпапках.</summary>
+    [Fact]
+    public void Plan_ProjectTree_DoesNotRenameExecutable()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0002");
+        var fw = VersionLayout.FirmwareFolder(dir);
+        var exe = Touch(fw, "пж_smh5_4.36.psl");
+        Touch(Path.Combine(fw, "Drivers"), "driver.dll");
+        Touch(Path.Combine(fw, "Resources"), "logo.png");
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+
+        var finding = Find(plan, exe);
+        Assert.True(finding is null || finding.Issue != DiskCleanupScanner.Issue.FirmwareName,
+            "имя исполняемого файла не должно предлагаться к переименованию рядом с деревом проекта");
+        Assert.Contains(plan.Skipped, s => s.Contains("папки проекта"));
+    }
+
+    /// <summary>Одинокий файл без дерева — прежнее поведение сохраняется: имя приводится к
+    /// каноническому, ради этого чистильщик и делался.</summary>
+    [Fact]
+    public void Plan_LoneFile_StillGetsCanonicalName()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0003");
+        var exe = Touch(VersionLayout.FirmwareFolder(dir), "пж_smh5_4.36.psl");
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+
+        var finding = Find(plan, exe);
+        Assert.NotNull(finding);
+        Assert.Equal(DiskCleanupScanner.Issue.FirmwareName, finding!.Issue);
+        Assert.Equal("1.0.0005.0003.psl", finding.NewName);
+    }
+
+    /// <summary>Служебные папки раскладки — не дерево проекта: они наши, к имени файла отношения не
+    /// имеют, и из-за них переименование блокировать нельзя.</summary>
+    [Fact]
+    public void Plan_LayoutFoldersNearby_DoNotBlockRename()
+    {
+        using var root = new TempRoot();
+        var (record, dir) = MakeVersion(root.Path, "1.0.0005.0004");
+        // Папка версии по новой раскладке уже содержит «Инструкция», «HMI» и прочие служебные —
+        // сам файл лежит в «Прошивка», где рядом только они уровнем выше.
+        var exe = Touch(VersionLayout.FirmwareFolder(dir), "пж_smh5_4.36.psl");
+
+        var plan = DiskCleanupScanner.Plan(Input(root.Path, record));
+
+        var finding = Find(plan, exe);
+        Assert.NotNull(finding);
+        Assert.Equal(DiskCleanupScanner.Issue.FirmwareName, finding!.Issue);
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -84,7 +84,7 @@ public class LfsConversionTests
     }
 
     [Fact]
-    public void Decide_LfsAlreadyOnDisk_NothingToDo()
+    public void Decide_LfsAlreadyOnDisk_StillAllowsRebuild()
     {
         using var root = new TempRoot();
         var (network, local, _) = Layout(root);
@@ -94,7 +94,9 @@ public class LfsConversionTests
         var decision = LfsConversionService.Decide(network, local, null);
 
         Assert.Equal(LfsConversionNeed.AlreadyPresent, decision.Need);
-        Assert.Null(decision.Plan);
+        // План теперь отдаётся и здесь: пересобрать разрешено в любой момент — исходник правят и
+        // не меняя номера версии. Перезапись подтверждается отдельно, в интерфейсе.
+        Assert.NotNull(decision.Plan);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -246,6 +246,26 @@ public static class DiskCleanupScanner
         {
             skipped.Add($"{record.VersionRaw}: файлов прошивки {candidates.Count} — имя не трогаем " +
                         "(в многофайловой папке оно привязано к подсказке «чем открывать»)");
+            return null;
+        }
+
+        // ⚠️ Рядом лежат подпапки — это не одинокий файл, а ДЕРЕВО проекта: исполняемый файл плюс
+        // драйверы, библиотеки и ресурсы. Среда разработки связывает их по имени исполняемого файла
+        // (папка «<имя>_files», ссылки внутри проекта и т.п.), и переименование в каноническое имя
+        // эту связь рвёт: проект открывается, а дополнений и драйверов не находит.
+        //
+        // Прежняя защита считала только ФАЙЛЫ верхнего уровня, поэтому дерево проекта — один файл
+        // плюс подпапки — под неё не попадало, и имя менялось. Отсюда жалоба: «переименовывание
+        // исполняемого ломает логику, что HMI, что ПЛК не могут найти дополнения и драйвера».
+        //
+        // Служебные папки раскладки («Прошивка», «Инструкция», «HMI»…) не в счёт: они наши, а не
+        // часть проекта, и к имени файла отношения не имеют.
+        var projectFolders = TopLevelProjectFolders(folder);
+        if (projectFolders.Count > 0)
+        {
+            skipped.Add($"{record.VersionRaw}: рядом с файлом лежат папки проекта " +
+                        $"({string.Join(", ", projectFolders.Select(Path.GetFileName).Take(3))}) — " +
+                        "имя не трогаем, иначе проект перестанет находить свои драйверы и дополнения");
             return null;
         }
 
@@ -708,6 +728,22 @@ public static class DiskCleanupScanner
     }
 
     // ── Обход диска ─────────────────────────────────────────────────────────
+
+    /// <summary>Папки верхнего уровня, которые НЕ являются служебными папками раскладки. Наличие
+    /// хотя бы одной означает, что рядом с файлом лежит дерево проекта — драйверы, библиотеки,
+    /// ресурсы, — и переименовывать исполняемый файл нельзя: среда разработки связывает их с ним
+    /// по имени.</summary>
+    private static List<string> TopLevelProjectFolders(string dir)
+    {
+        try
+        {
+            if (IsLink(dir)) return new List<string>();
+            return Directory.EnumerateDirectories(dir, "*", SearchOption.TopDirectoryOnly)
+                .Where(d => !VersionLayout.IsVersionOwnFolder(Path.GetFileName(d)))
+                .ToList();
+        }
+        catch (Exception) { return new List<string>(); }
+    }
 
     private static List<string> TopLevelFiles(string dir)
     {
