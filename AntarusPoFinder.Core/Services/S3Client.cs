@@ -142,6 +142,42 @@ public sealed class S3Client
         }
     }
 
+    // ── Чтение объекта ──────────────────────────────────────────────────────────
+    // До обмена тикетами (TicketStorageSync) программа в бакет только КЛАЛА: инструкция уезжает
+    // туда, а читает её телефон по публичной ссылке. Двусторонняя синхронизация тикетов означает,
+    // что состояние в бакете правит и другая сторона, — значит его надо уметь забрать обратно.
+
+    /// <summary>Скачивает объект как текст. Отсутствие объекта (404) — не ошибка, а законный ответ
+    /// «его там нет»: он мог быть удалён между перечислением и чтением, и обмен на этом
+    /// спотыкаться не должен. Различаются эти два случая по <c>Error</c>: у «нет объекта» он null.
+    ///
+    /// Через ПОДПИСАННЫЙ запрос, а не через публичный веб-адрес: публичный адрес отдаёт хостинг
+    /// (и раздаёт его кеш), а тут нужно то, что лежит в бакете прямо сейчас.</summary>
+    public async Task<(string? Text, string? Error)> GetStringAsync(S3Settings s, string key,
+        CancellationToken ct = default)
+    {
+        if (!s.HasAddress) return (null, "не задан адрес хранилища или бакет");
+        if (!s.HasCredentials) return (null, "не заданы ключи доступа");
+
+        try
+        {
+            var request = BuildRequest(s, HttpMethod.Get, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound) return (null, null);
+            if (!response.IsSuccessStatusCode)
+                return (null, await DescribeFailureAsync(response, ct).ConfigureAwait(false));
+            return (await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false), null);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (null, "хранилище не ответило вовремя");
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
+
     // ── Обзор бакета ────────────────────────────────────────────────────────────
     // Страница «Хранилище» показывает то, что ДОЛЖНО лежать на хостинге (список строится из базы и
     // диска), и по каждой строке умеет спросить, лежит ли. Чего она не умела вовсе — показать то,
@@ -150,8 +186,13 @@ public sealed class S3Client
     // во вкладке хранилище, типа чтобы можно было посмотреть, может удалить что-то — допустим, тот
     // же мусор вручную». Для этого нужны ровно два запроса: перечислить и удалить.
 
-    /// <summary>Объект в бакете таким, каким его показывает хостинг.</summary>
-    public sealed record BucketObject(string Key, long Size, DateTime? Modified);
+    /// <summary>Объект в бакете таким, каким его показывает хостинг.
+    ///
+    /// <paramref name="ETag"/> — отпечаток тела (у обычного объекта это его md5 в кавычках). Нужен
+    /// обмену тикетами: по нему видно, что объект ПЕРЕПИСАЛИ, не скачивая его (см.
+    /// TicketStorageSync.TagOf). Присылает его не всякий хостинг, поэтому поле необязательное и
+    /// пустая строка — законное значение.</summary>
+    public sealed record BucketObject(string Key, long Size, DateTime? Modified, string ETag = "");
 
     /// <summary>Одна страница ответа: объекты, «папки» (общие префиксы) и метка продолжения. Хостинг
     /// отдаёт список порциями (обычно по тысяче), и продолжение — единственный способ узнать
@@ -220,7 +261,7 @@ public sealed class S3Client
                     System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
                     out var when) ? when.ToLocalTime() : null;
-                objects.Add(new BucketObject(key, size, modified));
+                objects.Add(new BucketObject(key, size, modified, Value(node, "ETag").Trim('"')));
             }
 
             var folders = new List<string>();
