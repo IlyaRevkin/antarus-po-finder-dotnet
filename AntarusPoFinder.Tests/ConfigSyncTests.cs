@@ -30,10 +30,7 @@ public class ConfigSyncTests
 
     private static void Cleanup(params string[] dbPaths)
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        foreach (var db in dbPaths)
-            foreach (var f in new[] { db, db + "-wal", db + "-shm" })
-                if (File.Exists(f)) File.Delete(f);
+        TempDbFiles.Delete(dbPaths);
     }
 
     [Fact]

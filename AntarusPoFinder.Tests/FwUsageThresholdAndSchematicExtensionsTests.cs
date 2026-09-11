@@ -218,10 +218,7 @@ public class FwUsageThresholdAndSchematicExtensionsTests
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            foreach (var f in new[] { pathA, pathB })
-                foreach (var ff in new[] { f, f + "-wal", f + "-shm" })
-                    if (File.Exists(ff)) File.Delete(ff);
+            TempDbFiles.Delete(pathA, pathB);
         }
     }
 

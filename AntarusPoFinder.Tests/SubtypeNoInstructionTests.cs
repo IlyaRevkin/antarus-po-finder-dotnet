@@ -19,10 +19,7 @@ public class SubtypeNoInstructionTests
 
     private static void Cleanup(params string[] paths)
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        foreach (var db in paths)
-            foreach (var f in new[] { db, db + "-wal", db + "-shm" })
-                if (File.Exists(f)) File.Delete(f);
+        TempDbFiles.Delete(paths);
     }
 
     private static int SubtypeId(Database db, string group, string subtype)
