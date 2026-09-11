@@ -385,6 +385,23 @@ public partial class Database : IDisposable
                  payload  TEXT NOT NULL
              );
 
+             -- Что эта машина в последний раз видела в хранилище на хостинге по каждому тикету
+             -- (см. TicketStorageSync). Машинная таблица, в общий конфиг не едет и ехать не должна:
+             -- она описывает не тикеты, а состояние ОБМЕНА этой конкретной машины с бакетом.
+             --   obj_key           — ключ объекта БЕЗ префикса предприятия («tickets/state/<id>.json»);
+             --   remote_updated_at — updated_at тикета в том виде, в каком он лежал в бакете. По нему
+             --                       решается, надо ли выкладывать своё: наше новее — выкладываем;
+             --   remote_tag        — отпечаток тела (ETag, иначе время+размер). По нему решается,
+             --                       надо ли СКАЧИВАТЬ: совпал — содержимое то же, что разбирали.
+             -- Потеря этой таблицы не теряет данные: пустая означает «перечитать и переложить всё»,
+             -- а обе операции идемпотентны.
+             CREATE TABLE IF NOT EXISTS ticket_storage_seen (
+                 obj_key           TEXT PRIMARY KEY,
+                 ticket_id         TEXT NOT NULL DEFAULT '',
+                 remote_updated_at TEXT NOT NULL DEFAULT '',
+                 remote_tag        TEXT NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS app_users (
                  id              INTEGER PRIMARY KEY AUTOINCREMENT,
                  ad_login        TEXT    UNIQUE NOT NULL COLLATE NOCASE,

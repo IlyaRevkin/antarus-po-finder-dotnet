@@ -69,6 +69,42 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Применяет тикет, приехавший из хранилища на хостинге (TicketStorageSync).
+    ///
+    /// Тикета нет — заводим целиком. Есть — меняем ТОЛЬКО статус, и только если чужая отметка
+    /// времени позже нашей. Текст, тип и автор не переписываются никогда, потому что и не меняются:
+    /// тикет после создания правят одним-единственным способом — сменой статуса (то же правило, что
+    /// у журнала на сетевом диске, см. InsertTicketIfMissing). Приедь сюда чужой текст — на двух
+    /// машинах разошлись бы две редакции одной жалобы, и «кто прав» решал бы порядок обмена.
+    ///
+    /// Возвращает true, если у нас что-то поменялось, — по этому счёту показывается «получено».</summary>
+    public bool ApplyRemoteTicket(Ticket t)
+    {
+        if (string.IsNullOrWhiteSpace(t.Id)) return false;
+
+        var current = ExecuteScalar("SELECT updated_at FROM tickets WHERE id=@id",
+            cmd => cmd.Parameters.AddWithValue("@id", t.Id)) as string;
+        if (current is null)
+        {
+            InsertTicketIfMissing(t);
+            return true;
+        }
+
+        if (string.CompareOrdinal(t.UpdatedAt, current) <= 0) return false;
+
+        var status = ExecuteScalar("SELECT status FROM tickets WHERE id=@id",
+            cmd => cmd.Parameters.AddWithValue("@id", t.Id)) as string ?? "";
+        ExecuteNonQuery("UPDATE tickets SET status=@s, updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", t.Status);
+            cmd.Parameters.AddWithValue("@u", t.UpdatedAt);
+            cmd.Parameters.AddWithValue("@id", t.Id);
+        });
+        // Отметка времени подвинулась, а статус тот же (обмен по кругу, повторная выкладка) — для
+        // человека не поменялось ничего, и в счётчик «получено» это попадать не должно.
+        return !string.Equals(status, t.Status, StringComparison.Ordinal);
+    }
+
     // ── Sync bookkeeping ─────────────────────────────────────────────────────
 
     public bool IsTicketSyncFileApplied(string filename) =>
@@ -99,4 +135,33 @@ public partial class Database
 
     public void RemoveTicketOutbox(string filename) =>
         ExecuteNonQuery("DELETE FROM ticket_outbox WHERE filename=@f", cmd => cmd.Parameters.AddWithValue("@f", filename));
+
+    // ── Хранилище на хостинге: что мы там в последний раз видели ─────────────
+    // Таблица ticket_storage_seen, см. её описание в Database.cs и TicketStorageSync.
+
+    public TicketStorageSeen? GetTicketStorageSeen(string objectKey)
+    {
+        using var r = ExecuteReader(
+            "SELECT obj_key, ticket_id, remote_updated_at, remote_tag FROM ticket_storage_seen WHERE obj_key=@k",
+            cmd => cmd.Parameters.AddWithValue("@k", objectKey));
+        if (!r.Read()) return null;
+        return new TicketStorageSeen(r.GetString(0), GetString(r, "ticket_id"),
+            GetString(r, "remote_updated_at"), GetString(r, "remote_tag"));
+    }
+
+    public void SaveTicketStorageSeen(string objectKey, string ticketId, string remoteUpdatedAt, string remoteTag) =>
+        ExecuteNonQuery("""
+            INSERT INTO ticket_storage_seen(obj_key, ticket_id, remote_updated_at, remote_tag)
+            VALUES(@k, @id, @u, @tag)
+            ON CONFLICT(obj_key) DO UPDATE SET ticket_id=@id, remote_updated_at=@u, remote_tag=@tag
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@k", objectKey);
+            cmd.Parameters.AddWithValue("@id", ticketId);
+            cmd.Parameters.AddWithValue("@u", remoteUpdatedAt);
+            cmd.Parameters.AddWithValue("@tag", remoteTag);
+        });
 }
+
+/// <summary>Состояние объекта тикета в хранилище на момент последнего удачного обмена.</summary>
+public sealed record TicketStorageSeen(string ObjectKey, string TicketId, string RemoteUpdatedAt, string RemoteTag);

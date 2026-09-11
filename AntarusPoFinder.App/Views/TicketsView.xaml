@@ -36,11 +36,17 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Button Grid.Column="0" Content="Прикрепить файлы…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AttachFiles_Click"
-                            ToolTip="Скриншот, лог или любой файл, поясняющий проблему — уедет вместе с тикетом"/>
+                            ToolTip="Скриншот, лог или любой файл, поясняющий проблему. Ложится на сетевой диск рядом с тикетом — коллегам в конторе видно, в хранилище на хостинге НЕ уезжает"/>
                     <Button Grid.Column="1" x:Name="ClearAttachmentsBtn" Content="Очистить вложения" Style="{StaticResource SecondaryButton}"
                             Margin="0,0,8,0" Visibility="Collapsed" Click="ClearAttachments_Click"/>
                     <TextBlock Grid.Column="2" x:Name="AttachmentsSummaryText" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextWrapping="Wrap"/>
                 </Grid>
+                <!-- Сказано прямо и постоянной строкой, а не только в подсказке: сам тикет и его
+                     статус ездят и по сетевому диску, и через хранилище на хостинге, а вложения —
+                     только по диску (TicketStorageSync возит запись, не файлы). Человек, приложивший
+                     скриншот, обязан знать, что тот, кто чинит, увидит его не сам собой. -->
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Тикет и его статус синхронизируются между машинами и с хранилищем на хостинге. Вложения остаются на сетевом диске конторы — чтобы их увидел тот, кто вне сети, отправьте архив кнопкой «Выгрузить…»."/>
                 <Button Content="Создать тикет" HorizontalAlignment="Left" Click="CreateTicket_Click"/>
             </StackPanel>
         </Border>
