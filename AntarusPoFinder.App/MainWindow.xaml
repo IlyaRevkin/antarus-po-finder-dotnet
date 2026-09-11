@@ -336,18 +336,9 @@
                             <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
                                     Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"
                                     ToolTip="Пройти вводный тур по программе заново"/>
-                            <TextBlock HorizontalAlignment="Center" Margin="0,4,0,2">
-                                <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
-                            </TextBlock>
-                            <!-- Дублирует "Текущая версия: …" из Настроек → Общие → Обновление приложения —
-                                 там та же самая строка (тот же AppUpdateService.CurrentVersionText), просто
-                                 крупнее; здесь — компактно и приглушённо, чтобы версия была видна и без
-                                 захода в Настройки. Значение выставляется один раз из code-behind
-                                 (MainWindow.xaml.cs) — версия сборки не меняется, пока приложение не
-                                 перезапустится после обновления. -->
-                            <TextBlock x:Name="SidebarVersionText" Text="" HorizontalAlignment="Center"
-                                       Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,0"
-                                       Background="Transparent" MouseLeftButtonDown="SidebarVersionText_MouseLeftButtonDown"/>
+<!-- Версия и ссылка на GitHub переехали в строку состояния внизу, к остальным
+                                 служебным показателям: в списке кнопок они читались как ещё один пункт
+                                 меню, хотя открывают их изредка. -->
                         </StackPanel>
                     </StackPanel>
 
@@ -615,6 +606,8 @@
         <Border Grid.Row="7" Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid Margin="10,4">
                 <Grid.ColumnDefinitions>
+                    <!-- Версия и ссылка на исходники — первыми слева, среди служебных показателей. -->
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -622,9 +615,23 @@
                     <!-- Колокольчик уведомлений — см. ниже, последним в ряду показателей. -->
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Style="{StaticResource MutedText}"
+
+                <!-- Переехали сюда из сайдбара: там они стояли в списке кнопок и читались как ещё
+                     один пункт меню, хотя открывают их изредка. Значение версии ставится из
+                     code-behind один раз (MainWindow.xaml.cs) — версия сборки не меняется, пока
+                     приложение не перезапустится после обновления. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+                    <TextBlock x:Name="SidebarVersionText" Text="" Style="{StaticResource MutedText}"
+                               FontSize="10" VerticalAlignment="Center" Background="Transparent"
+                               MouseLeftButtonDown="SidebarVersionText_MouseLeftButtonDown"/>
+                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="10">
+                        <Hyperlink NavigateUri="https://github.com/IlyaRevkin/antarus-po-finder-dotnet" RequestNavigate="GitHubLink_RequestNavigate">GitHub</Hyperlink>
+                    </TextBlock>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Left" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0"
                             Visibility="{Binding Busy.IsBusy, Converter={StaticResource BoolToVis}}">
                     <ProgressBar Width="90" Height="6" VerticalAlignment="Center" Maximum="100"
                                  IsIndeterminate="{Binding Busy.IsIndeterminate}" Value="{Binding Busy.Progress}"/>
@@ -646,7 +653,7 @@
                      формой отличается от неё сразу, чего тикет и просил. Цвет у Path задаётся
                      Stroke (не Foreground) — это разные свойства, поэтому и триггеры ниже правят
                      именно Stroke. -->
-                <Button Grid.Column="2" Command="{Binding ShowSyncDetailsCommand}" Cursor="Hand"
+                <Button Grid.Column="3" Command="{Binding ShowSyncDetailsCommand}" Cursor="Hand"
                         VerticalAlignment="Center" Margin="0,0,14,0"
                         ToolTip="{Binding SyncStatusTooltip}">
                     <Button.Template>
@@ -701,7 +708,7 @@
                     </Button.Template>
                 </Button>
 
-                <TextBlock Grid.Column="3" Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
+                <TextBlock Grid.Column="4" Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
                            HorizontalAlignment="Right" VerticalAlignment="Center"/>
 
                 <!-- Уведомления. Раньше это была широкая кнопка в сайдбаре — единственная там в своём
@@ -711,7 +718,7 @@
 
                      Значок мелкий сознательно: рядом стоят показатели, а не кнопки, и колокольчик
                      не должен перетягивать взгляд — он нужен, только когда на нём есть счётчик. -->
-                <Grid Grid.Column="4" Margin="14,0,0,0" VerticalAlignment="Center">
+                <Grid Grid.Column="5" Margin="14,0,0,0" VerticalAlignment="Center">
                     <!-- Без рамки и фона: соседний значок синхронизации рисуется своим шаблоном
                          без бордюра, а IconButton наследует его от SecondaryButton — два значка в
                          строке оказывались в разном оформлении. Подсветку при наведении стиль
