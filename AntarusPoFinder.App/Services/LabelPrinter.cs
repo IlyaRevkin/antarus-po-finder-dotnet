@@ -301,7 +301,11 @@ public static class LabelPrinter
         element.UpdateLayout();
     }
 
-    public sealed record PrintOutcome(bool Ok, string Message);
+    /// <summary>Итог отправки на печать. <paramref name="Printer"/> — имя очереди, в которую
+    /// задание реально ушло (не то, что записано в настройках: если настроенный принтер не
+    /// найден, задание уходит в принтер по умолчанию, и человеку важно увидеть именно это).
+    /// Пусто, когда очередь определить не удалось.</summary>
+    public sealed record PrintOutcome(bool Ok, string Message, string Printer = "");
 
     /// <summary>Печать без диалога выбора принтера: наладчику незачем каждый раз подтверждать окно —
     /// принтер задан в Настройки → Печать. Возврат — что сказать человеку в статус-строке.
@@ -326,12 +330,26 @@ public static class LabelPrinter
             if (DescribeJob(dlg.PrintQueue, LabelPrintJob.SheetFor(layout)) is { } ticket) dlg.PrintTicket = ticket;
 
             dlg.PrintVisual(label, jobName);
-            return new PrintOutcome(true, $"Этикетка отправлена на печать{note}");
+            // Имя очереди читаем ПОСЛЕ настройки диалога: к этому моменту тут либо выбранный
+            // принтер, либо подставленный системой по умолчанию. Печать в WPF асинхронна —
+            // «напечаталось» мы знать не можем, только «ушло в очередь», так и говорим.
+            var queueName = SafeQueueName(dlg);
+            var where = string.IsNullOrWhiteSpace(queueName) ? "" : $" на «{queueName}»";
+            return new PrintOutcome(true, $"Этикетка отправлена{where}{note}", queueName);
         }
         catch (Exception ex)
         {
             return new PrintOutcome(false, $"Не удалось напечатать: {ex.Message}");
         }
+    }
+
+    /// <summary>Имя очереди печати из диалога. Обращение к <c>PrintQueue</c> лезет в спулер и умеет
+    /// бросать, если очередь пропала между выбором и печатью, — для подписи под кнопкой это не повод
+    /// превращать удачную печать в ошибку.</summary>
+    private static string SafeQueueName(PrintDialog dlg)
+    {
+        try { return dlg.PrintQueue?.FullName ?? ""; }
+        catch { return ""; }
     }
 
     /// <summary>Тикет задания под конкретную наклейку. Строится поверх ТЕКУЩИХ настроек очереди

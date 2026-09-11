@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,6 +29,8 @@ public partial class InstructionLabelWindow : Window
     private readonly string _title;
     private readonly string _subtitle;
     private LabelLayout _layout;
+    /// <summary>Сколько раз в этом окне жали «Печать» — для подписи «уже N-й раз».</summary>
+    private int _printCount;
 
     /// <summary>Пока поля заполняются из настроек, их TextChanged не должен пересобирать этикетку и
     /// уж тем более читать полузаполненную форму.</summary>
@@ -110,6 +113,16 @@ public partial class InstructionLabelWindow : Window
         };
     }
 
+    /// <summary>«Открыть на хостинге» — открыть в браузере ровно тот адрес, который зашит в QR.
+    ///
+    /// Раньше кнопка называлась «Проверить» и печатала строчку «на хостинге есть». Верить ей на
+    /// слово никто не обязан: наклейку клеят на шкаф, и цена ошибки — выезд. Открытая страница
+    /// отвечает на вопрос сама и заодно показывает, ТОТ ли это документ, а не просто «файл по ключу
+    /// существует».
+    ///
+    /// HEAD перед открытием остаётся: он дешёвый, обновляет кэш наблюдений (его читает значок в
+    /// списке версий) и позволяет не подсовывать браузеру 404. Если хранилище не ответило — всё
+    /// равно открываем: недоступность нашего API не означает недоступности публичного адреса.</summary>
     private async void CheckHosting_Click(object sender, RoutedEventArgs e)
     {
         if (HostingKey() is not { } key) return;
@@ -119,21 +132,44 @@ public partial class InstructionLabelWindow : Window
         try
         {
             var settings = _services.Cfg.S3();
+            var url = S3Client.PublicUrl(settings, key);
             var presence = await new S3Client().HeadAsync(settings, key);
             if (presence.Ok)
             {
-                _services.Db.SaveHostingCheck(key, presence.Exists, S3Client.PublicUrl(settings, key));
+                _services.Db.SaveHostingCheck(key, presence.Exists, url);
                 ShowHostingState();
+                if (!presence.Exists)
+                {
+                    AppMessageBox.Show(
+                        "На хостинге этого файла нет — открывать нечего.\n\n" +
+                        "Инструкция выкладывается на страницу «Хранилище». Пока файла там нет, QR с " +
+                        "наклейки у наладчика не откроется.",
+                        "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
             }
             else
             {
                 // «Не смогли спросить» — это не «нет»: в кэш такое не пишем, иначе значок соврал бы.
                 HostingStateText.Text = $"Не удалось проверить: {presence.Error}";
             }
+
+            OpenInBrowser(url);
         }
         finally
         {
             CheckHostingBtn.IsEnabled = true;
+        }
+    }
+
+    private void OpenInBrowser(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось открыть браузер: {ex.Message}\n\nАдрес: {url}",
+                "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -384,8 +420,34 @@ public partial class InstructionLabelWindow : Window
         // предпросмотра, и печать чужого визуального родителя в WPF не работает.
         var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(), $"Этикетка — {_title}", _layout);
         _host.ShowStatus(outcome.Message, category: NotificationCategory.General);
+        ShowPrintState(outcome);
         if (!outcome.Ok)
             AppMessageBox.Show(outcome.Message, "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    /// <summary>Ответ на «нажал печать — и ничего не произошло».
+    ///
+    /// Формулировка намеренно осторожная: WPF отдаёт задание спулеру и возвращается, бумага может
+    /// не выехать (принтер выключен, кончилась лента). Писать «напечатано» значило бы врать, поэтому
+    /// пишем «отправлено на <очередь>» и время. Счётчик повторов нужен потому, что без принтера
+    /// перед глазами люди жмут кнопку ещё раз, а потом получают стопку наклеек: увидев «уже 2 раза»,
+    /// человек идёт смотреть принтер, а не давит третий.</summary>
+    private void ShowPrintState(LabelPrinter.PrintOutcome outcome)
+    {
+        PrintStateText.Visibility = Visibility.Visible;
+        if (!outcome.Ok)
+        {
+            _printCount = 0;
+            PrintStateText.SetResourceReference(ForegroundProperty, "ErrorBrush");
+            PrintStateText.Text = "Не ушло на принтер";
+            return;
+        }
+
+        _printCount++;
+        var where = string.IsNullOrWhiteSpace(outcome.Printer) ? "" : $" на «{outcome.Printer}»";
+        var again = _printCount > 1 ? $", уже {_printCount}-й раз" : "";
+        PrintStateText.SetResourceReference(ForegroundProperty, "SuccessBrush");
+        PrintStateText.Text = $"Отправлено{where} в {DateTime.Now:HH:mm:ss}{again}";
     }
 
     private void CopyLink_Click(object sender, RoutedEventArgs e)
