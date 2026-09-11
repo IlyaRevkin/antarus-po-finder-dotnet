@@ -323,24 +323,45 @@ public partial class EditFirmwareDialog : Window
     private void RefreshBuildLfs()
     {
         var decision = LfsConversionService.Decide(VersionFolderOnDisk(), null, _record.ExecutableHint);
-        if (decision.Need != LfsConversionNeed.Build)
+
+        // Кнопка ПОСТОЯННАЯ, а не только когда .lfs ещё нет: исходник правят и не меняя номера
+        // версии, и тогда собранный файл устаревает молча. Прячем её лишь там, где собирать
+        // физически нечем — нет исходника или недоступна папка версии.
+        if (decision.Need is LfsConversionNeed.NoSource or LfsConversionNeed.Unreachable || decision.Plan is null)
         {
             BuildLfsPanel.Visibility = Visibility.Collapsed;
             return;
         }
+
         BuildLfsPanel.Visibility = Visibility.Visible;
-        BuildLfsHint.Text = "Собранного .lfs у версии нет — в поиске наладчик видит только исходник.";
+        var rebuild = decision.Need == LfsConversionNeed.AlreadyPresent;
+        BuildLfsBtn.Content = rebuild ? "Пересобрать LFS из PSL" : "Собрать LFS из PSL";
+        BuildLfsHint.Text = rebuild
+            ? decision.Message
+            : "Собранного .lfs у версии нет — в поиске наладчик видит только исходник.";
     }
 
     private void BuildLfs_Click(object sender, RoutedEventArgs e)
     {
         var folder = VersionFolderOnDisk();
         var decision = LfsConversionService.Decide(folder, null, _record.ExecutableHint);
-        if (decision.Need != LfsConversionNeed.Build || decision.Plan is null)
+        if (decision.Plan is null)
         {
             AppMessageBox.Show(decision.Message, "Сборка LFS", MessageBoxButton.OK, MessageBoxImage.Information);
             RefreshBuildLfs();
             return;
+        }
+
+        // Пересборка ПЕРЕЗАПИСЫВАЕТ рабочий файл, которым, возможно, уже пользуются. Спрашиваем
+        // явно и показываем, что известно о свежести: даты сборки и исходника лежат в сообщении
+        // решения — по ним сразу видно, правили ли .psl после сборки.
+        if (decision.Need == LfsConversionNeed.AlreadyPresent)
+        {
+            var reply = AppMessageBox.Show(
+                $"{decision.Message}\n\nСобрать заново и заменить существующий .lfs?\n" +
+                "Старый файл будет перезаписан — те, кто уже скачал его, останутся со старым.",
+                "Пересобрать LFS", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (reply != MessageBoxResult.Yes) return;
         }
 
         // Окно сборки немодальное и висит на ГЛАВНОМ окне, а не на этом (см. LoaderDialog.Start):

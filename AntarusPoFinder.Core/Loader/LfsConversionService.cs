@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +12,8 @@ public enum LfsConversionNeed
     /// <summary>Есть .psl без .lfs и есть куда положить результат — можно собирать.</summary>
     Build,
 
-    /// <summary>Собранный .lfs у версии уже лежит — делать нечего.</summary>
+    /// <summary>Собранный .lfs у версии уже лежит. Пересобрать всё равно можно — исходник могли
+    /// поправить, не меняя номера версии, — но это ПЕРЕЗАПИСЬ, и спрашивать надо явно.</summary>
     AlreadyPresent,
 
     /// <summary>Исходника .psl нет (не Segnetics, или выложили только .lfs).</summary>
@@ -77,16 +78,27 @@ public static class LfsConversionService
         // увидев его, кнопка предлагала бы собрать заново то, что уже есть.
         var lookIn = VersionLayout.FirmwareFolders(networkFolder);
 
-        if (LoaderFiles.FindIn(lookIn, LoaderFiles.LfsExtension) is { } existing)
-        {
-            return new LfsConversionDecision(LfsConversionNeed.AlreadyPresent,
-                $"У версии уже есть собранный LFS: {Path.GetFileName(existing)}", null);
-        }
+        var existingLfs = LoaderFiles.FindIn(lookIn, LoaderFiles.LfsExtension);
 
         // Исходник берём именно с сетевого диска, а не из локального кэша: собранный файл ляжет
         // рядом с ним, и собирать его из устаревшей локальной копии значило бы выложить коллегам
         // .lfs, не соответствующий лежащему рядом .psl.
-        var psl = LoaderFiles.ResolvePreferHint(lookIn, executableHint, LoaderFiles.PslExtension);
+        var source = LoaderFiles.ResolvePreferHint(lookIn, executableHint, LoaderFiles.PslExtension);
+
+        if (existingLfs is not null)
+        {
+            // .lfs есть — но пересобрать разрешаем: исходник мог обновиться без смены номера версии
+            // («вышел psl без обновления версии»). План отдаём, чтобы кнопка работала; вызывающий
+            // обязан спросить подтверждение — это перезапись рабочего файла.
+            //
+            // Без исходника пересобирать нечем, и тогда это по-прежнему тупик.
+            var plan = source is null ? null : new LfsConversionPlan(source, publish);
+            var when = LfsFreshness(source, existingLfs);
+            return new LfsConversionDecision(LfsConversionNeed.AlreadyPresent,
+                $"У версии уже есть собранный LFS: {Path.GetFileName(existingLfs)}{when}", plan);
+        }
+
+        var psl = source;
         if (psl is null)
         {
             return new LfsConversionDecision(LfsConversionNeed.NoSource,
@@ -94,6 +106,30 @@ public static class LfsConversionService
         }
 
         return new LfsConversionDecision(LfsConversionNeed.Build, "", new LfsConversionPlan(psl, publish));
+    }
+
+    /// <summary>Приписка о свежести: собран ли .lfs из нынешнего исходника или исходник новее.
+    /// Человеку у этой кнопки важен ровно один вопрос — «а моя ли правка внутри?», и ответ на него
+    /// должен стоять рядом с кнопкой, а не выясняться сравнением дат в проводнике.</summary>
+    private static string LfsFreshness(string? pslPath, string lfsPath)
+    {
+        try
+        {
+            if (pslPath is null || !File.Exists(pslPath) || !File.Exists(lfsPath)) return "";
+            var psl = File.GetLastWriteTime(pslPath);
+            var lfs = File.GetLastWriteTime(lfsPath);
+
+            // Секундный зазор: файловые системы и копирование по сети округляют время по-разному,
+            // и без него «собран только что» иногда показывалось бы как «исходник новее».
+            if (psl > lfs.AddSeconds(1))
+                return $". Исходник новее собранного ({psl:dd.MM.yyyy HH:mm} против {lfs:dd.MM.yyyy HH:mm}) — похоже, .psl правили после сборки.";
+            return $". Собран {lfs:dd.MM.yyyy HH:mm}, исходник от {psl:dd.MM.yyyy HH:mm}.";
+        }
+        catch
+        {
+            // Даты — подсказка, а не условие работы: недоступная шара не должна мешать пересборке.
+            return "";
+        }
     }
 
     /// <summary>Собирает .lfs локально и публикует результат. Ошибка публикации в одну из папок —
