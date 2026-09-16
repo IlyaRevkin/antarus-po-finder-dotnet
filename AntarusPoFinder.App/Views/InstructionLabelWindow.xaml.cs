@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Windows.Threading;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -31,6 +32,11 @@ public partial class InstructionLabelWindow : Window
     private LabelLayout _layout;
     /// <summary>Сколько раз в этом окне жали «Печать» — для подписи «уже N-й раз».</summary>
     private int _printCount;
+    private DispatcherTimer? _toastTimer;
+    private DispatcherTimer? _flashTimer;
+    private int _toastLeftMs;
+    private const int ToastTotalMs = 2600;
+    private const int ToastStepMs = 60;
 
     /// <summary>Пока поля заполняются из настроек, их TextChanged не должен пересобирать этикетку и
     /// уж тем более читать полузаполненную форму.</summary>
@@ -429,25 +435,85 @@ public partial class InstructionLabelWindow : Window
     ///
     /// Формулировка намеренно осторожная: WPF отдаёт задание спулеру и возвращается, бумага может
     /// не выехать (принтер выключен, кончилась лента). Писать «напечатано» значило бы врать, поэтому
-    /// пишем «отправлено на <очередь>» и время. Счётчик повторов нужен потому, что без принтера
-    /// перед глазами люди жмут кнопку ещё раз, а потом получают стопку наклеек: увидев «уже 2 раза»,
-    /// человек идёт смотреть принтер, а не давит третий.</summary>
+    /// пишем «отправлено на &lt;очередь&gt;». Счётчик повторов нужен потому, что без принтера перед
+    /// глазами люди жмут кнопку ещё раз, а потом получают стопку наклеек.
+    ///
+    /// Ответ даётся ДВАЖДЫ и по-разному. Плашка поверх окна — для того, кто смотрит в окно; она
+    /// крупная, по центру и гаснет сама. Позеленевшая кнопка — для того, кто уже отвернулся к
+    /// принтеру и вернулся взглядом через секунду. Прежняя подпись в ряду кнопок не годилась ни
+    /// тому, ни другому: в узком окне она вылезала за край, а замечали её редко.</summary>
     private void ShowPrintState(LabelPrinter.PrintOutcome outcome)
     {
-        PrintStateText.Visibility = Visibility.Visible;
         if (!outcome.Ok)
         {
             _printCount = 0;
-            PrintStateText.SetResourceReference(ForegroundProperty, "ErrorBrush");
-            PrintStateText.Text = "Не ушло на принтер";
+            ShowToast("Не ушло на принтер", outcome.Message, ok: false);
             return;
         }
 
         _printCount++;
-        var where = string.IsNullOrWhiteSpace(outcome.Printer) ? "" : $" на «{outcome.Printer}»";
-        var again = _printCount > 1 ? $", уже {_printCount}-й раз" : "";
-        PrintStateText.SetResourceReference(ForegroundProperty, "SuccessBrush");
-        PrintStateText.Text = $"Отправлено{where} в {DateTime.Now:HH:mm:ss}{again}";
+        var where = string.IsNullOrWhiteSpace(outcome.Printer) ? "" : $"на «{outcome.Printer}»";
+        var again = _printCount > 1 ? $" · уже {_printCount}-й раз" : "";
+        ShowToast("Отправлено на принтер",
+            $"{where}{(where.Length > 0 ? " · " : "")}{DateTime.Now:HH:mm:ss}{again}", ok: true);
+        FlashPrintButton();
+    }
+
+    /// <summary>Показать плашку и погасить её через пару секунд.
+    ///
+    /// Таймер один на окно и перезапускается: если нажать «Печать» дважды подряд, вторая плашка не
+    /// должна гаснуть по таймеру первой — иначе второй ответ мигнёт и исчезнет, и это будет выглядеть
+    /// хуже, чем отсутствие ответа.</summary>
+    private void ShowToast(string title, string detail, bool ok)
+    {
+        PrintToastTitle.Text = title;
+        PrintToastTitle.SetResourceReference(ForegroundProperty, ok ? "SuccessBrush" : "ErrorBrush");
+        PrintToastDetail.Text = detail;
+        PrintToast.Visibility = Visibility.Visible;
+        PrintToast.Opacity = 1;
+        PrintToastBar.Value = 100;
+
+        _toastTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ToastStepMs) };
+        _toastTimer.Tick -= ToastTick;
+        _toastTimer.Tick += ToastTick;
+        _toastLeftMs = ToastTotalMs;
+        _toastTimer.Start();
+    }
+
+    private void ToastTick(object? sender, EventArgs e)
+    {
+        _toastLeftMs -= ToastStepMs;
+        if (_toastLeftMs <= 0)
+        {
+            _toastTimer?.Stop();
+            PrintToast.Visibility = Visibility.Collapsed;
+            PrintToast.Opacity = 0;
+            return;
+        }
+
+        PrintToastBar.Value = 100.0 * _toastLeftMs / ToastTotalMs;
+        // Гасим плавно только в конце: мигание с первой же миллисекунды читается как сбой отрисовки.
+        if (_toastLeftMs < 500) PrintToast.Opacity = _toastLeftMs / 500.0;
+    }
+
+    /// <summary>Кнопка зеленеет на пару секунд и возвращается к своему обычному виду.
+    ///
+    /// Фон задаётся локально и потом СНИМАЕТСЯ (ClearValue), а не возвращается «нужным» цветом:
+    /// цвет кнопки задаёт тема, и запомненное здесь значение после смены темы было бы чужим.</summary>
+    private void FlashPrintButton()
+    {
+        PrintBtn.SetResourceReference(BackgroundProperty, "SuccessBrush");
+        _flashTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _flashTimer.Tick -= FlashTick;
+        _flashTimer.Tick += FlashTick;
+        _flashTimer.Stop();
+        _flashTimer.Start();
+    }
+
+    private void FlashTick(object? sender, EventArgs e)
+    {
+        _flashTimer?.Stop();
+        PrintBtn.ClearValue(BackgroundProperty);
     }
 
     private void CopyLink_Click(object sender, RoutedEventArgs e)

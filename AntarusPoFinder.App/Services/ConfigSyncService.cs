@@ -163,7 +163,11 @@ public static class ConfigSyncService
         //     его экспорт — сломать его новый ключ не может (тот же приём, что и у политики входа).
         // Пароли/хеши (admin/programmer) при этом не уезжают НИКОГДА — они остаются ниже.
         "inspection_folder", "admin_password", "programmer_password",
-        "current_role", "theme", "keep_archives", "image_server_port",
+        // "accent" рядом с "theme" не случайно: оформление — личное дело каждого. Тема была здесь
+        // с самого начала, а акцентный цвет забыли, и получалось несогласованно — свой цвет уезжал
+        // ко всем, чужой приезжал и затирал подобранный. Для человека это выглядело как «цвет не
+        // сохраняется»: он сохранялся, просто ближайшая синхронизация возвращала чужой.
+        "current_role", "theme", "accent", "keep_archives", "image_server_port",
         "sync_interval_min", "quick_apps",
         // ВНИМАНИЕ: ad_domain, ad_auth_mode, ad_http_url, ad_group_* и oidc_authority/oidc_client_id/
         // oidc_groups_claim ЗДЕСЬ СОЗНАТЕЛЬНО ОТСУТСТВУЮТ — это политика единого входа, она

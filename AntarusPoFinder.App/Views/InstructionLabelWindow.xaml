@@ -183,14 +183,6 @@
         <TextBlock Grid.Row="3" Grid.ColumnSpan="2" x:Name="PrinterText" TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"/>
 
         <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <!-- Отметка о печати стоит ВПЛОТНУЮ к кнопке, а не в статус-строке главного окна: окно
-                 наклейки модальное и закрывает собой низ экрана, поэтому прежний ответ никто не
-                 видел и на «Печать» жали повторно, получая пачку одинаковых наклеек. Здесь же
-                 написано, в какую очередь ушло и во сколько, — и счётчик повторов, чтобы вторая
-                 отправка отличалась от первой даже в пределах одной минуты. -->
-            <TextBlock x:Name="PrintStateText" VerticalAlignment="Center" Margin="0,0,10,0"
-                       TextWrapping="Wrap" Visibility="Collapsed"/>
-
             <!-- Ссылка на наклейке ведёт на хостинг, и «а файл-то туда доехал?» — первый вопрос
                  перед печатью. Кнопка открывает ровно тот адрес, который зашит в QR: увидеть
                  документ глазами убедительнее любой галочки. Перед открытием — один HEAD-запрос,
@@ -200,8 +192,32 @@
             <Button x:Name="CheckHostingBtn" Content="Открыть на хостинге" Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0" Click="CheckHosting_Click"/>
             <Button Content="Копировать ссылку" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="CopyLink_Click"/>
-            <Button Content="Печать" Width="120" Margin="0,0,8,0" Click="Print_Click"/>
+            <!-- Именованная и с собственной кистью фона: после удачной отправки она на пару секунд
+                 зеленеет. Это второй, «периферийный» ответ — его видно, даже когда смотришь на
+                 принтер, а не в окно. -->
+            <Button x:Name="PrintBtn" Content="Печать" Width="120" Margin="0,0,8,0" Click="Print_Click"/>
             <Button Content="Закрыть" Style="{StaticResource SecondaryButton}" Width="100" IsCancel="True" Click="Close_Click"/>
         </StackPanel>
+
+        <!-- Плашка поверх всего окна. Прежняя подпись стояла в ряду кнопок и в узком окне вылезала
+             за край — а главное, её там не замечали: человек в этот момент смотрит на принтер, а не
+             в угол окна. Плашка появляется по центру, живёт пару секунд и гаснет сама; закрывать её
+             не надо, и ни одной кнопки она не перекрывает насовсем.
+             IsHitTestVisible=False — чтобы она не перехватывала клик, если в эти две секунды человек
+             уже потянулся к «Закрыть». -->
+        <Border x:Name="PrintToast" Grid.RowSpan="5" Grid.ColumnSpan="2" Visibility="Collapsed"
+                IsHitTestVisible="False" Opacity="0"
+                VerticalAlignment="Center" HorizontalAlignment="Center"
+                Background="{DynamicResource BgSidebarBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                BorderThickness="1" CornerRadius="8" Padding="22,16" MaxWidth="520">
+            <StackPanel>
+                <TextBlock x:Name="PrintToastTitle" FontSize="16" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                <TextBlock x:Name="PrintToastDetail" Style="{StaticResource MutedText}" Margin="0,6,0,0"
+                           HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                <!-- Полоска-таймер: заодно показывает, что плашка исчезнет сама. -->
+                <ProgressBar x:Name="PrintToastBar" Height="4" Margin="0,12,0,0" Minimum="0" Maximum="100"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
