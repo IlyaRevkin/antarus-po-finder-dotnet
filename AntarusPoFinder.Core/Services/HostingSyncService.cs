@@ -40,6 +40,12 @@ public sealed record HostingItem(
     string ObjectKey,
     string Url)
 {
+    /// <summary>Путь, по которому документ ДОЛЖЕН лежать. У найденного документа совпадает с
+    /// <see cref="SourcePath"/>, а у ненайденного это единственное, от чего можно считать адрес на
+    /// хостинге: сам ключ уже посчитан именно от него (иначе строка не попала бы в список вовсе).
+    /// Нужен, чтобы по адресу отсутствующего документа положить страницу обращения в сервис.</summary>
+    public string ExpectedPath { get; init; } = "";
+
     public HostingState State { get; init; } = HostingState.Unknown;
     public string? Error { get; init; }
     public long? Size { get; init; }
@@ -169,6 +175,7 @@ public sealed class HostingSyncService
                 ObjectKey: key,
                 Url: url)
             {
+                ExpectedPath = pathOnDisk,
                 State = file is null ? HostingState.NoSource : HostingState.Unknown,
                 Size = SizeOf(file),
             }, pathOnDisk));
@@ -290,8 +297,25 @@ public sealed class HostingSyncService
 
             if (item.State == HostingState.NoSource || string.IsNullOrEmpty(item.SourcePath))
             {
-                skipped++;
-                messages.Add($"{item.VersionRaw}: файла инструкции на диске нет — выкладывать нечего");
+                // Документа на диске нет — но НАКЛЕЙКА со ссылкой на него, возможно, уже висит на
+                // шкафу. Пусто по этому адресу означает для заказчика страницу ошибки хранилища:
+                // XML-простыня «AccessDenied» на телефоне. Настроить хранилище так, чтобы оно само
+                // подставляло заглушку, нашими ключами нельзя (оно отвечает отказом на попытку
+                // задать страницу ошибки), поэтому кладём по этому адресу страницу обращения в
+                // сервис сами. Тогда «файл не найден» превращается в «позвоните вот сюда».
+                //
+                // Страница — та же, что вшивается последней в настоящие инструкции, и текст у неё
+                // правится в редакторе макетов: придумывать ей отдельную формулировку в коде
+                // значило бы лишить Илью возможности её поменять.
+                if (stubs is null || string.IsNullOrEmpty(item.ExpectedPath))
+                {
+                    skipped++;
+                    messages.Add($"{item.VersionRaw}: файла инструкции на диске нет — выкладывать нечего");
+                    continue;
+                }
+
+                if (PublishServicePageInstead(publisher, stubs, item, diskRoot, messages)) published++;
+                else failed++;
                 continue;
             }
             // Заглушка, нарисованная по прошлому макету, перерисовывается ДО отправки — иначе наверх
@@ -319,6 +343,45 @@ public sealed class HostingSyncService
 
         progress?.Report(new HostingProgress(done, list.Count, "готово"));
         return new HostingRunResult(published, skipped, failed, messages);
+    }
+
+    /// <summary>Положить по адресу отсутствующего документа страницу обращения в сервис.
+    ///
+    /// Рисуется во временный файл и оттуда уезжает в хранилище: на общий диск мы ничего не пишем.
+    /// Документ там отсутствует не «сам по себе» — его либо ещё не положили, либо убрали руками, — и
+    /// самовольно создавать файлы в чужой папке приложение не должно. А вот адрес, на который
+    /// смотрит уже наклеенный QR, обязан отвечать чем-то осмысленным.
+    ///
+    /// Ключ считается от ОЖИДАЕМОГО пути документа (item.SourcePath), а не от временного файла, —
+    /// иначе страница легла бы куда-то не туда.</summary>
+    private static bool PublishServicePageInstead(IInstructionPublisher publisher, IInstructionStubWriter stubs,
+        HostingItem item, string diskRoot, List<string> messages)
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"antarus_service_{Guid.NewGuid():N}.pdf");
+        try
+        {
+            stubs.Write(temp, StubKind.ServiceNote, item.VersionRaw);
+            var warnings = new List<string>();
+            var url = publisher.Publish(temp, item.ExpectedPath, diskRoot, warnings);
+            foreach (var w in warnings) messages.Add($"{item.VersionRaw}: {w}");
+            if (url is null)
+            {
+                messages.Add($"{item.VersionRaw}: документа на диске нет, и страницу сервиса выложить не удалось");
+                return false;
+            }
+
+            messages.Add($"{item.VersionRaw}: документа на диске нет — по ссылке выложена страница обращения в сервис");
+            return true;
+        }
+        catch (Exception e)
+        {
+            messages.Add($"{item.VersionRaw}: документа на диске нет, и страницу сервиса нарисовать не удалось: {e.Message}");
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch (Exception) { /* временный файл — не повод падать */ }
+        }
     }
 
     /// <summary>Файл инструкции этой версии на диске — настоящий документ или заглушка. Путь из базы

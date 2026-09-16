@@ -254,6 +254,52 @@ public class HostingSyncServiceTests
         Assert.Contains(result.Messages, m => m.Contains("выкладывать нечего", StringComparison.Ordinal));
     }
 
+    /// <summary>Рисовальщик заглушек для этого класса: кладёт настоящий файл, чтобы выкладчику было
+    /// что отправить.</summary>
+    private sealed class FakeStubWriter : IInstructionStubWriter
+    {
+        public List<StubKind> Kinds { get; } = new();
+        public void Write(string path, string text) => File.WriteAllText(path, text);
+        public void Write(string path, StubKind kind, string? versionRaw)
+        {
+            Kinds.Add(kind);
+            File.WriteAllText(path, "заглушка");
+        }
+    }
+
+    /// <summary>Просьба Ильи 16.09.2026: «сделай, что если страница или файл не найден по ссылке
+    /// инструкции, то редирект на заглушку с сервисом».
+    ///
+    /// Редирект настроить нечем: наши ключи к хранилищу не дают задать страницу ошибки, а публичный
+    /// адрес ведёт прямо в него, без нашей прослойки. Зато можно не допускать пустоты по адресу:
+    /// если документа на диске нет, кладём туда страницу обращения в сервис. Наклейка на шкафу уже
+    /// висит, и открыть по ней XML-простыню «AccessDenied» заказчик не должен.</summary>
+    [Fact]
+    public void Publish_VersionWithoutFile_PutsTheServicePageAtItsAddress()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var root = new TempRoot();
+        SeedVersion(db, root, "1.0.0005.0003", instructionFile: null);
+
+        var storage = new FakeStorage();
+        var service = Service(db, storage);
+        var stubs = new FakeStubWriter();
+        var result = service.Publish(Settings(), root.Path, service.Plan(Settings(), root.Path),
+            onlyMissing: true, stubs: stubs);
+
+        Assert.Equal(1, result.Published);
+        Assert.Single(storage.Puts);
+        // Страниц сервиса рисуется две: сама выкладываемая страница и та, что выкладчик подшивает
+        // последней в любой публикуемый документ (ServicePageStitcher). Проверяем вид, а не число.
+        Assert.All(stubs.Kinds, k => Assert.Equal(StubKind.ServiceNote, k));
+        Assert.NotEmpty(stubs.Kinds);
+        Assert.Contains(result.Messages, m => m.Contains("страница обращения в сервис", StringComparison.Ordinal));
+
+        // Адрес — тот же, по которому лежал бы настоящий документ: наклейка ведёт именно туда.
+        Assert.Contains(storage.Puts, k => k.Contains("instrukciya_1.0.0005.0003", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Plan_WithoutDiskRoot_ReturnsNothingInsteadOfThrowing()
     {
