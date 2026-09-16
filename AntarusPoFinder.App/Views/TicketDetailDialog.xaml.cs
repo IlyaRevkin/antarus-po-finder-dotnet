@@ -14,10 +14,19 @@ namespace AntarusPoFinder.App.Views;
 public partial class TicketDetailDialog : Window
 {
     private readonly string? _attachmentsDir;
+    private readonly AppServices? _services;
+    private readonly Ticket _ticket;
 
-    public TicketDetailDialog(Ticket ticket, string? root)
+    /// <summary>Одна реплика так, как её видно в окне. Отдельный тип, а не привязка к доменной
+    /// TicketComment: в шапке склеиваются автор, роль и время, и собирать эту строку в разметке
+    /// значило бы разложить её по трём привязкам с конвертерами.</summary>
+    private sealed record CommentRow(string Head, string Body);
+
+    public TicketDetailDialog(Ticket ticket, string? root, AppServices? services = null)
     {
         InitializeComponent();
+        _ticket = ticket;
+        _services = services;
 
         HeaderText.Text = $"{TicketType.Label(ticket.Type)} — {TicketStatus.Label(ticket.Status)}";
         var created = DateTime.TryParse(ticket.CreatedAt, out var dt) ? dt.ToString("dd.MM.yyyy HH:mm") : ticket.CreatedAt;
@@ -37,6 +46,17 @@ public partial class TicketDetailDialog : Window
                     NoAttachmentsText.Visibility = Visibility.Collapsed;
                 }
             }
+        }
+
+        // Без доступа к базе переписку ни показать, ни написать — окно тогда открывается как
+        // раньше, только для чтения. Так бывает у вызовов, которым база не нужна вовсе.
+        if (_services is null)
+        {
+            CommentsPanelEnabled(false);
+        }
+        else
+        {
+            ReloadComments();
         }
 
         // Фокус в текст сразу при открытии: колесо мыши работает и без этого, но PageUp/PageDown,
@@ -67,6 +87,50 @@ public partial class TicketDetailDialog : Window
             return;
         }
         Process.Start(new ProcessStartInfo(_attachmentsDir) { UseShellExecute = true });
+    }
+
+    private void CommentsPanelEnabled(bool on)
+    {
+        NewCommentInput.IsEnabled = on;
+        AddCommentBtn.IsEnabled = on;
+        if (!on) NoCommentsText.Text = "Обсуждение недоступно";
+    }
+
+    private void ReloadComments()
+    {
+        if (_services is null) return;
+        var rows = _services.Db.GetTicketComments(_ticket.Id)
+            .Select(c => new CommentRow(
+                $"{(string.IsNullOrWhiteSpace(c.Author) ? "—" : c.Author)}" +
+                $" ({RolesConfig.RoleLabel(c.AuthorRole)})" +
+                $" · {(DateTime.TryParse(c.CreatedAt, out var at) ? at.ToString("dd.MM.yyyy HH:mm") : c.CreatedAt)}",
+                c.Text))
+            .ToList();
+
+        CommentsList.ItemsSource = rows;
+        CommentsList.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NoCommentsText.Visibility = rows.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Ctrl+Enter отправляет, просто Enter переносит строку. Наоборот было бы нельзя:
+    /// многострочную реплику иначе не написать, а она здесь обычное дело.</summary>
+    private void NewCommentInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        if ((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == 0) return;
+        e.Handled = true;
+        AddComment_Click(sender, new RoutedEventArgs());
+    }
+
+    private void AddComment_Click(object sender, RoutedEventArgs e)
+    {
+        if (_services is null) return;
+        var text = NewCommentInput.Text.Trim();
+        if (text.Length == 0) return;
+
+        _services.Db.AddTicketComment(_ticket.Id, _services.CurrentAdLogin, _services.Cfg.CurrentRole(), text);
+        NewCommentInput.Clear();
+        ReloadComments();
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

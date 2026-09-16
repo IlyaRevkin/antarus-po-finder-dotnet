@@ -376,6 +376,20 @@ public partial class Database : IDisposable
                  updated_at       TEXT    NOT NULL DEFAULT ''
              );
 
+             -- Переписка по тикету. Реплики только добавляются: править и удалять их нельзя, и
+             -- поэтому здесь нет ни updated_at, ни надгробий — слияние между машинами сводится к
+             -- объединению по id (см. TicketStorageSync).
+             CREATE TABLE IF NOT EXISTS ticket_comments (
+                 id           TEXT    PRIMARY KEY,
+                 ticket_id    TEXT    NOT NULL,
+                 author       TEXT    NOT NULL DEFAULT '',
+                 author_role  TEXT    NOT NULL DEFAULT '',
+                 text         TEXT    NOT NULL DEFAULT '',
+                 created_at   TEXT    NOT NULL DEFAULT ''
+             );
+
+             CREATE INDEX IF NOT EXISTS idx_ticket_comments_ticket ON ticket_comments(ticket_id);
+
              CREATE TABLE IF NOT EXISTS ticket_sync_applied (
                  filename TEXT PRIMARY KEY
              );

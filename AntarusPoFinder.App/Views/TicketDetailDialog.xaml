@@ -13,6 +13,11 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <!-- Переписка тянется наравне с текстом тикета: у длинного обсуждения своя прокрутка,
+                 а у короткого места ровно столько, сколько нужно. -->
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="2*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -38,8 +43,52 @@
                      SpellCheck.IsEnabled="False"/>
         </Border>
 
-        <TextBlock Grid.Row="2" Text="ВЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
-        <Grid Grid.Row="3" Margin="0,0,0,12">
+        <!-- Переписка по тикету. Раньше обсуждать его было негде: правка текста самого тикета
+             затирала написанное раньше, и договаривались словами мимо программы. Реплики только
+             добавляются — это переписка, а не документ, и переписывать чужое в ней нельзя. -->
+        <TextBlock Grid.Row="2" Text="ОБСУЖДЕНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <Border Grid.Row="3" Style="{StaticResource CardBorder}" Margin="0,0,0,8">
+            <Grid>
+                <TextBlock x:Name="NoCommentsText" Text="Пока ничего не написано" Style="{StaticResource MutedText}"
+                           HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                <ItemsControl x:Name="CommentsList" Visibility="Collapsed">
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsPresenter/>
+                            </ScrollViewer>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,0,0,10">
+                                <TextBlock Text="{Binding Head}" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Body}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <!-- Ctrl+Enter отправляет: реплика обычно в одну-две строки, и тянуться мышью к кнопке
+                 ради каждой — лишнее движение. Просто Enter оставлен переносом строки, иначе
+                 многострочную реплику не написать. -->
+            <TextBox Grid.Column="0" x:Name="NewCommentInput" AcceptsReturn="True" TextWrapping="Wrap"
+                     MinHeight="52" MaxHeight="110" VerticalScrollBarVisibility="Auto" Margin="0,0,8,0"
+                     PreviewKeyDown="NewCommentInput_PreviewKeyDown"/>
+            <Button Grid.Column="1" x:Name="AddCommentBtn" Content="Написать" VerticalAlignment="Bottom"
+                    Width="110" Click="AddComment_Click"
+                    ToolTip="Добавить реплику к тикету (Ctrl+Enter). Она уедет остальным вместе с тикетом."/>
+        </Grid>
+
+        <TextBlock Grid.Row="5" Text="ВЛОЖЕНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <Grid Grid.Row="6" Margin="0,0,0,12">
             <TextBlock x:Name="NoAttachmentsText" Text="Нет вложений" Style="{StaticResource MutedText}"
                        HorizontalAlignment="Left" VerticalAlignment="Top"/>
             <!-- MaxHeight, а не фиксированная высота: пара вложений занимает две строки, длинный
@@ -47,7 +96,7 @@
             <ListBox x:Name="AttachmentsList" MaxHeight="130" Visibility="Collapsed" MouseDoubleClick="AttachmentsList_MouseDoubleClick"/>
         </Grid>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Открыть файл" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenAttachment_Click"/>
             <Button Content="Открыть папку вложений" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenAttachmentsFolder_Click"/>
             <Button Content="Закрыть" IsCancel="True" Click="Close_Click"/>

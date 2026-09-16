@@ -110,7 +110,13 @@ public static class TicketStorageSync
     /// его переименованием свойства в домене нельзя.</summary>
     public sealed record Payload(
         int Schema, string Id, string Type, string Text, string Status,
-        string CreatedBy, string CreatedByRole, string CreatedAt, string UpdatedAt);
+        string CreatedBy, string CreatedByRole, string CreatedAt, string UpdatedAt,
+        List<CommentPayload>? Comments = null);
+
+    /// <summary>Реплика переписки внутри объекта тикета. Отдельным объектом в хранилище реплики не
+    /// лежат намеренно: их всегда читают вместе с тикетом, а один объект вместо десятка — это и
+    /// меньше запросов, и невозможность увидеть тикет без половины обсуждения.</summary>
+    public sealed record CommentPayload(string Id, string Author, string Role, string Text, string CreatedAt);
 
     public static string RelativeKeyFor(Ticket t) =>
         $"{(TicketAutoReports.IsAutoReport(t) ? CrashFolder : StateFolder)}/{t.Id}.json";
@@ -123,8 +129,12 @@ public static class TicketStorageSync
         (key.StartsWith(StateFolder + "/", StringComparison.Ordinal) ||
          key.StartsWith(CrashFolder + "/", StringComparison.Ordinal));
 
-    public static string Serialize(Ticket t) => JsonSerializer.Serialize(
-        new Payload(Schema, t.Id, t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt, t.UpdatedAt),
+    public static string Serialize(Ticket t) => Serialize(t, System.Array.Empty<TicketComment>());
+
+    public static string Serialize(Ticket t, IReadOnlyList<TicketComment> comments) => JsonSerializer.Serialize(
+        new Payload(Schema, t.Id, t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt, t.UpdatedAt,
+            comments.Count == 0 ? null
+                : comments.Select(c => new CommentPayload(c.Id, c.Author, c.AuthorRole, c.Text, c.CreatedAt)).ToList()),
         JsonOptions);
 
     /// <summary>Разбор объекта из хранилища. Терпимый: незнакомые поля игнорируются, отсутствующий
@@ -153,6 +163,32 @@ public static class TicketStorageSync
             };
         }
         catch (JsonException) { return null; }
+    }
+
+    /// <summary>Реплики из объекта. Отдельным разбором, а не полем в <see cref="TryParse"/>, чтобы
+    /// не менять его подпись: тикет и переписка нужны в разных местах и по отдельности.
+    ///
+    /// Реплики без идентификатора или без текста пропускаются молча: файл правят руками, и
+    /// недописанная строка не повод ни падать, ни заводить пустую реплику.</summary>
+    public static List<TicketComment> TryParseComments(string json)
+    {
+        var list = new List<TicketComment>();
+        try
+        {
+            var p = JsonSerializer.Deserialize<Payload>(json, JsonOptions);
+            if (p is null || string.IsNullOrWhiteSpace(p.Id) || p.Comments is null) return list;
+            foreach (var c in p.Comments)
+            {
+                if (c is null || string.IsNullOrWhiteSpace(c.Id) || string.IsNullOrWhiteSpace(c.Text)) continue;
+                list.Add(new TicketComment
+                {
+                    Id = c.Id.Trim(), TicketId = p.Id.Trim(), Author = c.Author ?? "",
+                    AuthorRole = c.Role ?? "", Text = c.Text, CreatedAt = c.CreatedAt ?? "",
+                });
+            }
+        }
+        catch (JsonException) { /* битый объект — тикет уже разобран отдельно, переписку просто не берём */ }
+        return list;
     }
 
     private static string NormalizeStatus(string? status) => (status ?? "").Trim().ToLowerInvariant() switch
@@ -233,7 +269,14 @@ public static class TicketStorageSync
             var ticket = TryParse(json);
             if (ticket is null) { failed++; continue; }
 
-            if (db.ApplyRemoteTicket(ticket)) pulled++;
+            var changed = db.ApplyRemoteTicket(ticket);
+            // Переписка приезжает ВСЕГДА, даже если сам тикет не изменился: реплику могли добавить
+            // к тикету, у которого больше ничего не поменялось, и отбрасывать её вместе с «тикет
+            // прежний» значило бы терять ровно то, ради чего переписка и заводилась.
+            foreach (var comment in TryParseComments(json))
+                if (db.AddTicketCommentIfMissing(comment)) changed = true;
+
+            if (changed) pulled++;
             db.SaveTicketStorageSeen(key, ticket.Id, ticket.UpdatedAt, tag);
         }
 
@@ -254,7 +297,7 @@ public static class TicketStorageSync
                            string.CompareOrdinal(t.UpdatedAt, seen.RemoteUpdatedAt) <= 0;
             if (upToDate) continue;
 
-            var error = await storage.PutAsync(key, Serialize(t), ct);
+            var error = await storage.PutAsync(key, Serialize(t, db.GetTicketComments(t.Id)), ct);
             if (error is not null) { failed++; continue; }
 
             pushed++;

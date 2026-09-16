@@ -23,6 +23,25 @@ public class Ticket
     public string UpdatedAt { get; set; } = "";
 }
 
+/// <summary>Одна реплика в переписке по тикету.
+///
+/// Заведено потому, что обсуждать тикет было негде: правка текста самого тикета затирала то, что
+/// человек написал раньше, а договариваться приходилось словами мимо программы. Реплики только
+/// ДОБАВЛЯЮТСЯ и никогда не редактируются и не удаляются — это переписка, а не документ. Из этого
+/// же следует и правило слияния между машинами: объединение по идентификатору, без разбора, чья
+/// версия новее (см. TicketStorageSync).</summary>
+public class TicketComment
+{
+    /// <summary>Свой идентификатор, а не порядковый номер: реплики появляются на разных машинах
+    /// независимо, и нумеровать их по порядку значит гарантированно столкнуться номерами.</summary>
+    public string Id { get; set; } = "";
+    public string TicketId { get; set; } = "";
+    public string Author { get; set; } = "";
+    public string AuthorRole { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string CreatedAt { get; set; } = "";
+}
+
 public static class TicketType
 {
     public const string Bug = "bug";

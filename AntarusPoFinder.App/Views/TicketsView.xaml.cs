@@ -425,7 +425,12 @@ public partial class TicketsView : UserControl
     private void OpenDetailForSelected()
     {
         if (TicketsGrid.SelectedItem is not TicketRow row) return;
-        new TicketDetailDialog(row.Ticket, _services.Cfg.RootPath()) { Owner = Window.GetWindow(this) }.ShowDialog();
+        // Службы передаются ради обсуждения: реплики читаются и пишутся в базу, а после закрытия
+        // окна список перечитывается — реплика меняет и время правки тикета, а по нему строится
+        // порядок и решается, отдавать ли тикет в хранилище.
+        new TicketDetailDialog(row.Ticket, _services.Cfg.RootPath(), _services) { Owner = Window.GetWindow(this) }.ShowDialog();
+        ReloadGrid();
+        _ = SyncWithStorageAsync();
     }
 
     private void SetStatus_Click(object sender, RoutedEventArgs e)
