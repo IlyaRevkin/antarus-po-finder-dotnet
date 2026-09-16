@@ -142,14 +142,19 @@ public static class SearchService
     /// версию должны выбрать по этому запросу, прежде чем статистика начнёт двигать выдачу (по
     /// умолчанию 1 — единственный выбор уже учитывается, как было до появления настраиваемого
     /// порога; реальный вызывающий код передаёт ConfigService.FwUsageThreshold()).</summary>
+    /// <param name="showAllVersions">Галочка «показывать всё» — см. Database.SearchFwVersions:
+    /// выдача не схлопывается к одной строке на шкаф. По умолчанию выключено.</param>
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
-        FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "") =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot));
+        FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "",
+        bool showAllVersions = false) =>
+        SearchWithLayoutFallback(query, exactWord,
+            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
         bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null,
-        int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "") =>
-        SearchWithLayoutFallback(query, exactWord, (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot),
+        int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "", bool showAllVersions = false) =>
+        SearchWithLayoutFallback(query, exactWord,
+            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions),
             allowFallback, out usedFallback, out convertedQuery);
 
     /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
@@ -157,7 +162,8 @@ public static class SearchService
     public static string UsageKey(string query) => Normalize(query);
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
-        FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier, string localRoot = "")
+        FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier, string localRoot = "",
+        bool showAllVersions = false)
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -165,7 +171,8 @@ public static class SearchService
         // разбирает сам Database.SearchFwVersions; пустой запрос без фильтров ничего не ищет.
         if (tokens.Length == 0 && (filters is null || filters.IsEmpty)) return new();
 
-        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold, usageMultiplier);
+        var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold,
+            usageMultiplier, showAllVersions);
 
         return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount, localRoot, row.MatchedTokens)).ToList();
     }

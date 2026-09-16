@@ -899,12 +899,16 @@ public partial class Database
         return true;
     }
 
-    /// <summary>Оператор вручную назначает ЭТУ версию «текущей» в её hw-группе (подтип+контроллер+hw),
+    /// <summary>Оператор вручную назначает ЭТУ версию «текущей» в её группе (подтип+контроллер+hw+
+    /// ИСПОЛНЕНИЕ),
     /// в обход обычного правила «текущая = версия с максимальным sw_version» (см. FwHistoryStatus.
     /// Labels) — например, когда более новую по номеру версию забраковали и по факту в шкафах стоит
     /// версия постарше, но формально откатывать её не хочется (история версий должна остаться видна
     /// целиком). В группе может быть отмечена только одна версия: перед установкой отметка снимается
-    /// со всех остальных версий той же группы. На откатанной версии отметку поставить нельзя —
+    /// со всех остальных версий той же группы. Исполнение — полноправная часть границы группы, ровно
+    /// та же, по которой считает метки FwHistoryStatus.Labels: без него отметка «текущая» у прошивки
+    /// «3 насоса» молча снимала бы такую же отметку у соседней линейки «ПЧ Danfoss», и у неё вместо
+    /// выбранной оператором версии снова становилась бы текущей самая свежая. На откатанной версии отметку поставить нельзя —
     /// «откатана» и «текущая» взаимоисключающие состояния. Возвращает false, если версия не найдена
     /// или откатана (тогда ничего не меняется).</summary>
     public bool SetFwVersionManualCurrent(int fwVersionId)
@@ -915,11 +919,13 @@ public partial class Database
         ExecuteNonQuery("""
             UPDATE fw_versions SET manual_current=0
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+              AND IFNULL(execution,'') = @e
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", v.SubtypeId);
             cmd.Parameters.AddWithValue("@c", v.ControllerId);
             cmd.Parameters.AddWithValue("@h", v.HwVersion);
+            cmd.Parameters.AddWithValue("@e", FwExecution.Normalize(v.Execution));
         });
         ExecuteNonQuery("UPDATE fw_versions SET manual_current=1 WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
         return true;

@@ -292,6 +292,26 @@ public class FwExecutionTests
         Assert.Equal(new[] { 2, 1 }, candidates.Select(c => c.SwVersion));
     }
 
+    /// <summary>Ручная отметка «текущая» живёт внутри своего исполнения. Отметили версию «3 насоса» —
+    /// отметка соседней линейки «ПЧ Danfoss» обязана уцелеть: иначе там снова стала бы текущей самая
+    /// свежая версия, то есть выбор оператора молча отменялся бы чужим действием.</summary>
+    [Fact]
+    public void ManualCurrent_OfOneExecution_DoesNotClearTheOther()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var drives = AddVersion(db, sw: 1, execution: "ПЧ Danfoss");
+        AddVersion(db, sw: 2, execution: "ПЧ Danfoss");
+        var pumps = AddVersion(db, sw: 3, execution: "3 насоса");
+
+        Assert.True(db.SetFwVersionManualCurrent(drives));
+        Assert.True(db.SetFwVersionManualCurrent(pumps));
+
+        Assert.True(db.GetFwVersionById(drives)!.ManualCurrent);
+        Assert.True(db.GetFwVersionById(pumps)!.ManualCurrent);
+    }
+
     /// <summary>Исполнение правится и у уже заведённой прошивки: признак появился позже накопленного,
     /// и разнести его по линейкам можно только руками (окно модерации, EditFirmwareDialog).</summary>
     [Fact]
