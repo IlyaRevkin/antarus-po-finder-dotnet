@@ -368,7 +368,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 if (!_ticketStorageLastFailed)
                 {
                     _ticketStorageLastFailed = true;
-                    ShowStatus($"Тикеты не синхронизируются с хранилищем: {result.Error}", 8000, NotificationCategory.Sync);
+                    // Формулировка начинается с того, что тикет НЕ ПОТЕРЯН. Прежняя («тикеты не
+                    // синхронизируются с хранилищем: …») появлялась сразу после кнопки «Создать
+                    // тикет» и читалась как «отправить не удалось» — хотя тикет к этому моменту уже
+                    // записан и уехал на сетевой диск конторы, а не уехала только копия на хостинг.
+                    ShowStatus($"Тикеты сохранены и ушли на сетевой диск. До хранилища на хостинге " +
+                               $"копия пока не доехала: {result.Error}", 12000, NotificationCategory.Sync);
                 }
                 return;
             }

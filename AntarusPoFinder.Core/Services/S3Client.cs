@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -99,8 +100,49 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return Result.Fail(ex.Message);
+            return Result.Fail(Explain(ex));
         }
+    }
+
+    /// <summary>Пересказать сетевую беду по-человечески.
+    ///
+    /// .NET на неудачном рукопожатии TLS говорит «The SSL connection could not be established, see
+    /// inner exception», и это ровно то, с чем человек приходит: «выдаёт ошибку SSL какую-то».
+    /// Понять по ней нечего, а причина почти всегда одна из двух и обе НЕ в программе: либо
+    /// корпоративный фильтр разрывает соединение и подставляет свой сертификат, которому машина не
+    /// обучена, либо наружу вообще не пускают. Пишем это прямо — и главное, пишем, что делать.
+    ///
+    /// Внутренние исключения разворачиваются: сообщение верхнего уровня у HttpRequestException
+    /// почти всегда бессодержательно, а настоящая причина лежит на два уровня глубже.</summary>
+    public static string Explain(Exception ex)
+    {
+        var chain = new List<string>();
+        for (var e = ex; e is not null; e = e.InnerException) chain.Add(e.Message);
+        var all = string.Join(" | ", chain);
+
+        if (all.Contains("SSL", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("TLS", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("certificate", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("сертификат", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("SecureChannel", StringComparison.OrdinalIgnoreCase))
+            return "защищённое соединение с хранилищем не устанавливается. Обычно это корпоративный " +
+                   "фильтр: он разрывает соединение и подставляет свой сертификат, а машина ему не " +
+                   "обучена. Нужен корневой сертификат предприятия в хранилище «Доверенные корневые " +
+                   "центры сертификации» этого компьютера либо разрешение ходить на адрес хранилища " +
+                   "напрямую — это к тем, кто ведёт сеть. Подробность: " + chain[^1];
+
+        if (all.Contains("No such host", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("не удалось разрешить", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("known", StringComparison.OrdinalIgnoreCase) && all.Contains("host", StringComparison.OrdinalIgnoreCase))
+            return "адрес хранилища не разрешается в сети этого компьютера. Подробность: " + chain[^1];
+
+        if (all.Contains("refused", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("отказано", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase))
+            return "до хранилища не достучаться — соединение закрывают. Обычно наружу не пускают. " +
+                   "Подробность: " + chain[^1];
+
+        return chain[0];
     }
 
     /// <summary>Лежит ли объект в бакете — HEAD по ключу. Нужен странице «Хранилище», чтобы отвечать
@@ -138,7 +180,7 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return Presence.Unknown(ex.Message);
+            return Presence.Unknown(Explain(ex));
         }
     }
 
@@ -174,7 +216,7 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return (null, ex.Message);
+            return (null, Explain(ex));
         }
     }
 
@@ -235,7 +277,7 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return ListPage.Fail(ex.Message);
+            return ListPage.Fail(Explain(ex));
         }
     }
 
@@ -313,7 +355,7 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return Result.Fail(ex.Message);
+            return Result.Fail(Explain(ex));
         }
     }
 
@@ -342,7 +384,7 @@ public sealed class S3Client
         }
         catch (Exception ex)
         {
-            return Result.Fail(ex.Message);
+            return Result.Fail(Explain(ex));
         }
     }
 
