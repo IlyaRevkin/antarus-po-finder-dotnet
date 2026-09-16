@@ -260,12 +260,15 @@ public static class DiskCleanupScanner
         //
         // Служебные папки раскладки («Прошивка», «Инструкция», «HMI»…) не в счёт: они наши, а не
         // часть проекта, и к имени файла отношения не имеют.
-        var projectFolders = TopLevelProjectFolders(folder);
-        if (projectFolders.Count > 0)
+        //
+        // Второй признак того же правила — «файл назван так же, как папка». Он появился позже, по
+        // жалобе про KINCO: «ты переименовываешь файл, а папка старой остаётся, и он из-за
+        // расхождения названий не может найти расширения». Оба признака живут одним местом —
+        // ProjectTree, — чтобы чистильщик, перестройка диска и копия версии отвечали одинаково.
+        var why = ProjectTree.WhyRenameWouldBreak(candidates[0]);
+        if (why is not null)
         {
-            skipped.Add($"{record.VersionRaw}: рядом с файлом лежат папки проекта " +
-                        $"({string.Join(", ", projectFolders.Select(Path.GetFileName).Take(3))}) — " +
-                        "имя не трогаем, иначе проект перестанет находить свои драйверы и дополнения");
+            skipped.Add($"{record.VersionRaw}: {why}");
             return null;
         }
 
@@ -728,22 +731,6 @@ public static class DiskCleanupScanner
     }
 
     // ── Обход диска ─────────────────────────────────────────────────────────
-
-    /// <summary>Папки верхнего уровня, которые НЕ являются служебными папками раскладки. Наличие
-    /// хотя бы одной означает, что рядом с файлом лежит дерево проекта — драйверы, библиотеки,
-    /// ресурсы, — и переименовывать исполняемый файл нельзя: среда разработки связывает их с ним
-    /// по имени.</summary>
-    private static List<string> TopLevelProjectFolders(string dir)
-    {
-        try
-        {
-            if (IsLink(dir)) return new List<string>();
-            return Directory.EnumerateDirectories(dir, "*", SearchOption.TopDirectoryOnly)
-                .Where(d => !VersionLayout.IsVersionOwnFolder(Path.GetFileName(d)))
-                .ToList();
-        }
-        catch (Exception) { return new List<string>(); }
-    }
 
     private static List<string> TopLevelFiles(string dir)
     {

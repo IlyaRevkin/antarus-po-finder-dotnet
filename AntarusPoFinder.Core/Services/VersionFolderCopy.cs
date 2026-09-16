@@ -50,15 +50,26 @@ public static class VersionFolderCopy
             foreach (var file in Directory.EnumerateFiles(src))
             {
                 var name = Path.GetFileName(file);
+                // Файл прошивки переезжает под каноническое имя новой версии — но ТОЛЬКО если от
+                // этого не разъедется пара «папка + одноимённый файл проекта» (см. ProjectTree).
+                // Проект KINCO лежит в папке, названной по файлу; правило «строка версии в имени»
+                // до неё не дотягивается (в имени папки номера нашей версии нет), а это условие —
+                // дотягивалось, и копия получала переименованный файл в папке со старым именем.
+                // Имя папки в этой ветке известно — значит развилка решается точно, а не догадкой:
+                // папку переименовали заодно (обычная папка версии) — переименовываем и файл, нет —
+                // не трогаем ни того, ни другого.
+                var renameKeepsThePair = !ProjectTree.IsEntryFile(file)
+                    || string.Equals(Path.GetFileName(dst.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                        Path.GetFileNameWithoutExtension(newFirmwareName), StringComparison.OrdinalIgnoreCase);
                 var target = string.Equals(name, oldFirmwareName, StringComparison.OrdinalIgnoreCase)
-                             && newFirmwareName.Length > 0
+                             && newFirmwareName.Length > 0 && renameKeepsThePair
                     ? newFirmwareName
                     : RenameForVersion(name, oldVersionRaw, newVersionRaw);
                 try
                 {
                     File.Copy(file, Path.Combine(dst, target), overwrite: true);
                     if (string.Equals(name, oldFirmwareName, StringComparison.OrdinalIgnoreCase))
-                        firmwareName = target;
+                        firmwareName = target; // в т.ч. НЕ переименованное — в базе должно быть то, что на диске
                 }
                 catch (Exception ex)
                 {
@@ -105,6 +116,9 @@ public static class VersionFolderCopy
                 .Where(f => !VersionLayout.IsServiceFile(f) && !JunkFiles.IsJunk(f))
                 .Take(2).ToList();
             if (files.Count != 1) return "";
+            // Одинокий файл, но рядом лежит окружение проекта — это дерево, а не одинокий файл
+            // (см. ProjectTree). Та же развилка, что у чистильщика диска и у перестройки раскладки.
+            if (ProjectTree.RenameWouldBreak(files[0])) return Path.GetFileName(files[0]);
 
             var target = Path.Combine(folder, newFirmwareName);
             if (!string.Equals(files[0], target, StringComparison.OrdinalIgnoreCase))

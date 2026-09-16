@@ -418,6 +418,14 @@ public static class DiskLayoutMigrator
                     skipped.Add($"{v.VersionRaw}: номер версии не разбирается — каноническое имя не построить");
                     continue;
                 }
+                // Та же защита и здесь: в многофайловой папке имя укажет человек, но если папка —
+                // дерево проекта, указывать нечего, переименование сломает его любым выбором.
+                var whyMany = ProjectTree.WhyRenameWouldBreak(files[0]);
+                if (whyMany is not null)
+                {
+                    skipped.Add($"{v.VersionRaw}: {whyMany}");
+                    continue;
+                }
                 ops.Add(new Op
                 {
                     Kind = OpKind.RenameFirmware,
@@ -447,6 +455,17 @@ public static class DiskLayoutMigrator
             var canonical = FirmwareNaming.BuildFirmwareFilename(number, ext, v.RequestNum, v.CabinetSn);
             var currentName = Path.GetFileName(current);
             if (string.Equals(currentName, canonical, StringComparison.Ordinal)) continue;
+
+            // Дерево проекта переименовывать нельзя ни одной половиной — см. ProjectTree. Защита
+            // была только у чистильщика диска, а перестройка раскладки делает ровно ту же операцию и
+            // спокойно переименовывала файл, оставляя одноимённую папку старой: «он из-за
+            // расхождения названий не может найти расширения».
+            var why = ProjectTree.WhyRenameWouldBreak(current);
+            if (why is not null)
+            {
+                skipped.Add($"{v.VersionRaw}: {why}");
+                continue;
+            }
 
             ops.Add(new Op
             {
