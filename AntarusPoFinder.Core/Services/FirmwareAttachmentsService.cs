@@ -93,6 +93,16 @@ public static class FirmwareAttachmentsService
             var hmiParent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(hmiRootFolder));
             var insideVersionFolder = hmiParent is not null && VersionLayout.IsNewLayout(hmiParent);
             var hmiDstFolder = insideVersionFolder ? hmiRootFolder : Path.Combine(hmiRootFolder, $"{versionRaw}_hmi");
+
+            // ⚠️ Папка проекта (см. ProjectTree) кладётся ПОД СВОИМ ИМЕНЕМ и никогда не высыпается
+            // содержимым в «HMI». У такого проекта имя папки и имя файла проекта — одно и то же, по
+            // нему среда его и собирает; сложи мы содержимое в «HMI», папка проекта стала бы
+            // называться «HMI», а файл внутри — по-прежнему по-своему, и проект перестал бы находить
+            // свои расширения. Ровно эта жалоба и пришла про KINCO.
+            var projectName = Path.GetFileName(sourceFolder.TrimEnd(Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar));
+            if (ProjectTree.IsProjectTree(sourceFolder))
+                hmiDstFolder = Path.Combine(hmiRootFolder, projectName);
             // Проект УЖЕ лежит там, куда мы собрались его класть — оператор выбрал сохранённый проект
             // повторно (или через другую букву сетевого диска). Копировать нечего, а копирование
             // папки в саму себя раньше падало «файл занят другим процессом».

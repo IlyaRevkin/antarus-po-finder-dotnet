@@ -32,9 +32,15 @@ public static class HmiProjectFormat
     /// и утаскивать её целиком в «HMI\» значило бы продублировать туда всю прошивку.</summary>
     public static string? ProjectFolderOf(string? filePath)
     {
-        if (!IsFolderProjectFile(filePath) || !SafeFileExists(filePath)) return null;
+        if (!SafeFileExists(filePath)) return null;
         var folder = SafeParent(filePath!);
         if (folder is null || !SafeDirExists(folder)) return null;
+        // Либо формат заведомо «проект-папка» (.fsprj), либо это видно по строению: файл назван так
+        // же, как папка, и рядом с ним лежат ресурсы (см. ProjectTree). Второй признак добавлен по
+        // жалобе про KINCO — у него точка входа .dpj, и списком расширений такие случаи не
+        // закрываются: у каждого следующего вендора оно своё.
+        if (!IsFolderProjectFile(filePath)
+            && !(ProjectTree.IsEntryFile(filePath) && ProjectTree.IsProjectTree(folder))) return null;
         return ContainsPlcFirmware(folder) ? null : folder;
     }
 
