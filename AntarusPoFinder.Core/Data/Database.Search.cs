@@ -173,9 +173,13 @@ public partial class Database
     /// Rank/ConfigService.FwUsageMultiplier); 1 по умолчанию — прежнее поведение. Ручной вес
     /// (Weight) множитель НЕ трогает: он и так задаётся оператором в тех же «баллах», что и потолок
     /// авто-вклада, и складывается напрямую.</summary>
+    /// <paramref name="showAllVersions"/> — не схлопывать выдачу вовсе: показать КАЖДУЮ подходящую
+    /// версию отдельной строкой (тикет «чекбокс отображения всего имеющегося в поиске»: модератору
+    /// надо видеть, что есть и что надо подгрузить). По умолчанию выключено — схлопывание придумано
+    /// ради наладчика, которому нужна одна актуальная прошивка, а не вся история.
     public List<ScoredFwVersion> SearchFwVersions(IReadOnlyList<string> tokens, bool exactWord = false,
         FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "", int usageThreshold = 1,
-        double usageMultiplier = 1)
+        double usageMultiplier = 1, bool showAllVersions = false)
     {
         filters ??= FirmwareSearchFilters.None;
 
@@ -195,7 +199,7 @@ public partial class Database
         {
             if (filters.IsEmpty) return new();
             return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, UsesOf(r, usage), WeightOf(r, usage))),
-                usageThreshold, usageMultiplier);
+                usageThreshold, usageMultiplier, showAllVersions);
         }
 
         // Два принципиально разных режима, а не одно матчирование с флажком:
@@ -210,7 +214,7 @@ public partial class Database
             ? SearchOrdered(rows, tokens, phrase, usage)
             : SearchByKeywords(rows, RepairMixedLayout(qTokens, rows), phrase, usage);
 
-        return Deduplicate(scored, usageThreshold, usageMultiplier);
+        return Deduplicate(scored, usageThreshold, usageMultiplier, showAllVersions);
     }
 
     /// <summary>Обычный (не «в кавычках») поиск — модель «как в Гугле»: находит широко по отдельным
@@ -506,14 +510,32 @@ public partial class Database
     /// название своего шкафа, получает ту конфигурацию, чьи теги совпали, а не десяток одинаковых
     /// прошивок — это и требовалось.
     ///
+    /// ИСПОЛНЕНИЕ (столбец execution, см. FwExecution) — другое дело и в ключ входит: это РАЗНЫЕ
+    /// прошивки одного шкафа, актуальные одновременно, со своими файлами и своими папками. Их
+    /// схлопывание и было тем препятствием, из-за которого «несколько актуальных прошивок для одного
+    /// типа и подтипа» не работали: вторая просто не доживала до выдачи.
+    ///
     /// Единственная добавка — предпочтение при РАВНОМ ранге: побеждает основная запись (config_name
     /// пуст). На «общем» запросе («НГР SMH5», пустой запрос с фильтрами) все конфигурации набирают
     /// одинаковые очки, и без этого правила наверх выходила бы произвольная из них — наладчик видел бы
     /// комплектацию соседнего шкафа там, где вопрос о конкретной комплектации вообще не стоял.</summary>
+    /// <param name="showAllVersions">Схлопывание выключено целиком — в выдачу идут ВСЕ подходящие
+    /// строки, в том же порядке ранга. Отбор и ранжирование при этом те же самые: галочка снимает
+    /// только последний шаг «оставить по одной строке на шкаф», а не превращает поиск в перечисление
+    /// базы. Порядок сортировки один на оба режима (SortByRank) — разойдись он, включённая галочка
+    /// выдавала бы другие версии на первых местах, и сравнить «что показано без неё и с ней» стало бы
+    /// невозможно.</param>
     private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold,
-        double usageMultiplier)
+        double usageMultiplier, bool showAllVersions = false)
     {
-        var seen = new Dictionary<(int, int), ScoredFwVersion>();
+        if (showAllVersions) return SortByRank(scored, usageThreshold, usageMultiplier);
+
+        // Ключ сравнивается ТОЧНО (Ordinal), без игнора регистра: исполнение сверяется и в SQL
+        // (Database.NotSuperseded), где COLLATE NOCASE по-русски всё равно не работает, — разъехавшись,
+        // две стороны считали бы «ПЧ» и «пч» то одним исполнением, то разными. Одинаковое написание
+        // обеспечивается на вводе (FwExecution.Normalize + выбор из уже заведённых в форме загрузки).
+        var seen = new Dictionary<(int, int, string), ScoredFwVersion>();
+
         foreach (var entry in scored)
         {
             // ОПЦ-версия НИКОГДА не схлопывается с обычной и с другой ОПЦ.
@@ -526,7 +548,15 @@ public partial class Database
             // индексируется как текущая» и «ОПЦ в поиске не находится, видна только во вкладке
             // прошивок». Какая именно выживала, зависело от очков и порядка обхода, поэтому и
             // выглядело это по-разному в разных случаях.
-            var key = (entry.Row.SubtypeId, entry.Row.IsOpc ? -(entry.Row.Id ?? 0) : entry.Row.ControllerId);
+            // ИСПОЛНЕНИЕ — третья часть ключа, и это то самое, чего не хватало: у одного шкафа
+            // бывает несколько ОДНОВРЕМЕННО актуальных прошивок, различающихся комплектацией («3
+            // насоса», «ПЧ Danfoss»), и они не заменяют друг друга. Схлопывание при этом никуда не
+            // делось — версии ОДНОГО исполнения по-прежнему сворачиваются к лучшей, иначе выдача
+            // превратилась бы в перечисление всей истории. У ОПЦ исполнения нет вовсе: она и так
+            // никогда ни с чем не схлопывается (ключ ниже уникален по её id).
+            var key = (entry.Row.SubtypeId,
+                entry.Row.IsOpc ? -(entry.Row.Id ?? 0) : entry.Row.ControllerId,
+                entry.Row.IsOpc ? "" : FwExecution.Normalize(entry.Row.Execution));
             if (!seen.TryGetValue(key, out var existing))
             {
                 seen[key] = entry;
@@ -540,12 +570,18 @@ public partial class Database
                 seen[key] = entry;
         }
 
-        return seen.Values
+        return SortByRank(seen.Values, usageThreshold, usageMultiplier);
+    }
+
+    /// <summary>Порядок выдачи — один и тот же и для схлопнутой, и для полной (галочка «показывать
+    /// всё»). Вынесен отдельно ровно ради этого: два места сортировки неизбежно разъехались бы.</summary>
+    private static List<ScoredFwVersion> SortByRank(IEnumerable<ScoredFwVersion> entries, int usageThreshold,
+        double usageMultiplier) =>
+        entries
             .OrderByDescending(e => Rank(e, usageThreshold, usageMultiplier))
             .ThenByDescending(e => AutoUsageBonus(e.UsageCount, usageThreshold, usageMultiplier) + e.Weight)
             .ThenByDescending(e => e.Row.Id ?? 0)
             .ToList();
-    }
 
     /// <summary>Ранг = очки релевантности + вклад счётчика открытий (с потолком и множителем) + ручной
     /// вес (напрямую, без потолка). Ручной вес живёт в тех же «баллах», что и очки/авто-вклад, — так

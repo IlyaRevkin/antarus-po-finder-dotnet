@@ -27,8 +27,10 @@ public static class OpcFields
     public static bool IsValid(bool opcEnabled, string? cabinetSn, string? requestNum) =>
         Validate(opcEnabled, cabinetSn, requestNum) is null;
 
-    /// <summary>Учитывать ли выбор «не увеличивать версию ПО (sw)». Для ОПЦ-версии — нет: у неё
-    /// собственный, разовый шкаф, и sw в форме не задаётся (галочка при включённой ОПЦ прячется),
-    /// поэтому случайно оставшийся включённым флажок не должен молча утащить номер назад.</summary>
+    /// <summary>Учитывать ли выбор «не увеличивать версию ПО (sw)». Для ОПЦ-версии — нет, и теперь
+    /// по более прямой причине, чем раньше: у ОПЦ выбор номера СВОЙ — оператор указывает БАЗОВУЮ
+    /// версию, и её номер достаётся сборке целиком (FirmwareUploadRequest.OpcBaseSwVersion,
+    /// FirmwareUploadService.Prepare). Галочка при включённой ОПЦ прячется, а случайно оставшийся
+    /// включённым флажок не должен вмешиваться в этот выбор.</summary>
     public static bool SwVersionChoiceApplies(bool opcEnabled) => !opcEnabled;
 }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Services;
@@ -26,6 +27,21 @@ public static class FwHistoryStatus
 
     public static string CurrentForHw(int hwVersion) => $"{Current} (HW {hwVersion})";
 
+    /// <summary>«Текущая» другого ИСПОЛНЕНИЯ — прошивки того же шкафа, отличающейся комплектацией
+    /// («3 насоса», «ПЧ Danfoss»), а не возрастом. Такие прошивки актуальны одновременно, и назвать
+    /// «Заменённой» ту из них, что просто загружена раньше, значит соврать. См. FwExecution.</summary>
+    public static string CurrentForExecution(string execution) => $"{Current} (исполнение «{execution}»)";
+
+    /// <summary>Отличается и железо, и исполнение — называем оба, иначе две строки получили бы одну
+    /// и ту же подпись.</summary>
+    public static string CurrentForHwAndExecution(int hwVersion, string execution) =>
+        $"{Current} (HW {hwVersion}, исполнение «{execution}»)";
+
+    /// <summary>«Эта метка говорит, что версия актуальна» — любая из четырёх её разновидностей.
+    /// Отдельный метод, чтобы вызывающая сторона не перебирала их списком и не забыла новую.</summary>
+    public static bool IsCurrent(string? label) =>
+        label is not null && label.StartsWith(Current, StringComparison.Ordinal);
+
     /// <summary>Метки в том же порядке, что и <paramref name="newestFirst"/> — версии должны быть
     /// отсортированы от новых к старым (как их отдаёт Database.GetFwVersionsHistory).
     ///
@@ -39,26 +55,46 @@ public static class FwHistoryStatus
     {
         var alive = newestFirst.Where(v => v.Status != "rolled_back").ToList();
 
-        // «Текущая» внутри каждой hw-группы — обычно первая (самая свежая) живая версия этой группы,
+        // «Текущая» внутри каждой группы — обычно первая (самая свежая) живая версия этой группы,
         // но если оператор вручную отметил другую версию как текущую, используется она.
-        var newestPerHw = new Dictionary<int, FwVersionRecord>();
-        foreach (var group in alive.GroupBy(v => v.HwVersion))
+        //
+        // Группа — это пара «железо + ИСПОЛНЕНИЕ». Исполнение здесь ровно на тех же правах, что и hw,
+        // и по той же причине: прошивки разных исполнений («3 насоса», «ПЧ Danfoss») актуальны
+        // ОДНОВРЕМЕННО и друг друга не заменяют, поэтому у каждой своя «текущая». Сравнение точное,
+        // без игнора регистра, — то же правило, что и в SQL (Database.NotSuperseded), см. FwExecution.
+        var newestPerGroup = new Dictionary<(int Hw, string Execution), FwVersionRecord>();
+        foreach (var group in alive.GroupBy(v => (v.HwVersion, Execution: FwExecution.Normalize(v.Execution))))
         {
             var manual = group.FirstOrDefault(v => v.ManualCurrent);
-            newestPerHw[group.Key] = manual ?? group.First();
+            newestPerGroup[group.Key] = manual ?? group.First();
         }
+
+        (int, string) GroupKeyOf(FwVersionRecord v) => (v.HwVersion, FwExecution.Normalize(v.Execution));
 
         // Общая «Текущая» (без пометки HW) — первая по естественному порядку версия среди отобранных
         // выше кандидатов каждой hw-группы. Без ручных отметок это тривиально совпадает с прежним
         // "alive.FirstOrDefault()": самый первый элемент отсортированного списка неизбежно является
         // и первым элементом своей же hw-подгруппы.
-        var newest = alive.FirstOrDefault(v => newestPerHw.TryGetValue(v.HwVersion, out var pick) && ReferenceEquals(pick, v));
+        var newest = alive.FirstOrDefault(v => newestPerGroup.TryGetValue(GroupKeyOf(v), out var pick) && ReferenceEquals(pick, v));
+
+        // Подпись «текущей» не самой новой группы называет ровно то, чем группа отличается от
+        // главной: одно железо — только исполнение, одно исполнение — только HW, разное и то и
+        // другое — оба. Иначе две живые группы получили бы одинаковую подпись, и наладчик не понял
+        // бы, какая строка его.
+        string GroupLabel(FwVersionRecord v)
+        {
+            var execution = FwExecution.Normalize(v.Execution);
+            if (execution.Length == 0) return CurrentForHw(v.HwVersion);
+            return newest is not null && newest.HwVersion == v.HwVersion
+                ? CurrentForExecution(execution)
+                : CurrentForHwAndExecution(v.HwVersion, execution);
+        }
 
         return newestFirst.Select(v =>
             v.Status == "rolled_back" ? RolledBack
             : ReferenceEquals(v, newest) ? Current
-            : newestPerHw.TryGetValue(v.HwVersion, out var hwNewest) && ReferenceEquals(v, hwNewest)
-                ? CurrentForHw(v.HwVersion)
+            : newestPerGroup.TryGetValue(GroupKeyOf(v), out var groupNewest) && ReferenceEquals(v, groupNewest)
+                ? GroupLabel(v)
                 : Superseded).ToList();
     }
 

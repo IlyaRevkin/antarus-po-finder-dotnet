@@ -246,6 +246,9 @@ public static class FirmwareConfigService
         ExecutableHint = primary.ExecutableHint,
         HmiExecutableHint = primary.HmiExecutableHint,
         IsOpc = primary.IsOpc,
+        // Вариант комплектации наследует ИСПОЛНЕНИЕ прошивки: это та же самая прошивка, те же файлы,
+        // и в своей линейке она стоит там же, где основная запись.
+        Execution = primary.Execution,
         RequestNum = primary.RequestNum,
         CabinetSn = primary.CabinetSn,
         AuthorId = primary.AuthorId,

@@ -148,6 +148,16 @@
                       IsChecked="False"
                       ToolTip="Искать введённое целиком, тем же порядком и написанием"
                       Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
+            <!-- «Показывать все версии»: снимает схлопывание выдачи (Database.Deduplicate) — тикет
+                 «кому надо, тот включит и будет видеть всё; удобно для модерации видеть, что есть и
+                 что надо подгрузить». Отбор и порядок те же, добавляются только строки, которые
+                 схлопывание прятало. Состояние запоминается на этой машине
+                 (ConfigService.SearchShowAllVersions): включают её насовсем, под свою работу, а не на
+                 один запрос, — поэтому IsChecked здесь не задан, его ставит код при открытии. -->
+            <CheckBox x:Name="ShowAllVersionsCheck" Content="Показывать все версии" VerticalAlignment="Center"
+                      Margin="16,0,0,0"
+                      ToolTip="Показывать каждую подходящую версию отдельной строкой, а не только актуальную по каждому шкафу. Запоминается на этом компьютере."
+                      Checked="ShowAllVersions_Changed" Unchecked="ShowAllVersions_Changed"/>
         </StackPanel>
 
         <TextBlock Grid.Row="4" x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>

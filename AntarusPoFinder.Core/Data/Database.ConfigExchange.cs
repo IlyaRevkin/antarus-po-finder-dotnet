@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -268,7 +269,7 @@ public partial class Database
                    fv.changelog, fv.launch_types, fv.io_map_path, fv.instructions_path,
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
-                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of,
+                   fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -292,6 +293,7 @@ public partial class Database
                 HmiExecutableHint = GetString(r, "hmi_executable_hint"), ModbusMapPath = GetString(r, "modbus_map_path"),
                 DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
                 ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
+                Execution = GetString(r, "execution"),
                 GroupName = GetString(r, "group_name"),
                 SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                 CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1521,6 +1523,12 @@ public partial class Database
                 var newExecHint = Backfill(localExecHint, fv.ExecutableHint);
                 var newHmiExecHint = Backfill(localHmiExecHint, fv.HmiExecutableHint);
                 var newModbus = Backfill(localModbus, fv.ModbusMapPath);
+                // ИСПОЛНЕНИЕ — тот же Backfill: признак появился позже самих прошивок, и разносит
+                // накопленное по линейкам человек руками на ОДНОЙ машине. Без пересылки эта работа
+                // осталась бы местной, а у коллег обе прошивки продолжали бы считаться одной линейкой.
+                // Правило «только заполняем пустое» здесь важнее обычного: перетирать чужой разбор
+                // своим устаревшим снимком нельзя, а снять пометку можно там же, где её ставили.
+                var newExecution = Backfill(existingRow.Execution, FwExecution.Normalize(fv.Execution));
 
                 // Описание/типы пуска — тот же Backfill, но «пустым» здесь считается ещё и заглушка
                 // ChangelogFile.DiskSyncPlaceholder. Строку могло создать сканирование диска
@@ -1546,7 +1554,8 @@ public partial class Database
 
                 var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
                                     newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
-                                    newDesc != localDesc || newLaunchTypes != localLaunchTypes || newTags != localTags;
+                                    newDesc != localDesc || newLaunchTypes != localLaunchTypes || newTags != localTags ||
+                                    newExecution != existingRow.Execution;
 
                 // Архивирование — третья составляющая состояния модерации, наравне со status и
                 // released (очередь модерации отбирает строки по всем трём сразу, см.
@@ -1565,10 +1574,11 @@ public partial class Database
                 ExecuteNonQuery("""
                     UPDATE fw_versions SET status=@st, released=@rel, archived=@arch, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
-                        description=@desc, launch_types=@lt, tags=@tags
+                        description=@desc, launch_types=@lt, tags=@tags, execution=@execution
                     WHERE id=@id
                     """, cmd =>
                 {
+                    cmd.Parameters.AddWithValue("@execution", newExecution);
                     cmd.Parameters.AddWithValue("@desc", newDesc);
                     cmd.Parameters.AddWithValue("@lt", newLaunchTypes);
                     cmd.Parameters.AddWithValue("@tags", newTags);
@@ -1601,15 +1611,20 @@ public partial class Database
                     dt_str, version_raw, filename, disk_path, local_path, description, changelog,
                     launch_types, io_map_path, instructions_path, hmi_path, executable_hint, hmi_executable_hint,
                     modbus_map_path, is_opc, request_num,
-                    upload_date, archived, tags, status, released, sync_id, config_name, copy_of)
+                    upload_date, archived, tags, status, released, sync_id, config_name, copy_of, execution)
                 VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                     @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                     @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                     @modbus_map_path,@is_opc,@request_num,
-                    @upload_date,@archived,@tags,@status,@released,@sync_id,@config_name,@copy_of)
+                    @upload_date,@archived,@tags,@status,@released,@sync_id,@config_name,@copy_of,@execution)
                 """, cmd =>
             {
                 cmd.Parameters.AddWithValue("@config_name", fv.ConfigName ?? "");
+                // ИСПОЛНЕНИЕ едет вместе со строкой: без него прошивка «3 насоса» приезжала бы к
+                // коллеге обычной и тут же считалась заменой соседней линейки (см. FwExecution).
+                // Снимок со старой версии приложения этого поля не содержит — приезжает '', то есть
+                // ровно «обычная прошивка», и поведение у получателя прежнее.
+                cmd.Parameters.AddWithValue("@execution", FwExecution.Normalize(fv.Execution));
                 // Родство копий (см. столбец fw_versions.copy_of) едет вместе с записью: оно указано
                 // через sync_id, то есть у коллеги значит ровно то же самое, что у автора.
                 cmd.Parameters.AddWithValue("@copy_of", fv.CopyOf ?? "");
@@ -2159,7 +2174,7 @@ public partial class Database
         string IoMapPath, string InstructionsPath, string HmiPath, string ExecutableHint,
         string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
         string Description, string LaunchTypes, string Tags,
-        int SubtypeId, int ControllerId, string VersionRaw, string ConfigName);
+        int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution);
 
     /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
     /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
@@ -2180,7 +2195,8 @@ public partial class Database
         const string cols = """
             id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
             executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
-            description, launch_types, tags, subtype_id, controller_id, version_raw, config_name
+            description, launch_types, tags, subtype_id, controller_id, version_raw, config_name,
+            execution
             """;
 
         if (!string.IsNullOrEmpty(syncId))
@@ -2218,7 +2234,8 @@ public partial class Database
         GetString(r, "executable_hint"), GetString(r, "hmi_executable_hint"), GetString(r, "modbus_map_path"),
         GetString(r, "deleted_at"), GetString(r, "disk_path"),
         GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
-        GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"));
+        GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"),
+        GetString(r, "execution"));
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {

@@ -225,6 +225,9 @@ public static class FirmwareSubtypeLinkService
                 ExecutableHint = VersionFolderCopy.RenameForVersion(primary.ExecutableHint, primary.VersionRaw, number.Raw),
                 HmiExecutableHint = primary.HmiExecutableHint,
                 IsOpc = primary.IsOpc,
+                // Копия под другой подтип — та же сборка, значит и то же ИСПОЛНЕНИЕ: у нового подтипа
+                // она должна встать в свою линейку, а не считаться обычной прошивкой (см. FwExecution).
+                Execution = primary.Execution,
                 RequestNum = primary.RequestNum,
                 CabinetSn = primary.CabinetSn,
                 AuthorId = primary.AuthorId,

@@ -55,6 +55,10 @@ public partial class SearchView : UserControl
         InitializeComponent();
         _services = services;
         _host = host;
+        // Галочка «показывать все версии» запоминается на этой машине: её включают под свою работу
+        // (модерация — «видеть, что есть и что надо подгрузить»), а не на один запрос. Ставится
+        // ПОСЛЕ присваивания _services: обработчик Checked тут же попробует сохранить значение.
+        ShowAllVersionsCheck.IsChecked = _services.Cfg.SearchShowAllVersions();
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -497,6 +501,18 @@ public partial class SearchView : UserControl
         if (!string.IsNullOrWhiteSpace(SearchInput.Text)) PerformSearch();
     }
 
+    /// <summary>Галочка «показывать все версии» — состояние запоминается сразу, а выдача
+    /// пересчитывается тем же путём, что и смена режима поиска: включённая галочка обязана показать
+    /// результат немедленно, иначе неотличима от неработающей.</summary>
+    private void ShowAllVersions_Changed(object sender, RoutedEventArgs e)
+    {
+        // Обработчик срабатывает и во время InitializeComponent/восстановления состояния в
+        // конструкторе, когда _services ещё не присвоен, — ранний выход вместо падения страницы.
+        if (_services is null) return;
+        _services.Cfg.SetSearchShowAllVersions(ShowAllVersionsCheck.IsChecked == true);
+        if (!string.IsNullOrWhiteSpace(SearchInput.Text)) PerformSearch();
+    }
+
     /// <summary>Ширина одного сегмента переключателя Прошивки/Параметры/Таблицы/Схемы — обязана
     /// совпадать с Width у каждой RadioButton и у ModeThumb в SearchView.xaml.</summary>
     private const double ModeSegmentWidth = 150;
@@ -613,7 +629,8 @@ public partial class SearchView : UserControl
         var filters = ActiveFilters();
         var results = SearchService.Search(_services.Db, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
-            _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath());
+            _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath(),
+            ShowAllVersionsCheck.IsChecked == true);
 
         if (results.Count == 0)
         {

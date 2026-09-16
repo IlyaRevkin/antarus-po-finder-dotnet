@@ -78,6 +78,13 @@ public class FwVersionRecord
     /// FirmwareConfigService.</summary>
     public string ConfigName { get; set; } = "";
 
+    /// <summary>ИСПОЛНЕНИЕ прошивки (столбец fw_versions.execution): '' — обычная прошивка, непустое —
+    /// одна из нескольких ОДНОВРЕМЕННО актуальных прошивок этого же шкафа, отличающихся комплектацией
+    /// («3 насоса», «ПЧ Danfoss»). В отличие от ConfigName это САМОСТОЯТЕЛЬНАЯ прошивка — свои файлы,
+    /// своя папка, свой номер; версии разных исполнений друг друга не заменяют и в выдаче стоят рядом.
+    /// См. FwExecution.</summary>
+    public string Execution { get; set; } = "";
+
     // Populated by joins for display purposes (not stored on this table).
     /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа
     /// (Database.SearchFwVersionsByTokens): подтип у версии свой, а тип берётся через него.</summary>

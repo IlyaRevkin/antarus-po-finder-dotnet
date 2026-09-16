@@ -98,6 +98,12 @@ public class ExportedFwVersion
     /// (fw_versions.copy_of). Пусто у обычной загрузки и у снимков со старых версий приложения —
     /// тогда родство просто неизвестно, и всё работает как раньше.</summary>
     [JsonPropertyName("copy_of")] public string CopyOf { get; set; } = "";
+
+    /// <summary>ИСПОЛНЕНИЕ прошивки (fw_versions.execution) — '' у обычной и у снимков со старых
+    /// версий приложения, где поля нет вовсе; тогда поведение у получателя ровно прежнее. Ехать
+    /// обязано: прошивки разных исполнений актуальны одновременно, и приехавшая без пометки сразу
+    /// считалась бы заменой соседней линейки. См. FwExecution.</summary>
+    [JsonPropertyName("execution")] public string Execution { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }

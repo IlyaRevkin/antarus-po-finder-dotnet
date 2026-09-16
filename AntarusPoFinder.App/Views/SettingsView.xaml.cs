@@ -3276,10 +3276,10 @@ public partial class SettingsView : UserControl
             ? label
             : (v.Status == "rolled_back" ? FwHistoryStatus.RolledBack : FwHistoryStatus.Current);
 
-    /// <summary>Схлопывает «Текущая (HW n)» до «Текущая», чтобы одна опция фильтра ловила и общую
-    /// текущую, и текущие по каждому hw. Остальные метки возвращаются как есть.</summary>
+    /// <summary>Схлопывает «Текущая (HW n)» и «Текущая (исполнение «…»)» до «Текущая», чтобы одна
+    /// опция фильтра ловила их все. Остальные метки возвращаются как есть.</summary>
     private static string StatusCategory(string label) =>
-        label.StartsWith(FwHistoryStatus.Current, StringComparison.Ordinal) ? FwHistoryStatus.Current : label;
+        FwHistoryStatus.IsCurrent(label) ? FwHistoryStatus.Current : label;
 
     private void FwFilter_Changed(object sender, TextChangedEventArgs e) => ApplyFwFilter();
 
@@ -3387,7 +3387,9 @@ public partial class SettingsView : UserControl
 
         var isRolledBack = v.Status == "rolled_back";
         var label = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var l) ? l : "";
-        var isCurrent = label == FwHistoryStatus.Current || label == FwHistoryStatus.CurrentForHw(v.HwVersion);
+        // Любая разновидность «Текущей» — и общая, и по HW, и по исполнению (FwHistoryStatus.IsCurrent):
+        // версия, уже актуальная в своей группе, повторной отметки не требует.
+        var isCurrent = FwHistoryStatus.IsCurrent(label);
 
         RollbackFirmwareBtn.IsEnabled = !isRolledBack;
         UnrollbackFirmwareBtn.IsEnabled = isRolledBack;
@@ -3476,7 +3478,7 @@ public partial class SettingsView : UserControl
             return;
         }
         var currentLabel = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label) ? label : "";
-        if (currentLabel == FwHistoryStatus.Current || currentLabel == FwHistoryStatus.CurrentForHw(v.HwVersion))
+        if (FwHistoryStatus.IsCurrent(currentLabel))
         {
             AppMessageBox.Show("Эта версия уже текущая.", "Сделать текущей", MessageBoxButton.OK, MessageBoxImage.Information);
             return;

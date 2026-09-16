@@ -733,6 +733,18 @@ public class ConfigService
     public bool SearchAutoSync() => Get("search_auto_sync").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetSearchAutoSync(bool value) => Set("search_auto_sync", value ? "true" : "false");
 
+    /// <summary>Показывать в выдаче ВСЕ подходящие версии, не схлопывая их к одной строке на шкаф
+    /// (см. Database.Deduplicate). Тикет: «сделать чекбокс настройки отображения всего имеющегося в
+    /// поиске — кому надо, тот включит и будет видеть всё; удобно для модерации видеть, что есть и
+    /// что надо подгрузить».
+    ///
+    /// Умолчание — ВЫКЛЮЧЕНО, и менять его нельзя: схлопывание придумано ради наладчика, которому
+    /// нужна одна актуальная прошивка под его шкаф, а не вся история версий. Настройка личная,
+    /// per-machine — как и SearchAutoSync выше: это привычка конкретного человека (модератор хочет
+    /// видеть всё, наладчик в цеху — нет), а не орг-политика.</summary>
+    public bool SearchShowAllVersions() => Get("search_show_all_versions").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetSearchShowAllVersions(bool value) => Set("search_show_all_versions", value ? "true" : "false");
+
     /// <summary>Необязательный путь к папке Segnetics Loader, GUI exe или Automation exe.
     /// Пустое значение выбирает Loader, поставляемый вместе с приложением.</summary>
     public string LoaderExePath() => Get("loader_exe_path");
