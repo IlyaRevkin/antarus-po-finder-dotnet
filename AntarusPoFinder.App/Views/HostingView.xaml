@@ -159,6 +159,10 @@
                             <MenuItem Header="Выложить сейчас" Click="PublishSelected_Click"/>
                             <MenuItem Header="Открыть ссылку в браузере" Click="OpenUrl_Click"/>
                             <MenuItem Header="Скопировать ссылку" Click="CopyUrl_Click"/>
+                            <!-- Самый частый вопрос к выложенному документу — «а телефоном он
+                                 открывается?». Показать QR прямо здесь быстрее, чем копировать
+                                 ссылку и пересылать её себе в мессенджер. -->
+                            <MenuItem Header="Показать QR" Click="ShowQr_Click"/>
                             <MenuItem Header="Скопировать ключ объекта" Click="CopyKey_Click"/>
                             <Separator/>
                             <MenuItem Header="Показать файл на диске" Click="ShowOnDisk_Click"/>
@@ -353,6 +357,7 @@
                         <ContextMenu>
                             <MenuItem Header="Открыть" Click="FilesOpen_Click"/>
                             <MenuItem Header="Скопировать ссылку" Click="FilesCopyUrl_Click"/>
+                            <MenuItem Header="Показать QR" Click="FilesShowQr_Click"/>
                             <MenuItem Header="Скопировать ключ объекта" Click="FilesCopyKey_Click"/>
                             <Separator/>
                             <MenuItem Header="Загрузить файл сюда…" Click="FilesUpload_Click"/>

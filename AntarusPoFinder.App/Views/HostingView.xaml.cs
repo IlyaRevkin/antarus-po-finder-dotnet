@@ -764,6 +764,9 @@ public partial class HostingView : UserControl
 
     private void CopyKey_Click(object sender, RoutedEventArgs e) => CopyToClipboard(Selected?.Item.ObjectKey);
 
+    private void ShowQr_Click(object sender, RoutedEventArgs e) =>
+        QrPeekWindow.ShowFor(Window.GetWindow(this), Selected?.Item.Url);
+
     private void ShowOnDisk_Click(object sender, RoutedEventArgs e)
     {
         var path = Selected?.Item.SourcePath;
@@ -1118,6 +1121,9 @@ public partial class HostingView : UserControl
 
     private void FilesCopyUrl_Click(object sender, RoutedEventArgs e) =>
         CopyToClipboard((FilesGrid.SelectedItem as FileRow)?.Url);
+
+    private void FilesShowQr_Click(object sender, RoutedEventArgs e) =>
+        QrPeekWindow.ShowFor(Window.GetWindow(this), (FilesGrid.SelectedItem as FileRow)?.Url);
 
     private void FilesCopyKey_Click(object sender, RoutedEventArgs e) =>
         CopyToClipboard((FilesGrid.SelectedItem as FileRow)?.Key);
