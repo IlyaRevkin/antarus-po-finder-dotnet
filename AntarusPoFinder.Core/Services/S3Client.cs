@@ -136,11 +136,19 @@ public sealed class S3Client
             || all.Contains("known", StringComparison.OrdinalIgnoreCase) && all.Contains("host", StringComparison.OrdinalIgnoreCase))
             return "адрес хранилища не разрешается в сети этого компьютера. Подробность: " + chain[^1];
 
-        if (all.Contains("refused", StringComparison.OrdinalIgnoreCase)
+        // «couldn't connect», «connection refused», «did not properly respond», «forcibly closed» —
+        // это всё одно и то же для человека: наружу не пускают. Формулировок у системы много, и
+        // ловим мы их по общему признаку «connect», а не списком: пропущенная формулировка означает
+        // невнятное сообщение ровно в том случае, ради которого всё и писалось.
+        if (all.Contains("connect", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("refused", StringComparison.OrdinalIgnoreCase)
             || all.Contains("отказано", StringComparison.OrdinalIgnoreCase)
-            || all.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase))
-            return "до хранилища не достучаться — соединение закрывают. Обычно наружу не пускают. " +
-                   "Подробность: " + chain[^1];
+            || all.Contains("соединени", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase)
+            || all.Contains("did not properly respond", StringComparison.OrdinalIgnoreCase))
+            return "до хранилища не достучаться: соединение не устанавливается. Обычно с этой машины " +
+                   "наружу не пускают — межсетевой экран или прокси предприятия. Проверять надо не " +
+                   "программу, а доступ к адресу хранилища с этого компьютера. Подробность: " + chain[^1];
 
         return chain[0];
     }

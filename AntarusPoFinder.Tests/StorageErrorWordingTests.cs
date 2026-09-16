@@ -50,6 +50,22 @@ public class StorageErrorWordingTests
         Assert.Contains("не разрешается", S3Client.Explain(ex), StringComparison.Ordinal);
     }
 
+    /// <summary>«Couldn't connect» — то, с чем пришли на самом деле. Формулировок у системы много
+    /// («connection refused», «did not properly respond», «forcibly closed»), и для человека это
+    /// всё одно: наружу не пускают. Ловим по общему признаку, а не списком — пропущенная
+    /// формулировка означала бы невнятное сообщение ровно там, ради чего всё и писалось.</summary>
+    [Theory]
+    [InlineData("Couldn't connect to server")]
+    [InlineData("No connection could be made because the target machine actively refused it. (s3.twcstorage.ru:443)")]
+    [InlineData("A connection attempt failed because the connected party did not properly respond")]
+    [InlineData("An existing connection was forcibly closed by the remote host")]
+    public void ConnectionFailures_AllSayTheSameUnderstandableThing(string message)
+    {
+        var text = S3Client.Explain(new HttpRequestException(message));
+        Assert.Contains("не достучаться", text, StringComparison.Ordinal);
+        Assert.Contains("наружу не пускают", text, StringComparison.Ordinal);
+    }
+
     /// <summary>Всё прочее пересказывать не выдумываем: чужое сообщение лучше выдуманного.</summary>
     [Fact]
     public void UnknownFailure_IsPassedThroughAsIs()
