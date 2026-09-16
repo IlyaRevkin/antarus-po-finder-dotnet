@@ -79,10 +79,10 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" Width="90"/>
+                <DataGridTextColumn Header="Статус" Binding="{Binding StatusLabel}" SortMemberPath="StatusOrder" Width="90"/>
                 <DataGridTextColumn Header="Автор" Binding="{Binding CreatedBy}" Width="120"/>
                 <DataGridTextColumn Header="Роль" Binding="{Binding CreatedByRoleLabel}" Width="110"/>
-                <DataGridTextColumn Header="Создан" Binding="{Binding CreatedAtLabel}" Width="130"/>
+                <DataGridTextColumn Header="Создан" Binding="{Binding CreatedAtLabel}" SortMemberPath="CreatedAtSort" Width="130"/>
             </DataGrid.Columns>
         </DataGrid>
 

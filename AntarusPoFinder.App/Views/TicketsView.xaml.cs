@@ -22,6 +22,8 @@ public partial class TicketsView : UserControl
         public string TypeLabel => TicketType.Label(Ticket.Type);
         public string Text => Ticket.Text;
         public string StatusLabel => TicketStatus.Label(Ticket.Status);
+        /// <summary>По чему столбец «Статус» на самом деле сортируется — см. TicketStatus.SortOrder.</summary>
+        public int StatusOrder => TicketStatus.SortOrder(Ticket.Status);
         public string CreatedBy => Ticket.CreatedBy;
         /// <summary>У автоотчёта роль — «system», и RolesConfig её не знает: в столбце «Роль»
         /// стояло бы английское слово. Пишем по-русски, как и все остальные роли.</summary>
@@ -30,6 +32,15 @@ public partial class TicketsView : UserControl
                 ? "программа"
                 : RolesConfig.RoleLabel(Ticket.CreatedByRole);
         public string CreatedAtLabel => DateTime.TryParse(Ticket.CreatedAt, out var dt) ? dt.ToString("dd.MM.yyyy HH:mm") : Ticket.CreatedAt;
+
+        /// <summary>По чему столбец «Создан» сортируется на самом деле.
+        ///
+        /// Показываем дату по-русски («дд.ММ.гггг чч:мм»), а сортировка по этой же строке идёт
+        /// посимвольно — то есть по ДНЮ МЕСЯЦА: 01.09 оказывается выше 30.08, и порядок выглядит
+        /// случайным. Именно это и назвали багом сортировки по дате создания. Сортируем по самой
+        /// дате; неразобранное значение уезжает в конец (DateTime.MinValue), а не притворяется
+        /// сегодняшним.</summary>
+        public DateTime CreatedAtSort => DateTime.TryParse(Ticket.CreatedAt, out var dt) ? dt : DateTime.MinValue;
     }
 
     private readonly AppServices _services;
