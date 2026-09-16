@@ -579,7 +579,38 @@ public static class FirmwareUploadService
                 fwFolder = VersionLayout.FirmwareFolder(plan.DestinationFolder);
             }
 
-            if (plan.SourceIsDirectory && plan.MainFileInFolder.Length > 0)
+            if (plan.SourceIsDirectory && ProjectTree.IsProjectTree(request.SourcePath))
+            {
+                // Выбрана ПАПКА ПРОЕКТА — «папка + одноимённый файл проекта + подпапки ресурсов»
+                // (см. ProjectTree). Такая папка едет целиком и под своим именем: ни выбор «что
+                // взять», ни каноническое имя к ней не применяются.
+                //
+                // Иначе получалось ровно то, на что жаловались про KINCO: файл проекта ложился в
+                // «Прошивка» под каноническим именем, а папка, по которой среда его и находит,
+                // оставалась со старым именем (или пропадала вовсе, раз содержимое высыпалось в
+                // «Прошивка») — «из-за расхождения названий не может найти расширения».
+                //
+                // Правило структурное, а не по списку вендоров: так устроены Kinco, Owen, Codesys,
+                // Delta, Weintek и любой следующий, о ком мы пока не слышали.
+                var projectName = Path.GetFileName(request.SourcePath.TrimEnd(Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar));
+                var projectDst = Path.Combine(fwFolder, projectName);
+                Directory.CreateDirectory(projectDst);
+                CopyDirectoryContents(request.SourcePath, projectDst);
+
+                // Имя в базе — путь ОТ папки прошивки: «<папка проекта>\<файл проекта>». По нему же
+                // работает «чем открывать» — ExecutableHintResolver вложенные пути понимает.
+                var entry = ProjectTree.EntryFileIn(projectDst);
+                dstName = entry is null
+                    ? projectName
+                    : Path.Combine(projectName, Path.GetFileName(entry));
+                if (plan.ExtraFilesInFolder.Count > 0 || plan.MainFileInFolder.Length > 0)
+                    warnings.Add($"«{projectName}» — папка проекта: она скопирована целиком и под своим " +
+                                 "именем. Проект связан с папкой по имени, и взять из него часть файлов " +
+                                 "или переименовать его в каноническое имя нельзя — среда перестанет " +
+                                 "находить свои расширения и драйверы.");
+            }
+            else if (plan.SourceIsDirectory && plan.MainFileInFolder.Length > 0)
             {
                 // Оператор указал, ЧТО в папке является прошивкой (FolderContentsDialog): она ложится
                 // так же, как одиночный выбранный файл — под каноническим именем в «Прошивка». Всё

@@ -160,7 +160,12 @@ public static class VersionLayout
     {
         var trimmed = entry.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var name = SafeDirExists(trimmed) ? Path.GetFileName(trimmed) : Path.GetFileNameWithoutExtension(trimmed);
-        return name.EndsWith(HmiProjectFormat.StoredFolderSuffix, StringComparison.OrdinalIgnoreCase);
+        if (name.EndsWith(HmiProjectFormat.StoredFolderSuffix, StringComparison.OrdinalIgnoreCase)) return true;
+        // Проект панели, положенный ПОД СВОИМ ИМЕНЕМ (см. ProjectTree): у такого проекта имя папки и
+        // имя файла проекта — одно и то же, переименовывать его в «{версия}_hmi» нельзя. Значит и
+        // узнавать «нашу» папку HMI по одному суффиксу больше недостаточно: без этой ветки настоящая
+        // папка панели версии выглядела бы половиной чужого проекта и уезжала в «Прошивка\».
+        return ProjectTree.IsProjectTree(trimmed);
     }
 
     public static string FirmwareFolder(string versionDir) => Path.Combine(versionDir, FirmwareFolderName);
