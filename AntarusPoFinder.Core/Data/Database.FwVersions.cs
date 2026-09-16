@@ -388,6 +388,10 @@ public partial class Database
               AND newer.controller_id = {alias}.controller_id
               AND newer.hw_version = {alias}.hw_version
               AND newer.archived = 0 AND (newer.status IS NULL OR newer.status = 'active')
+              -- ОПЦ ничего не заменяет: это разовая сборка под конкретный шкаф, а не следующая
+              -- версия линейки. Пока она считалась заменой, свежая ОПЦ выкидывала обычную прошивку
+              -- из списков «актуальное» и из модерации.
+              AND newer.is_opc = 0
               AND {NotDeleted("newer")}
               AND (newer.sw_version > {alias}.sw_version
                    OR (newer.sw_version = {alias}.sw_version AND newer.dt_str > {alias}.dt_str))
@@ -951,12 +955,19 @@ public partial class Database
         return result;
     }
 
+    /// <summary>Последняя версия ОБЫЧНОЙ линейки этого шкафа.
+    ///
+    /// ОПЦ-версии сюда не попадают намеренно. ОПЦ — разовая сборка под конкретный шкаф (свой
+    /// серийный номер, свой номер заявки), она не продолжает линейку и не заменяет собой то, что
+    /// ставят всем. Пока она сюда попадала, ОПЦ с бо́льшим номером становилась «текущей» для всего
+    /// подтипа: её показывали как актуальную и от неё же считали следующий номер — жалоба «ОПЦ
+    /// перезаписала стандартную прошивку и индексирует её как текущую, хотя она ОПЦ».</summary>
     public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion)
     {
         using var reader = ExecuteReader($"""
             SELECT * FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
-            AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
+            AND (status IS NULL OR status='active') AND archived=0 AND is_opc=0 AND {NotDeleted()}
             ORDER BY sw_version DESC, dt_str DESC LIMIT 1
             """, cmd =>
         {
