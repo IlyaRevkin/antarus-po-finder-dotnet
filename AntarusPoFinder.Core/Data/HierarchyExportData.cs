@@ -670,6 +670,18 @@ public class ImportCounts
 
     public int FwVersionsSkippedTombstone { get; set; }
 
+    /// <summary>Подтипы, которым приём проставил sync_id отправителя — «знакомство» двух баз.
+    ///
+    /// Считается отдельно и входит в TotalChanges намеренно. До этого две машины с одинаковым
+    /// справочником, но своими sync_id (так бывает у всех: идентификаторы появились миграцией уже
+    /// после установки) выглядели друг для друга как «у тебя пропали все подтипы, и появились
+    /// какие-то новые» — приём удалял и заводил их заново. Диff получался жирным, зато машины
+    /// случайно знакомились. Теперь подтипы опознаются по имени и не пересоздаются, и если
+    /// знакомство не считать изменением, то Analyze решит «применять нечего», приём не запустится,
+    /// sync_id так и не сойдутся — а от их совпадения зависит и перенос переименований, и
+    /// зеркалирование удалений.</summary>
+    public int SubtypeSyncIdsCorrelated { get; set; }
+
     public int ConflictsFound { get; set; }
 
     public int TotalChanges =>
@@ -678,6 +690,7 @@ public class ImportCounts
         ExtensionsAdded + ExtensionsRemoved + ExtensionsHmiAdded + ExtensionsHmiRemoved +
         ExtensionsSchematicAdded + ExtensionsSchematicRemoved +
         ReservationsAdded + ReservationsUpdated + FwVersions + FwVersionsRemoved + FwVersionsRenamed +
+        SubtypeSyncIdsCorrelated +
         ParamFiles + ParamFilesRemoved + ParamFilesUpdated +
         Passports + PassportsRemoved + PassportsUpdated +
         FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +

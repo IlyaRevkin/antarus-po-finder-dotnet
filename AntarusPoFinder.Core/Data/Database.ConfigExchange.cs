@@ -726,6 +726,12 @@ public partial class Database
 
         // ── Subtypes (upsert by sync_id, fallback to (group,name)) ──────────────
         var subtypeSyncToId = new Dictionary<string, int>();
+        // Строки, которые входящий снимок ОПОЗНАЛ. Нужен зеркалированию удалений ниже: оно
+        // считает пропавшим всё, чьего sync_id нет во входящем наборе, а у машины, с которой мы
+        // по sync_id ещё не сошлись, на тот же подтип свой идентификатор. Без этого набора
+        // каждая такая пара машин удаляла друг у друга подтипы и тут же заводила их заново —
+        // «удаляю НГР-2.0 в десятый раз, а оно само подтягивается».
+        var matchedSubtypeIds = new HashSet<int>();
         foreach (var s in data.EquipmentSubtypes)
         {
             var groupId = ResolveId("equipment_groups", s.GroupSyncId, groupSyncToId, "name", s.GroupName);
@@ -752,8 +758,22 @@ public partial class Database
                 }
                 continue;
             }
-            var (id, name, prefix, folder, sort, localSyncId, localUpdatedAt) = existing.Value;
+            var (id, name, prefix, folder, sort, localSyncId, localUpdatedAt, staleForName) = existing.Value;
+            // Снимок опознал эту нашу строку — неважно, по sync_id, по имени или по прежнему имени.
+            // Значит подтип у отправителя ЕСТЬ, и зеркалить удаление ниже по нему нельзя.
+            matchedSubtypeIds.Add(id);
+            // Привязку sync_id -> наша строка ставим В ЛЮБОМ случае, даже для устаревшего снимка:
+            // прошивки и резервы из него принадлежат именно этому подтипу, и без карты они осели бы
+            // в никуда.
             if (!string.IsNullOrEmpty(s.SyncId)) subtypeSyncToId[s.SyncId] = id;
+
+            // Снимок опознан по нашему ПРЕЖНЕМУ имени — значит эта машина переименования ещё не
+            // получила. Её мнение об имени устарело по определению, и ни переименовывать себя
+            // обратно, ни принимать её sync_id нельзя: иначе подтип «КПЧ» на каждом обмене
+            // превращался бы обратно в «2.0», а следующий обмен возвращал бы его в «КПЧ». Именно
+            // так выглядело «удаляю, а оно само подтягивается». Отставшая машина догонит сама: в
+            // НАШЕМ снимке лежит prev_name, и она узнает свою строку по нему.
+            if (staleForName) continue;
 
             // Признак «инструкции не будет» переносится ТОЛЬКО в сторону «поставлена» и мимо
             // разбора конфликтов выше — по той же причине, по которой синхронизация не переносит
@@ -788,7 +808,17 @@ public partial class Database
                     counts.SubtypesUpdated++;
                     if (apply)
                     {
-                        ExecuteNonQuery("UPDATE equipment_subtypes SET name=@n, prefix=@p, folder_name=@f, sort_order=@s, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
+                        // prev_name пишется и ЗДЕСЬ, а не только при переименовании своими руками
+                        // (Database.Hierarchy.RenameEquipmentSubtype). Без этого машина, получившая
+                        // переименование по синхронизации, забывала старое имя — и снимок машины,
+                        // которая переименование ещё не получила и с нами по имени не сходилась
+                        // (свой sync_id), заводил ВТОРОЙ подтип со старым именем в конце списка.
+                        // Это и есть «2.0 вылезает из ниоткуда под индексом 7», который не помогало
+                        // удалить руками: следующий же обмен приносил его снова.
+                        //
+                        // CASE, а не безусловная запись: правка одного префикса или порядка не
+                        // должна затирать память о настоящем переименовании.
+                        ExecuteNonQuery("UPDATE equipment_subtypes SET prev_name = CASE WHEN name <> @n THEN name ELSE prev_name END, name=@n, prefix=@p, folder_name=@f, sort_order=@s, sync_id=@sy, updated_at=@u WHERE id=@id", cmd =>
                         {
                             cmd.Parameters.AddWithValue("@n", s.Name); cmd.Parameters.AddWithValue("@p", s.Prefix);
                             cmd.Parameters.AddWithValue("@f", wantFolder); cmd.Parameters.AddWithValue("@s", s.SortOrder);
@@ -815,16 +845,21 @@ public partial class Database
                             counts.PathsRemappedAfterRename += RemapSubtypeSegment(s.GroupName, name, s.Name);
                     }
                 }
-                else if (apply)
+                else
                 {
-                    if (adoptSyncId)
-                        ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
-                        { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
-                    SetHierarchyWatermark(effectiveSyncId, syncNow);
+                    if (adoptSyncId) counts.SubtypeSyncIdsCorrelated++;
+                    if (apply)
+                    {
+                        if (adoptSyncId)
+                            ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
+                            { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
+                        SetHierarchyWatermark(effectiveSyncId, syncNow);
+                    }
                 }
             }
             else
             {
+                if (adoptSyncId) counts.SubtypeSyncIdsCorrelated++;
                 if (adoptSyncId && apply)
                     ExecuteNonQuery("UPDATE equipment_subtypes SET sync_id=@sy WHERE id=@id", cmd =>
                     { cmd.Parameters.AddWithValue("@sy", s.SyncId); cmd.Parameters.AddWithValue("@id", id); });
@@ -852,6 +887,7 @@ public partial class Database
         foreach (var (id, syncId) in localSubtypes)
         {
             if (incomingSubtypeSyncIds.Contains(syncId)) continue;
+            if (matchedSubtypeIds.Contains(id)) continue; // опознан по имени/прежнему имени — не пропал
 
             var referenced = ExecuteScalar("""
                 SELECT 1 WHERE EXISTS(SELECT 1 FROM fw_versions WHERE subtype_id=@id)
@@ -2195,17 +2231,17 @@ public partial class Database
         return r2.Read() ? (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetInt32(3), GetString(r2, "sync_id"), GetString(r2, "updated_at")) : null;
     }
 
-    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId, string UpdatedAt)? FindSubtype(string syncId, int groupId, string name, string prevName = "")
+    private (int Id, string Name, int Prefix, string Folder, int SortOrder, string SyncId, string UpdatedAt, bool StaleForName)? FindSubtype(string syncId, int groupId, string name, string prevName = "")
     {
         if (!string.IsNullOrEmpty(syncId))
         {
             using var r1 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE sync_id=@sy AND group_id=@g",
                 cmd => { cmd.Parameters.AddWithValue("@sy", syncId); cmd.Parameters.AddWithValue("@g", groupId); });
-            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetString(3), r1.GetInt32(4), GetString(r1, "sync_id"), GetString(r1, "updated_at"));
+            if (r1.Read()) return (r1.GetInt32(0), r1.GetString(1), r1.GetInt32(2), r1.GetString(3), r1.GetInt32(4), GetString(r1, "sync_id"), GetString(r1, "updated_at"), false);
         }
         using var r2 = ExecuteReader("SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND name=@n",
             cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@n", name); });
-        if (r2.Read()) return (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id"), GetString(r2, "updated_at"));
+        if (r2.Read()) return (r2.GetInt32(0), r2.GetString(1), r2.GetInt32(2), r2.GetString(3), r2.GetInt32(4), GetString(r2, "sync_id"), GetString(r2, "updated_at"), false);
 
         // Третья попытка — по ПРЕЖНЕМУ имени. Без неё переименование на машине, чей sync_id ещё не
         // согласован с нашим, выглядит здесь как «появился новый подтип»: старый остаётся рядом,
@@ -2220,13 +2256,15 @@ public partial class Database
             using var r3 = ExecuteReader(
                 "SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND name=@p",
                 cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@p", prevName); });
-            if (r3.Read()) return (r3.GetInt32(0), r3.GetString(1), r3.GetInt32(2), r3.GetString(3), r3.GetInt32(4), GetString(r3, "sync_id"), GetString(r3, "updated_at"));
+            if (r3.Read()) return (r3.GetInt32(0), r3.GetString(1), r3.GetInt32(2), r3.GetString(3), r3.GetInt32(4), GetString(r3, "sync_id"), GetString(r3, "updated_at"), false);
         }
 
         using var r4 = ExecuteReader(
             "SELECT id, name, prefix, folder_name, sort_order, sync_id, updated_at FROM equipment_subtypes WHERE group_id=@g AND prev_name<>'' AND prev_name=@n",
             cmd => { cmd.Parameters.AddWithValue("@g", groupId); cmd.Parameters.AddWithValue("@n", name); });
-        return r4.Read() ? (r4.GetInt32(0), r4.GetString(1), r4.GetInt32(2), r4.GetString(3), r4.GetInt32(4), GetString(r4, "sync_id"), GetString(r4, "updated_at")) : null;
+        // Совпало по НАШЕМУ прежнему имени: снимок приехал с машины, которая переименование ещё
+        // не получила. Для имени он заведомо устаревший — отсюда StaleForName, см. место вызова.
+        return r4.Read() ? (r4.GetInt32(0), r4.GetString(1), r4.GetInt32(2), r4.GetString(3), r4.GetInt32(4), GetString(r4, "sync_id"), GetString(r4, "updated_at"), true) : null;
     }
 
     private (int Id, string Name, int HwVersion, int SortOrder, string Description, string SyncId, string UpdatedAt)? FindModification(string syncId, int controllerId, string displayName)

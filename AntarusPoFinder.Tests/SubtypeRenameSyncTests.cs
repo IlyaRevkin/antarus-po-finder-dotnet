@@ -201,6 +201,121 @@ public class SubtypeRenameSyncTests
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Жалоба Ильи 16.09.2026: «я уже 10 раз удалял в иерархии НГР-2.0, отправлял эталонную
+    /// синхронизацию — всё равно он сам подтягивается». И раньше: «у коллег 2.0 теперь под индексом 7,
+    /// а КПЧ под 2, как был раньше 2.0».
+    ///
+    /// Разбор. Переименование доезжает до коллеги и применяется правильно: строка остаётся та же,
+    /// на своём месте (отсюда «КПЧ под 2»). Но приём, в отличие от переименования своими руками,
+    /// НЕ ЗАПОМИНАЛ прежнее имя. А в конторе есть машины, которые с этой ещё не «знакомились» по
+    /// имени — у них свой sync_id на тот же подтип. Приезжает снимок такой машины, в нём подтип всё
+    /// ещё «2.0»: по sync_id не нашли (чужой), по имени не нашли (у нас уже КПЧ), по прежнему имени
+    /// не нашли (его не записали) — и приём заводит ВТОРОЙ подтип, который встаёт в конец списка.
+    /// Отсюда «2.0 под индексом 7». Удалять его бесполезно: следующий обмен приносит снова.
+    ///
+    /// Поэтому память о прежнем имени обязана появляться и при приёме тоже.</summary>
+    [Fact]
+    public void StaleMachineSnapshot_DoesNotResurrectOldSubtypeName()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var (_, subtypeId) = AddSubtype(m.DbA, "НГР", Original);
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var cfg = ConfigSyncService.ConfigPathFor(root);
+        ConfigSyncService.Apply(m.SvcB, cfg, root);
+
+        m.DbA.RenameEquipmentSubtype(subtypeId, Renamed, Renamed);
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        ConfigSyncService.Apply(m.SvcB, cfg, root);
+
+        // Снимок ТРЕТЬЕЙ машины: свежий по номеру ревизии (иначе его бы просто не приняли), но
+        // подтип в нём под старым именем и со СВОИМ sync_id — эта машина переименование ещё не
+        // получала и с нашей по имени никогда не сходилась.
+        // Промежуточная проверка: переименование действительно доехало. Без неё провал
+        // ниже читался бы как «снимок воскресил старое имя», хотя на деле не доехало новое.
+        var mid = m.DbB.GetSubtypesForGroup(
+            m.DbB.GetAllEquipmentGroups().First(x => x.Name == "НГР").Id!.Value);
+        Assert.True(mid.Any(s => s.Name == Renamed),
+            "переименование не доехало до B: " + string.Join(", ", mid.Select(s => s.Name)));
+
+        var stale = StaleSnapshotWithOldSubtypeName(cfg, Renamed, Original);
+        ConfigSyncService.Apply(m.SvcB, stale, root);
+
+        var after = m.DbB.GetSubtypesForGroup(
+            m.DbB.GetAllEquipmentGroups().First(x => x.Name == "НГР").Id!.Value);
+
+        var names = string.Join(", ", after.Select(s => s.Name));
+        Assert.True(after.Any(s => s.Name == Renamed), "после приёма отставшего снимка: " + names);
+        Assert.True(!after.Any(s => s.Name == Original), "старое имя воскресло: " + names);
+    }
+
+    /// <summary>Тот же отставший снимок, но с СВЕЖЕЙ отметкой времени у подтипа. Так и бывает в
+    /// жизни: на отставшей машине строку недавно трогали — подвинули в списке, поправили префикс, —
+    /// и по времени она выглядит новее нашего переименования. Плюс sync_id у неё свой, поэтому
+    /// разбор конфликтов не находит истории правок и считает приехавшее достоверным.
+    ///
+    /// Переименовывать себя обратно по такому снимку нельзя ни при какой отметке времени: машина,
+    /// которая переименования ещё не видела, не может быть источником правды об имени. Иначе имя
+    /// скачет туда-сюда на каждом обмене — и выглядит это ровно как «оно живёт своей жизнью».</summary>
+    [Fact]
+    public void StaleMachineSnapshot_WithNewerTimestamp_StillDoesNotRenameBack()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var (_, subtypeId) = AddSubtype(m.DbA, "НГР", Original);
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        var cfg = ConfigSyncService.ConfigPathFor(root);
+        ConfigSyncService.Apply(m.SvcB, cfg, root);
+
+        m.DbA.RenameEquipmentSubtype(subtypeId, Renamed, Renamed);
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        ConfigSyncService.Apply(m.SvcB, cfg, root);
+
+        var stale = StaleSnapshotWithOldSubtypeName(cfg, Renamed, Original, "2099-01-01 00:00:00");
+        ConfigSyncService.Apply(m.SvcB, stale, root);
+
+        var after = m.DbB.GetSubtypesForGroup(
+            m.DbB.GetAllEquipmentGroups().First(x => x.Name == "НГР").Id!.Value);
+        var names = string.Join(", ", after.Select(s => s.Name));
+        Assert.True(after.Any(s => s.Name == Renamed), "имя откатилось назад: " + names);
+        Assert.True(!after.Any(s => s.Name == Original), "старое имя воскресло: " + names);
+
+        // И никакого «разберитесь, чьё имя правильнее». Отставшая машина — не сторона спора: она
+        // просто ещё не получила правку. Раньше каждый обмен с такой машиной вываливал человеку
+        // конфликт, который нечего решать, и к разбору конфликтов переставали относиться серьёзно.
+        var conflicts = m.DbB.GetPendingHierarchyConflicts();
+        Assert.True(!conflicts.Any(c => c.DisplayLabel.Contains(Renamed) || c.DisplayLabel.Contains(Original)),
+            "заведён конфликт на пустом месте: " + string.Join(", ", conflicts.Select(c => c.DisplayLabel)));
+    }
+
+    /// <summary>Готовит файл конфига «отставшей машины»: берёт настоящий снимок и откатывает в нём
+    /// ОДИН подтип к прежнему имени, выдав ему чужой sync_id и более старую отметку времени.
+    /// Собирать такой снимок руками из полей нельзя — он должен быть валиден целиком, со всеми
+    /// прочими разделами, иначе приём отвергнет его не по той причине, которую проверяем.</summary>
+    private static string StaleSnapshotWithOldSubtypeName(string configPath, string currentName, string oldName, string updatedAt = "2000-01-01 00:00:00")
+    {
+        // Файл конфига зашифрован (ConfigFileCrypto) — читать его как текст нельзя.
+        var plain = AntarusPoFinder.Core.Infrastructure.ConfigFileCrypto.TryDecrypt(System.IO.File.ReadAllBytes(configPath))!;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(plain)!.AsObject();
+        foreach (var item in node["equipment_subtypes"]!.AsArray())
+        {
+            var o = item!.AsObject();
+            if ((string?)o["name"] != currentName) continue;
+            o["name"] = oldName;
+            o["folder_name"] = oldName;
+            o["sync_id"] = System.Guid.NewGuid().ToString();
+            o["prev_name"] = "";
+            o["updated_at"] = updatedAt;
+        }
+        var path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(configPath)!, $"stale_config_{updatedAt[..4]}.json");
+        System.IO.File.WriteAllBytes(path, AntarusPoFinder.Core.Infrastructure.ConfigFileCrypto.Encrypt(node.ToJsonString()));
+        return path;
+    }
+
     private static string PrevNameOf(string dbPath, int subtypeId)
     {
         using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}");
