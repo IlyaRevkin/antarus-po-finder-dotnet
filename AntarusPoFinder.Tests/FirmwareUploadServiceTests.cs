@@ -248,11 +248,15 @@ public class FirmwareUploadServiceTests : IDisposable
         finally { File.Delete(src); }
     }
 
-    /// <summary>«При включённой ОПЦ поле sw не указывается»: форма галочку «не увеличивать версию ПО»
-    /// прячет, а служба её игнорирует — ОПЦ-версия получает следующий номер обычным порядком, даже
-    /// если флажок остался включённым с прошлой загрузки.</summary>
+    /// <summary>ОПЦ берёт номер sw у БАЗОВОЙ версии, а не следующий по порядку.
+    ///
+    /// «Я когда ОПЦ загружаю, чаще всего за основу берётся уже имеющаяся прошивка. И вот нужно, чтобы
+    /// не sw увеличивался при загрузке, а чтобы я мог выбрать имеющуюся версию прошивки, и к ней
+    /// соответственно цифры ОПЦ добавляются». Основу не выбрали — ею считается текущая последняя
+    /// версия шкафа; именно этот случай здесь и проверяется (галочка «не увеличивать sw» на решение
+    /// по-прежнему не влияет никак).</summary>
     [Fact]
-    public void Upload_OpcEnabled_IgnoresKeepSwVersion()
+    public void Upload_OpcEnabled_TakesTheCurrentVersionNumber_InsteadOfTheNextOne()
     {
         var (group, subtype, mod) = SeedTgrSmh5();
         var first = WriteTempFile(".psl");
@@ -271,9 +275,126 @@ public class FirmwareUploadServiceTests : IDisposable
             var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
 
             Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
-            Assert.Equal(firstSw + 1, result.Record!.SwVersion);
+            Assert.Equal(firstSw, result.Record!.SwVersion);
         }
         finally { File.Delete(first); File.Delete(second); }
+    }
+
+    /// <summary>Выбранная основа — не обязательно самая свежая: наладчик собирает ОПЦ и от прошлой
+    /// версии, если шкаф уехал с ней.</summary>
+    [Fact]
+    public void Upload_OpcWithChosenBase_TakesThatBaseNumber()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var first = WriteTempFile(".psl");
+        var second = WriteTempFile(".psl");
+        var opcSrc = WriteTempFile(".psl");
+        try
+        {
+            var firstResult = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(first, group, subtype, mod));
+            Assert.Equal(FirmwareUploadOutcome.Success, firstResult.Outcome);
+            var secondResult = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(second, group, subtype, mod));
+            Assert.Equal(FirmwareUploadOutcome.Success, secondResult.Outcome);
+            Assert.True(secondResult.Record!.SwVersion > firstResult.Record!.SwVersion);
+
+            var request = BaseRequest(opcSrc, group, subtype, mod);
+            request.OpcEnabled = true;
+            request.CabinetSnRaw = "42";
+            request.OpcBaseSwVersion = firstResult.Record!.SwVersion;
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Equal(firstResult.Record!.SwVersion, result.Record!.SwVersion);
+        }
+        finally { File.Delete(first); File.Delete(second); File.Delete(opcSrc); }
+    }
+
+    /// <summary>ОПЦ не расходует номера обычной линейки. Проверяется на ОПЦ с бо́льшим номером, чем
+    /// вся линейка, — именно такие и накопились в базах: до этой правки разовая сборка получала
+    /// MAX+1, и следующая нормальная прошивка выходила через один. После правки она такую ОПЦ просто
+    /// не видит и продолжает свой счёт.</summary>
+    [Fact]
+    public void Upload_NextNumber_IgnoresAnOpcVersionThatRanAhead()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var first = WriteTempFile(".psl");
+        var third = WriteTempFile(".psl");
+        try
+        {
+            var firstResult = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(first, group, subtype, mod));
+            Assert.Equal(FirmwareUploadOutcome.Success, firstResult.Outcome);
+
+            // ОПЦ, ушедшая вперёд линейки (так их заводила прежняя версия программы).
+            _db.AddFwVersion(new FwVersionRecord
+            {
+                SubtypeId = subtype.Id!.Value,
+                ControllerId = mod.ControllerId,
+                EqPrefix = group.Prefix,
+                SubPrefix = subtype.Prefix,
+                HwVersion = mod.HwVersion,
+                SwVersion = firstResult.Record!.SwVersion + 8,
+                VersionRaw = "opc-ahead",
+                Status = "active",
+                IsOpc = true,
+                CabinetSn = "00042",
+            });
+
+            var next = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(third, group, subtype, mod));
+
+            Assert.Equal(FirmwareUploadOutcome.Success, next.Outcome);
+            Assert.Equal(firstResult.Record!.SwVersion + 1, next.Record!.SwVersion);
+        }
+        finally { File.Delete(first); File.Delete(third); }
+    }
+
+    /// <summary>Папки ОПЦ и её основы не сталкиваются, хотя номер версии у них теперь ОДИН И ТОТ ЖЕ:
+    /// имя папки ОПЦ собрано из номера заявки и серийника шкафа (HierarchyService.FwPath). Проверка
+    /// стоит именно здесь: совпадение номеров — прямое следствие правки, и «перезаписать?» на ровном
+    /// месте было бы худшим из возможных её последствий.</summary>
+    [Fact]
+    public void Upload_OpcOnTheSameNumber_LandsInItsOwnFolder()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var first = WriteTempFile(".psl");
+        var opcSrc = WriteTempFile(".psl");
+        try
+        {
+            var baseResult = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(first, group, subtype, mod));
+            Assert.Equal(FirmwareUploadOutcome.Success, baseResult.Outcome);
+
+            var opcRequest = BaseRequest(opcSrc, group, subtype, mod);
+            opcRequest.OpcEnabled = true;
+            opcRequest.CabinetSnRaw = "42";
+            opcRequest.RequestNumRaw = "1312";
+            var opcResult = FirmwareUploadService.Upload(_db, _hierarchy, opcRequest);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, opcResult.Outcome);
+            Assert.Equal(baseResult.Record!.SwVersion, opcResult.Record!.SwVersion);
+            Assert.NotEqual(baseResult.Record!.DiskPath, opcResult.Record!.DiskPath);
+        }
+        finally { File.Delete(first); File.Delete(opcSrc); }
+    }
+
+    /// <summary>Исполнение доезжает до записи прошивки в неизменном виде (с точностью до
+    /// нормализации пробелов — см. FwExecution): на нём держится всё остальное, а потерянное молча
+    /// оно снаружи выглядит как «функции нет».</summary>
+    [Fact]
+    public void Upload_Execution_IsStoredOnTheVersion()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.Execution = "  3 насоса  ";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            Assert.Equal("3 насоса", result.Record!.Execution);
+        }
+        finally { File.Delete(src); }
     }
 
     [Fact]
