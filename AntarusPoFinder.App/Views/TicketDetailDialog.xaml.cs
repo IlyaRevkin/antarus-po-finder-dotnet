@@ -128,7 +128,10 @@ public partial class TicketDetailDialog : Window
         var text = NewCommentInput.Text.Trim();
         if (text.Length == 0) return;
 
-        _services.Db.AddTicketComment(_ticket.Id, _services.CurrentAdLogin, _services.Cfg.CurrentRole(), text);
+        // Имя берём из CurrentUserName — тем же источником подписывается и сам тикет
+        // (TicketSyncService). CurrentAdLogin у входа аварийным администратором пуст, и реплика
+        // тогда подписывалась прочерком, хотя рядом в шапке стояло имя.
+        _services.Db.AddTicketComment(_ticket.Id, _services.CurrentUserName, _services.Cfg.CurrentRole(), text);
         NewCommentInput.Clear();
         ReloadComments();
     }
