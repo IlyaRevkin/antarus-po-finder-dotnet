@@ -56,6 +56,11 @@ public partial class UploadView : UserControl
 
     private record ReservationOption(string Label, FwVersionReservation? Reservation);
 
+    /// <summary>Строка списка «Базовая версия» у ОПЦ: подпись для человека и сам номер sw, который
+    /// достанется ОПЦ-версии. Хранится именно sw, а не вся запись, — больше от основы ничего и не
+    /// берётся (файлы у ОПЦ свои, папка своя, см. FirmwareUploadRequest.OpcBaseSwVersion).</summary>
+    private record OpcBaseOption(string Label, int SwVersion);
+
     /// <summary>See SearchView.OnboardingTarget for why this exists — same reasoning.</summary>
     public FrameworkElement? OnboardingTarget(string key) => key switch
     {
@@ -442,6 +447,8 @@ public partial class UploadView : UserControl
         // резерв номера — пересчитываем её здесь же, вместо отдельного набора вызовов по всем тем же
         // точкам (смена группы/подтипа/контроллера уже и так гоняет этот метод).
         UpdateKeepSwVersionAvailability();
+        RefreshExecutionPicker();
+        RefreshOpcBasePicker();
 
         if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype || CtrlCombo.SelectedItem is not ControllerModification mod)
         {
@@ -517,6 +524,65 @@ public partial class UploadView : UserControl
         subtype?.Id is int subtypeId && mod is not null
             && db.GetLastActiveFwVersion(subtypeId, mod.ControllerId, mod.HwVersion) is not null;
 
+    /// <summary>Уже заведённые ИСПОЛНЕНИЯ этого шкафа — подсказкой в редактируемом списке. Набранное
+    /// руками не трогаем: оператор может заводить новое исполнение, и подмена его текста списком была
+    /// бы потерей ввода. Сравниваются исполнения ТОЧНО (см. FwExecution), поэтому список здесь не
+    /// украшение, а главный способ попасть в существующую линейку, не промахнувшись написанием.</summary>
+    private void RefreshExecutionPicker()
+    {
+        if (ExecutionCombo is null) return;
+
+        var known = new List<string> { "" };
+        if (SubtypesSelect.MainSubtype?.Id is int subtypeId && CtrlCombo.SelectedItem is ControllerModification mod)
+            known.AddRange(_services.Db.GetFwExecutions(subtypeId, mod.ControllerId));
+
+        var typed = ExecutionCombo.Text;
+        ExecutionCombo.ItemsSource = known;
+        ExecutionCombo.Text = typed;
+    }
+
+    /// <summary>Список «Базовая версия» для ОПЦ: живые прошивки обычной линейки этого же шкафа, от
+    /// свежих к старым, с ТЕКУЩЕЙ первой и выбранной по умолчанию — за основу ОПЦ берут её чаще
+    /// всего. Версий нет вовсе (первая загрузка в эту комбинацию) — панель прячется: выбирать не из
+    /// чего, номер будет обычный следующий (см. FirmwareUploadService.Prepare).</summary>
+    private void RefreshOpcBasePicker()
+    {
+        if (OpcBaseCombo is null || OpcBasePanel is null) return;
+
+        var candidates = SubtypesSelect.MainSubtype?.Id is int subtypeId && CtrlCombo.SelectedItem is ControllerModification mod
+            ? _services.Db.GetOpcBaseCandidates(subtypeId, mod.ControllerId, mod.HwVersion)
+            : new List<FwVersionRecord>();
+
+        if (candidates.Count == 0)
+        {
+            OpcBaseCombo.ItemsSource = null;
+            OpcBasePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var options = candidates
+            .Select((v, i) => new OpcBaseOption(i == 0 ? $"{v.VersionRaw}  —  текущая" : v.VersionRaw, v.SwVersion))
+            .ToList();
+        OpcBaseCombo.ItemsSource = options;
+        OpcBaseCombo.SelectedIndex = 0;
+        OpcBasePanel.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Номер sw выбранной основы — или null, если выбирать было не из чего. Читается и
+    /// предпросмотром, и самой загрузкой, чтобы показанный путь совпал с записанным.</summary>
+    private int? SelectedOpcBaseSw =>
+        IsOpc && OpcBasePanel?.Visibility == Visibility.Visible
+            ? (OpcBaseCombo?.SelectedItem as OpcBaseOption)?.SwVersion
+            : null;
+
+    private void OpcBase_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdatePreview();
+
+    /// <summary>Смена исполнения меняет и предпросмотр номера: «не увеличивать sw» и базовая версия
+    /// ОПЦ отсчитываются от последней версии ТОГО ЖЕ исполнения (см. Database.GetLastActiveFwVersion).
+    /// Ловим и выбор из списка, и уход из поля — у редактируемого ComboBox набранное руками иначе
+    /// осталось бы незамеченным до самого нажатия «Загрузить».</summary>
+    private void Execution_Changed(object sender, RoutedEventArgs e) => UpdatePreview();
+
     private void ReservationCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdatePreview();
 
     private FwVersionReservation? GetSelectedReservation() => (ReservationCombo.SelectedItem as ReservationOption)?.Reservation;
@@ -572,6 +638,9 @@ public partial class UploadView : UserControl
     private void Opc_Toggled(object sender, RoutedEventArgs e)
     {
         OpcFieldsPanel.Visibility = IsOpc ? Visibility.Visible : Visibility.Collapsed;
+        // Список основ пересобираем при каждом включении: между открытием формы и галочкой сюда мог
+        // приехать новый снимок конфига, и предлагать основу, которой уже нет, незачем.
+        if (IsOpc) RefreshOpcBasePicker();
         // Галочка «не увеличивать версию ПО (sw)» при ОПЦ не показывается — пересчитываем её здесь же.
         UpdateKeepSwVersionAvailability();
         UpdateOpcValidationUi();
@@ -677,10 +746,18 @@ public partial class UploadView : UserControl
             // «Не увеличивать версию ПО (sw)» — тот же выбор номера, что и в FirmwareUploadService.
             // Prepare (см. его комментарий): берём sw текущей последней активной версии этой группы
             // вместо MAX+1, чтобы предпросмотр пути совпадал с тем, что реально запишется при загрузке.
-            int swInt = KeepSwVersionCheck.IsChecked == true
-                ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)?.SwVersion
+            // Тот же порядок выбора номера, что и в FirmwareUploadService.Prepare: сперва ОПЦ
+            // (номер базовой версии), потом «не увеличивать sw», потом обычный следующий. Разойдись
+            // они — предпросмотр показывал бы путь, по которому прошивка не ляжет.
+            var execution = FwExecution.Normalize(ExecutionCombo?.Text);
+            int swInt = IsOpc
+                ? SelectedOpcBaseSw
+                    ?? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                     ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
-                : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
+                : KeepSwVersionCheck.IsChecked == true
+                    ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
+                        ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
+                    : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
         }
 
@@ -1178,6 +1255,8 @@ public partial class UploadView : UserControl
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
             OpcEnabled = IsOpc,
+            OpcBaseSwVersion = SelectedOpcBaseSw,
+            Execution = ExecutionCombo.Text,
             RequestNumRaw = ReqNumInput.Text,
             CabinetSnRaw = CabinetSnInput.Text,
             Reservation = GetSelectedReservation(),
@@ -1222,6 +1301,10 @@ public partial class UploadView : UserControl
         GroupCombo.SelectedIndex = -1;
         CtrlCombo.SelectedIndex = -1;
         OpcCheck.IsChecked = false;
+        // Исполнение — признак КОНКРЕТНОЙ прошивки, а не привычка оператора: оставленное от прошлой
+        // загрузки, оно молча увело бы следующую, ни с чем не связанную версию в чужую линейку (та же
+        // причина, что и у KeepSwVersionCheck ниже).
+        ExecutionCombo.Text = "";
         ReqNumInput.Text = "";
         CabinetSnInput.Text = "";
         _opcTouched = false;

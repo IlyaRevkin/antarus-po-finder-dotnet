@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.Core.Data;
@@ -47,6 +48,9 @@ public partial class EditFirmwareDialog : Window
     public string ResultDescription { get; private set; } = "";
     public string ResultTags { get; private set; } = "";
     public List<string> ResultLaunchTypes { get; private set; } = new();
+    /// <summary>ИСПОЛНЕНИЕ прошивки (см. FwExecution): '' — обычная. Правится здесь, потому что
+    /// признак появился позже накопленных прошивок, и разнести их по линейкам можно только руками.</summary>
+    public string ResultExecution { get; private set; } = "";
     /// <summary>Null when the HMI executable picker wasn't shown (no HMI folder for this version) —
     /// UpdateFwVersion treats null as "leave unchanged", same as the other optional params, so this
     /// dialog never blanks out an existing hint for firmware that doesn't have this panel at all.</summary>
@@ -94,6 +98,15 @@ public partial class EditFirmwareDialog : Window
         TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
 
         _checks = new LaunchTypeChecks(LaunchTypesPanel, v.LaunchTypes);
+
+        // Уже заведённые исполнения этого же шкафа — подсказкой в списке. Пустая строка первой: это
+        // полноправное значение «обычная прошивка», и вернуться к нему должно быть чем.
+        var executions = new List<string> { "" };
+        executions.AddRange(_db.GetFwExecutions(v.SubtypeId, v.ControllerId)
+            .Where(x => !string.Equals(x, v.Execution, StringComparison.Ordinal)));
+        if (!string.IsNullOrEmpty(v.Execution)) executions.Insert(1, v.Execution);
+        ExecutionCombo.ItemsSource = executions;
+        ExecutionCombo.Text = v.Execution;
 
         // Позволяет (пере)выбрать, какой файл внутри загруженной папки открывается по кнопкам карточки
         // — например, при загрузке в папке не было файла с узнаваемым расширением и выбрался не тот
@@ -1001,6 +1014,7 @@ public partial class EditFirmwareDialog : Window
         foreach (var tag in tags) _db.AddTag(tag);
         ResultTags = AntarusPoFinder.Core.Services.TagString.Join(tags);
         ResultLaunchTypes = _checks.Selected;
+        ResultExecution = FwExecution.Normalize(ExecutionCombo.Text);
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         // Приложение файлов — единственный шаг сохранения, который ходит на сетевую шару и на
@@ -1035,7 +1049,7 @@ public partial class EditFirmwareDialog : Window
     public static void ApplyResult(EditFirmwareDialog dlg, AppServices services, IAppHost host, int versionId)
     {
         services.Db.UpdateFwVersion(versionId, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint);
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint, dlg.ResultExecution);
         ReportChanges(dlg, host);
     }
 

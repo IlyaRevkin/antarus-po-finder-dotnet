@@ -77,6 +77,24 @@ public class FirmwareUploadRequest
     /// <summary>Заводской серийный номер шкафа. Учитывается только при <see cref="OpcEnabled"/>.</summary>
     public string CabinetSnRaw { get; set; } = "";
 
+    /// <summary>БАЗОВАЯ версия для ОПЦ: номер sw уже существующей прошивки, на основе которой собрана
+    /// эта разовая сборка. Учитывается только при <see cref="OpcEnabled"/>.
+    ///
+    /// «Я когда ОПЦ загружаю, чаще всего за основу берётся уже имеющаяся прошивка. И вот нужно, чтобы
+    /// не sw увеличивался при загрузке, а чтобы я мог выбрать имеющуюся версию прошивки, и к ней
+    /// соответственно цифры ОПЦ добавляются». Номер берётся у неё целиком, а «цифры ОПЦ» — номер
+    /// заявки и серийник шкафа — попадают в имя папки и файла, а не в сам номер версии.
+    ///
+    /// null — основу не выбирали: тогда ею считается текущая последняя версия шкафа, а если версий
+    /// нет вовсе — обычный следующий номер. Поведение не зависит от того, успела ли форма заполнить
+    /// список (то же правило, что и у SwVersionChoiceApplies).</summary>
+    public int? OpcBaseSwVersion { get; set; }
+
+    /// <summary>ИСПОЛНЕНИЕ загружаемой прошивки (столбец fw_versions.execution, см. FwExecution):
+    /// пусто — обычная прошивка, непустое — своя линейка внутри того же шкафа. Прошивки разных
+    /// исполнений актуальны одновременно и друг друга не заменяют.</summary>
+    public string Execution { get; set; } = "";
+
     /// <summary>If set, consumes this reservation's EXACT locked-in version number instead of
     /// computing the next free one — see ReserveVersion_Click's doc for why that matters.</summary>
     public FwVersionReservation? Reservation { get; set; }
@@ -224,6 +242,8 @@ public class FirmwareUploadPlan
     public int SwVersion { get; init; }
     public int HwVersion { get; init; }
     public bool IsOpc { get; init; }
+    /// <summary>ИСПОЛНЕНИЕ прошивки, уже приведённое к каноническому виду (см. FwExecution).</summary>
+    public string Execution { get; init; } = "";
     public string RequestNum { get; init; } = "";
     public string CabinetSn { get; init; } = "";
     public string Description { get; init; } = "";
@@ -432,6 +452,9 @@ public static class FirmwareUploadService
         var reqNum = Format5Digits(reqNumRaw);
         var cabinetSn = Format5Digits(cabinetSnRaw);
         int hwInt = mod.HwVersion;
+        // Исполнение приводится к каноническому виду один раз здесь: дальше оно и пишется в строку, и
+        // участвует в выборе предыдущей версии — обе стороны обязаны видеть одно и то же значение.
+        var execution = FwExecution.Normalize(request.Execution);
 
         // If a reservation is picked, consume its EXACT locked-in number (Parse, never recompute) —
         // that's the whole point: the number inside the compiled firmware must match what gets saved.
@@ -443,12 +466,24 @@ public static class FirmwareUploadService
             fwv = FwVersionNumber.Parse(reservation.VersionRaw)!;
             swInt = fwv.SwVersion;
         }
+        else if (isOpc)
+        {
+            // ОПЦ собирается НА ОСНОВЕ уже имеющейся прошивки и номера обычной линейки не расходует
+            // (см. Database.GetNextSwVersion — ОПЦ-строки в MAX не входят). Номер берётся у выбранной
+            // основы; основу не выбрали — у текущей последней версии шкафа; версий нет вовсе (самая
+            // первая загрузка в эту комбинацию) — обычный следующий номер, брать больше неоткуда.
+            swInt = request.OpcBaseSwVersion
+                    ?? db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
+                    ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
+            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
+                includeDate: request.IncludeDateInVersion);
+        }
         else if (request.KeepSwVersion && OpcFields.SwVersionChoiceApplies(isOpc))
         {
             // «Не увеличивать версию ПО (sw)» — берём номер текущей последней активной версии этой
             // группы вместо MAX+1. Если версий ещё не было (первая загрузка шкафа), вести себя как
             // обычно: GetNextSwVersion всё равно вернёт 1 в этом случае.
-            var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
+            var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution);
             swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
                 includeDate: request.IncludeDateInVersion);
@@ -506,7 +541,7 @@ public static class FirmwareUploadService
         // ввёл сам, и только в конец: набранное вручную остаётся первым и ничем не перетирается,
         // убрать лишнее можно потом в модерации.
         var inheritedTags = new List<string>();
-        var previousTags = PreviousVersionTags(db, subOption.Id!.Value, mod.ControllerId);
+        var previousTags = PreviousVersionTags(db, subOption.Id!.Value, mod.ControllerId, execution);
         foreach (var tag in TagString.Parse(previousTags?.Tags ?? ""))
             if (!tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
             {
@@ -522,6 +557,7 @@ public static class FirmwareUploadService
             SwVersion = swInt,
             HwVersion = hwInt,
             IsOpc = isOpc,
+            Execution = execution,
             RequestNum = reqNum,
             CabinetSn = cabinetSn,
             Description = desc,
@@ -549,8 +585,13 @@ public static class FirmwareUploadService
     /// быть видно заранее, а не всплывать сюрпризом в сообщении об успехе.
     ///
     /// null — наследовать нечего (первая версия шкафа либо у предыдущих не было тегов).</summary>
-    public static (string Tags, string VersionRaw)? PreviousVersionTags(Database db, int subtypeId, int controllerId) =>
-        db.GetLatestTagsForFirmware(subtypeId, controllerId);
+    /// <param name="execution">ИСПОЛНЕНИЕ будущей версии (см. FwExecution): теги берутся у
+    /// предыдущей версии ТОГО ЖЕ исполнения. Теги — это названия шкафов, а у разных исполнений шкафы
+    /// как раз и разные; наследование через границу исполнения привело бы к тому, что прошивка «3
+    /// насоса» находилась бы по названиям двухнасосных шкафов. null — как раньше, любое исполнение.</param>
+    public static (string Tags, string VersionRaw)? PreviousVersionTags(Database db, int subtypeId, int controllerId,
+        string? execution = null) =>
+        db.GetLatestTagsForFirmware(subtypeId, controllerId, execution);
 
     /// <summary>Фаза 2 (только диск): копирует прошивку и вложения на сетевой диск, пишет
     /// CHANGELOG.md. В БД не ходит ни разу — вызывающий может выполнить её в фоновом потоке, чтобы
@@ -758,6 +799,7 @@ public static class FirmwareUploadService
             ExecutableHint = copy.ExecutableHint.Length > 0 ? copy.ExecutableHint : request.ExecutableHint ?? "",
             HmiExecutableHint = request.HmiEnabled ? request.HmiExecutableHint ?? "" : "",
             IsOpc = plan.IsOpc,
+            Execution = plan.Execution,
             RequestNum = plan.RequestNum,
             CabinetSn = plan.CabinetSn,
             AuthorId = plan.AuthorId,

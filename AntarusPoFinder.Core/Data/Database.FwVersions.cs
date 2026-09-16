@@ -17,19 +17,23 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status,sync_id,config_name,copy_of)
+                upload_date,tags,author_id,status,sync_id,config_name,copy_of,execution)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of)
+                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of,@execution)
             """, cmd =>
         {
             // Пусто у обычной загрузки; непустым его заводит только FirmwareConfigService (вариант
             // шкафа) — см. столбец config_name в Database.cs.
             cmd.Parameters.AddWithValue("@config_name", v.ConfigName ?? "");
             cmd.Parameters.AddWithValue("@copy_of", v.CopyOf ?? "");
+            // Нормализуем ровно здесь, на единственном входе строки в таблицу: сравнение исполнений
+            // и в SQL, и в .NET идёт точным равенством (см. FwExecution), поэтому «3 насоса » с
+            // хвостовым пробелом обязано стать тем же исполнением, что и «3 насоса».
+            cmd.Parameters.AddWithValue("@execution", FwExecution.Normalize(v.Execution));
             // sync_id проставляется сразу при заведении строки, а не откладывается до ближайшего
             // BackfillSyncIds на старте приложения: между загрузкой прошивки и следующим запуском
             // помещается и синхронизация, и вывод из модерации, и удаление — всё то, чему этот
@@ -71,7 +75,7 @@ public partial class Database
     /// <summary>Update editable fields (description, tags, launch_types, исполняемые файлы ПЛК/HMI)
     /// of a fw_version. Любой параметр null — «не трогать это поле».</summary>
     public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null,
-        string? hmiExecutableHint = null, string? executableHint = null)
+        string? hmiExecutableHint = null, string? executableHint = null, string? execution = null)
     {
         // Снятие тега обязано пережить синхронизацию: без явной отметки об удалении тег вернулся бы с
         // первой машины, которая о снятии ещё не знает (см. Database.FlatLists.RecordRowTagChange —
@@ -86,6 +90,10 @@ public partial class Database
         if (launchTypes is not null) { sets.Add("launch_types=@launch_types"); values.Add(("@launch_types", JsonSerializer.Serialize(launchTypes))); }
         if (hmiExecutableHint is not null) { sets.Add("hmi_executable_hint=@hmi_executable_hint"); values.Add(("@hmi_executable_hint", hmiExecutableHint)); }
         if (executableHint is not null) { sets.Add("executable_hint=@executable_hint"); values.Add(("@executable_hint", executableHint)); }
+        // Исполнение правится и у уже заведённой прошивки: признак появился позже самих прошивок, и
+        // разнести накопленное по линейкам можно только вручную. Нормализация та же, что при
+        // заведении строки (AddFwVersion) — иначе одно и то же исполнение разъехалось бы на два.
+        if (execution is not null) { sets.Add("execution=@execution"); values.Add(("@execution", FwExecution.Normalize(execution))); }
         if (sets.Count == 0) return;
 
         ExecuteNonQuery($"UPDATE fw_versions SET {string.Join(", ", sets)} WHERE id=@id", cmd =>
@@ -392,6 +400,12 @@ public partial class Database
               -- версия линейки. Пока она считалась заменой, свежая ОПЦ выкидывала обычную прошивку
               -- из списков «актуальное» и из модерации.
               AND newer.is_opc = 0
+              -- Исполнение — своя линейка. «3 насоса» и «ПЧ Danfoss» это разные прошивки одного и
+              -- того же шкафа, актуальные ОДНОВРЕМЕННО, и свежая версия одной не заменяет другую:
+              -- пока сравнения не было, вторая прошивка выпадала и из «актуального», и из модерации.
+              -- Пустое исполнение сравнивается с пустым, поэтому у баз без единой пометки поведение
+              -- ровно прежнее. См. FwExecution.
+              AND IFNULL(newer.execution,'') = IFNULL({alias}.execution,'')
               AND {NotDeleted("newer")}
               AND (newer.sw_version > {alias}.sw_version
                    OR (newer.sw_version = {alias}.sw_version AND newer.dt_str > {alias}.dt_str))
@@ -712,18 +726,24 @@ public partial class Database
         return reader.Read() ? ReadFwVersion(reader) : null;
     }
 
-    public (string Tags, string VersionRaw)? GetLatestTagsForFirmware(int subtypeId, int controllerId)
+    /// <param name="execution">ИСПОЛНЕНИЕ (см. FwExecution): null — любое, как до его появления;
+    /// иначе теги берутся только у версий ТОГО ЖЕ исполнения. Теги — это названия шкафов, а у разных
+    /// исполнений они разные.</param>
+    public (string Tags, string VersionRaw)? GetLatestTagsForFirmware(int subtypeId, int controllerId,
+        string? execution = null)
     {
+        var executionFilter = execution is null ? "" : " AND IFNULL(execution,'') = @e";
         using var reader = ExecuteReader($"""
             SELECT tags, version_raw FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c
               AND tags IS NOT NULL AND TRIM(tags) != ''
-              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()} AND {NotConfig()}
+              AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()} AND {NotConfig()}{executionFilter}
             ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", subtypeId);
             cmd.Parameters.AddWithValue("@c", controllerId);
+            if (execution is not null) cmd.Parameters.AddWithValue("@e", FwExecution.Normalize(execution));
         });
         return reader.Read() ? (GetString(reader, "tags"), GetString(reader, "version_raw")) : null;
     }
@@ -778,12 +798,19 @@ public partial class Database
     /// <summary>Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
     /// currently-open reservations (see Database.FwVersionReservations.cs) for this exact
     /// (subtype, controller, hw_version) combo. Including reservations here is what makes the live
-    /// preview (before any reservation exists) never suggest a number someone else already locked in.</summary>
+    /// preview (before any reservation exists) never suggest a number someone else already locked in.
+    ///
+    /// ОПЦ-версии в счёт НЕ идут (is_opc = 0). ОПЦ — разовая сборка под конкретный шкаф на основе уже
+    /// существующей прошивки: номер она берёт у выбранной базовой версии, а не следующий по порядку
+    /// (см. FirmwareUploadService.Prepare). Пока она попадала в MAX, каждая такая сборка съедала номер
+    /// обычной линейки, и следующая нормальная прошивка выходила через один — просьба Ильи «чтобы не
+    /// sw увеличивался при загрузке ОПЦ». Своей папке на диске ОПЦ от этого не мешает: та называется
+    /// номером заявки и серийником шкафа, а не одним лишь номером версии (HierarchyService.FwPath).</summary>
     public int GetNextSwVersion(int subtypeId, int controllerId, int hwVersion)
     {
         var result = ExecuteScalar($"""
             SELECT MAX(sw_version) FROM fw_versions
-            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h AND is_opc=0
             AND (status IS NULL OR status='active') AND {NotDeleted()}
             """, cmd =>
         {
@@ -962,20 +989,75 @@ public partial class Database
     /// ставят всем. Пока она сюда попадала, ОПЦ с бо́льшим номером становилась «текущей» для всего
     /// подтипа: её показывали как актуальную и от неё же считали следующий номер — жалоба «ОПЦ
     /// перезаписала стандартную прошивку и индексирует её как текущую, хотя она ОПЦ».</summary>
-    public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion)
+    /// <param name="execution">ИСПОЛНЕНИЕ (см. FwExecution): null — любое, как и было до появления
+    /// исполнений; непустое или "" — ровно это исполнение. У шкафа с несколькими одновременно
+    /// актуальными прошивками «последняя версия» без указания исполнения смысла не имеет: их
+    /// столько же, сколько исполнений, и взятая наугад чужая привела бы к тому, что «не увеличивать
+    /// sw» и перенос файлов с предыдущей версии сработали бы от соседней линейки.</param>
+    public FwVersionRecord? GetLastActiveFwVersion(int subtypeId, int controllerId, int hwVersion,
+        string? execution = null)
     {
+        var executionFilter = execution is null ? "" : " AND IFNULL(execution,'') = @e";
         using var reader = ExecuteReader($"""
             SELECT * FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
-            AND (status IS NULL OR status='active') AND archived=0 AND is_opc=0 AND {NotDeleted()}
+            AND (status IS NULL OR status='active') AND archived=0 AND is_opc=0 AND {NotDeleted()}{executionFilter}
             ORDER BY sw_version DESC, dt_str DESC LIMIT 1
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", subtypeId);
             cmd.Parameters.AddWithValue("@c", controllerId);
             cmd.Parameters.AddWithValue("@h", hwVersion);
+            if (execution is not null) cmd.Parameters.AddWithValue("@e", FwExecution.Normalize(execution));
         });
         return reader.Read() ? ReadFwVersion(reader) : null;
+    }
+
+    /// <summary>Из чего наладчику выбирать БАЗОВУЮ версию при загрузке ОПЦ: живые прошивки обычной
+    /// линейки этого же шкафа, от свежих к старым.
+    ///
+    /// «Я когда ОПЦ загружаю, чаще всего за основу берётся уже имеющаяся прошивка» — значит номер sw
+    /// у ОПЦ должен быть НЕ следующий по порядку, а тот же, что у выбранной основы. Список тот же,
+    /// что и у «последней активной» (GetLastActiveFwVersion), только целиком: ОПЦ и строки-конфигурации
+    /// сюда не попадают — первая сама не основа, у второй нет своих файлов.</summary>
+    public List<FwVersionRecord> GetOpcBaseCandidates(int subtypeId, int controllerId, int hwVersion)
+    {
+        var result = new List<FwVersionRecord>();
+        using var reader = ExecuteReader($"""
+            SELECT * FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h
+            AND (status IS NULL OR status='active') AND archived=0 AND is_opc=0
+            AND {NotDeleted()} AND {NotConfig()}
+            ORDER BY sw_version DESC, dt_str DESC, id DESC
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+            cmd.Parameters.AddWithValue("@h", hwVersion);
+        });
+        while (reader.Read()) result.Add(ReadFwVersion(reader));
+        return result;
+    }
+
+    /// <summary>Исполнения, уже заведённые у этого шкафа (подтип + контроллер), по алфавиту и без
+    /// пустого. Нужны форме загрузки: исполнение сравнивается ТОЧНО (см. FwExecution), поэтому
+    /// набранное руками второй раз «ПЧ danfoss» завело бы третью линейку вместо попадания в
+    /// существующую — выбирать из списка надёжнее, чем вспоминать написание.</summary>
+    public List<string> GetFwExecutions(int subtypeId, int controllerId)
+    {
+        var result = new List<string>();
+        using var reader = ExecuteReader($"""
+            SELECT DISTINCT execution FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND execution IS NOT NULL AND execution <> ''
+            AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()}
+            ORDER BY execution
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeId);
+            cmd.Parameters.AddWithValue("@c", controllerId);
+        });
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
     }
 
     /// <summary>Последний известный HMI-проект этого шкафа: путь, подсказка исполняемого файла и
@@ -1124,6 +1206,7 @@ public partial class Database
             SyncId = GetString(r, "sync_id"),
             ConfigName = GetString(r, "config_name"),
             CopyOf = GetString(r, "copy_of"),
+            Execution = GetString(r, "execution"),
         };
     }
 }
