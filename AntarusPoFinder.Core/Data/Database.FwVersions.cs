@@ -17,13 +17,13 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status,sync_id,config_name,copy_of,execution)
+                upload_date,tags,author_id,status,sync_id,config_name,copy_of,execution,on_demand_terms)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of,@execution)
+                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of,@execution,@on_demand)
             """, cmd =>
         {
             // Пусто у обычной загрузки; непустым его заводит только FirmwareConfigService (вариант
@@ -34,6 +34,7 @@ public partial class Database
             // и в SQL, и в .NET идёт точным равенством (см. FwExecution), поэтому «3 насоса » с
             // хвостовым пробелом обязано стать тем же исполнением, что и «3 насоса».
             cmd.Parameters.AddWithValue("@execution", FwExecution.Normalize(v.Execution));
+            cmd.Parameters.AddWithValue("@on_demand", FwOnDemandTerms.Normalize(v.OnDemandTerms));
             // sync_id проставляется сразу при заведении строки, а не откладывается до ближайшего
             // BackfillSyncIds на старте приложения: между загрузкой прошивки и следующим запуском
             // помещается и синхронизация, и вывод из модерации, и удаление — всё то, чему этот
@@ -75,7 +76,8 @@ public partial class Database
     /// <summary>Update editable fields (description, tags, launch_types, исполняемые файлы ПЛК/HMI)
     /// of a fw_version. Любой параметр null — «не трогать это поле».</summary>
     public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null,
-        string? hmiExecutableHint = null, string? executableHint = null, string? execution = null)
+        string? hmiExecutableHint = null, string? executableHint = null, string? execution = null,
+        string? onDemandTerms = null)
     {
         // Снятие тега обязано пережить синхронизацию: без явной отметки об удалении тег вернулся бы с
         // первой машины, которая о снятии ещё не знает (см. Database.FlatLists.RecordRowTagChange —
@@ -94,6 +96,7 @@ public partial class Database
         // разнести накопленное по линейкам можно только вручную. Нормализация та же, что при
         // заведении строки (AddFwVersion) — иначе одно и то же исполнение разъехалось бы на два.
         if (execution is not null) { sets.Add("execution=@execution"); values.Add(("@execution", FwExecution.Normalize(execution))); }
+        if (onDemandTerms is not null) { sets.Add("on_demand_terms=@on_demand"); values.Add(("@on_demand", FwOnDemandTerms.Normalize(onDemandTerms))); }
         if (sets.Count == 0) return;
 
         ExecuteNonQuery($"UPDATE fw_versions SET {string.Join(", ", sets)} WHERE id=@id", cmd =>
@@ -1213,6 +1216,7 @@ public partial class Database
             ConfigName = GetString(r, "config_name"),
             CopyOf = GetString(r, "copy_of"),
             Execution = GetString(r, "execution"),
+            OnDemandTerms = GetString(r, "on_demand_terms"),
         };
     }
 }

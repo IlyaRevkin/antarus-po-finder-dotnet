@@ -183,7 +183,20 @@ public partial class Database
     {
         filters ??= FirmwareSearchFilters.None;
 
-        var rows = SearchIndex().Where(r => PassesFilters(r, filters)).ToList();
+        // Прошивки «по запросу» (см. FwOnDemandTerms): у них заданы слова, без которых показывать
+        // их не надо. Отсеиваются ДО всего остального — ни в счёт совпадений, ни в схлопывание они
+        // попадать не должны, иначе спрятанная строка могла бы вытеснить показанную.
+        //
+        // Галка «показывать все версии» снимает и это: она для того и заведена, чтобы посмотреть
+        // всё, что есть, — и прятать от неё что-то значило бы соврать её названием.
+        //
+        // Сверяемся с ЦЕЛОЙ фразой запроса, а не с разобранными словами: «Рх» в
+        // «НГР-ПП-2-(2.5-4А)-Рх» не отдельное слово, разделителем там дефис.
+        var askedText = string.IsNullOrWhiteSpace(phrase) ? string.Join(" ", tokens) : phrase;
+        var rows = SearchIndex()
+            .Where(r => PassesFilters(r, filters))
+            .Where(r => showAllVersions || FwOnDemandTerms.AskedFor(r.OnDemandTerms, askedText))
+            .ToList();
         if (rows.Count == 0) return new();
 
         var usage = string.IsNullOrEmpty(usageQueryKey)
