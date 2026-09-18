@@ -162,7 +162,31 @@ public partial class TicketsView : UserControl
         ShowAutoReportsCheck.IsEnabled = autoCount > 0;
 
         var visible = TicketAutoReports.Visible(mine, ShowAutoReportsCheck.IsChecked == true);
+
+        // Порядок сортировки запоминается и восстанавливается вокруг подмены источника.
+        // Новый ItemsSource обнуляет и стрелку в заголовке, и сам порядок — и тикет, открытый из
+        // отсортированного по статусу списка, после закрытия окна оказывался «в середине, между
+        // закрытыми». Раньше это не было заметно, потому что список не перечитывался после
+        // открытия тикета; перечитывать его понадобилось из-за переписки — реплика меняет время
+        // правки, а по нему строится порядок.
+        var sort = TicketsGrid.Items.SortDescriptions.ToList();
+        var sortedColumns = TicketsGrid.Columns
+            .Where(c => c.SortDirection is not null)
+            .Select(c => (Column: c, Direction: c.SortDirection))
+            .ToList();
+
         TicketsGrid.ItemsSource = visible.Select(t => new TicketRow { Ticket = t }).ToList();
+
+        if (sort.Count > 0)
+        {
+            TicketsGrid.Items.SortDescriptions.Clear();
+            foreach (var d in sort) TicketsGrid.Items.SortDescriptions.Add(d);
+            // Стрелку в заголовке WPF сам не вернёт: она живёт на колонке, а не в описании
+            // сортировки. Без этого порядок правильный, а столбец выглядит несортированным.
+            foreach (var (column, direction) in sortedColumns) column.SortDirection = direction;
+            TicketsGrid.Items.Refresh();
+        }
+
         UpdateActionButtons();
     }
 

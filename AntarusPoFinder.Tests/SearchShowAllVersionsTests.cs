@@ -99,4 +99,28 @@ public class SearchShowAllVersionsTests
 
         Assert.Empty(all);
     }
+    /// <summary>Тикет 18.09.2026: «чекбокс "показывать все версии" при пустом поле поиска должен
+    /// показывать всё, что имеется».
+    ///
+    /// Галка молчала до первого введённого слова — то есть не работала ровно в том случае, ради
+    /// которого её и просили: посмотреть, что вообще загружено и чего ещё не хватает. Пустой запрос
+    /// БЕЗ галки по-прежнему не выдаёт ничего: вываливать весь справочник тому, кто просто открыл
+    /// страницу, незачем.</summary>
+    [Fact]
+    public void WithEmptyQuery_TheCheckboxShowsEverything()
+    {
+        using var file = new TempDb();
+        using var db = new Database(file.Path);
+
+        var first = AddVersion(db, sw: 1);
+        var second = AddVersion(db, sw: 2);
+
+        Assert.Empty(db.SearchFwVersions(System.Array.Empty<string>(), phrase: ""));
+
+        var shown = db.SearchFwVersions(System.Array.Empty<string>(), phrase: "", showAllVersions: true)
+            .Select(r => r.Row.Id).ToList();
+        Assert.Contains(first, shown);
+        Assert.Contains(second, shown);
+    }
+
 }

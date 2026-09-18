@@ -3,13 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
         Title="Загрузка через Segnetics Loader"
-        Width="540" MinWidth="460" MaxHeight="760"
+        Width="540" MinWidth="460" MinHeight="320" MaxHeight="760"
         SizeToContent="Height" ResizeMode="CanResize"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
     <!-- Окно операции намеренно КОМПАКТНОЕ и стартует само (см. LoaderDialog.xaml.cs): файл уже
          выбран карточкой, второе нажатие «Загрузить» ничего не решало. Всё, что нужно не всегда —
-         выбор другого файла, подготовка ПЛК, журнал — убрано под «Дополнительно»/«Подробности». -->
+         выбор другого файла, подготовка ПЛК, журнал — убрано под «Дополнительно»/«Подробности».
+
+         MinHeight есть, а MinWidth был всегда: окно тянется мышью, и по высоте его можно было
+         сжать в полоску, за которой не видно ни хода заливки, ни кнопок. Высота подбирается по
+         содержимому (SizeToContent), поэтому нижняя граница нужна только на случай ручного
+         перетаскивания — и равна примерно тому, что занимает окно в самом свёрнутом виде. -->
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
