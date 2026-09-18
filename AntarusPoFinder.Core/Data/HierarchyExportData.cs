@@ -104,6 +104,12 @@ public class ExportedFwVersion
     /// обязано: прошивки разных исполнений актуальны одновременно, и приехавшая без пометки сразу
     /// считалась бы заменой соседней линейки. См. FwExecution.</summary>
     [JsonPropertyName("execution")] public string Execution { get; set; } = "";
+
+    /// <summary>Отметка «эта версия сейчас в шкафах» (fw_versions.manual_current), поставленная
+    /// человеком руками. Ехать обязана: её ставят именно для того, чтобы остальные видели, какая
+    /// версия считается текущей, когда более свежая по номеру забракована. Пока она не ездила,
+    /// отметка жила только на машине того, кто её поставил, — «делает текущей, а она откатывается».</summary>
+    [JsonPropertyName("manual_current")] public bool ManualCurrent { get; set; }
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }

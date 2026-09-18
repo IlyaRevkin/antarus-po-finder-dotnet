@@ -271,6 +271,7 @@ public partial class Database
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
                    fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
+                   fv.manual_current,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -295,6 +296,7 @@ public partial class Database
                 DeletedAt = GetString(r, "deleted_at"), SyncId = GetString(r, "sync_id"),
                 ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
                 Execution = GetString(r, "execution"),
+                ManualCurrent = GetInt(r, "manual_current") != 0,
                 GroupName = GetString(r, "group_name"),
                 SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                 CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1573,9 +1575,15 @@ public partial class Database
                 // активной и продолжала висеть у них в модерации — ровно тот же класс расхождения, что
                 // и с released до его появления здесь. Правило то же, монотонное: 0 → 1 применяем,
                 // назад (разархивирование) не тянем — снимок мог быть собран до архивирования.
+                // Отметка «эта версия сейчас в шкафах» считается изменением наравне с остальным.
+                // Без этого случай «кроме отметки, ничего не поменялось» проходил мимо: строку
+                // признавали неизменной и отметку не применяли вовсе — а именно так чаще всего и
+                // бывает, отметку ставят отдельным действием, ничего больше не трогая.
+                var markArrives = fv.ManualCurrent && !existingRow.ManualCurrent;
+
                 var advances = (localStatus == "active" && incomingStatus != "active") ||
                                (localReleased == 0 && fv.Released != 0) ||
-                               (localArchived == 0 && fv.Archived != 0) || fieldsChanged;
+                               (localArchived == 0 && fv.Archived != 0) || fieldsChanged || markArrives;
                 if (!advances) continue;
 
                 counts.FwVersions++;
@@ -1602,6 +1610,16 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@mb", newModbus);
                     cmd.Parameters.AddWithValue("@id", id);
                 });
+
+                // Отметка «эта версия сейчас в шкафах» переносится ТОЛЬКО в сторону «поставлена»,
+                // как и «инструкции не будет»: машина со старой программой поля не присылает вовсе,
+                // и её молчание (false) снимало бы отметку туда-сюда при каждом обмене. Снимается
+                // отметка руками на каждой машине — как и удаление записей справочника.
+                //
+                // Ставим через SetFwVersionManualCurrent, а не полем в UPDATE: отметка в группе
+                // может быть только одна, и снять её у соседей обязано то же самое место, что и при
+                // ручной установке, — иначе после обмена их окажется две.
+                if (fv.ManualCurrent) SetFwVersionManualCurrent(id);
                 continue;
             }
 
@@ -1670,6 +1688,12 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@status", string.IsNullOrEmpty(fv.Status) ? "active" : fv.Status);
                 cmd.Parameters.AddWithValue("@released", fv.Released);
             });
+
+            // Та же отметка «эта версия сейчас в шкафах» у только что заведённой строки — по тем же
+            // правилам, что и выше: переносится лишь «поставлена», и ставится тем же методом, чтобы
+            // в группе она осталась одна.
+            if (fv.ManualCurrent)
+                SetFwVersionManualCurrent(Convert.ToInt32(ExecuteScalar("SELECT last_insert_rowid()")));
         }
 
         // ── Узкий канал доставки решений модерации (см. ExportedModerationDecision). ИДЁТ ПОСЛЕ
@@ -2183,7 +2207,8 @@ public partial class Database
         string IoMapPath, string InstructionsPath, string HmiPath, string ExecutableHint,
         string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
         string Description, string LaunchTypes, string Tags,
-        int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution);
+        int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution,
+        bool ManualCurrent);
 
     /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
     /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
@@ -2205,7 +2230,7 @@ public partial class Database
             id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
             executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
             description, launch_types, tags, subtype_id, controller_id, version_raw, config_name,
-            execution
+            execution, manual_current
             """;
 
         if (!string.IsNullOrEmpty(syncId))
@@ -2244,7 +2269,7 @@ public partial class Database
         GetString(r, "deleted_at"), GetString(r, "disk_path"),
         GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
         GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"),
-        GetString(r, "execution"));
+        GetString(r, "execution"), GetInt(r, "manual_current") != 0);
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {
