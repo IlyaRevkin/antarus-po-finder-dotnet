@@ -113,9 +113,7 @@ public partial class Database : IDisposable
                  copy_of           TEXT    NOT NULL DEFAULT '',
                  -- ИСПОЛНЕНИЕ прошивки: '' — обычная, непустое — одна из нескольких одновременно
                  -- актуальных прошивок одного шкафа. См. FwExecution и EnsureColumnsExist ниже.
-                 execution         TEXT    NOT NULL DEFAULT '',
-                 -- Слова, без которых прошивка в выдаче не показывается (см. FwOnDemandTerms).
-                 on_demand_terms   TEXT    NOT NULL DEFAULT ''
+                 execution         TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -182,6 +180,12 @@ public partial class Database : IDisposable
              -- tags выше, и синхронизируется тем же LWW-механизмом через flat_list_state. Стартовый
              -- набор заводит разовая миграция SeedFwAttachmentKindsOnce (сид «пока таблица пуста» до
              -- установленных копий не доезжает).
+             -- Слова-исключения поиска: см. Database.SearchWords.cs.
+             CREATE TABLE IF NOT EXISTS search_on_demand_words (
+                 name       TEXT PRIMARY KEY,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
              CREATE TABLE IF NOT EXISTS fw_attachment_kinds (
                  name       TEXT PRIMARY KEY COLLATE NOCASE,
                  sort_order INTEGER NOT NULL DEFAULT 0
@@ -795,10 +799,6 @@ public partial class Database : IDisposable
         // «обычная прошивка». См. FwExecution.
         AddColumnsIfMissing("fw_versions", ("execution", "TEXT NOT NULL DEFAULT ''"));
 
-        // on_demand_terms: слова, без которых прошивка не показывается в выдаче (см.
-        // Core/Domain/FwOnDemandTerms.cs). Пусто у всех, кроме тех прошивок, которым это нужно, —
-        // поэтому миграции данных не требуется, значение по умолчанию и есть прежнее поведение.
-        AddColumnsIfMissing("fw_versions", ("on_demand_terms", "TEXT NOT NULL DEFAULT ''"));
 
         // Задел (Задача 7): «сохранить у себя, не выгружать» — строка с is_local_only=1 просто
         // пропускается ExportHierarchyData (см. Database.ConfigExchange.cs), т.е. никогда не попадёт

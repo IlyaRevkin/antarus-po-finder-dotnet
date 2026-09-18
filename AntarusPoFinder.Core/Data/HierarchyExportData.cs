@@ -496,6 +496,11 @@ public class HierarchyExportData
     /// логикой для снимков со старой версии приложения.</summary>
     [JsonPropertyName("fw_attachment_kinds")] public List<string>? FwAttachmentKinds { get; set; }
 
+    /// <summary>Слова-исключения поиска (см. Database.SearchWords.cs). Справочник общий: правило
+    /// «не показывать, пока не спросили» должно работать одинаково у всех, иначе один ищет и
+    /// находит, а другой по тому же запросу нет.</summary>
+    [JsonPropertyName("search_on_demand_words")] public List<string>? SearchOnDemandWords { get; set; }
+
     /// <summary>Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — полный список, вместе со
     /// снятыми (они и есть тумбстоуны), с вложенными ревизиями и их строками. Nullable без дефолта
     /// по той же причине, что FwAttachments рядом: снимок со старой версии приложения ключа не
@@ -617,6 +622,9 @@ public class ImportCounts
     public int FwAttachmentsUpdated { get; set; }
     /// <summary>Виды доп. материалов, добавленные/убранные в справочнике входящим снимком — тот же
     /// LWW-механизм, что у тегов и производителей (ImportFlatList).</summary>
+    public int OnDemandWordsAdded { get; set; }
+    public int OnDemandWordsRemoved { get; set; }
+
     public int AttachmentKindsAdded { get; set; }
     public int AttachmentKindsRemoved { get; set; }
     /// <summary>Вид, который эталонный снимок хотел бы убрать, но им ещё помечено локальное вложение —
@@ -701,6 +709,7 @@ public class ImportCounts
         Passports + PassportsRemoved + PassportsUpdated +
         FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +
         AttachmentKindsAdded + AttachmentKindsRemoved +
+        OnDemandWordsAdded + OnDemandWordsRemoved +
         ParamTablesAdded + ParamTablesRemoved + ParamTablesUpdated +
         ParamTableRevisionsAdded + ParamTableRevisionsRemoved +
         ParamGroupsAdded + ParamGroupsRemoved +

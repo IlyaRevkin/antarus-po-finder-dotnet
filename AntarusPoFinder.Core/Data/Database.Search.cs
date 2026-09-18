@@ -183,9 +183,10 @@ public partial class Database
     {
         filters ??= FirmwareSearchFilters.None;
 
-        // Прошивки «по запросу» (см. FwOnDemandTerms): у них заданы слова, без которых показывать
-        // их не надо. Отсеиваются ДО всего остального — ни в счёт совпадений, ни в схлопывание они
-        // попадать не должны, иначе спрятанная строка могла бы вытеснить показанную.
+        // Слова-исключения (см. FwOnDemandTerms и Database.SearchWords.cs): прошивка, у которой в
+        // описании встретилось такое слово, показывается, только если это слово есть и в запросе.
+        // Отсеивается ДО всего остального — ни в счёт совпадений, ни в схлопывание такая строка
+        // попадать не должна, иначе спрятанная могла бы вытеснить показанную.
         //
         // Галка «показывать все версии» снимает и это: она для того и заведена, чтобы посмотреть
         // всё, что есть, — и прятать от неё что-то значило бы соврать её названием.
@@ -193,9 +194,10 @@ public partial class Database
         // Сверяемся с ЦЕЛОЙ фразой запроса, а не с разобранными словами: «Рх» в
         // «НГР-ПП-2-(2.5-4А)-Рх» не отдельное слово, разделителем там дефис.
         var askedText = string.IsNullOrWhiteSpace(phrase) ? string.Join(" ", tokens) : phrase;
+        var onDemandWords = showAllVersions ? new List<string>() : GetOnDemandWords();
         var rows = SearchIndex()
             .Where(r => PassesFilters(r, filters))
-            .Where(r => showAllVersions || FwOnDemandTerms.AskedFor(r.OnDemandTerms, askedText))
+            .Where(r => !FwOnDemandTerms.ShouldHide(onDemandWords, SearchableTextOf(r), askedText))
             .ToList();
         if (rows.Count == 0) return new();
 
@@ -602,6 +604,13 @@ public partial class Database
     /// популярность, больше PhraseTagBonus, чтобы обойти даже точное совпадение тега.</summary>
     private static int Rank(ScoredFwVersion e, int usageThreshold, double usageMultiplier) =>
         e.Score + AutoUsageBonus(e.UsageCount, usageThreshold, usageMultiplier) + e.Weight;
+
+    /// <summary>Всё, по чему прошивку опознают глазами, одной строкой — по ней и проверяются
+    /// слова-исключения. Путь на диске сюда НЕ входит намеренно: в нём встречаются служебные куски,
+    /// которых человек не видит, и совпадение по ним пряло бы строки без видимой причины.</summary>
+    private static string SearchableTextOf(FwVersionRecord r) =>
+        string.Join(" ", new[] { r.GroupName, r.SubtypeName, r.SubtypeFolder, r.CtrlName, r.Tags, r.Execution }
+            .Where(x => !string.IsNullOrEmpty(x)));
 
     private static bool PassesFilters(FwVersionRecord row, FirmwareSearchFilters f)
     {

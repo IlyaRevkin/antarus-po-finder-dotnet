@@ -85,10 +85,6 @@ public class FwVersionRecord
     /// См. FwExecution.</summary>
     public string Execution { get; set; } = "";
 
-    /// <summary>Слова, без которых прошивка не показывается в выдаче (см. FwOnDemandTerms).
-    /// Пусто у подавляющего большинства — тогда прошивка ведёт себя как всегда.</summary>
-    public string OnDemandTerms { get; set; } = "";
-
     // Populated by joins for display purposes (not stored on this table).
     /// <summary>Тип шкафа, которому принадлежит подтип версии — нужен фильтру поиска по типу шкафа
     /// (Database.SearchFwVersionsByTokens): подтип у версии свой, а тип берётся через него.</summary>

@@ -110,7 +110,6 @@ public partial class EditFirmwareDialog : Window
         if (!string.IsNullOrEmpty(v.Execution)) executions.Insert(1, v.Execution);
         ExecutionCombo.ItemsSource = executions;
         ExecutionCombo.Text = v.Execution;
-        OnDemandTermsInput.Text = v.OnDemandTerms;
 
         // Позволяет (пере)выбрать, какой файл внутри загруженной папки открывается по кнопкам карточки
         // — например, при загрузке в папке не было файла с узнаваемым расширением и выбрался не тот
@@ -1026,7 +1025,6 @@ public partial class EditFirmwareDialog : Window
         ResultTags = AntarusPoFinder.Core.Services.TagString.Join(tags);
         ResultLaunchTypes = _checks.Selected;
         ResultExecution = FwExecution.Normalize(ExecutionCombo.Text);
-        ResultOnDemandTerms = FwOnDemandTerms.Normalize(OnDemandTermsInput.Text);
         if (_plcFolder is not null) ResultExecutableHint = _plcHint;
         if (_hmiFolder is not null) ResultHmiExecutableHint = _hmiHint;
         // Приложение файлов — единственный шаг сохранения, который ходит на сетевую шару и на
@@ -1061,8 +1059,7 @@ public partial class EditFirmwareDialog : Window
     public static void ApplyResult(EditFirmwareDialog dlg, AppServices services, IAppHost host, int versionId)
     {
         services.Db.UpdateFwVersion(versionId, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint, dlg.ResultExecution,
-            dlg.ResultOnDemandTerms);
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint, dlg.ResultExecution);
         ReportChanges(dlg, host);
     }
 

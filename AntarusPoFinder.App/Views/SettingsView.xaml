@@ -685,6 +685,31 @@
                     <TextBox x:Name="TagsFilterInput" Height="34" Margin="0,0,0,10"
                              ToolTip="Фильтр по подстроке в названии тега…" TextChanged="TagsFilter_Changed"/>
                     <WrapPanel x:Name="TagsBubblesPanel"/>
+
+                    <!-- Слова-исключения стоят на вкладке «Теги», а не отдельной: по сути это тот же
+                         справочник коротких слов, и искать их человек будет здесь же. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,18,0,0">
+                        <StackPanel>
+                            <TextBlock Text="НЕ ПОКАЗЫВАТЬ, ПОКА НЕ СПРОСИЛИ" Style="{StaticResource MutedText}"
+                                       FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Text="Прошивка, у которой в названии или тегах есть такое слово, попадёт в выдачу, только когда это слово есть и в запросе. Нужно там, где название одного исполнения длиннее другого: запрос «НГР-ПП-2-(2.5-4А)» перестанет вытаскивать заодно и «…-Рх». Слово заводится один раз и действует на всё, что загрузят потом; список общий для всех машин. Галочка «Показывать все версии» в поиске показывает и такие."/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" x:Name="OnDemandWordInput" Height="34" Margin="0,0,8,0"
+                                         KeyDown="OnDemandWordInput_KeyDown"
+                                         ToolTip="Слово целиком, например «Рх». Регистр не важен. Enter — добавить."/>
+                                <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}"
+                                        Click="AddOnDemandWord_Click"/>
+                            </Grid>
+                            <WrapPanel x:Name="OnDemandWordsPanel"/>
+                            <TextBlock x:Name="OnDemandWordsEmptyText" Style="{StaticResource MutedText}"
+                                       Text="Список пуст — поиск работает как обычно." Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- ═══════════════════════════ ЛОАДЕР ═══════════════════════════ -->

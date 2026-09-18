@@ -95,6 +95,7 @@ public partial class Database
 
         data.Tags = GetAllTags();
         data.FwAttachmentKinds = GetFwAttachmentKinds();
+        data.SearchOnDemandWords = GetOnDemandWords();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
         data.AllowedExtensionsSchematic = GetAllowedExtensionsSchematic();
@@ -1184,6 +1185,14 @@ public partial class Database
             data.FwAttachmentKinds ?? new(),
             data.FlatListState, apply, GetFwAttachmentKinds, AddFwAttachmentKind, DeleteFwAttachmentKind,
             () => counts.AttachmentKindsAdded++, () => counts.AttachmentKindsRemoved++);
+
+        // Слова-исключения поиска — шестой справочник того же устройства. Правило «не показывать,
+        // пока не спросили» обязано быть одинаковым у всех: иначе один по запросу находит, а другой
+        // по тому же запросу нет, и разобраться, у кого правильно, нельзя.
+        ImportFlatList(Database.FlatKindOnDemandWord,
+            data.SearchOnDemandWords ?? new(),
+            data.FlatListState, apply, GetOnDemandWords, AddOnDemandWord, DeleteOnDemandWord,
+            () => counts.OnDemandWordsAdded++, () => counts.OnDemandWordsRemoved++);
 
         // Группы параметров ПЧ/УПП — пятый справочник того же устройства. С одной особенностью:
         // главное его содержимое не имена, а ПОРЯДОК («сперва основные значения, сброс до заводских

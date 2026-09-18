@@ -429,8 +429,67 @@ public partial class SettingsView : UserControl
     /// отдельного индекса/запроса к БД не требуется, достаточно отфильтровать уже загруженный список
     /// перед отрисовкой баблов. Кнопка добавления тега показывается всегда, даже если фильтр ничего
     /// не нашёл — иначе непонятно, как добавить тег, когда список пуст из-за фильтра.</summary>
+    /// <summary>Список слов-исключений (см. Database.SearchWords.cs). Рисуется теми же «пузырьками»,
+    /// что и теги рядом: это такой же справочник коротких слов, и вести себя он должен так же.</summary>
+    private void RenderOnDemandWords()
+    {
+        OnDemandWordsPanel.Children.Clear();
+        var words = _services.Db.GetOnDemandWords();
+        OnDemandWordsEmptyText.Visibility = words.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        foreach (var word in words)
+        {
+            var captured = word;
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 6) };
+            panel.Children.Add(new TextBlock { Text = captured, VerticalAlignment = VerticalAlignment.Center });
+
+            var remove = new Button
+            {
+                Content = "×",
+                Style = (Style)FindResource("SecondaryButton"),
+                Margin = new Thickness(6, 0, 0, 0),
+                Padding = new Thickness(6, 0, 6, 0),
+                ToolTip = "Убрать слово. Прошивки не трогаются — они снова начнут находиться как раньше.",
+            };
+            remove.Click += (_, _) =>
+            {
+                _services.Db.DeleteOnDemandWord(captured);
+                RenderOnDemandWords();
+            };
+            panel.Children.Add(remove);
+
+            var bubble = new Border
+            {
+                Style = (Style)FindResource("CardBorder"),
+                Padding = new Thickness(10, 4, 6, 4),
+                Margin = new Thickness(0, 0, 6, 6),
+                Child = panel,
+            };
+            OnDemandWordsPanel.Children.Add(bubble);
+        }
+    }
+
+    private void AddOnDemandWord_Click(object sender, RoutedEventArgs e) => CommitOnDemandWord();
+
+    private void OnDemandWordInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        e.Handled = true;
+        CommitOnDemandWord();
+    }
+
+    private void CommitOnDemandWord()
+    {
+        var word = AntarusPoFinder.Core.Domain.FwOnDemandTerms.Normalize(OnDemandWordInput.Text);
+        if (word.Length == 0) return;
+        _services.Db.AddOnDemandWord(word);
+        OnDemandWordInput.Clear();
+        RenderOnDemandWords();
+    }
+
     private void RenderTagsTab()
     {
+        RenderOnDemandWords();
         TagsBubblesPanel.Children.Clear();
         var filter = TagsFilterInput.Text.Trim();
         var tags = filter.Length == 0
