@@ -507,6 +507,11 @@ public class HierarchyExportData
     /// находит, а другой по тому же запросу нет.</summary>
     [JsonPropertyName("search_on_demand_words")] public List<string>? SearchOnDemandWords { get; set; }
 
+    /// <summary>Справочник исполнений (см. Database.Executions.cs). Общий: исполнение — это граница
+    /// линейки, и заведённое на одной машине должно предлагаться на всех, иначе вторая машина
+    /// наберёт его руками в другом написании и заведёт третью линейку.</summary>
+    [JsonPropertyName("fw_executions")] public List<string>? FwExecutions { get; set; }
+
     /// <summary>Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — полный список, вместе со
     /// снятыми (они и есть тумбстоуны), с вложенными ревизиями и их строками. Nullable без дефолта
     /// по той же причине, что FwAttachments рядом: снимок со старой версии приложения ключа не
@@ -628,6 +633,9 @@ public class ImportCounts
     public int FwAttachmentsUpdated { get; set; }
     /// <summary>Виды доп. материалов, добавленные/убранные в справочнике входящим снимком — тот же
     /// LWW-механизм, что у тегов и производителей (ImportFlatList).</summary>
+    public int ExecutionsAdded { get; set; }
+    public int ExecutionsRemoved { get; set; }
+
     public int OnDemandWordsAdded { get; set; }
     public int OnDemandWordsRemoved { get; set; }
 
@@ -716,6 +724,7 @@ public class ImportCounts
         FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +
         AttachmentKindsAdded + AttachmentKindsRemoved +
         OnDemandWordsAdded + OnDemandWordsRemoved +
+        ExecutionsAdded + ExecutionsRemoved +
         ParamTablesAdded + ParamTablesRemoved + ParamTablesUpdated +
         ParamTableRevisionsAdded + ParamTableRevisionsRemoved +
         ParamGroupsAdded + ParamGroupsRemoved +

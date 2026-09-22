@@ -818,6 +818,20 @@ public static class FirmwareUploadService
             inheritedHmiFrom = plan.InheritedHmiFromVersion;
         }
 
+        // Инструкция и карты — по тому же правилу, что панель и теги: они описывают ШКАФ, а не
+        // сборку программы. Обновили прошивку — шкаф тот же, схема та же, инструкция та же.
+        // Пока этого не было, каждая новая версия выходила без инструкции и без карт: на карточке
+        // пусто, QR вести некуда, а документы всё это время лежали на диске в папке того же
+        // контроллера. Приложенное в этой загрузке имеет приоритет — наследуется только пустое.
+        //
+        // Файлы не копируются: путь указывает на тот же документ, что и у прошлой версии. Так и
+        // задумано — документ один на шкаф, и плодить его копии по папкам версий значит гарантировать
+        // расхождение редакций.
+        var inheritedDocs = db.GetLatestDocsForFirmware(subOption.Id!.Value, mod.ControllerId);
+        if (string.IsNullOrEmpty(record.InstructionsPath)) record.InstructionsPath = inheritedDocs.Instructions;
+        if (string.IsNullOrEmpty(record.IoMapPath)) record.IoMapPath = inheritedDocs.IoMap;
+        if (string.IsNullOrEmpty(record.ModbusMapPath)) record.ModbusMapPath = inheritedDocs.ModbusMap;
+
         var newFwId = db.AddFwVersion(record);
         record.Id = newFwId;
 

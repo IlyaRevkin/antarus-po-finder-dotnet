@@ -534,7 +534,7 @@ public partial class UploadView : UserControl
 
         var known = new List<string> { "" };
         if (SubtypesSelect.MainSubtype?.Id is int subtypeId && CtrlCombo.SelectedItem is ControllerModification mod)
-            known.AddRange(_services.Db.GetFwExecutions(subtypeId, mod.ControllerId));
+            known.AddRange(_services.Db.GetExecutionChoices(subtypeId, mod.ControllerId));
 
         var typed = ExecutionCombo.Text;
         ExecutionCombo.ItemsSource = known;

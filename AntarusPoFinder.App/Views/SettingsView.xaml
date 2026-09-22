@@ -40,6 +40,9 @@
             <Button x:Name="TabBtnTags" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Теги" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <Button x:Name="TabBtnExecutions" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Исполнения" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Быстрый доступ" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -708,6 +711,38 @@
                             <WrapPanel x:Name="OnDemandWordsPanel"/>
                             <TextBlock x:Name="OnDemandWordsEmptyText" Style="{StaticResource MutedText}"
                                        Text="Список пуст — поиск работает как обычно." Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ═════════════════════════ ИСПОЛНЕНИЯ ═════════════════════════ -->
+                <!-- Справочник заведён отдельно от самих прошивок, потому что иначе получался
+                     замкнутый круг: чтобы исполнение появилось в выпадающем списке при загрузке,
+                     его надо было кому-то там вписать, а вписать было негде. Теперь набор ведётся
+                     здесь и заполняется до первой загрузки. -->
+                <StackPanel x:Name="ExecutionsTab" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="Исполнение — это комплектация шкафа, из-за которой у него несколько прошивок, актуальных ОДНОВРЕМЕННО: «3 насоса», «ПЧ Danfoss», «с байпасом». Прошивки разных исполнений не заменяют друг друга, каждая считается текущей в своей линейке и находится поиском отдельно. Заведённые здесь исполнения предлагаются в «Загрузке ПО» и в карточке прошивки; список общий для всех машин."/>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="СПИСОК ИСПОЛНЕНИЙ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" x:Name="ExecutionInput" Height="34" Margin="0,0,8,0"
+                                         KeyDown="ExecutionInput_KeyDown"
+                                         ToolTip="Название исполнения, например «3 насоса». Enter — добавить."/>
+                                <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}"
+                                        Click="AddExecution_Click"/>
+                            </Grid>
+                            <WrapPanel x:Name="ExecutionsPanel"/>
+                            <TextBlock x:Name="ExecutionsEmptyText" Style="{StaticResource MutedText}"
+                                       Text="Список пуст — у прошивок нет деления на исполнения." Visibility="Collapsed"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                       Text="Убрать исполнение из списка можно в любой момент: у уже загруженных прошивок пометка сохранится, перестанет только предлагаться при новой загрузке."/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

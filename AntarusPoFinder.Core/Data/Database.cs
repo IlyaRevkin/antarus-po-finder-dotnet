@@ -180,6 +180,13 @@ public partial class Database : IDisposable
              -- tags выше, и синхронизируется тем же LWW-механизмом через flat_list_state. Стартовый
              -- набор заводит разовая миграция SeedFwAttachmentKindsOnce (сид «пока таблица пуста» до
              -- установленных копий не доезжает).
+             -- Справочник исполнений: см. Database.Executions.cs. Ведётся отдельно от самих
+             -- прошивок, чтобы исполнение можно было завести ДО первой загрузки.
+             CREATE TABLE IF NOT EXISTS fw_executions (
+                 name       TEXT PRIMARY KEY,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
              -- Слова-исключения поиска: см. Database.SearchWords.cs.
              CREATE TABLE IF NOT EXISTS search_on_demand_words (
                  name       TEXT PRIMARY KEY,

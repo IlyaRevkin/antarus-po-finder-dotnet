@@ -105,7 +105,7 @@ public partial class EditFirmwareDialog : Window
         // Уже заведённые исполнения этого же шкафа — подсказкой в списке. Пустая строка первой: это
         // полноправное значение «обычная прошивка», и вернуться к нему должно быть чем.
         var executions = new List<string> { "" };
-        executions.AddRange(_db.GetFwExecutions(v.SubtypeId, v.ControllerId)
+        executions.AddRange(_db.GetExecutionChoices(v.SubtypeId, v.ControllerId)
             .Where(x => !string.Equals(x, v.Execution, StringComparison.Ordinal)));
         if (!string.IsNullOrEmpty(v.Execution)) executions.Insert(1, v.Execution);
         ExecutionCombo.ItemsSource = executions;

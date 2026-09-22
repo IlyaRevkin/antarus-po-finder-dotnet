@@ -192,7 +192,7 @@ public partial class SettingsView : UserControl
     private Button[] AllTabButtons() => new[]
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
-        TabBtnTags, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
+        TabBtnTags, TabBtnExecutions, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
 
@@ -219,6 +219,7 @@ public partial class SettingsView : UserControl
         ModerationTab.Visibility = Visibility.Collapsed;
         ReservationsTab.Visibility = Visibility.Collapsed;
         TagsTab.Visibility = Visibility.Collapsed;
+        ExecutionsTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
         LoaderTab.Visibility = Visibility.Collapsed;
@@ -236,6 +237,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
+        else if (sender == TabBtnExecutions) { ExecutionsTab.Visibility = Visibility.Visible; RenderExecutions(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
     }
@@ -286,6 +288,8 @@ public partial class SettingsView : UserControl
         TabBtnCleanup.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnTags.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
+        // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
+        TabBtnExecutions.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // TabBtnGeneral/TabBtnQuickApps: no role restriction — everyone who can reach Настройки at all sees them.
 
@@ -467,6 +471,63 @@ public partial class SettingsView : UserControl
             };
             OnDemandWordsPanel.Children.Add(bubble);
         }
+    }
+
+    /// <summary>Справочник исполнений (см. Database.Executions.cs). Рисуется теми же «пузырьками»,
+    /// что теги и слова-исключения: справочник коротких названий, и вести себя должен так же.</summary>
+    private void RenderExecutions()
+    {
+        ExecutionsPanel.Children.Clear();
+        var items = _services.Db.GetExecutionCatalog();
+        ExecutionsEmptyText.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        foreach (var name in items)
+        {
+            var captured = name;
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(new TextBlock { Text = captured, VerticalAlignment = VerticalAlignment.Center });
+
+            var remove = new Button
+            {
+                Content = "×",
+                Style = (Style)FindResource("SecondaryButton"),
+                Margin = new Thickness(6, 0, 0, 0),
+                Padding = new Thickness(6, 0, 6, 0),
+                ToolTip = "Убрать из списка. У загруженных прошивок пометка сохранится — перестанет только предлагаться при новой загрузке.",
+            };
+            remove.Click += (_, _) =>
+            {
+                _services.Db.DeleteExecutionFromCatalog(captured);
+                RenderExecutions();
+            };
+            row.Children.Add(remove);
+
+            ExecutionsPanel.Children.Add(new Border
+            {
+                Style = (Style)FindResource("CardBorder"),
+                Padding = new Thickness(10, 4, 6, 4),
+                Margin = new Thickness(0, 0, 6, 6),
+                Child = row,
+            });
+        }
+    }
+
+    private void AddExecution_Click(object sender, RoutedEventArgs e) => CommitExecution();
+
+    private void ExecutionInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        e.Handled = true;
+        CommitExecution();
+    }
+
+    private void CommitExecution()
+    {
+        var name = AntarusPoFinder.Core.Domain.FwExecution.Normalize(ExecutionInput.Text);
+        if (name.Length == 0) return;
+        _services.Db.AddExecutionToCatalog(name);
+        ExecutionInput.Clear();
+        RenderExecutions();
     }
 
     private void AddOnDemandWord_Click(object sender, RoutedEventArgs e) => CommitOnDemandWord();

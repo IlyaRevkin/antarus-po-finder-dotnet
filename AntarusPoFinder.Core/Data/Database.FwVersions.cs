@@ -710,6 +710,42 @@ public partial class Database
     /// у него может смениться, а откатанные/архивные/удалённые версии не в счёт.
     /// <paramref name="exceptId"/> — исключить строку, которую только что завели сами (иначе новая
     /// версия оказалась бы «предыдущей» сама себе).</summary>
+    /// <summary>Последние известные ДОКУМЕНТЫ этого шкафа: инструкция, карта входов/выходов и карта
+    /// Modbus. Каждый берётся у самой свежей версии, у которой он вообще есть, — и это важно: карту
+    /// ВВ могли приложить три версии назад, инструкцию — в прошлой, и «взять всё у предыдущей
+    /// версии» потеряло бы карту.
+    ///
+    /// Зачем: документы описывают ШКАФ, а не сборку программы. Обновили прошивку — шкаф тот же,
+    /// схема та же, инструкция та же. Пока этого не было, каждая новая версия оказывалась без
+    /// инструкции и без карт: на карточке пусто, QR вести некуда, и наладчик у шкафа оставался ни с
+    /// чем, хотя документы лежат на диске в папке этого же контроллера. Ровно та же причина, по
+    /// которой наследуются панель и теги (GetLatestHmiForFirmware/GetLatestTagsForFirmware рядом).
+    ///
+    /// Откатанные, архивные и удалённые версии не в счёт — их документы это то, от чего отказались.
+    /// Строки-конфигурации тоже: у них пути указывают на документы соседнего шкафа.</summary>
+    public (string Instructions, string IoMap, string ModbusMap) GetLatestDocsForFirmware(
+        int subtypeId, int controllerId, int exceptId = 0)
+    {
+        string Latest(string column)
+        {
+            var value = ExecuteScalar($"""
+                SELECT {column} FROM fw_versions
+                WHERE subtype_id=@s AND controller_id=@c AND id<>@x
+                  AND IFNULL({column}, '') <> ''
+                  AND (status IS NULL OR status='active') AND archived=0 AND {NotDeleted()} AND {NotConfig()}
+                ORDER BY hw_version DESC, sw_version DESC, dt_str DESC, id DESC LIMIT 1
+                """, cmd =>
+            {
+                cmd.Parameters.AddWithValue("@s", subtypeId);
+                cmd.Parameters.AddWithValue("@c", controllerId);
+                cmd.Parameters.AddWithValue("@x", exceptId);
+            });
+            return value as string ?? "";
+        }
+
+        return (Latest("instructions_path"), Latest("io_map_path"), Latest("modbus_map_path"));
+    }
+
     public FwVersionRecord? GetLatestPrimaryFwVersion(int subtypeId, int controllerId, int exceptId = 0)
     {
         using var reader = ExecuteReader($"""

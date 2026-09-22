@@ -96,6 +96,7 @@ public partial class Database
         data.Tags = GetAllTags();
         data.FwAttachmentKinds = GetFwAttachmentKinds();
         data.SearchOnDemandWords = GetOnDemandWords();
+        data.FwExecutions = GetExecutionCatalog();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
         data.AllowedExtensionsSchematic = GetAllowedExtensionsSchematic();
@@ -1195,6 +1196,14 @@ public partial class Database
             data.SearchOnDemandWords ?? new(),
             data.FlatListState, apply, GetOnDemandWords, AddOnDemandWord, DeleteOnDemandWord,
             () => counts.OnDemandWordsAdded++, () => counts.OnDemandWordsRemoved++);
+
+        // Справочник исполнений — седьмой того же устройства. Общий по той же причине, по которой
+        // исполнения сравниваются точно: заведённое на одной машине обязано предлагаться на всех,
+        // иначе вторая наберёт его руками в другом написании и заведёт третью линейку.
+        ImportFlatList(Database.FlatKindExecution,
+            data.FwExecutions ?? new(),
+            data.FlatListState, apply, GetExecutionCatalog, AddExecutionToCatalog, DeleteExecutionFromCatalog,
+            () => counts.ExecutionsAdded++, () => counts.ExecutionsRemoved++);
 
         // Группы параметров ПЧ/УПП — пятый справочник того же устройства. С одной особенностью:
         // главное его содержимое не имена, а ПОРЯДОК («сперва основные значения, сброс до заводских
