@@ -36,6 +36,37 @@ public static class ProjectTree
     /// <summary>Файл в папке, названный так же, как сама папка, — точка входа проекта. Их может быть
     /// несколько (у Kinco рядом лежат <c>.dpj</c>, <c>.pkgx</c> и <c>.bak</c> с одним именем);
     /// возвращается первый по алфавиту — нужен сам факт, а не выбор между ними.</summary>
+    /// <summary>То же, но с предпочтением по расширению — для случая «надо ОТКРЫТЬ проект».
+    ///
+    /// Одноимённых файлов у проекта обычно несколько: у Kinco рядом с <c>.dpj</c> лежат <c>.pkgx</c>
+    /// и <c>.bak</c>. Для вопроса «это дерево проекта?» годится любой, а вот открывать надо именно
+    /// проект: по алфавиту первым оказывается <c>.bak</c>, то есть резервная копия, и открыв её
+    /// человек правил бы вчерашнюю версию. Поэтому сперва ищем среди известных расширений среды и
+    /// только потом откатываемся на «любой одноимённый».</summary>
+    public static string? EntryFileIn(string? folder, IReadOnlyCollection<string> preferredExtensions)
+    {
+        var all = EntryFilesIn(folder);
+        var preferred = all.FirstOrDefault(f =>
+            preferredExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase));
+        return preferred ?? all.FirstOrDefault();
+    }
+
+    /// <summary>Все одноимённые папке файлы, по алфавиту.</summary>
+    private static List<string> EntryFilesIn(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return new List<string>();
+        var name = FolderName(folder!);
+        if (name.Length == 0) return new List<string>();
+        try
+        {
+            return Directory.EnumerateFiles(folder!, "*", SearchOption.TopDirectoryOnly)
+                .Where(f => string.Equals(Path.GetFileNameWithoutExtension(f), name, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception) { return new List<string>(); }
+    }
+
     public static string? EntryFileIn(string? folder)
     {
         if (string.IsNullOrWhiteSpace(folder)) return null;

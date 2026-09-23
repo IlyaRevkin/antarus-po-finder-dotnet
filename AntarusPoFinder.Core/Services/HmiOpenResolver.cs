@@ -56,6 +56,22 @@ public static class HmiOpenResolver
                 // открываем папку, пусть оператор выберет сам.
                 if (ExecutableHintResolver.AutoDetect(stored, PlcOpenResolver.HmiExtensions) is { } onlyProjectFile)
                     return Path.Combine(stored, onlyProjectFile);
+
+                // Дерево проекта (см. ProjectTree): папка и одноимённый файл внутри неё.
+                //
+                // ⚠️ Без этого ломался Kinco, и вот почему. Отбор выше ищет файлы панели ПО ВСЕМУ
+                // дереву, а настоящий проект Kinco держит вторую копию в служебной папке temp:
+                //     УПД_MK070_v8-26\УПД_MK070_v8-26.dpj   ← настоящий
+                //     УПД_MK070_v8-26	emp\УПД_mk070_v8-26.dpj ← копия среды
+                // Два совпадения — значит «выбрать не могу», и открывалась ПАПКА. Ровно жалоба:
+                // «указал .dpj и файлом открытия, и файлом HMI, а открывается папка, а не файл».
+                //
+                // Имя проекта совпадает с именем его папки — этого достаточно, чтобы отличить
+                // настоящий файл от копии во вложенной служебной папке, и работает это для любого
+                // вендора, а не только для Kinco.
+                if (ProjectTree.EntryFileIn(stored, PlcOpenResolver.HmiExtensions) is { } ownEntry) return ownEntry;
+                if (SingleProjectTreeInside(stored) is { } nestedEntry) return nestedEntry;
+
                 return stored;
             }
             // В записи не папка, а ОДИН файл — так проекты панели складывались раньше, и у форматов
@@ -76,6 +92,25 @@ public static class HmiOpenResolver
     /// <summary>Расширение того, что откроет кнопка — то же, что пишется на ней. null — откроется
     /// папка либо файл без расширения.</summary>
     public static string? ResolveExtension(HmiOpenSources src) => PlcOpenResolver.ExtensionOf(Resolve(src));
+
+    /// <summary>Единственное дерево проекта внутри папки — его файл-точка входа. Нужно, когда у
+    /// версии записана папка НАД проектом (общая «HMI»), а не сам проект.
+    ///
+    /// Ровно одно: если папок проекта несколько, выбирать за человека нельзя — открываем папку,
+    /// пусть решает сам. Та же осторожность, что и у отбора по расширению выше.</summary>
+    private static string? SingleProjectTreeInside(string folder)
+    {
+        try
+        {
+            var entries = Directory.EnumerateDirectories(folder)
+                .Select(d => ProjectTree.EntryFileIn(d, PlcOpenResolver.HmiExtensions))
+                .Where(x => x is not null)
+                .Take(2)
+                .ToList();
+            return entries.Count == 1 ? entries[0] : null;
+        }
+        catch (Exception) { return null; }
+    }
 
     /// <summary>Файл, на который указывает подсказка оператора, в папках самой версии — или null.</summary>
     private static string? HintedInVersionFolders(HmiOpenSources src)
