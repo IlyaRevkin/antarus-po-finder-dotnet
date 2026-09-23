@@ -150,6 +150,44 @@ public class FwOnDemandTermsTests
         Assert.Single(db.GetOnDemandWords());
     }
 
+    /// <summary>Слово-исключение ищется КАК СЛОВО, а не куском другого слова.
+    ///
+    /// Жалоба Ильи 23.09.2026: «добавляю в настройках слово-исключение — и нужная прошивка при любых
+    /// запросах перестаёт находиться». Причина была в простом сравнении подстрокой: «Рх» совпадало
+    /// внутри «а-рх-ив», «све-рх», «ве-рх-ний», и пряталась уйма прошивок, к которым слово никакого
+    /// отношения не имеет. Это ровно та же ловушка, на которой в этом коде уже обжигались с типами
+    /// пуска («ПЧ» внутри «КПЧ»).</summary>
+    [Fact]
+    public void TheWord_IsNotMatchedInsideAnotherWord()
+    {
+        using var file = new TempDb();
+        using var db = new Database(file.Path);
+        db.AddOnDemandWord("Рх");
+
+        var archive = AddVersion(db, 1, "НГР архив старых");
+        var reserve = AddVersion(db, 2, "НГР-ПП-2-(2.5-4А)-Рх");
+
+        var found = Find(db, "НГР");
+        Assert.Contains(archive, found);          // «архив» не должен прятаться из-за «рх» внутри
+        Assert.DoesNotContain(reserve, found);    // а вот настоящий «Рх» — прячется
+    }
+
+    /// <summary>Границей считается любой разделитель: дефис, скобка, край строки. Иначе «Рх» в
+    /// «НГР-ПП-2-(2.5-4А)-Рх» не нашлось бы как слово и правило не сработало бы вовсе.</summary>
+    [Theory]
+    [InlineData("НГР-ПП-2-(2.5-4А)-Рх", true)]
+    [InlineData("Рх НГР", true)]
+    [InlineData("НГР (Рх)", true)]
+    [InlineData("архив", false)]
+    [InlineData("сверху", false)]
+    [InlineData("верхний предел", false)]
+    public void BoundaryRules_AreWhatOneWouldExpect(string text, bool matches)
+    {
+        var words = new List<string> { "Рх" };
+        // Пустой запрос: если слово в тексте есть как слово — прячем.
+        Assert.Equal(matches, FwOnDemandTerms.ShouldHide(words, text, ""));
+    }
+
     [Fact]
     public void Rule_IsExpressedPlainly()
     {

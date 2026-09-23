@@ -169,7 +169,11 @@ public static class SearchService
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         // Пустой запрос с заданными фильтрами — осмысленный «покажи всё такое», этот случай
         // разбирает сам Database.SearchFwVersions; пустой запрос без фильтров ничего не ищет.
-        if (tokens.Length == 0 && (filters is null || filters.IsEmpty)) return new();
+        //
+        // Исключение — галка «Показывать все версии»: с ней пустой запрос означает ровно то, что на
+        // ней написано, «показать всё, что есть». Без этой оговорки отбор обрывался ЗДЕСЬ, до базы,
+        // и галка при пустом поле молчала — то есть не работала в самом нужном случае.
+        if (tokens.Length == 0 && (filters is null || filters.IsEmpty) && !showAllVersions) return new();
 
         var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold,
             usageMultiplier, showAllVersions);

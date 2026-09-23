@@ -110,6 +110,7 @@ public partial class EditFirmwareDialog : Window
         if (!string.IsNullOrEmpty(v.Execution)) executions.Insert(1, v.Execution);
         ExecutionCombo.ItemsSource = executions;
         ExecutionCombo.Text = v.Execution;
+        RefreshOnDemandHint();
 
         // Позволяет (пере)выбрать, какой файл внутри загруженной папки открывается по кнопкам карточки
         // — например, при загрузке в папке не было файла с узнаваемым расширением и выбрался не тот
@@ -735,6 +736,35 @@ public partial class EditFirmwareDialog : Window
 
         _extraRows.Add(row);
         ExtraFilesList.Children.Add(grid);
+    }
+
+    /// <summary>Какие слова-исключения уже действуют на ЭТУ прошивку. Считается тем же правилом,
+    /// что и при поиске (FwOnDemandTerms), иначе подсказка врала бы: показывала одно, а прятало
+    /// другое.</summary>
+    private void RefreshOnDemandHint()
+    {
+        var haystack = string.Join(" ", new[]
+        {
+            _record.GroupName, _record.SubtypeName, _record.SubtypeFolder, _record.CtrlName,
+            _record.Tags, _record.Execution,
+        }.Where(x => !string.IsNullOrEmpty(x)));
+
+        var hits = _db.GetOnDemandWords()
+            .Where(w => FwOnDemandTerms.ShouldHide(new[] { w }, haystack, ""))
+            .ToList();
+
+        OnDemandWordsHint.Text = hits.Count == 0
+            ? "Сейчас на эту прошивку ничего не действует — она находится как обычно. Слово добавляется в общий список и подействует на все прошивки, где оно есть как отдельное слово (внутри других слов не срабатывает)."
+            : $"Сейчас действует: {string.Join(", ", hits)}. Эта прошивка попадёт в выдачу, только если в запросе есть одно из этих слов. Убрать — в Настройки → Теги.";
+    }
+
+    private void AddOnDemandWord_Click(object sender, RoutedEventArgs e)
+    {
+        var word = FwOnDemandTerms.Normalize(OnDemandWordInput.Text);
+        if (word.Length == 0) return;
+        _db.AddOnDemandWord(word);
+        OnDemandWordInput.Clear();
+        RefreshOnDemandHint();
     }
 
     private void OpenExtraFile(FwAttachment attachment)

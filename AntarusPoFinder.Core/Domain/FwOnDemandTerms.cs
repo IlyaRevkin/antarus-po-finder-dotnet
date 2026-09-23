@@ -36,14 +36,46 @@ public static class FwOnDemandTerms
         {
             if (string.IsNullOrWhiteSpace(word)) continue;
             var w = word.Trim();
-            if (!haystack.Contains(w, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!ContainsWord(haystack, w)) continue;
             // Слово есть у прошивки. Показываем, только если человек его и спросил.
-            if (string.IsNullOrEmpty(query) || !query.Contains(w, StringComparison.OrdinalIgnoreCase))
-                return true;
+            if (!ContainsWord(query, w)) return true;
         }
 
         return false;
     }
+
+    /// <summary>Слово встречается КАК СЛОВО, а не куском другого слова.
+    ///
+    /// ⚠️ Здесь была настоящая беда, и ровно та, на которой в этом коде уже обжигались с типами
+    /// пуска («ПЧ» внутри «КПЧ»). Сравнение шло простой подстрокой, и слово-исключение «Рх»
+    /// совпадало внутри «а-Рх-ив», «све-рх», «ве-рх-ний» — то есть пряталась уйма прошивок, к
+    /// которым оно никакого отношения не имеет, и найти их не получалось уже ничем. Отсюда жалоба
+    /// «добавляю исключение — нужная прошивка перестаёт находиться при любых запросах».
+    ///
+    /// Границей считается всё, что не буква и не цифра: пробел, дефис, точка, скобка, край строки.
+    /// Поэтому «Рх» находится в «НГР-ПП-2-(2.5-4А)-Рх» (после дефиса и до конца) и не находится
+    /// в «архив». Подчёркивание границей НЕ считается: в именах файлов оно работает как часть
+    /// слова, а не как разделитель.</summary>
+    private static bool ContainsWord(string? text, string word)
+    {
+        if (string.IsNullOrEmpty(text) || word.Length == 0) return false;
+
+        var from = 0;
+        while (true)
+        {
+            var at = text.IndexOf(word, from, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return false;
+
+            var beforeOk = at == 0 || IsBoundary(text[at - 1]);
+            var end = at + word.Length;
+            var afterOk = end >= text.Length || IsBoundary(text[end]);
+            if (beforeOk && afterOk) return true;
+
+            from = at + 1;
+        }
+    }
+
+    private static bool IsBoundary(char c) => !char.IsLetterOrDigit(c) && c != '_';
 
     /// <summary>Привести введённое к хранимому виду: обрезать края, схлопнуть пробелы. Больше
     /// ничего — само слово принадлежит человеку.</summary>
