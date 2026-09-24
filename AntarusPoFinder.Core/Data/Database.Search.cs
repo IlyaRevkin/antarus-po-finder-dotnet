@@ -194,7 +194,15 @@ public partial class Database
         // Сверяемся с ЦЕЛОЙ фразой запроса, а не с разобранными словами: «Рх» в
         // «НГР-ПП-2-(2.5-4А)-Рх» не отдельное слово, разделителем там дефис.
         var askedText = string.IsNullOrWhiteSpace(phrase) ? string.Join(" ", tokens) : phrase;
-        var onDemandWords = showAllVersions ? new List<string>() : GetOnDemandWords();
+
+        // Слова-исключения действуют ТОЛЬКО на текстовый запрос. Пустой запрос — это либо «покажи
+        // всё по фильтрам», либо галка «показывать все версии», и в обоих случаях человек прямо
+        // просит показать имеющееся: прятать от него что-то значило бы не ответить на заданный
+        // вопрос. Раньше при пустом запросе пряталось всё, у чего слово нашлось, — и отбор по одним
+        // фильтрам мог не найти вообще ничего. Ровно жалоба: «прошивка не ищется, когда я ничего не
+        // ввёл и только указываю фильтры».
+        var textAsked = !string.IsNullOrWhiteSpace(askedText);
+        var onDemandWords = showAllVersions || !textAsked ? new List<string>() : GetOnDemandWords();
         var rows = SearchIndex()
             .Where(r => PassesFilters(r, filters))
             .Where(r => !FwOnDemandTerms.ShouldHide(onDemandWords, SearchableTextOf(r), askedText))

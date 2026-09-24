@@ -741,6 +741,11 @@ public partial class EditFirmwareDialog : Window
     /// <summary>Какие слова-исключения уже действуют на ЭТУ прошивку. Считается тем же правилом,
     /// что и при поиске (FwOnDemandTerms), иначе подсказка врала бы: показывала одно, а прятало
     /// другое.</summary>
+    /// <summary>Что действует на ЭТУ прошивку — и весь список слов, чтобы любое можно было убрать.
+    ///
+    /// Показывать только совпавшее нельзя: слово заводится из карточки, а подействовать может на
+    /// соседнюю запись — тогда оно тут же пропадает с глаз, и убрать его негде. Именно на это и
+    /// пожаловались. Поэтому подпись говорит про эту прошивку, а список ниже — обо всех словах.</summary>
     private void RefreshOnDemandHint()
     {
         var haystack = string.Join(" ", new[]
@@ -749,13 +754,51 @@ public partial class EditFirmwareDialog : Window
             _record.Tags, _record.Execution,
         }.Where(x => !string.IsNullOrEmpty(x)));
 
-        var hits = _db.GetOnDemandWords()
-            .Where(w => FwOnDemandTerms.ShouldHide(new[] { w }, haystack, ""))
-            .ToList();
+        var all = _db.GetOnDemandWords();
+        var hits = all.Where(w => FwOnDemandTerms.ShouldHide(new[] { w }, haystack, "")).ToList();
 
-        OnDemandWordsHint.Text = hits.Count == 0
-            ? "Сейчас на эту прошивку ничего не действует — она находится как обычно. Слово добавляется в общий список и подействует на все прошивки, где оно есть как отдельное слово (внутри других слов не срабатывает)."
-            : $"Сейчас действует: {string.Join(", ", hits)}. Эта прошивка попадёт в выдачу, только если в запросе есть одно из этих слов. Убрать — в Настройки → Теги.";
+        OnDemandWordsHint.Text = all.Count == 0
+            ? "Список пуст — все прошивки находятся как обычно. Слово добавляется в общий список и действует на все записи, где встречается как отдельное слово (внутри других слов не срабатывает)."
+            : hits.Count == 0
+                ? "На эту прошивку сейчас ничего не действует — она находится как обычно. Ниже весь список: слово можно убрать, если завели по ошибке."
+                : $"Действует на эту прошивку: {string.Join(", ", hits)} — она попадёт в выдачу, только если в запросе есть одно из этих слов.";
+
+        OnDemandWordsPanel.Children.Clear();
+        foreach (var word in all)
+        {
+            var captured = word;
+            var affects = hits.Contains(captured);
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var label = new TextBlock { Text = captured, VerticalAlignment = VerticalAlignment.Center };
+            // Слово, которое прячет ИМЕННО ЭТУ прошивку, выделено: иначе в списке из десятка слов не
+            // видно, какое из них сейчас мешает.
+            if (affects) label.FontWeight = FontWeights.SemiBold;
+            row.Children.Add(label);
+
+            var remove = new Button
+            {
+                Content = "×",
+                Style = (Style)FindResource("SecondaryButton"),
+                Margin = new Thickness(6, 0, 0, 0),
+                Padding = new Thickness(6, 0, 6, 0),
+                ToolTip = "Убрать слово из общего списка. Прошивки не меняются — они снова начнут находиться как раньше.",
+            };
+            remove.Click += (_, _) =>
+            {
+                _db.DeleteOnDemandWord(captured);
+                RefreshOnDemandHint();
+            };
+            row.Children.Add(remove);
+
+            OnDemandWordsPanel.Children.Add(new Border
+            {
+                Style = (Style)FindResource("CardBorder"),
+                Padding = new Thickness(10, 4, 6, 4),
+                Margin = new Thickness(0, 0, 6, 6),
+                Child = row,
+            });
+        }
     }
 
     private void AddOnDemandWord_Click(object sender, RoutedEventArgs e)

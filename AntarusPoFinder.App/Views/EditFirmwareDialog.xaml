@@ -62,7 +62,13 @@
             <Button Grid.Column="1" Content="Добавить слово" Style="{StaticResource SecondaryButton}"
                     Click="AddOnDemandWord_Click"/>
         </Grid>
-        <TextBlock x:Name="OnDemandWordsHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+        <TextBlock x:Name="OnDemandWordsHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+        <!-- Список показывается ЦЕЛИКОМ, а не только то, что действует на эту прошивку. Так и надо:
+             слово заводится отсюда, а подействовать может на соседнюю запись — и если показывать
+             лишь совпавшее, только что заведённое слово исчезает с глаз, и убрать его негде.
+             Ровно на это и пожаловались: «не могу убрать слово-исключение, оно нигде не
+             отображается». -->
+        <WrapPanel x:Name="OnDemandWordsPanel" Margin="0,0,0,16"/>
 
         <!-- Набор подтипов шкафа задавался только в момент загрузки (чек-комбобокс «Подтипы» в
              «Загрузке ПО»): ошибся — и переделать было нечем, кроме повторной заливки. Здесь тот же

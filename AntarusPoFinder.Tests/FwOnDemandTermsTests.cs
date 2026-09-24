@@ -188,6 +188,47 @@ public class FwOnDemandTermsTests
         Assert.Equal(matches, FwOnDemandTerms.ShouldHide(words, text, ""));
     }
 
+    /// <summary>Случай Ильи 24.09.2026: «есть пожарка, вставляю её название в тег, потом ищу — и она
+    /// не находится. Такая проблема стала именно после появления слов-исключений».</summary>
+    [Fact]
+    public void Repro_PastedCabinetNameInTag_IsStillFound()
+    {
+        using var file = new TempDb();
+        using var db = new Database(file.Path);
+        db.AddOnDemandWord("Рх");
+
+        var fw = AddVersion(db, 1, "ПЖ-ПП-2-(2.5-4А)-Рх-Ст");
+
+        Assert.Contains(fw, Find(db, "ПЖ-ПП-2-(2.5-4А)-Рх-Ст"));
+    }
+
+    /// <summary>Жалоба Ильи 24.09.2026: «прошивка не ищется, когда я ничего не ввёл и только
+    /// указываю фильтры».
+    ///
+    /// Слова-исключения применялись и к пустому запросу: при отборе по одним фильтрам пряталось
+    /// всё, у чего слово нашлось, — и выдача оказывалась пустой. Пустой запрос это прямая просьба
+    /// «покажи, что есть», и прятать от неё нечего.</summary>
+    [Fact]
+    public void FiltersWithoutText_ShowEverything_EvenWithExclusionWords()
+    {
+        using var file = new TempDb();
+        using var db = new Database(file.Path);
+        db.AddOnDemandWord("Рх");
+
+        var plain = AddVersion(db, 1, "ПЖ-ПП-2");
+        var reserve = AddVersion(db, 2, "ПЖ-ПП-2-Рх");
+
+        var group = db.GetAllEquipmentGroups().First(g => g.Name == "НГР");
+        var subtype = db.GetSubtypesForGroup(group.Id!.Value).First(s => s.Name == "КНС");
+        var byFilter = db.SearchFwVersions(
+            System.Array.Empty<string>(), phrase: "",
+            filters: new FirmwareSearchFilters { SubtypeId = subtype.Id!.Value })
+            .Select(r => r.Row.Id).ToList();
+
+        Assert.Contains(plain, byFilter);
+        Assert.Contains(reserve, byFilter);
+    }
+
     [Fact]
     public void Rule_IsExpressedPlainly()
     {
