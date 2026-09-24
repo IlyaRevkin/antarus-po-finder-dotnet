@@ -149,7 +149,17 @@
                                         BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}"/>
                                 <TextBlock x:Name="AccentPreviewText" VerticalAlignment="Center" Margin="8,0,0,0"
                                            Style="{StaticResource MutedText}"/>
-                            </StackPanel>
+                                <!-- Обучение живёт здесь, а не в меню. В меню кнопка висела всегда и
+                                 занимала место наравне с тем, чем пользуются каждый день, хотя нужна
+                                 она один раз. Теперь у новичка она несколько минут видна в меню и
+                                 уходит сама, а пройти заново можно отсюда — осознанно. -->
+                            <Separator Margin="0,14,0,10"/>
+                            <TextBlock Text="ОБУЧЕНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="Короткий тур по разделам программы. Показывается сам при первом запуске; отсюда его можно пройти ещё раз в любой момент."/>
+                            <Button Content="Пройти обучение" Style="{StaticResource SecondaryButton}"
+                                    HorizontalAlignment="Left" Click="RunOnboarding_Click"/>
+                        </StackPanel>
                             <Button Content="Вернуть исходный цвет" HorizontalAlignment="Left" Click="AccentReset_Click"
                                     Style="{StaticResource SecondaryButton}"/>
                         </StackPanel>

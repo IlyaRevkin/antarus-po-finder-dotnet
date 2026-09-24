@@ -44,6 +44,11 @@ public class HierarchyResult
     /// чьи теги совпали с запросом, — поэтому карточке нужно показать, ЧТО ИМЕННО совпало: без пометки
     /// наладчик видит обычную карточку прошивки и не понимает, почему у неё «не те» теги.</summary>
     public string ConfigName { get; init; } = "";
+
+    /// <summary>ИСПОЛНЕНИЕ прошивки («2 насоса», «ПЧ Danfoss») — см. FwExecution. На карточке оно
+    /// нужнее номера конфигурации: наладчик ищет шкаф по тому, чем тот отличается, а не по тому,
+    /// каким по счёту вариантом его завели.</summary>
+    public string Execution { get; init; } = "";
     public DateTime? UploadDate { get; init; }
     public int Score { get; init; }
     public int FwVersionId { get; init; }
@@ -220,6 +225,7 @@ public static class SearchService
             Description = row.Description,
             Tags = row.Tags,
             ConfigName = row.ConfigName,
+            Execution = row.Execution,
             UploadDate = uploadDate,
             Score = score,
             UsageCount = usageCount,

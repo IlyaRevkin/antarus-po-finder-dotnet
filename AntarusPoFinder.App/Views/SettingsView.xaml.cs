@@ -720,6 +720,12 @@ public partial class SettingsView : UserControl
         FwUsageThresholdInput.Text = _services.Cfg.FwUsageThreshold().ToString();
         RefreshUsageMultiplierUi();
         RefreshUsageStats();
+        // ⚠️ InitThemeUi обязателен здесь. Он существовал, но не вызывался ниоткуда — и переключатель
+        // темы всегда рисовался в положении «светлая», какой бы тема ни была. Со стороны это выглядит
+        // так: «у меня тёмная тема, а ползунок в светлой; нажимаю — ползунок встаёт правильно, но
+        // больше ничего не меняется». Ничего и не могло: нажатие ставило ту тему, которая и так уже
+        // стояла.
+        InitThemeUi();
         InitAccentUi();
     }
 
@@ -1197,6 +1203,14 @@ public partial class SettingsView : UserControl
         DarkThemeCheck.IsChecked = ThemeManager.Current == "dark";
         ThemeLabelText.Text = ThemeManager.Current == "dark" ? "Тёмная тема" : "Светлая тема";
         _loadingGeneral = false;
+    }
+
+    /// <summary>«Пройти обучение» — тот же тур, что показывается при первом запуске. Живёт в
+    /// настройках, потому что нужен редко и осознанно; в меню кнопка остаётся только у новичка и
+    /// уходит сама (см. MainWindow.SetupOnboardingButton).</summary>
+    private void RunOnboarding_Click(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow main) main.RunOnboardingAgain();
     }
 
     private void DarkTheme_Changed(object sender, RoutedEventArgs e)

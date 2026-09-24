@@ -1,3 +1,4 @@
+using System.Windows.Threading;
 ﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
@@ -168,9 +169,46 @@ public partial class MainWindow : Window
         ContentRendered -= MainWindow_ContentRendered;
         if (!_services.Cfg.OnboardingShown())
             ShowOnboarding(markAsShown: true);
+        SetupOnboardingButton();
     }
 
+    /// <summary>Кнопка «Обучение» в меню — только для того, кто здесь впервые.
+    ///
+    /// Раньше она висела в списке всегда. Человеку, который работает в программе каждый день, она
+    /// не нужна ни разу, а место в меню занимает наравне с тем, чем пользуются постоянно. Поэтому:
+    /// у новичка она видна и уходит сама через несколько минут (успел заметить — успел нажать), у
+    /// остальных её нет вовсе. Пройти обучение заново можно из Настройки → Общие, и это честнее:
+    /// редкое действие живёт там, где его будут искать осознанно.
+    ///
+    /// Отсчёт от ПОЯВЛЕНИЯ окна, а не от запуска: до первой отрисовки кнопки на экране ещё нет.</summary>
+    private void SetupOnboardingButton()
+    {
+        // Признак «уже показывали» ставится тем же обучением при первом запуске, поэтому к этому
+        // месту он у новичка уже true. Отличаем по тому, показывали ли обучение ПРЯМО СЕЙЧАС.
+        if (!_onboardingJustShown)
+        {
+            OnboardingNavButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        OnboardingNavButton.Visibility = Visibility.Visible;
+        var hide = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        hide.Tick += (_, _) =>
+        {
+            hide.Stop();
+            OnboardingNavButton.Visibility = Visibility.Collapsed;
+        };
+        hide.Start();
+    }
+
+    /// <summary>Обучение показали в этом запуске — значит человек здесь впервые.</summary>
+    private bool _onboardingJustShown;
+
     private void ShowOnboarding_Click(object sender, RoutedEventArgs e) => ShowOnboarding(markAsShown: false);
+
+    /// <summary>Запустить тур из настроек. Отдельный метод, а не публичный ShowOnboarding: снаружи
+    /// нужно ровно «пройти заново», без выбора, отмечать ли показ.</summary>
+    public void RunOnboardingAgain() => ShowOnboarding(markAsShown: false);
 
     /// <summary>Наклейки открываются окном поверх текущей страницы: наладчик печатает наклейку, не
     /// теряя из виду то, чем занимался (в отличие от навигации, которая сбрасывает страницу поиска).</summary>
@@ -196,6 +234,7 @@ public partial class MainWindow : Window
 
     private void ShowOnboarding(bool markAsShown)
     {
+        if (markAsShown) _onboardingJustShown = true;
         var originalPageId = _vm.CurrentPageId;
 
         var steps = new List<OnboardingStep>
