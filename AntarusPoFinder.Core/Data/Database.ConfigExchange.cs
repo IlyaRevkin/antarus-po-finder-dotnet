@@ -272,7 +272,7 @@ public partial class Database
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
                    fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
-                   fv.manual_current,
+                   fv.manual_current, fv.status_changed_at,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -298,6 +298,7 @@ public partial class Database
                 ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
                 Execution = GetString(r, "execution"),
                 ManualCurrent = GetInt(r, "manual_current") != 0,
+                StatusChangedAt = GetString(r, "status_changed_at"),
                 GroupName = GetString(r, "group_name"),
                 SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                 CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1590,7 +1591,25 @@ public partial class Database
                 // бывает, отметку ставят отдельным действием, ничего больше не трогая.
                 var markArrives = fv.ManualCurrent && !existingRow.ManualCurrent;
 
-                var advances = (localStatus == "active" && incomingStatus != "active") ||
+                // Состояние версии (активна / откатана) переносится ПО ВРЕМЕНИ ПРАВКИ, а не
+                // монотонно. Прежнее правило звучало «активная может стать откатанной, обратно
+                // никогда» — и получалась дверь в одну сторону: вернул версию в строй, отправил
+                // изменения, а первый же снимок машины, которая об отмене ещё не знает, откатывал её
+                // снова. Именно так выглядело «делаю актуальной новую, она откатывается сама».
+                //
+                // У снимка со старой версии программы отметки нет — тогда ведём себя как раньше
+                // (только вперёд), иначе чужое молчание отменяло бы наш свежий откат.
+                var incomingStamp = fv.StatusChangedAt ?? "";
+                var localStamp = existingRow.StatusChangedAt ?? "";
+                var statusDecidedByTime = incomingStamp.Length > 0 || localStamp.Length > 0;
+                var incomingStatusWins = statusDecidedByTime
+                    ? string.CompareOrdinal(incomingStamp, localStamp) > 0
+                    : localStatus == "active";
+                var newStatus = incomingStatusWins ? incomingStatus : localStatus;
+                var newStatusStamp = incomingStatusWins && incomingStamp.Length > 0 ? incomingStamp : localStamp;
+                var statusAdvances = newStatus != localStatus;
+
+                var advances = statusAdvances ||
                                (localReleased == 0 && fv.Released != 0) ||
                                (localArchived == 0 && fv.Archived != 0) || fieldsChanged || markArrives;
                 if (!advances) continue;
@@ -1600,7 +1619,8 @@ public partial class Database
                 ExecuteNonQuery("""
                     UPDATE fw_versions SET status=@st, released=@rel, archived=@arch, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
-                        description=@desc, launch_types=@lt, tags=@tags, execution=@execution
+                        description=@desc, launch_types=@lt, tags=@tags, execution=@execution,
+                        status_changed_at=@st_at
                     WHERE id=@id
                     """, cmd =>
                 {
@@ -1608,7 +1628,8 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@desc", newDesc);
                     cmd.Parameters.AddWithValue("@lt", newLaunchTypes);
                     cmd.Parameters.AddWithValue("@tags", newTags);
-                    cmd.Parameters.AddWithValue("@st", localStatus == "active" ? incomingStatus : localStatus);
+                    cmd.Parameters.AddWithValue("@st", newStatus);
+                    cmd.Parameters.AddWithValue("@st_at", newStatusStamp);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
                     cmd.Parameters.AddWithValue("@arch", localArchived != 0 ? 1 : fv.Archived);
                     cmd.Parameters.AddWithValue("@io", newIoMap);
@@ -2217,7 +2238,7 @@ public partial class Database
         string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
         string Description, string LaunchTypes, string Tags,
         int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution,
-        bool ManualCurrent);
+        bool ManualCurrent, string StatusChangedAt);
 
     /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
     /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
@@ -2239,7 +2260,7 @@ public partial class Database
             id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
             executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
             description, launch_types, tags, subtype_id, controller_id, version_raw, config_name,
-            execution, manual_current
+            execution, manual_current, status_changed_at
             """;
 
         if (!string.IsNullOrEmpty(syncId))
@@ -2278,7 +2299,7 @@ public partial class Database
         GetString(r, "deleted_at"), GetString(r, "disk_path"),
         GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
         GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"),
-        GetString(r, "execution"), GetInt(r, "manual_current") != 0);
+        GetString(r, "execution"), GetInt(r, "manual_current") != 0, GetString(r, "status_changed_at"));
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {

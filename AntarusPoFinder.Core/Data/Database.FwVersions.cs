@@ -900,8 +900,12 @@ public partial class Database
         // состояния (FwHistoryStatus.Labels и так не рассматривает откатанные версии в качестве
         // текущих, но без явного сброса отметка «висела» бы на записи и молча ожила бы, если её
         // потом вернуть в активные через UnrollbackFwVersion).
-        ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back', manual_current=0 WHERE id=@id",
-            cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        ExecuteNonQuery("UPDATE fw_versions SET status='rolled_back', manual_current=0, status_changed_at=@t WHERE id=@id",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@t", NowIsoPrecise());
+                cmd.Parameters.AddWithValue("@id", fwVersionId);
+            });
 
         string newDiskPath = v.DiskPath, newHmiPath = v.HmiPath;
         try { newDiskPath = Infrastructure.FileSystemHelpers.MarkRolledBackOnDisk(v.DiskPath); } catch { /* best effort */ }
@@ -931,7 +935,11 @@ public partial class Database
         var v = GetFwVersionById(fwVersionId);
         if (v is null || v.Status != "rolled_back") return false;
 
-        ExecuteNonQuery("UPDATE fw_versions SET status='active' WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", fwVersionId));
+        ExecuteNonQuery("UPDATE fw_versions SET status='active', status_changed_at=@t WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@t", NowIsoPrecise());
+            cmd.Parameters.AddWithValue("@id", fwVersionId);
+        });
         return true;
     }
 

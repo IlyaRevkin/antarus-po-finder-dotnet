@@ -110,6 +110,12 @@ public class ExportedFwVersion
     /// версия считается текущей, когда более свежая по номеру забракована. Пока она не ездила,
     /// отметка жила только на машине того, кто её поставил, — «делает текущей, а она откатывается».</summary>
     [JsonPropertyName("manual_current")] public bool ManualCurrent { get; set; }
+
+    /// <summary>Когда в последний раз меняли состояние версии — откатили или вернули в строй.
+    /// По ней решается, чьё состояние новее: без этого перенос был односторонним, откат уезжал ко
+    /// всем, а его отмена нет, и вернувшаяся в строй версия откатывалась снова первым же чужим
+    /// снимком. Пусто у снимков со старых версий программы — тогда правило прежнее, монотонное.</summary>
+    [JsonPropertyName("status_changed_at")] public string StatusChangedAt { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }
