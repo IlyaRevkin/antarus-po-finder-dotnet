@@ -28,9 +28,18 @@ public partial class TicketDetailDialog : Window
         _ticket = ticket;
         _services = services;
 
-        HeaderText.Text = $"{TicketType.Label(ticket.Type)} — {TicketStatus.Label(ticket.Status)}";
+        // Критичность в самом заголовке, а не отдельной строчкой ниже: человек, открывший тикет, должен
+        // понять степень беды раньше, чем дочитает описание до конца.
+        var severity = FwBugSeverity.Label(ticket.Severity);
+        HeaderText.Text = severity.Length > 0
+            ? $"{TicketType.Label(ticket.Type)} ({severity.ToLowerInvariant()}) — {TicketStatus.Label(ticket.Status)}"
+            : $"{TicketType.Label(ticket.Type)} — {TicketStatus.Label(ticket.Status)}";
         var created = DateTime.TryParse(ticket.CreatedAt, out var dt) ? dt.ToString("dd.MM.yyyy HH:mm") : ticket.CreatedAt;
         MetaText.Text = $"Автор: {ticket.CreatedBy} ({RolesConfig.RoleLabel(ticket.CreatedByRole)}) · Создан: {created}";
+        // Подпись прошивки — слепок на момент жалобы (см. FwBugLabel), поэтому показывается как есть,
+        // а не пересобирается по текущему состоянию базы. Прошивки может на этой машине и не быть.
+        if (!string.IsNullOrWhiteSpace(ticket.FwLabel))
+            MetaText.Text += "\n" + $"Прошивка: {ticket.FwLabel}";
         BodyText.Text = ticket.Text;
 
         if (!string.IsNullOrEmpty(root) && Directory.Exists(root))

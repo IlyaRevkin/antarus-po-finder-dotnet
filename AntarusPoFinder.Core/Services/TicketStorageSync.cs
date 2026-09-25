@@ -111,7 +111,8 @@ public static class TicketStorageSync
     public sealed record Payload(
         int Schema, string Id, string Type, string Text, string Status,
         string CreatedBy, string CreatedByRole, string CreatedAt, string UpdatedAt,
-        List<CommentPayload>? Comments = null);
+        List<CommentPayload>? Comments = null,
+        string? Severity = null, string? FwSyncId = null, string? FwLabel = null);
 
     /// <summary>Реплика переписки внутри объекта тикета. Отдельным объектом в хранилище реплики не
     /// лежат намеренно: их всегда читают вместе с тикетом, а один объект вместо десятка — это и
@@ -134,7 +135,12 @@ public static class TicketStorageSync
     public static string Serialize(Ticket t, IReadOnlyList<TicketComment> comments) => JsonSerializer.Serialize(
         new Payload(Schema, t.Id, t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt, t.UpdatedAt,
             comments.Count == 0 ? null
-                : comments.Select(c => new CommentPayload(c.Id, c.Author, c.AuthorRole, c.Text, c.CreatedAt)).ToList()),
+                : comments.Select(c => new CommentPayload(c.Id, c.Author, c.AuthorRole, c.Text, c.CreatedAt)).ToList(),
+            // Пустые поля не пишем вовсе (null), чтобы обычный тикет в хранилище выглядел ровно
+            // так же, как до появления багов прошивок: файлы читают глазами и правят руками.
+            string.IsNullOrEmpty(t.Severity) ? null : t.Severity,
+            string.IsNullOrEmpty(t.FwSyncId) ? null : t.FwSyncId,
+            string.IsNullOrEmpty(t.FwLabel) ? null : t.FwLabel),
         JsonOptions);
 
     /// <summary>Разбор объекта из хранилища. Терпимый: незнакомые поля игнорируются, отсутствующий
@@ -160,6 +166,9 @@ public static class TicketStorageSync
                 CreatedByRole = p.CreatedByRole ?? "",
                 CreatedAt = createdAt,
                 UpdatedAt = string.IsNullOrWhiteSpace(p.UpdatedAt) ? createdAt : p.UpdatedAt.Trim(),
+                Severity = FwBugSeverity.Normalize(p.Severity),
+                FwSyncId = (p.FwSyncId ?? "").Trim(),
+                FwLabel = (p.FwLabel ?? "").Trim(),
             };
         }
         catch (JsonException) { return null; }
@@ -205,6 +214,7 @@ public static class TicketStorageSync
     private static string NormalizeType(string? type) => (type ?? "").Trim().ToLowerInvariant() switch
     {
         TicketType.Bug => TicketType.Bug,
+        TicketType.FwBug => TicketType.FwBug,
         TicketType.Suggestion => TicketType.Suggestion,
         _ => TicketType.Other,
     };

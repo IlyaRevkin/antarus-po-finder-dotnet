@@ -746,6 +746,7 @@ public partial class SearchView : UserControl
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
+            card.FwBugRequested += (s, _) => ReportFwBug(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
             return (card, result, flags);
@@ -2436,6 +2437,24 @@ public partial class SearchView : UserControl
     /// пока окно держало программу, «нажали второй раз» было невозможно, а теперь два окна с одним и
     /// тем же списком расходились бы после первой же правки.</summary>
     private readonly Dictionary<(int SubtypeId, int ControllerId), HistoryDialog> _historyWindows = new();
+
+    /// <summary>Жучок на карточке: завести тикет о баге в этой прошивке.
+    ///
+    /// Прошивка подставляется сама и двумя способами сразу: переносимым sync_id для программы и
+    /// подписью для человека — см. FwBugLabel. Пустой sync_id (старая запись, ещё не получившая его) не повод
+    /// отказывать в жалобе: останется одна подпись, и этого хватит, чтобы понять, о чём речь.</summary>
+    private void ReportFwBug(HierarchyResult result)
+    {
+        var label = FwBugLabel.Build(result.Name, result.VersionRaw, result.Execution);
+        var dlg = new FwBugDialog(label) { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        var syncId = _services.Db.GetFwVersionSyncId(result.FwVersionId);
+        TicketSyncService.CreateTicket(_services, TicketType.FwBug, dlg.TicketText, dlg.Severity, syncId, label);
+
+        AppMessageBox.Show("Тикет заведён. Программист увидит его во вкладке «Баги прошивок».",
+            "Баг в прошивке", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 
     private void ShowHistory(HierarchyResult result)
     {

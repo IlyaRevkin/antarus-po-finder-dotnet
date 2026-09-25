@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AntarusPoFinder.App.Services;
@@ -20,6 +21,38 @@ public partial class TicketsView : UserControl
     {
         public required Ticket Ticket { get; init; }
         public string TypeLabel => TicketType.Label(Ticket.Type);
+
+        /// <summary>Критичность словом — пусто у всего, кроме багов прошивок.</summary>
+        public string SeverityLabel => FwBugSeverity.Label(Ticket.Severity);
+        public int SeverityOrder => FwBugSeverity.SortOrder(Ticket.Severity);
+
+        /// <summary>Подпись прошивки, снятая в момент жалобы (см. FwBugLabel).</summary>
+        public string FwLabel => Ticket.FwLabel;
+
+        /// <summary>Цвет строки. Просьба владельца дословно: «Баг прошивок красным должен быть…
+        /// предложение зелёным… критичность бага, как красный оранжевый жёлтый, 3 уровня».
+        ///
+        /// У бага прошивки цвет берётся ПО КРИТИЧНОСТИ, а не по типу: иначе все три уровня выглядели бы
+        /// одинаково красными и шкала не значила бы ничего. Закрытый тикет не красится вовсе: красная строка
+        /// о решённой беде — ложная тревога, а именно от неё цветовые списки и перестают читать.</summary>
+        public string RowBrushKey
+        {
+            get
+            {
+                if (Ticket.Status == TicketStatus.Closed) return "TextBrush";
+                if (Ticket.Type == TicketType.Suggestion) return "SuccessBrush";
+                if (Ticket.Type == TicketType.FwBug)
+                    return Ticket.Severity switch
+                    {
+                        FwBugSeverity.Critical => "ErrorBrush",
+                        FwBugSeverity.Major => "WarningBrush",
+                        FwBugSeverity.Minor => "CautionBrush",
+                        _ => "ErrorBrush",
+                    };
+                if (Ticket.Type == TicketType.Bug) return "ErrorBrush";
+                return "TextBrush";
+            }
+        }
         public string Text => Ticket.Text;
         public string StatusLabel => TicketStatus.Label(Ticket.Status);
         /// <summary>По чему столбец «Статус» на самом деле сортируется — см. TicketStatus.SortOrder.</summary>
@@ -61,7 +94,10 @@ public partial class TicketsView : UserControl
         _services = services;
         _host = host;
 
-        foreach (var (id, label) in TicketType.All)
+        // «Баг прошивки» здесь НЕ предлагается намеренно: такой тикет осмыслен только вместе со
+        // ссылкой на конкретную прошивку, а её может подставить только карточка выдачи (жучок). Заведённый
+        // отсюда, он был бы багом неизвестно чего — и попал бы программисту без самого главного.
+        foreach (var (id, label) in TicketType.All.Where(t => t.Id != TicketType.FwBug))
             TicketTypeCombo.Items.Add(new TicketTypeOption(id, label));
         TicketTypeCombo.SelectedIndex = 0;
 
@@ -79,9 +115,12 @@ public partial class TicketsView : UserControl
 
     private void Activate()
     {
-        ScopeHintText.Text = IsAdmin
-            ? "Видны все тикеты всех пользователей. Можно менять статус."
-            : "Видны только тикеты, созданные вами на любом из компьютеров (по имени пользователя Windows).";
+        ScopeHintText.Text = _services.Cfg.CurrentRole() switch
+        {
+            TicketVisibility.Administrator => "Видны все тикеты всех пользователей. Можно менять статус.",
+            TicketVisibility.Programmer => "Видны все баги прошивок — чьи бы они ни были, их можно взять в работу и закрыть, — и ваши собственные тикеты по программе.",
+            _ => "Видны только тикеты, созданные вами на любом из компьютеров (по имени пользователя Windows).",
+        };
 
         var root = _services.Cfg.RootPath();
         if (!string.IsNullOrEmpty(root) && System.IO.Directory.Exists(root))
@@ -151,9 +190,9 @@ public partial class TicketsView : UserControl
     private void ReloadGrid()
     {
         var all = _services.Db.GetTickets();
-        var mine = IsAdmin
-            ? all
-            : all.Where(t => string.Equals(t.CreatedBy, _services.CurrentUserName, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Отбор живёт в Core (TicketVisibility), а не здесь: правило «программист видит все баги
+        // прошивок» — правило доступа, и проверять его глазами по живому экрану — худший из способов.
+        var mine = TicketVisibility.Visible(all, _services.Cfg.CurrentRole(), _services.CurrentUserName);
 
         var autoCount = TicketAutoReports.Count(mine);
         ShowAutoReportsCheck.Content = autoCount > 0
@@ -202,7 +241,7 @@ public partial class TicketsView : UserControl
     private void UpdateActionButtons()
     {
         var selected = (TicketsGrid.SelectedItem as TicketRow)?.Ticket;
-        var canModerate = IsAdmin && selected is not null;
+        var canModerate = selected is not null && TicketVisibility.CanModerate(selected, _services.Cfg.CurrentRole());
 
         TakeInProgressBtn.Visibility = canModerate && selected!.Status != TicketStatus.InProgress ? Visibility.Visible : Visibility.Collapsed;
         CloseTicketBtn.Visibility = canModerate && selected!.Status != TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;

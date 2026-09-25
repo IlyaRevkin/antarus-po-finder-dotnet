@@ -70,8 +70,36 @@
         <DataGrid Grid.Row="4" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
                   VirtualizingPanel.ScrollUnit="Pixel"
                   IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
+            <!-- Цвет строки задан триггерами по ключу кисти (см. TicketRow.RowBrushKey), а не конвертером:
+                 так кисть остаётся DynamicResource и переживает смену темы без перерисовки списка руками. -->
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding RowBrushKey}" Value="ErrorBrush">
+                            <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding RowBrushKey}" Value="WarningBrush">
+                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding RowBrushKey}" Value="CautionBrush">
+                            <Setter Property="Foreground" Value="{DynamicResource CautionBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding RowBrushKey}" Value="SuccessBrush">
+                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Тип" Binding="{Binding TypeLabel}" Width="90"/>
+                <DataGridTextColumn Header="Тип" Binding="{Binding TypeLabel}" Width="110"/>
+                <DataGridTextColumn Header="Критичность" Binding="{Binding SeverityLabel}" SortMemberPath="SeverityOrder" Width="100"/>
+                <DataGridTextColumn Header="Прошивка" Binding="{Binding FwLabel}" Width="180">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Текст" Binding="{Binding Text}" Width="*">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">

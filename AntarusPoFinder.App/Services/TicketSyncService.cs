@@ -14,7 +14,10 @@ namespace AntarusPoFinder.App.Services;
 public record TicketEvent(
     string EventId, string TicketId, string EventType,
     string? TicketType, string? Text, string Status,
-    string CreatedBy, string CreatedByRole, string At);
+    string CreatedBy, string CreatedByRole, string At,
+    // Критичность и ссылка на прошивку — только у багов прошивок. Со значениями по умолчанию,
+    // чтобы события, лежащие на диске с прошлой версии, разбирались по-прежнему, а не терялись целиком.
+    string? Severity = null, string? FwSyncId = null, string? FwLabel = null);
 
 /// <summary>Синхронизация тикетов между машинами через тот же сетевой «Конфиг» канал, что и
 /// ConfigSyncService, но отдельным механизмом: ConfigSyncService каждый раз перезаписывает единый
@@ -40,7 +43,8 @@ public static class TicketSyncService
 
     public static (string Filename, string Payload) BuildCreateEvent(Ticket t)
     {
-        var ev = new TicketEvent(Guid.NewGuid().ToString(), t.Id, "create", t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt);
+        var ev = new TicketEvent(Guid.NewGuid().ToString(), t.Id, "create", t.Type, t.Text, t.Status, t.CreatedBy, t.CreatedByRole, t.CreatedAt,
+            t.Severity, t.FwSyncId, t.FwLabel);
         return (FileNameFor(ev), JsonSerializer.Serialize(ev));
     }
 
@@ -58,7 +62,13 @@ public static class TicketSyncService
     /// Недоступный диск здесь не ошибка: событие остаётся в очереди и уйдёт при следующем удобном
     /// случае (см. <see cref="FlushOutbox(AppServices,string)"/>) — тикет с машины, у которой всё
     /// отвалилось, обязан дойти, ведь именно про это он и заведён.</summary>
-    public static Ticket CreateTicket(AppServices services, string type, string text)
+    public static Ticket CreateTicket(AppServices services, string type, string text) =>
+        CreateTicket(services, type, text, "", "", "");
+
+    /// <summary>То же самое, но с критичностью и ссылкой на прошивку — для багов, заведённых жучком
+    /// на карточке выдачи. Отдельной перегрузкой, чтобы все прежние места создания тикетов остались нетронутыми.</summary>
+    public static Ticket CreateTicket(AppServices services, string type, string text,
+        string severity, string fwSyncId, string fwLabel)
     {
         var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff");
         var ticket = new Ticket
@@ -66,6 +76,9 @@ public static class TicketSyncService
             Id = Guid.NewGuid().ToString(),
             Type = type,
             Text = text,
+            Severity = FwBugSeverity.Normalize(severity),
+            FwSyncId = fwSyncId ?? "",
+            FwLabel = fwLabel ?? "",
             Status = TicketStatus.Open,
             CreatedBy = services.CurrentUserName,
             CreatedByRole = services.Cfg.CurrentRole(),
@@ -183,6 +196,9 @@ public static class TicketSyncService
                 CreatedByRole = ev.CreatedByRole,
                 CreatedAt = ev.At,
                 UpdatedAt = ev.At,
+                Severity = FwBugSeverity.Normalize(ev.Severity),
+                FwSyncId = ev.FwSyncId ?? "",
+                FwLabel = ev.FwLabel ?? "",
             });
             services.Db.MarkTicketSyncFileApplied(name);
             knownTicketIds.Add(ev.TicketId);

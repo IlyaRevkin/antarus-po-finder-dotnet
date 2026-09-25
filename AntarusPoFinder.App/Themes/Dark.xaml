@@ -92,6 +92,11 @@
     <SolidColorBrush x:Key="SuccessOnAccentBrush" Color="{StaticResource SuccessOnAccentColor}"/>
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
+    <!-- Жёлтый — ТРЕТИЙ уровень критичности бага в прошивке (красный / оранжевый / жёлтый).
+         Отдельный цвет, а не поблёкший WarningBrush: шкала из трёх ступеней читается только тогда,
+         когда ступени различимы боком к боку в одном списке. -->
+    <Color x:Key="CautionColor">#F9E2AF</Color>
+    <SolidColorBrush x:Key="CautionBrush" Color="{StaticResource CautionColor}"/>
     <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
     <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
     <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>

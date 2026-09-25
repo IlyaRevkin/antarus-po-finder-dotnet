@@ -15,10 +15,14 @@ public partial class Database
     {
         if (TicketExists(t.Id)) return;
         ExecuteNonQuery("""
-            INSERT INTO tickets(id, ticket_type, text, status, created_by, created_by_role, created_at, updated_at)
-            VALUES(@id, @type, @text, @status, @by, @role, @created, @updated)
+            INSERT INTO tickets(id, ticket_type, text, status, created_by, created_by_role, created_at, updated_at,
+                                severity, fw_sync_id, fw_label)
+            VALUES(@id, @type, @text, @status, @by, @role, @created, @updated, @sev, @fwsync, @fwlabel)
             """, cmd =>
         {
+            cmd.Parameters.AddWithValue("@sev", FwBugSeverity.Normalize(t.Severity));
+            cmd.Parameters.AddWithValue("@fwsync", t.FwSyncId ?? "");
+            cmd.Parameters.AddWithValue("@fwlabel", t.FwLabel ?? "");
             cmd.Parameters.AddWithValue("@id", t.Id);
             cmd.Parameters.AddWithValue("@type", t.Type);
             cmd.Parameters.AddWithValue("@text", t.Text);
@@ -54,7 +58,7 @@ public partial class Database
     public List<Ticket> GetTickets()
     {
         var result = new List<Ticket>();
-        using var r = ExecuteReader("SELECT id, ticket_type, text, status, created_by, created_by_role, created_at, updated_at FROM tickets ORDER BY created_at DESC");
+        using var r = ExecuteReader("SELECT id, ticket_type, text, status, created_by, created_by_role, created_at, updated_at, severity, fw_sync_id, fw_label FROM tickets ORDER BY created_at DESC");
         while (r.Read())
             result.Add(new Ticket
             {
@@ -66,6 +70,9 @@ public partial class Database
                 CreatedByRole = GetString(r, "created_by_role"),
                 CreatedAt = GetString(r, "created_at"),
                 UpdatedAt = GetString(r, "updated_at"),
+                Severity = GetString(r, "severity"),
+                FwSyncId = GetString(r, "fw_sync_id"),
+                FwLabel = GetString(r, "fw_label"),
             });
         return result;
     }

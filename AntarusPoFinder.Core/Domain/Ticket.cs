@@ -21,6 +21,28 @@ public class Ticket
     public string CreatedByRole { get; set; } = "";
     public string CreatedAt { get; set; } = "";
     public string UpdatedAt { get; set; } = "";
+
+    /// <summary>Критичность — только у тикетов про баг В ПРОШИВКЕ (<see cref="TicketType.FwBug"/>),
+    /// у остальных пусто. Наладчик, нашедший баг на объекте, единственный, кто может сказать,
+    /// насколько всё плохо: «шкаф не запускается» и «в названии режима опечатка» приезжают
+    /// программисту одинаковым текстом, и разбирать их приходилось чтением. См. <see cref="FwBugSeverity"/>.</summary>
+    public string Severity { get; set; } = "";
+
+    /// <summary>ПЕРЕНОСИМЫЙ идентификатор прошивки, к которой относится тикет (fw_versions.sync_id).
+    ///
+    /// Именно sync_id, а не id: тикеты ездят между машинами, а id — локальный автоинкремент, у
+    /// коллеги под тем же числом лежит другая прошивка. Ссылка по id молча показывала бы жалобу на
+    /// чужую прошивку — той же породы ошибка, что и призрак подтипа.</summary>
+    public string FwSyncId { get; set; } = "";
+
+    /// <summary>Как прошивка называлась в момент создания тикета — человеческим текстом
+    /// («НГР 2.0 / КПЧ / ATV310 / 1.74.0»).
+    ///
+    /// Дублирует ссылку намеренно: прошивки с таким sync_id может не быть на машине, куда приехал
+    /// тикет (ещё не синхронизировались, или её удалили). Без подписи там осталась бы жалоба
+    /// неизвестно на что. Подпись не обновляется вслед за переименованием — это слепок на момент
+    /// жалобы, и он должен совпадать с тем, что человек видел на экране.</summary>
+    public string FwLabel { get; set; } = "";
 }
 
 /// <summary>Одна реплика в переписке по тикету.
@@ -48,8 +70,14 @@ public static class TicketType
     public const string Suggestion = "suggestion";
     public const string Other = "other";
 
+    /// <summary>Баг В ПРОШИВКЕ, а не в программе. Отдельный тип, потому что у него другой
+    /// адресат (программист, а не тот, кто чинит приложение), своя критичность и ссылка на
+    /// конкретную прошивку. Смешанные в одну кучу, они терялись среди жалоб на интерфейс.</summary>
+    public const string FwBug = "fw_bug";
+
     public static readonly (string Id, string Label)[] All =
     [
+        (FwBug, "Баг прошивки"),
         (Bug, "Баг"),
         (Suggestion, "Предложение"),
         (Other, "Другое"),
@@ -57,9 +85,64 @@ public static class TicketType
 
     public static string Label(string id) => id switch
     {
+        FwBug => "Баг прошивки",
         Bug => "Баг",
         Suggestion => "Предложение",
         _ => "Другое",
+    };
+
+    /// <summary>Жалоба ли это вообще — в отличие от предложения. По этому же признаку выбирается цвет:
+    /// баги красные, предложения зелёные.</summary>
+    public static bool IsBug(string id) => id == Bug || id == FwBug;
+}
+
+/// <summary>Критичность бага в прошивке — три уровня, красный / оранжевый / жёлтый.
+///
+/// Три, а не пять и не десять: различать надо не оттенки беды, а решение — бросать ли всё и чинить
+/// сейчас, чинить ли к следующей версии, или записать и жить дальше. Шкала из десяти пунктов превращается
+/// в спор о том, седьмой это уровень или восьмой.</summary>
+public static class FwBugSeverity
+{
+    /// <summary>Красный: оборудование не работает или работает опасно.</summary>
+    public const string Critical = "critical";
+    /// <summary>Оранжевый: работает, но не так, как должно — есть обходной путь.</summary>
+    public const string Major = "major";
+    /// <summary>Жёлтый: мелочь, на работу не влияет.</summary>
+    public const string Minor = "minor";
+
+    public static readonly (string Id, string Label)[] All =
+    [
+        (Critical, "Критичный — не работает"),
+        (Major, "Серьёзный — работает неверно"),
+        (Minor, "Мелкий — не мешает"),
+    ];
+
+    public static string Label(string id) => id switch
+    {
+        Critical => "Критичный",
+        Major => "Серьёзный",
+        Minor => "Мелкий",
+        _ => "",
+    };
+
+    /// <summary>Приводит приехавшее значение к известному. Неизвестное — в пустое, а не в
+    /// «критичный»: опечатка в файле хранилища не должна поднимать тревогу.</summary>
+    public static string Normalize(string? id) => (id ?? "").Trim().ToLowerInvariant() switch
+    {
+        Critical => Critical,
+        Major => Major,
+        Minor => Minor,
+        _ => "",
+    };
+
+    /// <summary>Порядок для сортировки: самое страшное сверху. Без критичности (не баг прошивки) —
+    /// в конец, чтобы не разбавлять собой шкалу.</summary>
+    public static int SortOrder(string id) => id switch
+    {
+        Critical => 0,
+        Major => 1,
+        Minor => 2,
+        _ => 3,
     };
 }
 

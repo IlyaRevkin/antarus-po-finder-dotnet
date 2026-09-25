@@ -193,6 +193,16 @@ public partial class Database : IDisposable
                  sort_order INTEGER NOT NULL DEFAULT 0
              );
 
+             -- Правила дублирования уведомлений на почту (бета). Строка — «категория|адрес»,
+             -- пустая категория означает «всё подряд». Одним текстовым ключом, а не двумя столбцами,
+             -- чтобы правила ездили между машинами тем же самым механизмом плоских списков, что и теги со
+             -- словами-исключениями — вместе с надгробиями, то есть с разъезжающимися удалениями. Забытое
+             -- правило, ожившее с чужой машины, — это письма тому, кто от них уже отписался.
+             CREATE TABLE IF NOT EXISTS email_rules (
+                 name       TEXT PRIMARY KEY,
+                 sort_order INTEGER NOT NULL DEFAULT 0
+             );
+
              CREATE TABLE IF NOT EXISTS fw_attachment_kinds (
                  name       TEXT PRIMARY KEY COLLATE NOCASE,
                  sort_order INTEGER NOT NULL DEFAULT 0
@@ -389,7 +399,11 @@ public partial class Database : IDisposable
                  created_by       TEXT    NOT NULL DEFAULT '',
                  created_by_role  TEXT    NOT NULL DEFAULT '',
                  created_at       TEXT    NOT NULL DEFAULT '',
-                 updated_at       TEXT    NOT NULL DEFAULT ''
+                 updated_at       TEXT    NOT NULL DEFAULT '',
+                 -- Критичность и ссылка на прошивку — только у багов прошивок, см. EnsureColumnsExist ниже.
+                 severity         TEXT    NOT NULL DEFAULT '',
+                 fw_sync_id       TEXT    NOT NULL DEFAULT '',
+                 fw_label         TEXT    NOT NULL DEFAULT ''
              );
 
              -- Переписка по тикету. Реплики только добавляются: править и удалять их нельзя, и
@@ -805,6 +819,21 @@ public partial class Database : IDisposable
         // DEFAULT '' проставляет уже существующим строкам ровно то значение, которое и означает
         // «обычная прошивка». См. FwExecution.
         AddColumnsIfMissing("fw_versions", ("execution", "TEXT NOT NULL DEFAULT ''"));
+
+        // Баги ПРОШИВОК: критичность и ссылка на ту самую прошивку.
+        //
+        // fw_sync_id — именно sync_id, а НЕ id: тикеты ездят между машинами, а id — локальный
+        // автоинкремент, и у коллеги под тем же числом лежит другая прошивка. Жалоба молча указывала
+        // бы на чужую версию — той же породы ошибка, что и призрак подтипа.
+        //
+        // fw_label дублирует ссылку человеческим текстом: прошивки с таким sync_id на этой машине
+        // может ещё не быть, и без подписи осталась бы жалоба неизвестно на что.
+        //
+        // Пустые значения — штатное состояние для всех прежних тикетов, поэтому миграция данных не нужна.
+        AddColumnsIfMissing("tickets",
+            ("severity", "TEXT NOT NULL DEFAULT ''"),
+            ("fw_sync_id", "TEXT NOT NULL DEFAULT ''"),
+            ("fw_label", "TEXT NOT NULL DEFAULT ''"));
 
         // status_changed_at: КОГДА в последний раз меняли состояние версии (откат или его отмена).
         // Без отметки времени перенос состояния между машинами был односторонним: откат уезжал ко

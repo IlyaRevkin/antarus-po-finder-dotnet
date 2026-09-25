@@ -168,6 +168,12 @@ public partial class FirmwareCard : UserControl
     /// несколько — выбором из списка с комментариями.</summary>
     public event EventHandler? ExtraFilesRequested;
     public event EventHandler? HistoryRequested;
+    /// <summary>Завести тикет о баге В ЭТОЙ ПРОШИВКЕ — жучок на карточке.
+    ///
+    /// На виду, а не в меню «Ещё», намеренно: баг находят на объекте, руки заняты, и если о нём не
+    /// сообщить в ту же минуту, не сообщат вовсе. До этого про баги рассказывали словами мимо программы,
+    /// и программист узнавал о них последним.</summary>
+    public event EventHandler? FwBugRequested;
     public event EventHandler? CopyNameRequested;
     public event EventHandler? TagsEditRequested;
 
@@ -396,6 +402,11 @@ public partial class FirmwareCard : UserControl
         if (flags.CanEditTags)
             AddMenuItem("Модерация прошивки", () => TagsEditRequested?.Invoke(this, EventArgs.Empty),
                 "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
+
+        // Жучок — рядом с «Ещё», но СНАРУЖИ меню: см. FwBugRequested.
+        var bugBtn = MakeActionButton("🐞", (_, _) => FwBugRequested?.Invoke(this, EventArgs.Empty));
+        bugBtn.ToolTip = "Сообщить о баге в этой прошивке";
+        ActionsPanel.Children.Add(bugBtn);
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
         moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, модерация";
