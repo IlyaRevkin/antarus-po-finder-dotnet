@@ -14,9 +14,44 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <!-- Жучок рядом с номером версии и ЗНАЧКОМ, а не кнопкой в ряду действий.
+                     Кнопка внизу выглядела наравне с «Загрузить» и «Открыть HMI» — тем, чем пользуются каждый день,
+                     хотя жалоба бывает раз в месяц. Здесь он при версии, к которой и относится.
+
+                     Собственный обработчик с Handled=true обязателен: вся шапка по нажатию копирует
+                     номер версии, и без этого нажатие на жучка заодно клало бы в буфер номер. -->
+                <Border Grid.Column="2" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
+                        Padding="6,2,0,2" VerticalAlignment="Center"
+                        MouseLeftButtonUp="BugIcon_Click"
+                        ToolTip="Сообщить о баге в этой прошивке">
+                    <Path x:Name="BugGlyph" Data="{StaticResource Icon.Bug}" Stretch="Uniform"
+                          Width="16" Height="16" StrokeThickness="1.3"
+                          StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                        <Path.Style>
+                            <Style TargetType="Path">
+                                <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}"/>
+                                <Style.Triggers>
+                                    <!-- Под курсором краснеет — тот же цвет, что у багов в списке тикетов.
+                                         В покое он приглушённый: красный значок на КАЖДОЙ карточке читался бы
+                                         как «здесь баг», хотя это всего лишь приглашение пожаловаться.
+
+                                         Привязка к IsMouseOver РОДИТЕЛЯ, а не триггер на самом Border: Setter
+                                         с TargetName работает только внутри шаблона, а в обычном стиле роняет разбор
+                                         разметки. По самому Path мышь берёт ненадёжно — штрихи тонкие, и между ними
+                                         пустота; поэтому и нажатие, и подсветка идут от Border с Background=Transparent. -->
+                                    <DataTrigger Value="True"
+                                                 Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}">
+                                        <Setter Property="Stroke" Value="{DynamicResource ErrorBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Path.Style>
+                    </Path>
+                </Border>
             </Grid>
             <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
             <!-- Что реально лежит рядом с версией (LFS/PSL/HMI/параметры/документы). Раньше это было

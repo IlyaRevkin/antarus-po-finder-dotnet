@@ -214,27 +214,11 @@ public partial class FirmwareCard : UserControl
             "Формат версии: eq_prefix.sub_prefix.hw.sw.ГГГГММДД_ЧЧММ\n" +
             ".PSL — исходный проект, .LFS — скомпилированный файл";
 
-        var metaParts = new List<string>();
-        // Первой строкой — какая именно комплектация шкафа совпала. Наладчик ввёл название своего
-        // шкафа и получил ОДНУ карточку: без этой пометки он видит обычную прошивку с «не своими»
-        // тегами и не понимает, почему нашлась именно она. У обычной прошивки поле пустое.
-        // ИСПОЛНЕНИЕ идёт первым и без подписи «исполнение»: это ответ на вопрос «чем эта прошивка
-        // отличается от соседней» — «2 насоса», «3 и более насосов». Именно его наладчик и ищет
-        // глазами. Жалоба была ровно об этом: «вижу не суть исполнения, а номер конфигурации; мне
-        // важно количество насосов».
-        if (!string.IsNullOrEmpty(result.Execution)) metaParts.Add(result.Execution);
-        if (!string.IsNullOrEmpty(result.ConfigName)) metaParts.Add($"Конфигурация: {result.ConfigName}");
-        if (!string.IsNullOrEmpty(result.Controller)) metaParts.Add($"Контроллер: {result.Controller}");
-        if (!string.IsNullOrEmpty(result.EquipmentType)) metaParts.Add(result.EquipmentType);
-        if (!string.IsNullOrEmpty(result.WorkType)) metaParts.Add(result.WorkType);
-        if (result.UploadDate is not null) metaParts.Add(result.UploadDate.Value.ToString("dd.MM.yyyy"));
-        // «По такому же запросу эту версию уже ставили N раз» — то, из-за чего она стоит выше
-        // остальных (см. Database.FwUsage.cs). Без этой строки подъём выглядел бы необъяснимым.
-        if (result.UsageCount > 0)
-            metaParts.Add(result.UsageCount == 1
-                ? "по этому запросу выбирали 1 раз"
-                : $"по этому запросу выбирали {result.UsageCount} раз");
-        MetaLabel.Text = string.Join("  ·  ", metaParts);
+        // Сама строка собирается в Core (FwCardMeta): что человек прочтёт первым и какими словами —
+        // решение, а не оформление, и проверять его глазами каждый раз мы уже пробовали.
+        MetaLabel.Text = FwCardMeta.Line(
+            result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
+            result.WorkType, result.UploadDate?.ToString("dd.MM.yyyy") ?? "", result.UsageCount);
         // Подсказка объясняет обе пометки — они про разное, и путать их нельзя: исполнение это
         // ОТДЕЛЬНАЯ прошивка своей линейки (свои файлы, свой номер), а конфигурация — вариант ОДНОЙ
         // и той же прошивки, где отличаются только теги.
@@ -402,11 +386,6 @@ public partial class FirmwareCard : UserControl
         if (flags.CanEditTags)
             AddMenuItem("Модерация прошивки", () => TagsEditRequested?.Invoke(this, EventArgs.Empty),
                 "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
-
-        // Жучок — рядом с «Ещё», но СНАРУЖИ меню: см. FwBugRequested.
-        var bugBtn = MakeActionButton("🐞", (_, _) => FwBugRequested?.Invoke(this, EventArgs.Empty));
-        bugBtn.ToolTip = "Сообщить о баге в этой прошивке";
-        ActionsPanel.Children.Add(bugBtn);
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
         moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, модерация";
@@ -766,6 +745,17 @@ public partial class FirmwareCard : UserControl
             && (DateTime.Now - _moreDismissedAt).TotalMilliseconds < 250;
         if (dismissedByThisClick) return;
         MorePopup.IsOpen = !MorePopup.IsOpen;
+    }
+
+    /// <summary>Нажатие на жучка у номера версии.
+    ///
+    /// Handled = true обязательно: вся шапка карточки по нажатию копирует номер версии
+    /// (Header_Click), и без этого жалоба на баг заодно клала бы в буфер номер — и человек потом
+    /// вставлял бы его туда, где ждал совсем другого.</summary>
+    private void BugIcon_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        FwBugRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void Copy_Click(object sender, RoutedEventArgs e)

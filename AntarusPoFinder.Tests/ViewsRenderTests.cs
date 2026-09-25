@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using AntarusPoFinder.App;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.App.Views;
+using AntarusPoFinder.Core.Services;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -199,6 +200,39 @@ public class ViewsRenderTests
     ///
     /// Живым прогоном это окно достаётся тяжело: до жучка на карточке надо сначала иметь в базе
     /// прошивку и доступный сетевой диск, а в чистом профиле нет ни того, ни другого.</summary>
+    /// <summary>Карточка прошивки строится и рисуется со всеми пометками.
+    ///
+    /// Страница поиска в проверке выше рисуется ПУСТОЙ — без найденных прошивок сама карточка не
+    /// создаётся ни разу, и ошибка в её разметке до сих пор вылезала только у того, кто что-то нашёл.
+    /// Живым прогоном туда тоже не добраться: нужна прошивка в базе и доступный сетевой диск, а в
+    /// чистом профиле нет ни того, ни другого.</summary>
+    [Fact]
+    public void FirmwareCard_BuildsAndRenders()
+    {
+        Ui.Run(() =>
+        {
+            var card = new FirmwareCard();
+            card.Configure(
+                new HierarchyResult
+                {
+                    Name = "НГР 2.0 КПЧ",
+                    VersionRaw = "3.1.0004.0002.20260101_0000",
+                    Execution = "3 и более насосов",
+                    ConfigName = "2 насоса",
+                    Controller = "SMH5",
+                    Tags = "пожарка, насосная",
+                },
+                new FirmwareCardFlags());
+            Render(card);
+
+            // Жучок — ЗНАЧОК у номера версии, а не кнопка в ряду действий внизу карточки.
+            // Просьба Ильи: «а то он вычурно как кнопка выглядит».
+            var bug = card.FindName("BugIcon") as System.Windows.FrameworkElement;
+            Assert.NotNull(bug);
+            Assert.IsNotType<Button>(bug);
+        });
+    }
+
     [Fact]
     public void FwBugDialog_BuildsAndRenders()
     {
