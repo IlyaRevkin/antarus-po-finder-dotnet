@@ -40,6 +40,9 @@
             <Button x:Name="TabBtnTags" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Теги" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <Button x:Name="TabBtnEmail" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Почта" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnExecutions" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Исполнения" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -753,6 +756,97 @@
                                        Text="Список пуст — у прошивок нет деления на исполнения." Visibility="Collapsed"/>
                             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,10,0,0"
                                        Text="Убрать исполнение из списка можно в любой момент: у уже загруженных прошивок пометка сохранится, перестанет только предлагаться при новой загрузке."/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ═══════════════════════════ ПОЧТА (БЕТА) ═════════════════════ -->
+                <StackPanel x:Name="EmailTab" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="Бета. Уведомления программы можно дублировать на почту — это именно дубль: всё, что уходит письмом, по-прежнему остаётся в колокольчике. Не дошёдшее письмо не повторяется и не копится в очереди; проверить связь можно кнопкой ниже."/>
+
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="ПОЧТОВЫЙ СЕРВЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
+                            <!-- Два пути к одному и тому же, по просьбе Ильи: «подключать как конфигом, так и
+                                 вручную». Файл — когда реквизиты пришли письмом или выгрузкой, поля — когда их просто
+                                 продиктовали. Разбор терпим к формату (см. MailSecretsFile): формат присланного файла мы не выбираем. -->
+                            <Border x:Name="MailSecretsDropZone" Style="{StaticResource DropZoneBorder}" Height="78" Cursor="Hand"
+                                    Margin="0,0,0,10" AllowDrop="True"
+                                    Drop="MailSecrets_Drop" DragOver="MailSecrets_DragOver" MouseLeftButtonUp="MailSecrets_Click"
+                                    ToolTip="Файл с настройками почты — txt, json, env или ini. Поля ниже заполнятся сами; что не нашлось в файле — останется как было.">
+                                <TextBlock x:Name="MailSecretsLabel" Style="{StaticResource MutedText}" TextAlignment="Center"
+                                           TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12,0"
+                                           Text="Перетащите файл с реквизитами почты или нажмите, чтобы выбрать. Можно и просто заполнить поля ниже руками."/>
+                            </Border>
+                            <CheckBox x:Name="EmailEnabledCheck" Content="Дублировать уведомления на почту" Margin="0,0,0,10"
+                                      Checked="EmailEnabled_Changed" Unchecked="EmailEnabled_Changed"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="90"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Сервер (SMTP)" VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1" x:Name="SmtpHostInput" Height="34" Margin="0,0,8,0"
+                                         ToolTip="Адрес почтового сервера конторы, например mail.company.ru"/>
+                                <TextBox Grid.Column="2" x:Name="SmtpPortInput" Height="34" Margin="0,0,8,0"
+                                         ToolTip="Порт. Обычно 587, реже 465 или 25."/>
+                                <CheckBox Grid.Column="3" x:Name="SmtpSslCheck" Content="SSL" VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="От кого" VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1" x:Name="SmtpFromInput" Height="34"
+                                         ToolTip="Адрес, с которого уходят письма"/>
+                            </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Логин и пароль" VerticalAlignment="Center"/>
+                                <TextBox Grid.Column="1" x:Name="SmtpUserInput" Height="34" Margin="0,0,8,0"
+                                         ToolTip="Пусто — если внутренний сервер принимает почту без авторизации"/>
+                                <PasswordBox Grid.Column="2" x:Name="SmtpPasswordInput" Height="34"/>
+                            </Grid>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Text="Пароль хранится зашифрованным и едет в общем конфиге вместе с остальными реквизитами — так же, как ключи хранилища. Это защита от случайного взгляда в файл базы, а не от того, у кого есть сама программа."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveSmtp_Click"/>
+                                <Button Content="Проверить отправку" Style="{StaticResource SecondaryButton}" Click="TestSmtp_Click"
+                                        ToolTip="Отправить пробное письмо на адрес «От кого»"/>
+                            </StackPanel>
+                            <TextBlock x:Name="SmtpStatusText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="КОМУ ЧТО ПРИСЫЛАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox Grid.Column="0" x:Name="EmailCategoryCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
+                                <TextBox Grid.Column="1" x:Name="EmailRecipientInput" Height="34" Margin="0,0,8,0"
+                                         KeyDown="EmailRecipientInput_KeyDown"
+                                         ToolTip="Почтовый ящик или название группы AD. Enter — добавить."/>
+                                <Button Grid.Column="2" Content="Добавить" Style="{StaticResource SecondaryButton}" Click="AddEmailRule_Click"/>
+                            </Grid>
+                            <StackPanel x:Name="EmailRulesPanel"/>
+                            <TextBlock x:Name="EmailRulesEmptyText" Style="{StaticResource MutedText}"
+                                       Text="Правил нет — письма не уходят никому." Visibility="Collapsed"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                       Text="«Всё подряд» значит любое уведомление этой машины. Группа AD раскрывается почтовым сервером, если у неё есть свой адрес; иначе впишите ящики по отдельности. Список общий для всех машин."/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

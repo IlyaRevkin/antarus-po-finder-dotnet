@@ -432,6 +432,59 @@ public class ConfigService
             : EncryptedPrefix + Convert.ToBase64String(ConfigFileCrypto.Encrypt(value)));
     }
 
+    // ── Почта (бета) ────────────────────────────────────────────────────
+
+    public string SmtpHost() => Get("smtp_host");
+    public void SetSmtpHost(string v) => Set("smtp_host", (v ?? "").Trim());
+
+    /// <summary>587 по умолчанию, а не 25: на 25-м сегодня чаще всего закрыто или режется провайдером,
+    /// и первая же проба выглядела бы как «почта не работает».</summary>
+    public int SmtpPort()
+    {
+        var raw = Get("smtp_port");
+        return int.TryParse(raw, out var port) && port > 0 ? port : 587;
+    }
+    public void SetSmtpPort(int v) => Set("smtp_port", v.ToString());
+
+    public bool SmtpSsl() => !Get("smtp_ssl").Equals("false", StringComparison.OrdinalIgnoreCase);
+    public void SetSmtpSsl(bool v) => Set("smtp_ssl", v ? "true" : "false");
+
+    public string SmtpUser() => Get("smtp_user");
+    public void SetSmtpUser(string v) => Set("smtp_user", (v ?? "").Trim());
+
+    public string SmtpFrom() => Get("smtp_from");
+    public void SetSmtpFrom(string v) => Set("smtp_from", (v ?? "").Trim());
+
+    public bool EmailEnabled() => Get("email_enabled").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetEmailEnabled(bool v) => Set("email_enabled", v ? "true" : "false");
+
+    /// <summary>Пароль почтового ящика — тем же способом и по той же причине, что и секрет хранилища
+    /// (см. <see cref="S3SecretKey"/>): шифрование от случайного взгляда в файл базы, общий ключ на все машины,
+    /// чтобы настройка ехала с общим конфигом. От того, у кого есть сам exe, это не защищает и не должно.</summary>
+    public string SmtpPassword()
+    {
+        var stored = Get("smtp_password");
+        if (string.IsNullOrEmpty(stored)) return "";
+        if (!stored.StartsWith(EncryptedPrefix, StringComparison.Ordinal)) return stored;
+        try
+        {
+            return ConfigFileCrypto.TryDecrypt(Convert.FromBase64String(stored[EncryptedPrefix.Length..])) ?? "";
+        }
+        catch (FormatException) { return ""; }
+    }
+
+    public void SetSmtpPassword(string secret)
+    {
+        var value = (secret ?? "").Trim();
+        Set("smtp_password", value.Length == 0
+            ? ""
+            : EncryptedPrefix + Convert.ToBase64String(ConfigFileCrypto.Encrypt(value)));
+    }
+
+    public SmtpSettings Smtp() => new(
+        Host: SmtpHost(), Port: SmtpPort(), UseSsl: SmtpSsl(),
+        User: SmtpUser(), Password: SmtpPassword(), From: SmtpFrom(), Enabled: EmailEnabled());
+
     /// <summary>Метка «дальше зашифрованное значение» — по ней же отличается ключ, вписанный в базу
     /// руками до появления шифрования.</summary>
     private const string EncryptedPrefix = "enc:";

@@ -96,6 +96,7 @@ public partial class Database
         data.Tags = GetAllTags();
         data.FwAttachmentKinds = GetFwAttachmentKinds();
         data.SearchOnDemandWords = GetOnDemandWords();
+        data.EmailRules = GetEmailRulesRaw();
         data.FwExecutions = GetExecutionCatalog();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
@@ -1197,6 +1198,14 @@ public partial class Database
             data.SearchOnDemandWords ?? new(),
             data.FlatListState, apply, GetOnDemandWords, AddOnDemandWord, DeleteOnDemandWord,
             () => counts.OnDemandWordsAdded++, () => counts.OnDemandWordsRemoved++);
+
+        // Правила почты — восьмой справочник того же устройства, и надгробия здесь важнее, чем где бы
+        // то ни было ещё: правило, удалённое здесь и ожившее с чужой машины, — это письма человеку, который
+        // от них уже отказался, а жаловаться он пойдёт не в программу.
+        ImportFlatList(Database.FlatKindEmailRule,
+            data.EmailRules ?? new(),
+            data.FlatListState, apply, GetEmailRulesRaw, AddEmailRuleRaw, DeleteEmailRule,
+            () => counts.EmailRulesAdded++, () => counts.EmailRulesRemoved++);
 
         // Справочник исполнений — седьмой того же устройства. Общий по той же причине, по которой
         // исполнения сравниваются точно: заведённое на одной машине обязано предлагаться на всех,

@@ -1,5 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -91,7 +93,41 @@ public class NotificationCenter : ObservableObject
         }
 
         Refresh();
+        MirrorToEmail(text, category);
         return entry;
+    }
+
+    /// <summary>Дубль на почту (бета). Просьба владельца: «чтобы уведомление о тикетах, выходе новой
+    /// прошивки и тп дублировались на почту».
+    ///
+    /// Три правила, и все три важны:
+    ///
+    /// 1. В ФОНЕ. Отправка письма — это сеть, а значит секунды ожидания на молчащем сервере. Здесь
+    ///    поток интерфейса: синхронная отправка подвешивала бы окно на каждом уведомлении.
+    /// 2. МОЛЧА. Не дошло письмо — не заводим про это второе уведомление: оно ушло бы туда же
+    ///    сюда, снова попыталось бы уйти почтой и зациклилось. Состояние почты смотрят в Настройках кнопкой
+    ///    «Проверить отправку» — там ошибка видна целиком и сразу.
+    /// 3. ЭТО ДУБЛЬ. Уведомление всегда остаётся в программе. Именно поэтому молчаливый отказ
+    ///    безопасен: ничто не пропадает, теряется только удобство.</summary>
+    private void MirrorToEmail(string text, NotificationCategory category)
+    {
+        SmtpSettings smtp;
+        List<string> to;
+        try
+        {
+            smtp = _cfg.Smtp();
+            if (!smtp.CanSend) return;
+            to = EmailRouting.RecipientsFor(category.ToString(), _db.GetEmailRules());
+            if (to.Count == 0) return;
+        }
+        catch
+        {
+            // Настройки не прочитались — это не повод уронить само уведомление, ради которого сюда пришли.
+            return;
+        }
+
+        var subject = "Antarus ПО Finder: " + NotificationCategoryInfo.Label(category);
+        _ = Task.Run(() => EmailNotifier.Send(smtp, to, subject, text));
     }
 
     /// <summary>Пометить одно уведомление прочитанным — зовётся, когда строка ДЕЙСТВИТЕЛЬНО показана

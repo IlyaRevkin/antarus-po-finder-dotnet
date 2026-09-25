@@ -513,6 +513,10 @@ public class HierarchyExportData
     /// находит, а другой по тому же запросу нет.</summary>
     [JsonPropertyName("search_on_demand_words")] public List<string>? SearchOnDemandWords { get; set; }
 
+    /// <summary>Правила дублирования уведомлений на почту — строки вида «категория|адрес»
+    /// (см. Database.EmailRules.cs). Общая настройка конторы: заводит администратор один раз, действует у всех.</summary>
+    [JsonPropertyName("email_rules")] public List<string>? EmailRules { get; set; }
+
     /// <summary>Справочник исполнений (см. Database.Executions.cs). Общий: исполнение — это граница
     /// линейки, и заведённое на одной машине должно предлагаться на всех, иначе вторая машина
     /// наберёт его руками в другом написании и заведёт третью линейку.</summary>
@@ -645,6 +649,9 @@ public class ImportCounts
     public int OnDemandWordsAdded { get; set; }
     public int OnDemandWordsRemoved { get; set; }
 
+    public int EmailRulesAdded { get; set; }
+    public int EmailRulesRemoved { get; set; }
+
     public int AttachmentKindsAdded { get; set; }
     public int AttachmentKindsRemoved { get; set; }
     /// <summary>Вид, который эталонный снимок хотел бы убрать, но им ещё помечено локальное вложение —
@@ -730,6 +737,7 @@ public class ImportCounts
         FwAttachmentsAdded + FwAttachmentsRemoved + FwAttachmentsUpdated +
         AttachmentKindsAdded + AttachmentKindsRemoved +
         OnDemandWordsAdded + OnDemandWordsRemoved +
+        EmailRulesAdded + EmailRulesRemoved +
         ExecutionsAdded + ExecutionsRemoved +
         ParamTablesAdded + ParamTablesRemoved + ParamTablesUpdated +
         ParamTableRevisionsAdded + ParamTableRevisionsRemoved +

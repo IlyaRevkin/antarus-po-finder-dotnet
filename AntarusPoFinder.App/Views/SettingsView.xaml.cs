@@ -192,7 +192,7 @@ public partial class SettingsView : UserControl
     private Button[] AllTabButtons() => new[]
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
-        TabBtnTags, TabBtnExecutions, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
+        TabBtnTags, TabBtnExecutions, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
 
@@ -220,6 +220,7 @@ public partial class SettingsView : UserControl
         ReservationsTab.Visibility = Visibility.Collapsed;
         TagsTab.Visibility = Visibility.Collapsed;
         ExecutionsTab.Visibility = Visibility.Collapsed;
+        EmailTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
         LoaderTab.Visibility = Visibility.Collapsed;
@@ -238,6 +239,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
         else if (sender == TabBtnExecutions) { ExecutionsTab.Visibility = Visibility.Visible; RenderExecutions(); }
+        else if (sender == TabBtnEmail) { EmailTab.Visibility = Visibility.Visible; LoadEmailTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
     }
@@ -291,6 +293,9 @@ public partial class SettingsView : UserControl
         // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
         TabBtnExecutions.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
+        // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
+        // адресатов, общий на всех. Настройка одного человека здесь меняет почту всем остальным.
+        TabBtnEmail.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // TabBtnGeneral/TabBtnQuickApps: no role restriction — everyone who can reach Настройки at all sees them.
 
         // «Лоадер» видят наладчик и программист (они и заливают), администратор — как и всё
@@ -3854,4 +3859,243 @@ public partial class SettingsView : UserControl
         _host.ReloadSidebarApps();
         _host.ShowStatus(statusMessage);
     }
+
+    // ═════════════════════════ ПОЧТА (БЕТА) ════════════════════════
+
+    private sealed record EmailCategoryOption(string Id, string Label);
+
+    private void LoadEmailTab()
+    {
+        if (EmailCategoryCombo.Items.Count == 0)
+        {
+            // Первым пунктом — «всё подряд»: при первой настройке хотят именно его, а не выбирать
+            // категорию из списка, смысл которого ещё не знают.
+            EmailCategoryCombo.Items.Add(new EmailCategoryOption("", "Всё подряд"));
+            foreach (var (category, label) in NotificationCategoryInfo.All)
+                EmailCategoryCombo.Items.Add(new EmailCategoryOption(category.ToString(), label));
+            EmailCategoryCombo.SelectedIndex = 0;
+        }
+
+        EmailEnabledCheck.IsChecked = _services.Cfg.EmailEnabled();
+        SmtpHostInput.Text = _services.Cfg.SmtpHost();
+        SmtpPortInput.Text = _services.Cfg.SmtpPort().ToString();
+        SmtpSslCheck.IsChecked = _services.Cfg.SmtpSsl();
+        SmtpUserInput.Text = _services.Cfg.SmtpUser();
+        SmtpFromInput.Text = _services.Cfg.SmtpFrom();
+        // Пароль обратно В ПОЛЕ НЕ подставляется — и не потому, что его нельзя прочитать, а чтобы
+        // сохранение без правки пароля не затирало его тем, что показалось в поле. Пустое поле при
+        // сохранении означает «оставить как было» — см. SaveSmtp_Click.
+        SmtpPasswordInput.Password = "";
+        SmtpStatusText.Text = _services.Cfg.SmtpPassword().Length > 0 ? "Пароль сохранён." : "";
+
+        RenderEmailRules();
+    }
+
+    // ── Реквизиты почты файлом ────────────────────────────────────────
+    //
+    // Второй путь к тому же самому, а не замена полям: просьба была «подключать как конфигом,
+    // так и вручную». Файл только заполняет поля — сохранение всё равно идёт через общий путь,
+    // чтобы не завестись второй способ записывать настройки, который потом разойдётся с первым.
+
+    private void MailSecrets_Click(object sender, MouseButtonEventArgs e) => PickMailSecretsFile();
+
+    private void MailSecrets_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void MailSecrets_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } paths)
+            ApplyMailSecretsFile(paths[0]);
+    }
+
+    private void PickMailSecretsFile()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выбрать файл с реквизитами почты",
+            // «Все файлы» первым фильтром — как и у ключей хранилища: имя и расширение задаём не мы.
+            Filter = "Все файлы (*.*)|*.*|Файлы настроек (*.txt;*.json;*.env;*.ini;*.cfg)|*.txt;*.json;*.env;*.ini;*.cfg",
+        };
+        if (dlg.ShowDialog() == true) ApplyMailSecretsFile(dlg.FileName);
+    }
+
+    /// <summary>Читает файл и раскладывает его по полям. Всё, что может пойти не так (папку перетащили,
+    /// файл занят, внутри не то), заканчивается понятной строкой в состоянии, а не исключением:
+    /// эту настройку делает не программист.
+    ///
+    /// В поля кладётся только то, что В ФАЙЛЕ ДЕЙСТВИТЕЛЬНО ЕСТЬ. Половинчатый файл не должен
+    /// вычищать уже заполненное: человек добавляет настройки, а не начинает с нуля.</summary>
+    private void ApplyMailSecretsFile(string path)
+    {
+        string content;
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                SmtpStatusText.Text = "Это папка. Нужен сам файл с настройками почты.";
+                return;
+            }
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                SmtpStatusText.Text = "Файл не найден.";
+                return;
+            }
+            if (info.Length > MailSecretsFile.MaxReasonableBytes)
+            {
+                SmtpStatusText.Text = "Файл слишком большой для настроек почты — похоже, это не он.";
+                return;
+            }
+            content = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            SmtpStatusText.Text = $"Не удалось прочитать файл: {ex.Message}";
+            return;
+        }
+
+        var parsed = MailSecretsFile.Parse(content);
+        if (!parsed.Ok)
+        {
+            SmtpStatusText.Text = parsed.Error!;
+            return;
+        }
+
+        var filled = new List<string>();
+        SmtpHostInput.Text = parsed.Host;
+        filled.Add("сервер");
+        if (parsed.Port > 0) { SmtpPortInput.Text = parsed.Port.ToString(); filled.Add("порт"); }
+        if (parsed.UseSsl is { } ssl) { SmtpSslCheck.IsChecked = ssl; filled.Add("SSL"); }
+        if (parsed.User.Length > 0) { SmtpUserInput.Text = parsed.User; filled.Add("логин"); }
+        if (parsed.From.Length > 0) { SmtpFromInput.Text = parsed.From; filled.Add("«от кого»"); }
+        if (parsed.Password.Length > 0) { SmtpPasswordInput.Password = parsed.Password; filled.Add("пароль"); }
+
+        // Сохраняем сразу и тем же путём, что и кнопка «Сохранить»: иначе человек, перетащивший
+        // файл и ушедший с вкладки, остался бы без настроек и с полной уверенностью, что всё готово.
+        SaveSmtp_Click(this, new RoutedEventArgs());
+
+        SmtpStatusText.Text = $"Из файла взято: {string.Join(", ", filled)}. Сохранено.";
+    }
+
+    private void EmailEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _services.Cfg.SetEmailEnabled(EmailEnabledCheck.IsChecked == true);
+    }
+
+    private void SaveSmtp_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetSmtpHost(SmtpHostInput.Text);
+        if (int.TryParse(SmtpPortInput.Text.Trim(), out var port) && port > 0)
+            _services.Cfg.SetSmtpPort(port);
+        _services.Cfg.SetSmtpSsl(SmtpSslCheck.IsChecked == true);
+        _services.Cfg.SetSmtpUser(SmtpUserInput.Text);
+        _services.Cfg.SetSmtpFrom(SmtpFromInput.Text);
+        // Пустое поле — «не трогать», а не «стереть»: иначе правка порта молча роняла бы почту
+        // целиком. Чтобы убрать пароль, очищают логин.
+        if (SmtpPasswordInput.Password.Length > 0)
+            _services.Cfg.SetSmtpPassword(SmtpPasswordInput.Password);
+        else if (SmtpUserInput.Text.Trim().Length == 0)
+            _services.Cfg.SetSmtpPassword("");
+
+        SmtpPasswordInput.Password = "";
+        SmtpStatusText.Text = "Сохранено.";
+    }
+
+    /// <summary>Пробное письмо самому себе. Единственное место, где ошибка почты говорится вслух: в бою
+    /// она молчит намеренно (см. NotificationCenter.MirrorToEmail), иначе недошедшее письмо порождало бы
+    /// уведомление, которое снова пыталось бы уйти почтой.</summary>
+    private async void TestSmtp_Click(object sender, RoutedEventArgs e)
+    {
+        SaveSmtp_Click(sender, e);
+
+        var smtp = _services.Cfg.Smtp() with { Enabled = true };
+        var to = smtp.From.Trim();
+        if (to.Length == 0)
+        {
+            SmtpStatusText.Text = "Укажите адрес «От кого» — на него и уйдёт пробное письмо.";
+            return;
+        }
+
+        SmtpStatusText.Text = "Отправляем…";
+        var error = await Task.Run(() => EmailNotifier.Send(smtp, new[] { to },
+            "Antarus ПО Finder: проверка почты",
+            "Это пробное письмо из настроек. Если оно пришло, дублирование уведомлений на почту работает."));
+
+        SmtpStatusText.Text = error.Length == 0 ? $"Письмо отправлено на {to}." : error;
+    }
+
+    private void EmailRecipientInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) AddEmailRule_Click(sender, e);
+    }
+
+    private void AddEmailRule_Click(object sender, RoutedEventArgs e)
+    {
+        var recipient = EmailRecipientInput.Text.Trim();
+        if (recipient.Length == 0) return;
+
+        var category = (EmailCategoryCombo.SelectedItem as EmailCategoryOption)?.Id ?? "";
+        _services.Db.AddEmailRule(category, recipient);
+        EmailRecipientInput.Clear();
+        RenderEmailRules();
+    }
+
+    private void RenderEmailRules()
+    {
+        EmailRulesPanel.Children.Clear();
+        var rules = _services.Db.GetEmailRules();
+        EmailRulesEmptyText.Visibility = rules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        foreach (var rule in rules)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var what = new TextBlock
+            {
+                Text = rule.Category.Length == 0 ? "Всё подряд" : LabelForCategoryId(rule.Category),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(what, 0);
+
+            var who = new TextBlock { Text = rule.Recipient, VerticalAlignment = VerticalAlignment.Center };
+            // Группа AD подписана явно: строка без собачки легко читается как опечатка, а она
+            // намеренная — и раскрывает её почтовый сервер, а не мы.
+            if (!EmailRouting.LooksLikeMailbox(rule.Recipient))
+            {
+                who.Text += "  — группа AD";
+                who.Style = (Style)FindResource("MutedText");
+            }
+            Grid.SetColumn(who, 1);
+
+            var del = new Button
+            {
+                Content = "×",
+                Style = (Style)FindResource("SecondaryButton"),
+                Padding = new Thickness(10, 2, 10, 2),
+                ToolTip = "Убрать правило",
+            };
+            var id = rule.Id;
+            del.Click += (_, _) => { _services.Db.DeleteEmailRule(id); RenderEmailRules(); };
+            Grid.SetColumn(del, 2);
+
+            row.Children.Add(what);
+            row.Children.Add(who);
+            row.Children.Add(del);
+            EmailRulesPanel.Children.Add(row);
+        }
+    }
+
+    private static string LabelForCategoryId(string id) =>
+        Enum.TryParse<NotificationCategory>(id, out var parsed)
+            ? NotificationCategoryInfo.Label(parsed)
+            // Неизвестная категория — это правило из более новой версии программы, приехавшее
+            // синхронизацией. Показываем как есть и НЕ удаляем: чужая настройка не наше дело.
+            : id;
 }
