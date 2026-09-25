@@ -101,6 +101,7 @@ public partial class TicketsView : UserControl
             TicketTypeCombo.Items.Add(new TicketTypeOption(id, label));
         TicketTypeCombo.SelectedIndex = 0;
 
+        ApplyTab();
         Loaded += (_, _) => Activate();
     }
 
@@ -111,16 +112,72 @@ public partial class TicketsView : UserControl
         if (IsLoaded) Activate();
     }
 
+    /// <summary>Какая вкладка открыта. Не запоминается между запусками намеренно: «Тикеты» открывают,
+    /// чтобы пожаловаться на программу, а баги прошивок смотрят осознанно.</summary>
+    private bool _fwBugsTab;
+
     private bool IsAdmin => _services.Cfg.CurrentRole() == "administrator";
+
+    private void ApplyScopeHint()
+    {
+        ScopeHintText.Text = _fwBugsTab
+            ? _services.Cfg.CurrentRole() switch
+            {
+                TicketVisibility.Naladchik =>
+                    "Баги, найденные в самих прошивках. Видны все — чтобы ехать на объект, зная, что за прошивкой числится. Закрыть можно свой — если завели ошибочно. Заводятся жучком на карточке поиска.",
+                _ =>
+                    "Баги, найденные в самих прошивках. Видны все, чьи бы они ни были: можно взять в работу, закрыть и переоткрыть. Заводятся жучком на карточке поиска.",
+            }
+            : _services.Cfg.CurrentRole() switch
+            {
+                TicketVisibility.Administrator => "Жалобы и предложения по самой программе. Видны все, можно менять статус.",
+                _ => "Жалобы и предложения по самой программе. Видны только созданные вами на любом из компьютеров (по имени пользователя Windows).",
+            };
+    }
+
+    private void Tab_Click(object sender, RoutedEventArgs e)
+    {
+        var wantFwBugs = ReferenceEquals(sender, TabBtnFwBugs);
+        if (wantFwBugs == _fwBugsTab) return;
+        _fwBugsTab = wantFwBugs;
+        ApplyTab();
+        // Подсказка живёт здесь же, а не только в Activate: иначе на вкладке багов продолжало
+        // висеть «баг-репорты и предложения по программе» — ровно то, что там НЕ показывается.
+        ApplyScopeHint();
+        ReloadGrid();
+    }
+
+    /// <summary>Что меняется при переключении вкладки.
+    ///
+    /// На вкладке багов нет формы «Новый тикет»: баг прошивки заводится только жучком на
+    /// карточке выдачи, иначе он окажется багом неизвестно чего. И нет галки автоотчётов о сбоях —
+    /// это падения самой программы, к прошивкам они отношения не имеют.
+    ///
+    /// Столбцы тоже разные: критичность и прошивка есть только у багов, а тип на их вкладке
+    /// излишен: там всё и так одного типа.</summary>
+    private void ApplyTab()
+    {
+        TabBtnApp.Tag = _fwBugsTab ? null : "Active";
+        TabBtnFwBugs.Tag = _fwBugsTab ? "Active" : null;
+
+        NewTicketCard.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
+        ShowAutoReportsCheck.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
+
+        SeverityColumn.Visibility = _fwBugsTab ? Visibility.Visible : Visibility.Collapsed;
+        FwColumn.Visibility = _fwBugsTab ? Visibility.Visible : Visibility.Collapsed;
+        TypeColumn.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
+
+        // «Текст» занимает всю оставшуюся ширину, но ширину-звёздочку приходится задавать ЗАНОВО
+        // после каждой смены видимости столбцов: DataGrid не пересчитывает долю сам, и после
+        // переключения вкладки текст сжимался в полоску шириной в одну букву, а справа зияла пустота.
+        TextColumn.Width = new DataGridLength(1, DataGridLengthUnitType.Star);
+    }
+
+
 
     private void Activate()
     {
-        ScopeHintText.Text = _services.Cfg.CurrentRole() switch
-        {
-            TicketVisibility.Administrator => "Видны все тикеты всех пользователей. Можно менять статус.",
-            TicketVisibility.Programmer => "Видны все баги прошивок — чьи бы они ни были, их можно взять в работу и закрыть, — и ваши собственные тикеты по программе.",
-            _ => "Видны только тикеты, созданные вами на любом из компьютеров (по имени пользователя Windows).",
-        };
+ApplyScopeHint();
 
         var root = _services.Cfg.RootPath();
         if (!string.IsNullOrEmpty(root) && System.IO.Directory.Exists(root))
@@ -192,7 +249,16 @@ public partial class TicketsView : UserControl
         var all = _services.Db.GetTickets();
         // Отбор живёт в Core (TicketVisibility), а не здесь: правило «программист видит все баги
         // прошивок» — правило доступа, и проверять его глазами по живому экрану — худший из способов.
-        var mine = TicketVisibility.Visible(all, _services.Cfg.CurrentRole(), _services.CurrentUserName);
+        var visibleToMe = TicketVisibility.Visible(all, _services.Cfg.CurrentRole(), _services.CurrentUserName);
+
+        // Число НЕЗАКРЫТЫХ багов прямо на вкладке. Без него отдельная вкладка стала бы местом,
+        // куда надо специально заглядывать, — то есть тем же самым, чем были баги в общей куче: незаметными.
+        // Закрытые не считаются: число должно отвечать на вопрос «сколько ещё чинить», а не «сколько было всего».
+        var openFwBugs = visibleToMe.Count(t => t.Type == TicketType.FwBug && t.Status != TicketStatus.Closed);
+        TabFwBugsText.Text = openFwBugs > 0 ? $"Баги прошивок ({openFwBugs})" : "Баги прошивок";
+        // Вкладка режет ПОСЛЕ прав доступа, а не вместо них: права — это вопрос «что человеку
+        // вообще положено видеть», а вкладка — всего лишь «что он сейчас смотрит».
+        var mine = visibleToMe.Where(t => (t.Type == TicketType.FwBug) == _fwBugsTab).ToList();
 
         var autoCount = TicketAutoReports.Count(mine);
         ShowAutoReportsCheck.Content = autoCount > 0
@@ -241,7 +307,8 @@ public partial class TicketsView : UserControl
     private void UpdateActionButtons()
     {
         var selected = (TicketsGrid.SelectedItem as TicketRow)?.Ticket;
-        var canModerate = selected is not null && TicketVisibility.CanModerate(selected, _services.Cfg.CurrentRole());
+        var canModerate = selected is not null &&
+            TicketVisibility.CanModerate(selected, _services.Cfg.CurrentRole(), _services.CurrentUserName);
 
         TakeInProgressBtn.Visibility = canModerate && selected!.Status != TicketStatus.InProgress ? Visibility.Visible : Visibility.Collapsed;
         CloseTicketBtn.Visibility = canModerate && selected!.Status != TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;

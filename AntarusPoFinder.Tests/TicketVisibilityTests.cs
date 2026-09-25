@@ -31,6 +31,38 @@ public class TicketVisibilityTests
         Assert.False(TicketVisibility.CanSee(AppBug("ivanov"), TicketVisibility.Programmer, "petrov"));
     }
 
+    /// <summary>Наладчик видит ВСЕ баги прошивок — ради отслеживания.
+    ///
+    /// Он едет на объект с той же прошивкой и обязан заранее знать, что за ней уже числится. Свои только
+    /// жалобы означали бы, что двое наладчиков найдут один и тот же баг и заведут его дважды.</summary>
+    [Fact]
+    public void Наладчик_видит_все_баги_прошивок()
+    {
+        Assert.True(TicketVisibility.CanSee(FwBug("ivanov"), TicketVisibility.Naladchik, "petrov"));
+    }
+
+    /// <summary>Но чужие жалобы на саму программу — по-прежнему нет: расширение касается только
+    /// багов прошивок, о остальном никто не просил.</summary>
+    [Fact]
+    public void Наладчику_не_показывают_чужие_жалобы_на_программу()
+    {
+        Assert.False(TicketVisibility.CanSee(AppBug("ivanov"), TicketVisibility.Naladchik, "petrov"));
+    }
+
+    /// <summary>Закрыть ОШИБОЧНО заведённый баг наладчик может — но только свой.
+    ///
+    /// Просьба дословно: «наладчику для отслеживания или закрытия, если ошибочно баг». Чужая
+    /// жалоба закрывается тем, кто чинит: иначе найденный на объекте баг можно убрать с глаз раньше,
+    /// чем его увидел программист.</summary>
+    [Fact]
+    public void Наладчик_закрывает_свой_ошибочный_баг_но_не_чужой()
+    {
+        Assert.True(TicketVisibility.CanModerate(FwBug("petrov"), TicketVisibility.Naladchik, "petrov"));
+        Assert.False(TicketVisibility.CanModerate(FwBug("ivanov"), TicketVisibility.Naladchik, "petrov"));
+        // Свою жалобу на интерфейс автор по-прежнему не закрывает.
+        Assert.False(TicketVisibility.CanModerate(AppBug("petrov"), TicketVisibility.Naladchik, "petrov"));
+    }
+
     [Fact]
     public void Свой_тикет_видит_автор_в_любой_роли()
     {
@@ -45,18 +77,12 @@ public class TicketVisibilityTests
         Assert.True(TicketVisibility.CanSee(FwBug("ivanov"), TicketVisibility.Administrator, "petrov"));
     }
 
-    [Fact]
-    public void Наладчик_не_видит_чужой_баг_прошивки()
-    {
-        Assert.False(TicketVisibility.CanSee(FwBug("ivanov"), "naladchik", "petrov"));
-    }
-
     /// <summary>Закрыть баг прошивки может тот, кто его чинит, а не тот, кто нашёл.</summary>
     [Fact]
     public void Статус_бага_прошивки_меняет_программист_а_не_автор()
     {
-        Assert.True(TicketVisibility.CanModerate(FwBug(), TicketVisibility.Programmer));
-        Assert.False(TicketVisibility.CanModerate(FwBug(), "naladchik"));
-        Assert.False(TicketVisibility.CanModerate(AppBug(), TicketVisibility.Programmer));
+        Assert.True(TicketVisibility.CanModerate(FwBug("ivanov"), TicketVisibility.Programmer, "petrov"));
+        Assert.False(TicketVisibility.CanModerate(FwBug("ivanov"), TicketVisibility.Naladchik, "petrov"));
+        Assert.False(TicketVisibility.CanModerate(AppBug(), TicketVisibility.Programmer, "petrov"));
     }
 }

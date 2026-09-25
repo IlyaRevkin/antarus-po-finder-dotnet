@@ -769,6 +769,13 @@
                     <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
                                Text="Бета. Уведомления программы можно дублировать на почту — это именно дубль: всё, что уходит письмом, по-прежнему остаётся в колокольчике. Не дошёдшее письмо не повторяется и не копится в очереди; проверить связь можно кнопкой ниже."/>
 
+                    <!-- Сводка перед всеми полями, а не после: именно она отвечает на вопрос, ради
+                         которого сюда заходят. Жалоба: «проверил почту, тестовое письмо дошло, опубликовал
+                         прошивку — и письмо не отправилось». -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+                        <TextBlock x:Name="EmailReadyText" TextWrapping="Wrap"/>
+                    </Border>
+
                     <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
                         <StackPanel>
                             <TextBlock Text="ПОЧТОВЫЙ СЕРВЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
@@ -824,6 +831,8 @@
                                        Text="Пароль хранится зашифрованным и едет в общем конфиге вместе с остальными реквизитами — так же, как ключи хранилища. Это защита от случайного взгляда в файл базы, а не от того, у кого есть сама программа."/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveSmtp_Click"/>
+                                <Button x:Name="DetectSmtpBtn" Content="Определить сервер" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DetectSmtp_Click"
+                                        ToolTip="Опросить сервер и самому подставить порт и SSL. Если адрес сервера не заполнен, берётся домен из адреса «От кого». Письмо не отправляется и пароль не нужен"/>
                                 <Button Content="Проверить отправку" Style="{StaticResource SecondaryButton}" Click="TestSmtp_Click"
                                         ToolTip="Отправить пробное письмо на адрес «От кого»"/>
                             </StackPanel>
@@ -850,7 +859,9 @@
                             <TextBlock x:Name="EmailRulesEmptyText" Style="{StaticResource MutedText}"
                                        Text="Правил нет — письма не уходят никому." Visibility="Collapsed"/>
                             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,10,0,0"
-                                       Text="«Всё подряд» значит любое уведомление этой машины. Группа AD раскрывается почтовым сервером, если у неё есть свой адрес; иначе впишите ящики по отдельности. Список общий для всех машин."/>
+                                       Text="Каждая строка читается так: «события такого-то вида → на такой-то адрес». Чтобы присылалось всё — выберите «Всё подряд». Нужно несколько адресов — добавьте несколько строк."/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="Группу AD раскрывает сам почтовый сервер, и только если у группы есть собственный адрес. Если его нет — впишите ящики по отдельности, иначе список выглядит заполненным, а письма не уходят. Список общий для всех машин."/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

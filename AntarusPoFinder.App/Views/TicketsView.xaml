@@ -12,11 +12,28 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="Тикеты" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
-        <TextBlock Grid.Row="1" x:Name="ScopeHintText" Text="Баг-репорты и предложения по программе."
-                   Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+        <!-- Две вкладки, а не один список с отбором. Жалоба Ильи: «отправил тестовый баг, оно
+             улетело в общие тикеты, вкладка баги прошивок отдельно должно быть».
+
+             Это разные потоки работы, а не два вида одного списка: у багов прошивок другой адресат
+             (программист, а не тот, кто чинит приложение), свои столбцы и свои права. Смешанные в одну
+             кучу, они терялись среди жалоб на интерфейс. -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <Button x:Name="TabBtnApp" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                    <TextBlock Text="Программа" Style="{StaticResource NavButtonContentText}"/>
+                </Button>
+                <Button x:Name="TabBtnFwBugs" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
+                    <TextBlock x:Name="TabFwBugsText" Text="Баги прошивок" Style="{StaticResource NavButtonContentText}"/>
+                </Button>
+            </StackPanel>
+            <TextBlock x:Name="ScopeHintText" Text="Баг-репорты и предложения по программе."
+                       Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+        </StackPanel>
 
         <!-- New ticket -->
-        <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+        <Border Grid.Row="2" x:Name="NewTicketCard" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
             <StackPanel>
                 <TextBlock Text="НОВЫЙ ТИКЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                 <Grid Margin="0,0,0,8">
@@ -70,10 +87,16 @@
         <DataGrid Grid.Row="4" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
                   VirtualizingPanel.ScrollUnit="Pixel"
                   IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
-            <!-- Цвет строки задан триггерами по ключу кисти (см. TicketRow.RowBrushKey), а не конвертером:
-                 так кисть остаётся DynamicResource и переживает смену темы без перерисовки списка руками. -->
-            <DataGrid.RowStyle>
-                <Style TargetType="DataGridRow">
+            <!-- Цвет задаётся ЯЧЕЙКЕ, а не строке, и это не прихоть: общеприложенческий стиль
+                 DataGridCell задаёт Foreground явно (см. Styles.xaml), а явное значение всегда бьёт
+                 наследование от строки. Цвет на DataGridRow просто не доходил до текста — список
+                 оставался сплошь чёрным, и заметить это без живых тикетов было негде.
+
+                 Правило выделения повторено здесь ниже триггеров цвета нарочно: триггеры производного
+                 стиля сильнее базовых, и без этого выделенная красная строка оставалась бы красной
+                 на синем фоне выделения — нечитаемо. -->
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding RowBrushKey}" Value="ErrorBrush">
                             <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
@@ -87,20 +110,28 @@
                         <DataTrigger Binding="{Binding RowBrushKey}" Value="SuccessBrush">
                             <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                         </DataTrigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                        </Trigger>
                     </Style.Triggers>
                 </Style>
-            </DataGrid.RowStyle>
+            </DataGrid.CellStyle>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Тип" Binding="{Binding TypeLabel}" Width="110"/>
-                <DataGridTextColumn Header="Критичность" Binding="{Binding SeverityLabel}" SortMemberPath="SeverityOrder" Width="100"/>
-                <DataGridTextColumn Header="Прошивка" Binding="{Binding FwLabel}" Width="180">
+                <DataGridTextColumn x:Name="TypeColumn" Header="Тип" Binding="{Binding TypeLabel}" Width="110"/>
+                <DataGridTextColumn x:Name="SeverityColumn" Header="Критичность" Binding="{Binding SeverityLabel}" SortMemberPath="SeverityOrder" Width="100"/>
+                <DataGridTextColumn x:Name="FwColumn" Header="Прошивка" Binding="{Binding FwLabel}" Width="180">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Текст" Binding="{Binding Text}" Width="*">
+                <!-- MinWidth обязателен, а не для красоты: долю «*» DataGrid пересчитывает не всегда,
+                     и после смены видимости столбцов при переключении вкладки текст сжимался в полоску
+                     шириной 20 пикселей (проверено замером ActualWidth), а справа зияла пустота. Самое важное
+                     в строке — что именно сломалось, и читать это по одной букве невозможно. -->
+                <DataGridTextColumn x:Name="TextColumn" Header="Текст" Binding="{Binding Text}" Width="*" MinWidth="240">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>

@@ -15,17 +15,33 @@ public static class TicketVisibility
 {
     public const string Administrator = "administrator";
     public const string Programmer = "programmer";
+    public const string Naladchik = "naladchik";
 
+    /// <summary>Баги прошивок видят ВСЕ три роли, и каждая — целиком, чьи бы они ни были.
+    ///
+    /// Программист и администратор — потому что чинят. Наладчик — ради отслеживания: едет на объект
+    /// с той же прошивкой и обязан заранее знать, что за ней уже числится. Показывать ему только СВОИ
+    /// жалобы значило бы, что двое наладчиков независимо найдут один и тот же баг и заведут его дважды.
+    ///
+    /// Жалобы на саму программу — по-прежнему только свои (кроме администратора).</summary>
     public static bool CanSee(Ticket t, string role, string userName) =>
         role == Administrator ||
-        (role == Programmer && t.Type == TicketType.FwBug) ||
+        t.Type == TicketType.FwBug ||
         string.Equals(t.CreatedBy, userName, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Менять статус может администратор кому угодно, а программист — только багам
-    /// прошивок. Своей жалобе на интерфейс автор статус не меняет: «закрыть» значит «починено», и
-    /// решает это тот, кто чинит.</summary>
-    public static bool CanModerate(Ticket t, string role) =>
-        role == Administrator || (role == Programmer && t.Type == TicketType.FwBug);
+    /// <summary>Кто может менять статус.
+    ///
+    /// Администратор — кому угодно. Программист — любому багу прошивки: он их чинит.
+    ///
+    /// Наладчик — только СВОЕМУ багу прошивки, и ровно затем, зачем просили: «закрыть,
+    /// если ошибочно баг». Закрывать ЧУЖУЮ жалобу он не может: «закрыто» там означало бы
+    /// «починено», а решает это тот, кто чинит — иначе найденный на объекте баг можно было бы убрать с
+    /// глаз до того, как его увидел программист.</summary>
+    public static bool CanModerate(Ticket t, string role, string userName = "") =>
+        role == Administrator ||
+        (role == Programmer && t.Type == TicketType.FwBug) ||
+        (role == Naladchik && t.Type == TicketType.FwBug &&
+         string.Equals(t.CreatedBy, userName, StringComparison.OrdinalIgnoreCase));
 
     public static List<Ticket> Visible(IEnumerable<Ticket> all, string role, string userName) =>
         all.Where(t => CanSee(t, role, userName)).ToList();

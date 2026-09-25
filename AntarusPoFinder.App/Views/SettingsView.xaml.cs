@@ -3889,6 +3889,7 @@ public partial class SettingsView : UserControl
         SmtpStatusText.Text = _services.Cfg.SmtpPassword().Length > 0 ? "Пароль сохранён." : "";
 
         RenderEmailRules();
+        RefreshEmailReadiness();
     }
 
     // ── Реквизиты почты файлом ────────────────────────────────────────
@@ -3980,10 +3981,80 @@ public partial class SettingsView : UserControl
         SmtpStatusText.Text = $"Из файла взято: {string.Join(", ", filled)}. Сохранено.";
     }
 
+    /// <summary>Одной строкой — уйдёт ли письмо на самом деле. См. EmailReadiness.</summary>
+    private void RefreshEmailReadiness()
+    {
+        var rules = _services.Db.GetEmailRules();
+        var smtp = _services.Cfg.Smtp();
+        EmailReadyText.Text = EmailReadiness.Describe(smtp, rules);
+        EmailReadyText.Foreground = (System.Windows.Media.Brush)FindResource(
+            EmailReadiness.Ready(smtp, rules) ? "SuccessBrush" : "WarningBrush");
+    }
+
+    /// <summary>Опрос почтового сервера — то же, что делают руками через консоль: открыть соединение,
+    /// прочитать баннер, сказать EHLO и посмотреть, что сервер умеет.
+    ///
+    /// Адрес берётся из поля сервера, а если оно пусто — угадывается по домену адреса «От кого».
+    /// Пароль здесь НЕ нужен и письмо НЕ отправляется: иначе непонятно, в чём беда — в адресе,
+    /// в порте или в пароле.</summary>
+    private async void DetectSmtp_Click(object sender, RoutedEventArgs e)
+    {
+        var typed = SmtpHostInput.Text.Trim();
+        var candidates = typed.Length > 0
+            ? new List<string> { typed }
+            : SmtpProbe.GuessHosts(SmtpFromInput.Text.Trim());
+
+        if (candidates.Count == 0)
+        {
+            SmtpStatusText.Text = "Укажите адрес сервера или адрес «От кого» — по домену из него сервер можно найти самому.";
+            return;
+        }
+
+        DetectSmtpBtn.IsEnabled = false;
+        SmtpStatusText.Text = $"Опрашиваем {string.Join(", ", candidates)}…";
+
+        var found = await Task.Run(() =>
+        {
+            var last = SmtpProbe.Probe("", 0);
+            foreach (var host in candidates)
+            {
+                last = SmtpProbe.ProbeCommonPorts(host, 4000);
+                if (last.Ok) return last;
+            }
+            return last;
+        });
+
+        DetectSmtpBtn.IsEnabled = true;
+
+        if (!found.Ok)
+        {
+            SmtpStatusText.Text = found.Error!;
+            return;
+        }
+
+        SmtpHostInput.Text = found.Host;
+        SmtpPortInput.Text = found.Port.ToString();
+        // Порт 465 — это TLS с первой секунды, 587/25 — STARTTLS поверх открытого соединения. SmtpClient
+        // в обоих случаях хочет EnableSsl, если сервер шифрование умеет.
+        SmtpSslCheck.IsChecked = found.StartTls || found.Port == 465;
+
+        SaveSmtp_Click(this, new RoutedEventArgs());
+
+        var parts = new List<string> { $"Нашёлся: {found.Host}, порт {found.Port}" };
+        if (found.Banner.Length > 0) parts.Add($"сервер представился: {found.Banner}");
+        if (found.StartTls) parts.Add("шифрование поддерживается");
+        parts.Add(found.NeedsAuth ? "нужен логин и пароль" : "вход не требуется");
+        if (found.CertificateSubject.Length > 0) parts.Add($"сертификат: {found.CertificateSubject}");
+        SmtpStatusText.Text = string.Join(". ", parts) + ".";
+
+        RefreshEmailReadiness();
+    }
+
     private void EmailEnabled_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
         _services.Cfg.SetEmailEnabled(EmailEnabledCheck.IsChecked == true);
+        RefreshEmailReadiness();
     }
 
     private void SaveSmtp_Click(object sender, RoutedEventArgs e)
@@ -4025,7 +4096,23 @@ public partial class SettingsView : UserControl
             "Antarus ПО Finder: проверка почты",
             "Это пробное письмо из настроек. Если оно пришло, дублирование уведомлений на почту работает."));
 
-        SmtpStatusText.Text = error.Length == 0 ? $"Письмо отправлено на {to}." : error;
+        if (error.Length > 0)
+        {
+            SmtpStatusText.Text = error;
+            return;
+        }
+
+        // Главное здесь — НЕ сказать «всё работает». Пробное письмо идёт в ОБХОД и галочки
+        // дублирования, и списка получателей — оно проверяет только связь с сервером. Именно на этом
+        // и обожглись: «тестовое письмо дошло, опубликовал прошивку — и письмо не отправилось».
+        var rules = _services.Db.GetEmailRules();
+        var problems = EmailReadiness.Problems(_services.Cfg.Smtp(), rules);
+        SmtpStatusText.Text = problems.Count == 0
+            ? $"Письмо отправлено на {to}. Дублирование настроено и работает."
+            : $"Письмо отправлено на {to} — значит, сервер доступен. НО уведомления по-прежнему НЕ будут дублироваться: "
+              + string.Join("; ", problems) + ".";
+
+        RefreshEmailReadiness();
     }
 
     private void EmailRecipientInput_KeyDown(object sender, KeyEventArgs e)
@@ -4042,6 +4129,7 @@ public partial class SettingsView : UserControl
         _services.Db.AddEmailRule(category, recipient);
         EmailRecipientInput.Clear();
         RenderEmailRules();
+        RefreshEmailReadiness();
     }
 
     private void RenderEmailRules()
@@ -4082,7 +4170,7 @@ public partial class SettingsView : UserControl
                 ToolTip = "Убрать правило",
             };
             var id = rule.Id;
-            del.Click += (_, _) => { _services.Db.DeleteEmailRule(id); RenderEmailRules(); };
+            del.Click += (_, _) => { _services.Db.DeleteEmailRule(id); RenderEmailRules(); RefreshEmailReadiness(); };
             Grid.SetColumn(del, 2);
 
             row.Children.Add(what);
