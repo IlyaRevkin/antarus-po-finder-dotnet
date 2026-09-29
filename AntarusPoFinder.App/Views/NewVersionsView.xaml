@@ -34,11 +34,20 @@
                 <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="140" ElementStyle="{StaticResource DataGridCellText}"/>
                 <!-- Столбца «Статус» здесь больше нет: в списке остались только текущие активные
                      версии, и он всегда показывал бы одно и то же «Текущая». -->
-                <DataGridTemplateColumn Header="" Width="130">
+                <!-- Две кнопки, а не одна: вывести из модерации можно было только через открытие
+                     карточки и вопрос в конце, хотя чаще всего править там нечего: теги уже стоят, надо
+                     просто подтвердить. Просьба дословно: «во вкладке модерации прошивок добавь
+                     сделать релизной без необходимости открывать». -->
+                <DataGridTemplateColumn Header="" Width="230">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Padding="10,3"
-                                    Click="EditTagsButton_Click"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Padding="10,3" Margin="0,0,6,0"
+                                        Click="EditTagsButton_Click"/>
+                                <Button Content="В релиз" Style="{StaticResource SecondaryButton}" Padding="10,3"
+                                        Click="ReleaseButton_Click"
+                                        ToolTip="Вывести из модерации сразу, не открывая карточку. Решение уедет коллегам"/>
+                            </StackPanel>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>

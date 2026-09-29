@@ -295,6 +295,18 @@ public partial class Database
                 // комментарий — свободный текст в несколько слов, случайное пересечение в нём куда
                 // вероятнее, чем в теге, который вешают осознанно и коротко.
                 if (TokenMatches(token, row.AttachmentsText, false)) { weighted += 1; hit = true; }
+                // НОМЕР ЗАЯВКИ и ЗАВОДСКОЙ НОМЕР ШКАФА. Без них ОПЦ была ненаходима вообще:
+                // у разовой сборки под конкретный шкаф другого имени нет, искать её будут именно по номеру
+                // заявки. Жалоба дословно: «по номеру заявки так и не нашлось».
+                //
+                // Вес как у тега, а не как у названия папки: это не описание, а точный указатель, вписанный
+                // человеком осознанно. Сравнение тем же TokenMatches, что и всюду: номера пишут то с нулями
+                // впереди, то без, и требовать точного совпадения значило бы не находить половину.
+                if (TokenMatches(token, row.RequestNum, false)) { weighted += 2; hit = true; }
+                if (TokenMatches(token, row.CabinetSn, false)) { weighted += 2; hit = true; }
+                // ИСПОЛНЕНИЕ — то, чем прошивка отличается от соседней («3 насоса», «ПЧ Danfoss»). Оно уже
+                // показывается на карточке первым — странно было бы показывать и не давать по этому искать.
+                if (TokenMatches(token, row.Execution, false)) { weighted += 2; hit = true; }
                 if (hit) matchedTokens++;
             }
 
@@ -444,6 +456,11 @@ public partial class Database
         // Доп. материалы — в общем стоге наравне с остальным: в кавычках («точное совпадение») ищут
         // в том числе и точную формулировку из комментария к файлу.
         parts.Add(row.AttachmentsText);
+        // Номер заявки, заводской номер шкафа и исполнение — и здесь тоже: в кавычках номер заявки
+        // ищут чаще, чем без них — он для того и записан, чтобы найти ровно одну запись.
+        parts.Add(row.RequestNum);
+        parts.Add(row.CabinetSn);
+        parts.Add(row.Execution);
         return CollapseForOrdered(string.Join(" ", parts.Where(p => !string.IsNullOrEmpty(p))));
     }
 
@@ -624,7 +641,8 @@ public partial class Database
     /// слова-исключения. Путь на диске сюда НЕ входит намеренно: в нём встречаются служебные куски,
     /// которых человек не видит, и совпадение по ним пряло бы строки без видимой причины.</summary>
     private static string SearchableTextOf(FwVersionRecord r) =>
-        string.Join(" ", new[] { r.GroupName, r.SubtypeName, r.SubtypeFolder, r.CtrlName, r.Tags, r.Execution }
+        string.Join(" ", new[] { r.GroupName, r.SubtypeName, r.SubtypeFolder, r.CtrlName, r.Tags, r.Execution,
+                                 r.RequestNum, r.CabinetSn }
             .Where(x => !string.IsNullOrEmpty(x)));
 
     private static bool PassesFilters(FwVersionRecord row, FirmwareSearchFilters f)

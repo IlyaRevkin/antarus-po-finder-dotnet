@@ -331,8 +331,14 @@
                                  наклейкам и паспортам в этом блоке не место — здесь всё остальное
                                  про настройку программы, а это рабочая печать. -->
 
-                            <TextBlock Text="ЛИЧНОЕ" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
-<TextBlock Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
+                            <!-- Заголовка «ЛИЧНОЕ» здесь больше нет: под ним не осталось ни одной кнопки — всё,
+                                 что там было, уехало в строку состояния. Заголовок над пустотой читается как
+                                 «здесь что-то должно быть, но не загрузилось».
+
+                                 У «СПРАВКИ» своё имя: она прячется вместе с единственной своей кнопкой (см.
+                                 SetupOnboardingButton) — у новичка кнопка живёт несколько минут и уходит,
+                                 а заголовок оставался висеть над пустым местом. -->
+                            <TextBlock x:Name="HelpSectionHeader" Text="СПРАВКА" Style="{StaticResource MutedText}" Margin="0,6,0,2" FontSize="9"/>
                             <Button x:Name="OnboardingNavButton" Content="Обучение" Style="{StaticResource CompactNavButton}"
                                     Margin="0,0,0,2" HorizontalAlignment="Stretch" Click="ShowOnboarding_Click"
                                     ToolTip="Пройти вводный тур по программе заново"/>

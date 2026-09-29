@@ -44,6 +44,29 @@ public partial class NewVersionsView : UserControl
         if (((FrameworkElement)sender).DataContext is RecentRow row) EditTags(row);
     }
 
+    /// <summary>«В релиз» прямо из списка, без открытия карточки.
+    ///
+    /// Вывод из модерации и доставка коллегам идут тем же путём, что и из карточки (см. Release ниже):
+    /// второй способ выпускать версию неизбежно разошёлся бы с первым — и решение, принятое одной
+    /// кнопкой, у коллег не появлялось бы.
+    ///
+    /// Подтверждение остаётся: это действие видно всей конторе и отменяется не одним нажатием,
+    /// а кнопка теперь стоит в строке списка, где промахнуться проще, чем в открытом окне.</summary>
+    private void ReleaseButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not RecentRow row) return;
+
+        var v = row.Record;
+        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+        if (AppMessageBox.Show($"Вывести из модерации и сделать релизной?\n\n{title}",
+                "Модерация прошивок", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.Yes) != MessageBoxResult.Yes)
+            return;
+
+        Release(v, title);
+        LoadData();
+    }
+
     private void RecentGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (DataGridClickGuard.IsOverDataRow(e) && RecentGrid.SelectedItem is RecentRow row) EditTags(row);
@@ -64,15 +87,7 @@ public partial class NewVersionsView : UserControl
         // Вместе со всеми записями-копиями этой же прошивки под другими подтипами — иначе подтип,
         // отмеченный только что в этом же диалоге, вернул бы версию в модерацию.
         var delivered = false;
-        if (release)
-        {
-            _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
-            // Узкий канал доставки решения (см. ConfigSyncService.PushFirmwareAndModerationOnly): страница
-            // модерации доступна и наладчику, а полный экспорт — только администратору, поэтому без
-            // этого решение, принятое здесь, у коллег никогда бы не появилось.
-            delivered = ConfigSyncService.RecordAndPushModeration(_services,
-                _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
-        }
+        if (release) delivered = Release(v, title);
 
         // Названием прошивки, а не голым номером версии: по «2.0.0042.0003» невозможно понять, к
         // чему относится сообщение (тикет коллеги — «не номер прошивки, а название её»).
@@ -80,5 +95,26 @@ public partial class NewVersionsView : UserControl
             ? $"Версия выведена из модерации: {title}" + (delivered ? " (отправлено коллегам)" : "")
             : $"Теги обновлены: {title}", category: NotificationCategory.FirmwareAndParams);
         LoadData();
+    }
+
+    /// <summary>Единственное место, где версия выходит из модерации. Оба пути — и кнопка в строке,
+    /// и вопрос после правки карточки — ходят сюда: иначе они разошлись бы, и решение, принятое
+    /// одним из них, у коллег не появлялось бы.
+    ///
+    /// Вместе со всеми записями-копиями этой же прошивки под другими подтипами — иначе подтип,
+    /// отмеченный только что, вернул бы версию в модерацию.
+    ///
+    /// Узкий канал доставки (ConfigSyncService.PushFirmwareAndModerationOnly) обязателен: страница
+    /// модерации доступна и наладчику, а полный экспорт — только администратору.</summary>
+    private bool Release(FwVersionRecord v, string title)
+    {
+        _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+        var delivered = ConfigSyncService.RecordAndPushModeration(_services,
+            _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
+
+        _host.ShowStatus($"Версия выведена из модерации: {title}"
+            + (delivered ? " (отправлено коллегам)" : ""),
+            category: NotificationCategory.FirmwareAndParams);
+        return delivered;
     }
 }

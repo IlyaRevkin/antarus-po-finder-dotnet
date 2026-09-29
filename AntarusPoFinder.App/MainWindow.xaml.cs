@@ -188,15 +188,18 @@ public partial class MainWindow : Window
         if (!_onboardingJustShown)
         {
             OnboardingNavButton.Visibility = Visibility.Collapsed;
+            HelpSectionHeader.Visibility = Visibility.Collapsed;
             return;
         }
 
         OnboardingNavButton.Visibility = Visibility.Visible;
+        HelpSectionHeader.Visibility = Visibility.Visible;
         var hide = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         hide.Tick += (_, _) =>
         {
             hide.Stop();
             OnboardingNavButton.Visibility = Visibility.Collapsed;
+            HelpSectionHeader.Visibility = Visibility.Collapsed;
         };
         hide.Start();
     }
