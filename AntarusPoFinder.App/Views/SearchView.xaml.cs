@@ -59,6 +59,7 @@ public partial class SearchView : UserControl
         // (модерация — «видеть, что есть и что надо подгрузить»), а не на один запрос. Ставится
         // ПОСЛЕ присваивания _services: обработчик Checked тут же попробует сохранить значение.
         ShowAllVersionsCheck.IsChecked = _services.Cfg.SearchShowAllVersions();
+        RefreshAllVersionsBanner();
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -510,8 +511,25 @@ public partial class SearchView : UserControl
         // конструкторе, когда _services ещё не присвоен, — ранний выход вместо падения страницы.
         if (_services is null) return;
         _services.Cfg.SetSearchShowAllVersions(ShowAllVersionsCheck.IsChecked == true);
+        RefreshAllVersionsBanner();
         if (!string.IsNullOrWhiteSpace(SearchInput.Text)) PerformSearch();
     }
+
+    /// <summary>Полоса «показаны все версии» видна ровно пока режим включён.
+    ///
+    /// Галочка запоминается между запусками, и включённая однажды меняет выдачу навсегда — и молча.
+    /// Именно так родилась жалоба «после загрузки ОПЦ вываливаются все версии, даже заменённые»:
+    /// галочку включили раньше, при разборе совсем другого, и забыли. Загрузка ОПЦ просто была
+    /// поводом посмотреть в выдачу внимательно.
+    ///
+    /// Режим, меняющий то, что человек видит, обязан сообщать о себе сам — иначе он неотличим от поломки.</summary>
+    private void RefreshAllVersionsBanner() =>
+        AllVersionsBanner.Visibility = ShowAllVersionsCheck.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    private void ShowOnlyCurrent_Click(object sender, RoutedEventArgs e) =>
+        ShowAllVersionsCheck.IsChecked = false;
 
     /// <summary>Ширина одного сегмента переключателя Прошивки/Параметры/Таблицы/Схемы — обязана
     /// совпадать с Width у каждой RadioButton и у ModeThumb в SearchView.xaml.</summary>

@@ -319,7 +319,10 @@ public partial class EditFirmwareDialog : Window
         // постоянной по прямой просьбе: исходник правят, не меняя номера версии, и тогда собранный
         // файл устаревает молча, а пересобрать его нечем. Что показать (собрать, пересобрать или
         // почему нельзя) решает сам RefreshBuildLfs.
-        if (hasPsl) RefreshBuildLfs();
+        // Зовём ВСЕГДА, а не только когда исходник уже записан у версии: при отсутствии .psl
+        // панель теперь не прячется, а объясняет, чего не хватает. Промолчав, она оставляла человека
+        // гадать, сломалась ли программа.
+        RefreshBuildLfs();
     }
 
     // ── Сборка .psl → .lfs ────────────────────────────────────────────────────
@@ -349,7 +352,16 @@ public partial class EditFirmwareDialog : Window
         // физически нечем — нет исходника или недоступна папка версии.
         if (decision.Need is LfsConversionNeed.NoSource or LfsConversionNeed.Unreachable || decision.Plan is null)
         {
-            BuildLfsPanel.Visibility = Visibility.Collapsed;
+            // Панель ОСТАЁТСЯ и говорит, почему собирать нечего. Раньше она просто исчезала, и
+            // отличить «нет исходника» от «диск недоступен» и от «сломалось» было невозможно — отсюда и
+            // повторяющийся вопрос «куда ОПЯТЬ делась кнопка пересобрать LFS». Кнопка прячется, причина остаётся.
+            BuildLfsPanel.Visibility = Visibility.Visible;
+            BuildLfsBtn.Visibility = Visibility.Collapsed;
+            BuildLfsHint.Text = decision.Need == LfsConversionNeed.Unreachable
+                ? "Пересобрать LFS сейчас нельзя: папка версии на сетевом диске недоступна — "
+                  + "подключите диск и откройте окно заново."
+                : "Пересобрать LFS не из чего: в папке версии нет исходника .psl. "
+                  + "Доложите его полем «Исходный проект (.psl)» выше и сохраните.";
             return;
         }
 

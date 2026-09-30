@@ -160,7 +160,25 @@
                       Checked="ShowAllVersions_Changed" Unchecked="ShowAllVersions_Changed"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="4" x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>
+        <StackPanel Grid.Row="4">
+            <TextBlock x:Name="StatusLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,10"/>
+
+        <!-- Полоса появляется, пока включена галочка «Показывать все версии».
+             Галочка запоминается между запусками, и включённая однажды она меняет выдачу навсегда — молча.
+             Именно так и родилась жалоба «после загрузки ОПЦ вываливаются все версии, даже заменённые»:
+             галочка была включена раньше, при разборе совсем другого, и так и осталась.
+             Режим, меняющий то, что человек видит, обязан сообщать о себе сам. -->
+        <Border x:Name="AllVersionsBanner" Visibility="Collapsed"
+                Background="{DynamicResource TagBgBrush}" CornerRadius="4" Padding="10,6"
+                Margin="0,0,0,10" HorizontalAlignment="Left">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Показаны ВСЕ версии, включая заменённые более свежими."
+                           VerticalAlignment="Center" FontWeight="SemiBold"/>
+                <Button Content="Показывать только текущие" Style="{StaticResource SecondaryButton}"
+                        Margin="12,0,0,0" Padding="10,2" Click="ShowOnlyCurrent_Click"/>
+            </StackPanel>
+        </Border>
+        </StackPanel>
 
         <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto">
             <Grid>
