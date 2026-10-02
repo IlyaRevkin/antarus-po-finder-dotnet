@@ -80,8 +80,36 @@ public static class HmiProjectFormat
     /// писалась.
     ///
     /// Ходит на диск (в т.ч. сетевой) — звать по клику, не из отрисовки.</summary>
+    /// <summary>Отдельно от списка форматов: точка входа ДЕРЕВА проекта (файл назван как его папка —
+    /// см. ProjectTree.IsEntryFile), оставшаяся без окружения. Так выглядит папка проекта, которую
+    /// скопировали пустой: по имени это всё ещё проект, а внутри ничего нет.
+    ///
+    /// Заведено по жалобе 02.10.2026: «у коллег открывается kinco dtools и пишет, что по указанному
+    /// пути файл прошивки не найден, но открываешь этот путь — и там всё нормально». Ошибку выдаёт
+    /// сам DTools: программа молча открывала одинокий .dpj. Проверка ниже смотрела только на список
+    /// форматов (.fsprj), и для KINCO не срабатывала.
+    ///
+    /// Список форматов при этом НЕ трогаем: он управляет ещё и копированием, а одинокий .dpj,
+    /// лежащий НЕ в своей папке (наша копия вида «{версия}_hmi.dpj» в общей папке HMI), по-прежнему
+    /// копируется файлом — так было решено раньше, и переворачивать это без доказательств нельзя.</summary>
+    private static bool IsEmptiedProjectTree(string? path) =>
+        ProjectTree.IsEntryFile(path) && SafeFileExists(path) && NoCompanionsAround(path!);
+
+    private static bool NoCompanionsAround(string path)
+    {
+        var folder = SafeParent(path);
+        if (folder is null) return false;
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(folder)
+                .All(e => string.Equals(e, path, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     public static bool LooksStrippedOfCompanions(string? path)
     {
+        if (IsEmptiedProjectTree(path)) return true;
         if (!IsFolderProjectFile(path) || !SafeFileExists(path)) return false;
         var folder = SafeParent(path!);
         if (folder is null) return false;
@@ -112,6 +140,7 @@ public static class HmiProjectFormat
     /// Ходит на диск — звать по клику.</summary>
     public static bool IsStrippedCopy(string? path, string versionRaw)
     {
+        if (IsEmptiedProjectTree(path)) return true;
         if (!IsFolderProjectFile(path) || !SafeFileExists(path)) return false;
         var folder = SafeParent(path!);
         var insideOurProjectFolder = folder is not null && IsStoredProjectFolder(folder);
