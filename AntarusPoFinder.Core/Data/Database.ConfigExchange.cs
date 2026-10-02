@@ -273,7 +273,7 @@ public partial class Database
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
                    fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
-                   fv.manual_current, fv.status_changed_at,
+                   fv.manual_current, fv.status_changed_at, fv.hints_changed_at,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -300,6 +300,7 @@ public partial class Database
                 Execution = GetString(r, "execution"),
                 ManualCurrent = GetInt(r, "manual_current") != 0,
                 StatusChangedAt = GetString(r, "status_changed_at"),
+                HintsChangedAt = GetString(r, "hints_changed_at"),
                 GroupName = GetString(r, "group_name"),
                 SubtypeName = GetString(r, "subtype_name"), SubtypeSyncId = GetString(r, "subtype_sync_id"),
                 CtrlName = GetString(r, "ctrl_name"), ControllerSyncId = GetString(r, "controller_sync_id"),
@@ -1550,8 +1551,28 @@ public partial class Database
                 var newIoMap = Backfill(localIoMap, fv.IoMapPath);
                 var newInstr = Backfill(localInstr, fv.InstructionsPath);
                 var newHmi = Backfill(localHmi, fv.HmiPath);
-                var newExecHint = Backfill(localExecHint, fv.ExecutableHint);
-                var newHmiExecHint = Backfill(localHmiExecHint, fv.HmiExecutableHint);
+                // Подсказки «какой файл открывать» — НЕ Backfill, в отличие от путей выше. Решает отметка
+                // времени правки (hints_changed_at): чьё значение свежее, то и стоит.
+                //
+                // Путь к документу у каждого свой — там «заполняем только пустое» верно. А здесь значение
+                // ОДНО на всех: это имя файла внутри папки версии, одинаковой у всех машин, и правят его
+                // именно затем, чтобы починить всем. С Backfill исправление не доходило до того, у кого в поле
+                // уже лежало неверное значение, подобранное автоопределением, — жалоба «у меня работает, а у
+                // коллег DPJ теряется». У KINCO это и вылезает: в папке несколько .dpj.
+                //
+                // Пустое входящее не стирает ничего никогда: машина, где подсказку ещё не трогали,
+                // не должна сносить чужую починку своим молчанием.
+                var incomingHintsStamp = fv.HintsChangedAt ?? "";
+                var localHintsStamp = existingRow.HintsChangedAt ?? "";
+                var incomingHintsWin = string.CompareOrdinal(incomingHintsStamp, localHintsStamp) > 0;
+                string PickHint(string local, string incoming) =>
+                    string.IsNullOrEmpty(incoming) ? local
+                    : incomingHintsWin || string.IsNullOrEmpty(local) ? incoming
+                    : local;
+                var newExecHint = PickHint(localExecHint, fv.ExecutableHint);
+                var newHmiExecHint = PickHint(localHmiExecHint, fv.HmiExecutableHint);
+                var newHintsStamp = incomingHintsWin && incomingHintsStamp.Length > 0
+                    ? incomingHintsStamp : localHintsStamp;
                 var newModbus = Backfill(localModbus, fv.ModbusMapPath);
                 // ИСПОЛНЕНИЕ — тот же Backfill: признак появился позже самих прошивок, и разносит
                 // накопленное по линейкам человек руками на ОДНОЙ машине. Без пересылки эта работа
@@ -1629,7 +1650,7 @@ public partial class Database
                     UPDATE fw_versions SET status=@st, released=@rel, archived=@arch, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
                         description=@desc, launch_types=@lt, tags=@tags, execution=@execution,
-                        status_changed_at=@st_at
+                        status_changed_at=@st_at, hints_changed_at=@hints_at
                     WHERE id=@id
                     """, cmd =>
                 {
@@ -1639,6 +1660,7 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@tags", newTags);
                     cmd.Parameters.AddWithValue("@st", newStatus);
                     cmd.Parameters.AddWithValue("@st_at", newStatusStamp);
+                    cmd.Parameters.AddWithValue("@hints_at", newHintsStamp);
                     cmd.Parameters.AddWithValue("@rel", localReleased != 0 ? 1 : fv.Released);
                     cmd.Parameters.AddWithValue("@arch", localArchived != 0 ? 1 : fv.Archived);
                     cmd.Parameters.AddWithValue("@io", newIoMap);
@@ -2247,7 +2269,7 @@ public partial class Database
         string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
         string Description, string LaunchTypes, string Tags,
         int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution,
-        bool ManualCurrent, string StatusChangedAt);
+        bool ManualCurrent, string StatusChangedAt, string HintsChangedAt);
 
     /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
     /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
@@ -2267,7 +2289,7 @@ public partial class Database
     {
         const string cols = """
             id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
-            executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path,
+            executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path, hints_changed_at,
             description, launch_types, tags, subtype_id, controller_id, version_raw, config_name,
             execution, manual_current, status_changed_at
             """;
@@ -2308,7 +2330,8 @@ public partial class Database
         GetString(r, "deleted_at"), GetString(r, "disk_path"),
         GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
         GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"),
-        GetString(r, "execution"), GetInt(r, "manual_current") != 0, GetString(r, "status_changed_at"));
+        GetString(r, "execution"), GetInt(r, "manual_current") != 0, GetString(r, "status_changed_at"),
+        GetString(r, "hints_changed_at"));
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {

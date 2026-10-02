@@ -90,6 +90,15 @@ public partial class Database
         if (launchTypes is not null) { sets.Add("launch_types=@launch_types"); values.Add(("@launch_types", JsonSerializer.Serialize(launchTypes))); }
         if (hmiExecutableHint is not null) { sets.Add("hmi_executable_hint=@hmi_executable_hint"); values.Add(("@hmi_executable_hint", hmiExecutableHint)); }
         if (executableHint is not null) { sets.Add("executable_hint=@executable_hint"); values.Add(("@executable_hint", executableHint)); }
+        // Отметка времени правки подсказок — по ней обмен решает, чьё значение свежее
+        // (см. Database.cs, hints_changed_at). Без неё исправление не доезжало до того, у кого в поле
+        // уже лежало неверное значение.
+        //
+        // Точность до миллисекунд, а не до секунды как у остальных отметок: две правки в одну секунду
+        // дали бы одинаковую отметку, и обмен не смог бы решить, чьё значение свежее. Сравнение строковое,
+        // и более длинная запись с миллисекундами оказывается старше прежней без них — что верно.
+        if (hmiExecutableHint is not null || executableHint is not null)
+        { sets.Add("hints_changed_at=@hints_at"); values.Add(("@hints_at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"))); }
         // Исполнение правится и у уже заведённой прошивки: признак появился позже самих прошивок, и
         // разнести накопленное по линейкам можно только вручную. Нормализация та же, что при
         // заведении строки (AddFwVersion) — иначе одно и то же исполнение разъехалось бы на два.

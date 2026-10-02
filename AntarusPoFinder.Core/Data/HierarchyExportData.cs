@@ -116,6 +116,11 @@ public class ExportedFwVersion
     /// всем, а его отмена нет, и вернувшаяся в строй версия откатывалась снова первым же чужим
     /// снимком. Пусто у снимков со старых версий программы — тогда правило прежнее, монотонное.</summary>
     [JsonPropertyName("status_changed_at")] public string StatusChangedAt { get; set; } = "";
+
+    /// <summary>Когда последний раз правили подсказки «какой файл открывать». По ней приём решает,
+    /// чьё значение свежее — иначе исправление не доходило до того, у кого в поле уже лежало
+    /// неверное (см. Database.cs, hints_changed_at).</summary>
+    [JsonPropertyName("hints_changed_at")] public string HintsChangedAt { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }
