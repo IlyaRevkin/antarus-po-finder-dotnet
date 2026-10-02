@@ -2007,8 +2007,7 @@ public partial class SearchView : UserControl
         var target = PlcOpenResolver.Resolve(PlcSources(result));
         if (target is null)
         {
-            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.", "Открыть",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            OfferDownload(result, "Открыть");
             return;
         }
         TryOpen(target);
@@ -2049,8 +2048,7 @@ public partial class SearchView : UserControl
             AppMessageBox.Show($"HMI-проект не найден.\nПуть: {result.HmiPath}", "HMI-проект",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         else
-            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.",
-                "Открыть HMI", MessageBoxButton.OK, MessageBoxImage.Information);
+            OfferDownload(result, "Открыть HMI");
     }
 
     /// <summary>Заменяет лежащий на диске обрубок проекта панели нормальной папкой — прямо отсюда, с
@@ -2133,8 +2131,7 @@ public partial class SearchView : UserControl
         var target = ResolveOpenTarget(result);
         if (target is null)
         {
-            AppMessageBox.Show("Прошивка не найдена локально.\nНажмите «Скачать» для копирования с сервера.", "Открыть папку",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            OfferDownload(result, "Открыть папку");
             return;
         }
         if (Directory.Exists(target))
@@ -2264,6 +2261,26 @@ public partial class SearchView : UserControl
     ///
     /// async Task, а не async void: обработчик — сама кнопка карточки, и падение внутри async void
     /// ушло бы мимо try/catch прямо в необработанное исключение приложения.</summary>
+    /// <summary>«Прошивки здесь ещё нет» — и сразу предложение её принести.
+    ///
+    /// Раньше сообщение велело «нажмите Скачать» — а кнопки с таким названием нет вообще:
+    /// действие зовётся «Обновить локальную копию с диска» и лежит в меню «Ещё». Человек искал
+    /// то, чего не существует — тикет коллеги: «непонятное местоположение клавиши "скачать", хотя
+    /// эту прошивку я и отгружал». И вторая его половина важна не меньше: тот, кто версию выкладывал,
+    /// искренне не понимает, почему её надо «скачивать» — поэтому текст говорит прямо, откуда и куда идёт копия.
+    ///
+    /// Предлагаем сделать сразу, а не отсылаем в меню: человек уже нажал то, что хотел, и вести его
+    /// окольным путём ради того же самого — лишняя работа.</summary>
+    private void OfferDownload(HierarchyResult result, string title)
+    {
+        var reply = AppMessageBox.Show(
+            "Файлов этой версии на этом компьютере пока нет — они лежат на сетевом диске." + "\n" +
+            "Это нормально и тогда, когда версию выкладывали вы сами: выкладывали из своей папки, а рабочая копия здесь заводится отдельно." + "\n\n" +
+            "Принести файлы сейчас?",
+            title, MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+        if (reply == MessageBoxResult.Yes) _ = DownloadFirmwareAsync(result);
+    }
+
     private async Task DownloadFirmwareAsync(HierarchyResult result)
     {
         var root = _services.Cfg.RootPath();

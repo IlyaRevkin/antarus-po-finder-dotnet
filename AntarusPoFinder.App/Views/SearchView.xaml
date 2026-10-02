@@ -68,38 +68,43 @@
                      особенно после переноса на вторую строку в узком окне. Ширина задана на
                      StackPanel-обёртке, а не на самом ComboBox — только так и подпись, и поле
                      растягиваются на одинаковую ширину колонки. -->
-                <WrapPanel x:Name="FirmwareFiltersPanel">
-                    <StackPanel Width="170" Margin="0,0,12,8">
-                        <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterGroupCombo" Height="30" DisplayMemberPath="Label"
-                                  SelectionChanged="Filter_Changed"/>
-                    </StackPanel>
-                    <StackPanel Width="170" Margin="0,0,12,8">
-                        <TextBlock Text="Подтип" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterSubtypeCombo" Height="30" DisplayMemberPath="Label"
-                                  SelectionChanged="Filter_Changed"/>
-                    </StackPanel>
-                    <StackPanel Width="170" Margin="0,0,12,8">
-                        <TextBlock Text="Контроллер" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterControllerCombo" Height="30" DisplayMemberPath="Label"
-                                  SelectionChanged="Filter_Changed"/>
-                    </StackPanel>
-                    <StackPanel Width="170" Margin="0,0,12,8">
-                        <TextBlock Text="Тип пуска" Style="{StaticResource MutedText}"/>
-                        <ComboBox x:Name="FilterLaunchCombo" Height="30" DisplayMemberPath="Label"
-                                  SelectionChanged="Filter_Changed"/>
-                    </StackPanel>
-                </WrapPanel>
-                <!-- Кнопка сброса — общая на оба набора и вынесена из WrapPanel прошивок, иначе в
-                     режиме «Схемы» (где этот WrapPanel скрыт целиком) сбросить фильтр расширений было
-                     бы нечем. CompactSecondaryButton, а не SecondaryButton: у последнего вертикальный
-                     padding (8+8) плюс рамка обрезали бы надпись в компактном ряду — см. её
-                     комментарий в Styles.xaml. -->
-                <Button x:Name="ResetFiltersButton" Content="Сбросить фильтры" Style="{StaticResource CompactSecondaryButton}"
-                        HorizontalAlignment="Left" Margin="0,4,0,8" Click="ResetFilters_Click"/>
-                <!-- Поиск по тегу теперь идёт из обычной строки поиска (см. SearchInput) — тег с
-                     точным совпадением слова сворачивает выдачу до одной прошивки, см.
-                     Database.SearchFwVersions. Отдельного фильтра «Тег» здесь больше нет. -->
+                <!-- Фильтры и «Сбросить» в ОДНОЙ строке: кнопка стояла отдельным рядом под ними и
+                     забирала целую строку высоты ни за чем. Тикет коллеги: «редизайн: уменьшить окно и текст
+                     фильтров, перенести надпись "сброс"».
+
+                     Кнопка остаётся ВНЕ WrapPanel с фильтрами прошивок — иначе в режиме «Схемы», где тот
+                     скрыт целиком, сбросить фильтр расширений было бы нечем. -->
+                <DockPanel LastChildFill="True">
+                    <Button x:Name="ResetFiltersButton" DockPanel.Dock="Right" Content="Сбросить"
+                            Style="{StaticResource CompactSecondaryButton}" VerticalAlignment="Bottom"
+                            Margin="12,0,0,8" Padding="10,2" Click="ResetFilters_Click"
+                            ToolTip="Сбросить все фильтры"/>
+                    <!-- Ширина колонки 150 вместо 170 и высота поля 26 вместо 30: четыре фильтра
+                         теперь влезают в одну строку в более узком окне. Единая ширина на все четыре сохранена:
+                         разная делала ряд рваным, особенно после переноса на вторую строку. -->
+                    <WrapPanel x:Name="FirmwareFiltersPanel">
+                        <StackPanel Width="150" Margin="0,0,10,6">
+                            <TextBlock Text="Тип шкафа" Style="{StaticResource MutedText}" FontSize="11"/>
+                            <ComboBox x:Name="FilterGroupCombo" Height="26" DisplayMemberPath="Label"
+                                      SelectionChanged="Filter_Changed"/>
+                        </StackPanel>
+                        <StackPanel Width="150" Margin="0,0,10,6">
+                            <TextBlock Text="Подтип" Style="{StaticResource MutedText}" FontSize="11"/>
+                            <ComboBox x:Name="FilterSubtypeCombo" Height="26" DisplayMemberPath="Label"
+                                      SelectionChanged="Filter_Changed"/>
+                        </StackPanel>
+                        <StackPanel Width="150" Margin="0,0,10,6">
+                            <TextBlock Text="Контроллер" Style="{StaticResource MutedText}" FontSize="11"/>
+                            <ComboBox x:Name="FilterControllerCombo" Height="26" DisplayMemberPath="Label"
+                                      SelectionChanged="Filter_Changed"/>
+                        </StackPanel>
+                        <StackPanel Width="150" Margin="0,0,10,6">
+                            <TextBlock Text="Тип пуска" Style="{StaticResource MutedText}" FontSize="11"/>
+                            <ComboBox x:Name="FilterLaunchCombo" Height="26" DisplayMemberPath="Label"
+                                      SelectionChanged="Filter_Changed"/>
+                        </StackPanel>
+                    </WrapPanel>
+                </DockPanel>
                 <TextBlock x:Name="FiltersHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
