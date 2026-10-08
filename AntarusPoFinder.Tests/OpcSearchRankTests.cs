@@ -157,4 +157,22 @@ public class OpcSearchRankTests : IDisposable
         Assert.Equal("01312", card.RequestNum);
         Assert.Equal("SN-778899", card.CabinetSn);
     }
+
+    /// <summary>Сквозная проверка того, на что жаловался Илья: «номер заявки всё ещё не отображается
+    /// в копируемом тексте — условно 2.1.0004.0002 отображается, а должно быть
+    /// 2.1.0004.0002_(47137)». Путь целиком: строка из базы → выдача поиска → строка, которую
+    /// карточка кладёт в буфер. Отдельные куски этого пути уже проверены порознь, но жалоба была
+    /// именно про путь целиком — потеряться номер мог на любом стыке.</summary>
+    [Fact]
+    public void Из_выдачи_в_буфер_уезжает_номер_с_меткой_заявки()
+    {
+        var card = SearchService.ToHierarchyResult(Search("01312")[0].Row);
+
+        var copied = FirmwareNaming.CopyableVersionName(
+            card.VersionRaw, card.IsOpc, card.RequestNum, card.CabinetSn);
+
+        Assert.Contains("_(01312)", copied);
+        Assert.Contains("_SN" + card.CabinetSn, copied);
+        Assert.StartsWith(card.VersionRaw, copied);
+    }
 }
