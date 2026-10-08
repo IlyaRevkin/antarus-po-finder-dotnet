@@ -292,6 +292,37 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>Спектр выбора цвета строится, рисуется и показывает то, что ему задали.
+    ///
+    /// Просьба: «сделай выбор цвета не только кодом, но и спектром». Арифметика проверена отдельно
+    /// (ColorSpectrumTests), здесь — что элемент вообще живой: три слоя градиентов и два маркера в
+    /// разметке легко сломать опечаткой в имени ресурса, а компилятор про XAML молчит.</summary>
+    [Fact]
+    public void ColorSpectrumPicker_BuildsAndRenders()
+    {
+        Ui.Run(() =>
+        {
+            var picker = new ColorSpectrumPicker();
+            picker.Width = 240;
+            picker.Height = 200;
+            Render(picker);
+
+            // Цвет, заданный снаружи (поле кода, образец палитры), элемент принимает как свой.
+            var blue = (Color)ColorConverter.ConvertFromString(AccentPalette.DefaultHex)!;
+            picker.SelectedColor = blue;
+            Render(picker);
+            Assert.Equal(blue, picker.SelectedColor);
+
+            // Подложка квадрата — ЧИСТЫЙ оттенок выбранного цвета, а не сам цвет: бледность и
+            // темноту накладывают градиенты поверх.
+            var layer = picker.FindName("HueLayer") as System.Windows.Shapes.Rectangle;
+            Assert.NotNull(layer);
+            var fill = Assert.IsType<SolidColorBrush>(layer!.Fill);
+            var (h, _, _) = ColorSpectrum.ToHsv(blue);
+            Assert.Equal(ColorSpectrum.FromHsv(h, 1, 1), fill.Color);
+        });
+    }
+
     [Fact]
     public void FwBugDialog_BuildsAndRenders()
     {

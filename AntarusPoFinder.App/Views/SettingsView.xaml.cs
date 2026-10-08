@@ -1239,10 +1239,19 @@ public partial class SettingsView : UserControl
         ShowAccent(AccentPalette.NormalizeStored(_services.Cfg.Accent()));
     }
 
+    /// <summary>Цвет выбрали мышью на спектре. Применяется сразу, как и щелчок по образцу палитры:
+    /// подбор на глаз без немедленного показа результата смысла не имеет.</summary>
+    private void AccentSpectrum_ColorPicked(object? sender, System.Windows.Media.Color color) =>
+        ApplyAccent(AccentPalette.ToHex(color));
+
     private void ShowAccent(string hex)
     {
         var color = AccentPalette.Parse(hex);
         AccentHexBox.Text = AccentPalette.ToHex(color);
+        // Спектр показывает то же, что и поле кода: выбрали образец или вписали код — маркеры
+        // переезжают туда же. Присваивание не зациклится: пока цвет меняем мы, элемент своё
+        // событие не шлёт (см. ColorSpectrumPicker).
+        AccentSpectrum.SelectedColor = color;
         AccentPreview.Background = new SolidColorBrush(color);
         // Подпись рядом с образцом — не украшение: цвет надписи на кнопках подбирается сам, и человек
         // должен видеть, какой именно выбран, чтобы не гадать, почему текст вдруг стал тёмным.

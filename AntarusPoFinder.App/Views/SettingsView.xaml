@@ -153,6 +153,16 @@
                                 <TextBlock x:Name="AccentPreviewText" VerticalAlignment="Center" Margin="8,0,0,0"
                                            Style="{StaticResource MutedText}"/>
                             </StackPanel>
+                            <!-- Спектр — рядом с полем кода, а не вместо него. Код нужен, чтобы попасть
+                                 в ТОЧНЫЙ цвет (фирменный, из макета); спектр — чтобы подобрать на глаз,
+                                 видя весь набор оттенков сразу. Просьба дословно: «сделай выбор цвета не
+                                 только кодом, но и спектром». Поле кода и спектр показывают одно и то же
+                                 значение и обновляют друг друга. -->
+                            <Expander x:Name="AccentSpectrumExpander" Header="Подобрать на спектре"
+                                      Margin="0,2,0,8" HorizontalAlignment="Left">
+                                <views:ColorSpectrumPicker x:Name="AccentSpectrum" Margin="0,8,0,0"
+                                                           ColorPicked="AccentSpectrum_ColorPicked"/>
+                            </Expander>
                             <Button Content="Вернуть исходный цвет" HorizontalAlignment="Left" Click="AccentReset_Click"
                                     Style="{StaticResource SecondaryButton}"/>
 
