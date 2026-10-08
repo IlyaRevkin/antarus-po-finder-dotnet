@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace AntarusPoFinder.Core.Domain;
 
@@ -136,15 +136,31 @@ public static class FirmwareNaming
         // назвали в SMLogix. Уже лежащие на диске файлы приводит к этому же виду разовая операция
         // «Перестроить структуру диска» (DiskLayoutMigrator) — переименование делается только там,
         // где в папке версии ровно один файл, иначе можно осиротить executable_hint у коллег.
-        var name = version.Raw;
-        if (!string.IsNullOrEmpty(requestNum))
-            name += $"_({requestNum})";
-        if (!string.IsNullOrEmpty(cabinetSn))
-            name += $"_SN{cabinetSn}";
+        var name = version.Raw + OpcMarkers(requestNum, cabinetSn);
         if (!string.IsNullOrEmpty(ext) && !ext.StartsWith('.'))
             ext = "." + ext;
         return name + ext.ToLowerInvariant();
     }
+
+    /// <summary>Хвост имени с метками ОПЦ — «_(01312)», «_SN00042» или оба подряд. Вынесен затем,
+    /// что эти метки приписываются В ДВУХ местах: к имени файла на диске и к номеру версии, который
+    /// карточка кладёт в буфер по «Копировать». Разъехавшись, они дали бы ровно то, на что жаловался
+    /// оператор, — скопированный номер, по которому нужный файл на диске не находится.</summary>
+    public static string OpcMarkers(string requestNum, string cabinetSn)
+    {
+        var s = "";
+        if (!string.IsNullOrEmpty(requestNum)) s += $"_({requestNum})";
+        if (!string.IsNullOrEmpty(cabinetSn)) s += $"_SN{cabinetSn}";
+        return s;
+    }
+
+    /// <summary>Что кладётся в буфер по «Копировать» на карточке выдачи. Для обычной прошивки — её
+    /// номер, как было. Для ОПЦ — номер С МЕТКАМИ заявки и заводского номера, то есть ровно то имя,
+    /// под которым файл лежит на диске (без расширения): «в копировании версии не отображается номер
+    /// заявки и SN, а для ОПЦ при загрузке мы специально сделали написание файла, и копироваться
+    /// должно с ним». Номер без меток у ОПЦ бесполезен — он совпадает у всей линейки.</summary>
+    public static string CopyableVersionName(string versionRaw, bool isOpc, string requestNum, string cabinetSn) =>
+        isOpc ? versionRaw + OpcMarkers(requestNum, cabinetSn) : versionRaw;
 
     /// <summary>Обратная операция к BuildFirmwareFilename для двух ОПЦ-меток: «_(01312)» → номер
     /// заявки, «_SN00042» → заводской SN. Нужна досмотру диска (HierarchyService.ImportFwCandidates):

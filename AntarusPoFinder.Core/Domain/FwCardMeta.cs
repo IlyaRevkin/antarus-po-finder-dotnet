@@ -27,23 +27,9 @@ public static class FwCardMeta
     /// «2 насоса», «3 и более насосов». Именно его наладчик и ищет глазами, а не номер и не дату.</summary>
     public static List<string> Parts(
         string execution, string configName, string controller, string equipmentType,
-        string workType, string uploadDate, int usageCount,
-        bool isOpc = false, string requestNum = "", string cabinetSn = "")
+        string workType, string uploadDate, int usageCount)
     {
         var parts = new List<string>();
-
-        // ОПЦ — ПЕРВЫМ, раньше исполнения, и с подписями у номеров. Это единственная пометка,
-        // которая меняет сам смысл строки: обычную прошивку ставят всем шкафам линейки, ОПЦ —
-        // ровно одному, под который её и собрали. Жалоба дословно: «я загрузил опц, нигде не
-        // написано что это опц, в итоге номер заявки или сн не отображается в карточке» и «в
-        // поисковой выдаче мне не отличить обычную от опц».
-        //
-        // Подписи «Заявка:» и «SN:» здесь обязательны, в отличие от названия комплектации: голые
-        // «01312» и «SN00042» в ряду через точку читаются как мусор, а перепутать их между собой
-        // легко — оба просто числа, и ищут прошивку то по одному, то по другому.
-        if (isOpc) parts.Add(Marker);
-        if (!string.IsNullOrWhiteSpace(requestNum)) parts.Add($"Заявка: {requestNum.Trim()}");
-        if (!string.IsNullOrWhiteSpace(cabinetSn)) parts.Add($"SN: {cabinetSn.Trim()}");
 
         Add(execution);
         // Без подписи — см. описание класса.
@@ -72,8 +58,21 @@ public static class FwCardMeta
 
     public static string Line(
         string execution, string configName, string controller, string equipmentType,
-        string workType, string uploadDate, int usageCount,
-        bool isOpc = false, string requestNum = "", string cabinetSn = "") =>
-        string.Join(Separator, Parts(execution, configName, controller, equipmentType, workType, uploadDate,
-            usageCount, isOpc, requestNum, cabinetSn));
+        string workType, string uploadDate, int usageCount) =>
+        string.Join(Separator, Parts(execution, configName, controller, equipmentType, workType, uploadDate, usageCount));
+
+    /// <summary>Отдельная строка карточки — номера шкафа, под который собрана ОПЦ. ОТДЕЛЬНАЯ, а не
+    /// часть строки выше, и это главное требование: «более явно номер заявки или SN». В общем ряду
+    /// через точку, да ещё приглушённым цветом, они терялись между исполнением, контроллером и
+    /// датой — а для разовой сборки это единственное, чем она себя называет.
+    ///
+    /// Подписи у номеров остаются: голые «01312» и «778899» не отличить друг от друга, а ищут
+    /// прошивку то по одному, то по другому.</summary>
+    public static string OpcLine(string requestNum, string cabinetSn)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(requestNum)) parts.Add($"Заявка {requestNum.Trim()}");
+        if (!string.IsNullOrWhiteSpace(cabinetSn)) parts.Add($"SN {cabinetSn.Trim()}");
+        return string.Join(Separator, parts);
+    }
 }

@@ -12,23 +12,26 @@
             <Grid Cursor="Hand" MouseLeftButtonUp="Header_Click"
                   ToolTip="Нажмите, чтобы скопировать номер версии (имя файла на диске)">
                 <Grid.ColumnDefinitions>
+                    <!-- Первая колонка — под значок «ОПЦ»: Auto, поэтому у обычной прошивки (значок
+                         свёрнут) она схлопывается в ноль и имя начинается от края, как и раньше. -->
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                <!-- Значок «ОПЦ» — в ШАПКЕ, при имени, а не строчкой ниже среди прочих пометок.
-                     Разовая прошивка под конкретный шкаф и обычная прошивка линейки в выдаче выглядели
-                     одинаково («в поисковой выдаче мне не отличить обычную от опц»), а ставят их
-                     противоположным образом: обычную — любому шкафу, ОПЦ — ровно одному.
+                <!-- Значок «ОПЦ» — САМЫМ ПЕРВЫМ, до названия. Сначала он стоял у номера версии, то
+                     есть в правом углу, и не попадал в глаз: «опц давай писать в начале карточки, а
+                     не в конце у версии, а то не бросается в глаза». Слева от имени его читают
+                     раньше самого имени — а это и есть нужный порядок: разовая прошивка под
+                     конкретный шкаф и прошивка линейки ставятся противоположным образом.
                      Текст на акцентной заливке обязан быть TextOnAccentBrush: в светлой теме белое
                      на белом здесь уже получалось. -->
-                <Border Grid.Column="1" x:Name="OpcBadge" Visibility="Collapsed" VerticalAlignment="Center"
-                        Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
+                <Border Grid.Column="0" x:Name="OpcBadge" Visibility="Collapsed" VerticalAlignment="Center"
+                        Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="6,1" Margin="0,0,8,0">
                     <TextBlock Text="ОПЦ" FontSize="11" FontWeight="Bold"
                                Foreground="{DynamicResource TextOnAccentBrush}"/>
                 </Border>
+                <TextBlock Grid.Column="1" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="2" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 <!-- Жучок рядом с номером версии и ЗНАЧКОМ, а не кнопкой в ряду действий.
                      Кнопка внизу выглядела наравне с «Загрузить» и «Открыть HMI» — тем, чем пользуются каждый день,
@@ -65,6 +68,12 @@
                     </Path>
                 </Border>
             </Grid>
+            <!-- Номера шкафа, под который собрана ОПЦ, — СВОЕЙ строкой и акцентным цветом, а не в
+                 общем приглушённом ряду через точку: «более явно номер заявки или сн». Для разовой
+                 сборки это единственное, чем она себя называет, и теряться между исполнением,
+                 контроллером и датой оно не должно. -->
+            <TextBlock x:Name="OpcNumbersLabel" Visibility="Collapsed" Margin="0,3,0,0" TextWrapping="Wrap"
+                       FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/>
             <TextBlock x:Name="MetaLabel" Style="{StaticResource MutedText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
             <!-- Что реально лежит рядом с версией (LFS/PSL/HMI/параметры/документы). Раньше это было
                  видно только по тому, есть ли пункт в меню «Ещё» — то есть «есть ли LFS» приходилось

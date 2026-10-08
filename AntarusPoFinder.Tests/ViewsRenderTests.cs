@@ -231,10 +231,15 @@ public class ViewsRenderTests
             Assert.NotNull(bug);
             Assert.IsNotType<Button>(bug);
 
-            // Обычная прошивка значком «ОПЦ» не помечена — иначе пометка ничего не значит.
+            // Обычная прошивка значком «ОПЦ» не помечена — иначе пометка ничего не значит,
+            // и строки с номерами шкафа у неё тоже нет.
             var badge = card.FindName("OpcBadge") as System.Windows.FrameworkElement;
             Assert.NotNull(badge);
             Assert.Equal(Visibility.Collapsed, badge!.Visibility);
+
+            var numbers = card.FindName("OpcNumbersLabel") as System.Windows.FrameworkElement;
+            Assert.NotNull(numbers);
+            Assert.Equal(Visibility.Collapsed, numbers!.Visibility);
         });
     }
 
@@ -266,10 +271,24 @@ public class ViewsRenderTests
             Assert.NotNull(badge);
             Assert.Equal(Visibility.Visible, badge!.Visibility);
 
+            // Значок стоит ПЕРЕД названием, а не у номера версии в правом углу: «опц давай писать
+            // в начале карточки, а не в конце у версии, а то не бросается в глаза».
+            var name = card.FindName("NameLabel") as TextBlock;
+            Assert.NotNull(name);
+            Assert.True(Grid.GetColumn(badge) < Grid.GetColumn(name!),
+                "значок ОПЦ должен стоять левее названия");
+
+            // Номера — своей строкой и акцентом, а не в общем приглушённом ряду («более явно
+            // номер заявки или сн»).
+            var numbers = card.FindName("OpcNumbersLabel") as TextBlock;
+            Assert.NotNull(numbers);
+            Assert.Equal(Visibility.Visible, numbers!.Visibility);
+            Assert.Contains("Заявка 01312", numbers.Text);
+            Assert.Contains("SN SN-778899", numbers.Text);
+
             var meta = card.FindName("MetaLabel") as TextBlock;
             Assert.NotNull(meta);
-            Assert.Contains("Заявка: 01312", meta!.Text);
-            Assert.Contains("SN: SN-778899", meta.Text);
+            Assert.DoesNotContain("Заявка", meta!.Text);
         });
     }
 

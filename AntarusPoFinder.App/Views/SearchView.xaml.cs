@@ -2525,9 +2525,16 @@ public partial class SearchView : UserControl
     /// dropped when the filename was simplified — copying it here was stale and no longer matched
     /// what's actually on disk. ToUpperInvariant matches BuildFirmwareFilename's own casing (moot in
     /// practice since VersionRaw is purely digits/dots/underscore, but kept for consistency/safety).</summary>
+    /// <summary>«Копировать» на карточке. У ОПЦ копируется номер С МЕТКАМИ заявки и заводского
+    /// номера — ровно то имя, под которым файл лежит на диске (FirmwareNaming.CopyableVersionName):
+    /// «в копировании версии не отображается номер заявки и SN, а для ОПЦ при загрузке мы специально
+    /// сделали написание файла, и копироваться должно с ним». Голый номер у разовой сборки
+    /// бесполезен — он одинаков у всей линейки, и по нему нужный файл не найти.</summary>
     private void CopyName(HierarchyResult result)
     {
-        var text = result.VersionRaw.ToUpperInvariant();
+        var text = FirmwareNaming
+            .CopyableVersionName(result.VersionRaw, result.IsOpc, result.RequestNum, result.CabinetSn)
+            .ToUpperInvariant();
         _host.ShowStatus(ClipboardSafe.TrySetText(text)
             ? $"Скопировано: {text}"
             : "Буфер обмена занят другим приложением — попробуйте ещё раз");
