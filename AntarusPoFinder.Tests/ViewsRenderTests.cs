@@ -240,6 +240,11 @@ public class ViewsRenderTests
             var numbers = card.FindName("OpcNumbersLabel") as System.Windows.FrameworkElement;
             Assert.NotNull(numbers);
             Assert.Equal(Visibility.Collapsed, numbers!.Visibility);
+
+            // У обычной прошивки номер версии остаётся голым — метки там не из чего строить.
+            var version = card.FindName("VersionLabel") as TextBlock;
+            Assert.NotNull(version);
+            Assert.Equal("3.1.0004.0002.20260101_0000", version!.Text);
         });
     }
 
@@ -286,6 +291,17 @@ public class ViewsRenderTests
             Assert.Contains("Заявка 01312", numbers.Text);
             Assert.Contains("SN SN-778899", numbers.Text);
 
+            // САМ НОМЕР ВЕРСИИ показывается с метками — и в шапке, и в поле у кнопки «Копировать».
+            // «Условно 2.1.0004.0002 отображается, а должно быть 2.1.0004.0002_(47137)». Показывать
+            // одно, а копировать другое — прямой обман: вставят не то, что видели.
+            var version = card.FindName("VersionLabel") as TextBlock;
+            Assert.NotNull(version);
+            Assert.Contains("_(01312)", version!.Text);
+
+            var copyField = card.FindName("SoftwareNameLabel") as TextBlock;
+            Assert.NotNull(copyField);
+            Assert.Contains("_(01312)", copyField!.Text);
+
             var meta = card.FindName("MetaLabel") as TextBlock;
             Assert.NotNull(meta);
             Assert.DoesNotContain("Заявка", meta!.Text);
@@ -320,6 +336,38 @@ public class ViewsRenderTests
             var fill = Assert.IsType<SolidColorBrush>(layer!.Fill);
             var (h, _, _) = ColorSpectrum.ToHsv(blue);
             Assert.Equal(ColorSpectrum.FromHsv(h, 1, 1), fill.Color);
+        });
+    }
+
+    /// <summary>Окно тикета без вложений не показывает ни раздела «Вложения», ни кнопок к нему.
+    ///
+    /// Жалоба: «в тикетах зачем отображать „открыть папку вложений" или „открыть вложение", если их
+    /// нет». Решение о том, что показывать, проверено отдельно (TicketAttachmentsPanelTests); здесь —
+    /// что окно это решение действительно применяет, а не считает его в стол.
+    ///
+    /// Заодно это первая проверка самого окна: до сих пор оно в разборе разметки не участвовало, и
+    /// адрес иконки в нём был относительный — тот самый случай, который уже ронял диалоги.</summary>
+    [Fact]
+    public void TicketDetailDialog_БезВложенийПрячетРазделЦеликом()
+    {
+        Ui.Run(() =>
+        {
+            var ticket = new AntarusPoFinder.Core.Domain.Ticket
+            {
+                Id = "t1", Type = "fw_bug", Status = "open", Severity = "major",
+                Text = "Прошивка не грузится", CreatedBy = "Илья", CreatedAt = "2026-10-08 12:00",
+            };
+
+            // root = null: сетевого диска нет вовсе. Кнопок всё равно быть не должно.
+            var dialog = new TicketDetailDialog(ticket, root: null);
+            Render(dialog);
+
+            var open = dialog.FindName("OpenAttachmentBtn") as FrameworkElement;
+            var folder = dialog.FindName("OpenAttachmentsFolderBtn") as FrameworkElement;
+            Assert.NotNull(open);
+            Assert.NotNull(folder);
+            Assert.Equal(Visibility.Collapsed, open!.Visibility);
+            Assert.Equal(Visibility.Collapsed, folder!.Visibility);
         });
     }
 

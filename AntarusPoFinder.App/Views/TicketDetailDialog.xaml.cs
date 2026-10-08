@@ -1,5 +1,7 @@
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
@@ -42,20 +44,15 @@ public partial class TicketDetailDialog : Window
             MetaText.Text += "\n" + $"Прошивка: {ticket.FwLabel}";
         BodyText.Text = ticket.Text;
 
-        if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+        var shareAvailable = !string.IsNullOrEmpty(root) && Directory.Exists(root);
+        var files = new List<string?>();
+        if (shareAvailable)
         {
-            _attachmentsDir = TicketSyncService.AttachmentsDir(root, ticket.Id);
+            _attachmentsDir = TicketSyncService.AttachmentsDir(root!, ticket.Id);
             if (Directory.Exists(_attachmentsDir))
-            {
-                var files = Directory.GetFiles(_attachmentsDir).Select(Path.GetFileName).ToList();
-                if (files.Count > 0)
-                {
-                    AttachmentsList.ItemsSource = files;
-                    AttachmentsList.Visibility = Visibility.Visible;
-                    NoAttachmentsText.Visibility = Visibility.Collapsed;
-                }
-            }
+                files = Directory.GetFiles(_attachmentsDir).Select(Path.GetFileName).ToList();
         }
+        ApplyAttachmentsState(TicketAttachmentsPanelState.For(shareAvailable, files.Count), files);
 
         // Без доступа к базе переписку ни показать, ни написать — окно тогда открывается как
         // раньше, только для чтения. Так бывает у вызовов, которым база не нужна вовсе.
@@ -78,6 +75,25 @@ public partial class TicketDetailDialog : Window
         };
     }
 
+    /// <summary>Раскладывает решение из <see cref="TicketAttachmentsPanelState"/> по элементам окна.
+    /// Само решение живёт отдельно и проверяется тестами: случаев три («есть», «нет», «не видно»),
+    /// и отличать последние два обязательно.</summary>
+    private void ApplyAttachmentsState(TicketAttachmentsPanelState state, List<string?> files)
+    {
+        AttachmentsHeader.Visibility = state.ShowSection ? Visibility.Visible : Visibility.Collapsed;
+        AttachmentsBlock.Visibility = state.ShowSection ? Visibility.Visible : Visibility.Collapsed;
+
+        AttachmentsList.ItemsSource = files;
+        AttachmentsList.Visibility = state.ShowList ? Visibility.Visible : Visibility.Collapsed;
+
+        NoAttachmentsText.Text = state.Note;
+        NoAttachmentsText.Visibility = state.Note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        var buttons = state.ShowButtons ? Visibility.Visible : Visibility.Collapsed;
+        OpenAttachmentBtn.Visibility = buttons;
+        OpenAttachmentsFolderBtn.Visibility = buttons;
+    }
+
     private void OpenAttachment_Click(object sender, RoutedEventArgs e)
     {
         if (AttachmentsList.SelectedItem is not string name || _attachmentsDir is null) return;
@@ -90,9 +106,11 @@ public partial class TicketDetailDialog : Window
 
     private void OpenAttachmentsFolder_Click(object sender, RoutedEventArgs e)
     {
+        // Кнопки при отсутствии вложений теперь нет вовсе (см. ApplyAttachmentsState), но папку
+        // могли удалить, пока окно открыто, — тогда честнее сказать, чем промолчать.
         if (_attachmentsDir is null || !Directory.Exists(_attachmentsDir))
         {
-            AppMessageBox.Show("Нет вложений — папка не создавалась.", "Вложения", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppMessageBox.Show("Папки с вложениями больше нет.", "Вложения", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         Process.Start(new ProcessStartInfo(_attachmentsDir) { UseShellExecute = true });

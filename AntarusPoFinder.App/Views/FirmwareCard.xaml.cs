@@ -209,8 +209,21 @@ public partial class FirmwareCard : UserControl
         Result = result;
 
         NameLabel.Text = result.Name;
-        VersionLabel.Text = result.VersionRaw;
+        // НОМЕР ВЕРСИИ У ОПЦ ПОКАЗЫВАЕТСЯ С МЕТКАМИ заявки и заводского номера — «2.1.0004.0002_(47137)»,
+        // а не «2.1.0004.0002». Это ровно то, что уезжает в буфер по «Копировать», и показывать здесь
+        // другое было бы обманом: человек видит одно, вставляет другое. Жалоба дословно: «условно
+        // 2.1.0004.0002 отображается, а должно быть 2.1.0004.0002_(47137)».
+        //
+        // Голый номер у разовой сборки не опознаёт ничего: он одинаков у всей линейки, и файла с таким
+        // именем на диске нет — там имя с метками (FirmwareNaming.BuildFirmwareFilename).
+        var versionText = FirmwareNaming.CopyableVersionName(
+            result.VersionRaw, result.IsOpc, result.RequestNum, result.CabinetSn);
+
+        VersionLabel.Text = versionText;
         VersionLabel.ToolTip =
+            (result.IsOpc
+                ? "Номер версии с метками шкафа: _(номер заявки) и _SN(заводской номер) — ровно так назван файл этой прошивки на диске.\n\n"
+                : "") +
             "Формат версии: eq_prefix.sub_prefix.hw.sw.ГГГГММДД_ЧЧММ\n" +
             ".PSL — исходный проект, .LFS — скомпилированный файл";
 
@@ -260,7 +273,9 @@ public partial class FirmwareCard : UserControl
         if (flags.TagsPending)
             TagsPendingLabel.Text = "⟳ Ваши правки этой прошивки ещё не на диске — коллеги их пока не видят. «Отправить всё» вверху.";
 
-        SoftwareNameLabel.Text = $"{result.Name} {result.VersionRaw}".Trim();
+        // Та же строка, что и в шапке: это поле читают рядом с кнопкой «Копировать», и расходиться
+        // с тем, что реально копируется, ему нельзя.
+        SoftwareNameLabel.Text = $"{result.Name} {versionText}".Trim();
 
         ShowFilesLine(result, flags);
 
