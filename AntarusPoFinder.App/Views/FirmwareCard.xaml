@@ -1,4 +1,4 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.FirmwareCard"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.FirmwareCard"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="clr-namespace:AntarusPoFinder.App.Views">
@@ -15,16 +15,28 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <!-- Значок «ОПЦ» — в ШАПКЕ, при имени, а не строчкой ниже среди прочих пометок.
+                     Разовая прошивка под конкретный шкаф и обычная прошивка линейки в выдаче выглядели
+                     одинаково («в поисковой выдаче мне не отличить обычную от опц»), а ставят их
+                     противоположным образом: обычную — любому шкафу, ОПЦ — ровно одному.
+                     Текст на акцентной заливке обязан быть TextOnAccentBrush: в светлой теме белое
+                     на белом здесь уже получалось. -->
+                <Border Grid.Column="1" x:Name="OpcBadge" Visibility="Collapsed" VerticalAlignment="Center"
+                        Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
+                    <TextBlock Text="ОПЦ" FontSize="11" FontWeight="Bold"
+                               Foreground="{DynamicResource TextOnAccentBrush}"/>
+                </Border>
+                <TextBlock Grid.Column="2" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 <!-- Жучок рядом с номером версии и ЗНАЧКОМ, а не кнопкой в ряду действий.
                      Кнопка внизу выглядела наравне с «Загрузить» и «Открыть HMI» — тем, чем пользуются каждый день,
                      хотя жалоба бывает раз в месяц. Здесь он при версии, к которой и относится.
 
                      Собственный обработчик с Handled=true обязателен: вся шапка по нажатию копирует
                      номер версии, и без этого нажатие на жучка заодно клало бы в буфер номер. -->
-                <Border Grid.Column="2" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
+                <Border Grid.Column="3" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
                         Padding="6,2,0,2" VerticalAlignment="Center"
                         MouseLeftButtonUp="BugIcon_Click"
                         ToolTip="Сообщить о баге в этой прошивке">

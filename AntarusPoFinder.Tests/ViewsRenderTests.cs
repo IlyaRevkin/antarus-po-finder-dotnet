@@ -230,6 +230,46 @@ public class ViewsRenderTests
             var bug = card.FindName("BugIcon") as System.Windows.FrameworkElement;
             Assert.NotNull(bug);
             Assert.IsNotType<Button>(bug);
+
+            // Обычная прошивка значком «ОПЦ» не помечена — иначе пометка ничего не значит.
+            var badge = card.FindName("OpcBadge") as System.Windows.FrameworkElement;
+            Assert.NotNull(badge);
+            Assert.Equal(Visibility.Collapsed, badge!.Visibility);
+        });
+    }
+
+    /// <summary>Разовая прошивка (ОПЦ) помечена значком в ШАПКЕ карточки.
+    ///
+    /// Жалоба: «в поисковой выдаче мне не отличить обычную от опц». Строку под именем дочитывают не
+    /// всегда, а спутать разовую сборку под конкретный шкаф с прошивкой линейки — это выехать на
+    /// объект с чужой прошивкой.</summary>
+    [Fact]
+    public void FirmwareCard_ОпцПомеченаЗначкомИНомерами()
+    {
+        Ui.Run(() =>
+        {
+            var card = new FirmwareCard();
+            card.Configure(
+                new HierarchyResult
+                {
+                    Name = "НГР 2.0 КПЧ",
+                    VersionRaw = "3.1.0004.0002.20260101_0000",
+                    Controller = "SMH5",
+                    IsOpc = true,
+                    RequestNum = "01312",
+                    CabinetSn = "SN-778899",
+                },
+                new FirmwareCardFlags());
+            Render(card);
+
+            var badge = card.FindName("OpcBadge") as System.Windows.FrameworkElement;
+            Assert.NotNull(badge);
+            Assert.Equal(Visibility.Visible, badge!.Visibility);
+
+            var meta = card.FindName("MetaLabel") as TextBlock;
+            Assert.NotNull(meta);
+            Assert.Contains("Заявка: 01312", meta!.Text);
+            Assert.Contains("SN: SN-778899", meta.Text);
         });
     }
 

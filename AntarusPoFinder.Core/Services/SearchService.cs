@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using AntarusPoFinder.Core.Data;
@@ -49,6 +49,19 @@ public class HierarchyResult
     /// нужнее номера конфигурации: наладчик ищет шкаф по тому, чем тот отличается, а не по тому,
     /// каким по счёту вариантом его завели.</summary>
     public string Execution { get; init; } = "";
+
+    /// <summary>Разовая прошивка под КОНКРЕТНЫЙ шкаф (папка «ОПЦ»). Карточке это нужно знать, чтобы
+    /// сказать об этом вслух: жалоба дословно — «я загрузил опц, нигде не написано что это опц».
+    /// Без пометки ОПЦ в выдаче неотличима от обычной прошивки той же линейки, а это противоположные
+    /// вещи: обычную ставят всем, ОПЦ — ровно одному шкафу, и поставить её по ошибке дорого.</summary>
+    public bool IsOpc { get; init; }
+
+    /// <summary>Номер заявки и заводской номер шкафа, под который собрана ОПЦ. У разовой сборки
+    /// другого имени нет — именно по ним её и ищут, поэтому на карточке они должны быть видны, а не
+    /// лежать в карточке редактирования.</summary>
+    public string RequestNum { get; init; } = "";
+    public string CabinetSn { get; init; } = "";
+
     public DateTime? UploadDate { get; init; }
     public int Score { get; init; }
     public int FwVersionId { get; init; }
@@ -226,6 +239,9 @@ public static class SearchService
             Tags = row.Tags,
             ConfigName = row.ConfigName,
             Execution = row.Execution,
+            IsOpc = row.IsOpc,
+            RequestNum = row.RequestNum,
+            CabinetSn = row.CabinetSn,
             UploadDate = uploadDate,
             Score = score,
             UsageCount = usageCount,

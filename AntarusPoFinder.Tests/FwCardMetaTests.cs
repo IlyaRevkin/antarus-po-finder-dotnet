@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Domain;
+﻿using AntarusPoFinder.Core.Domain;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -14,8 +14,55 @@ namespace AntarusPoFinder.Tests;
 public class FwCardMetaTests
 {
     private static string Line(string execution = "", string configName = "", string controller = "",
-        string equipmentType = "", string workType = "", string uploadDate = "", int usageCount = 0) =>
-        FwCardMeta.Line(execution, configName, controller, equipmentType, workType, uploadDate, usageCount);
+        string equipmentType = "", string workType = "", string uploadDate = "", int usageCount = 0,
+        bool isOpc = false, string requestNum = "", string cabinetSn = "") =>
+        FwCardMeta.Line(execution, configName, controller, equipmentType, workType, uploadDate, usageCount,
+            isOpc, requestNum, cabinetSn);
+
+    /// <summary>Жалоба дословно: «я загрузил опц, нигде не написано что это опц, в итоге номер
+    /// заявки или сн не отображается в карточке». Всё три вещи — в строке, и ОПЦ первым словом:
+    /// это единственная пометка, которая меняет смысл всей карточки.</summary>
+    [Fact]
+    public void Опц_называет_себя_опц_и_показывает_оба_номера()
+    {
+        var line = Line(isOpc: true, requestNum: "01312", cabinetSn: "SN-778899",
+            controller: "SMH5", uploadDate: "01.09.2026");
+
+        Assert.StartsWith("ОПЦ", line);
+        Assert.Contains("Заявка: 01312", line);
+        Assert.Contains("SN: SN-778899", line);
+    }
+
+    /// <summary>У номеров подписи ОСТАЮТСЯ, в отличие от названия комплектации: голые «01312» и
+    /// «SN-778899» в ряду через точку читаются как мусор, а перепутать их между собой легко — оба
+    /// просто числа.</summary>
+    [Fact]
+    public void Номера_подписаны_чтобы_их_не_перепутали()
+    {
+        var line = Line(isOpc: true, requestNum: "01312", cabinetSn: "778899");
+
+        Assert.DoesNotContain(FwCardMeta.Separator + "01312", line);
+        Assert.Contains("Заявка: 01312", line);
+        Assert.Contains("SN: 778899", line);
+    }
+
+    /// <summary>Заполнено только одно поле из двух — пустое не оставляет пустой подписи. У ОПЦ так
+    /// чаще всего и бывает: обязательно ОДНО из двух (см. OpcFields).</summary>
+    [Fact]
+    public void Незаполненный_номер_не_оставляет_пустой_подписи()
+    {
+        var line = Line(isOpc: true, requestNum: "01312");
+
+        Assert.DoesNotContain("SN:", line);
+        Assert.DoesNotContain(FwCardMeta.Separator + FwCardMeta.Separator, line);
+    }
+
+    /// <summary>Обычная прошивка словом «ОПЦ» себя не называет: пометка должна что-то значить.</summary>
+    [Fact]
+    public void Обычная_прошивка_не_помечается_как_опц()
+    {
+        Assert.DoesNotContain("ОПЦ", Line(execution: "2 насоса", controller: "SMH5"));
+    }
 
     /// <summary>Главное. «Конфигурация: 2 конфигурация» не значит вообще ничего.</summary>
     [Fact]

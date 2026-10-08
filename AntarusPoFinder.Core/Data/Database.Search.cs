@@ -277,6 +277,9 @@ public partial class Database
 
             int matchedTokens = 0;
             int weighted = 0;
+            // Запрос попал в номер заявки или в заводской номер шкафа — значит ОПЦ ищут именно так,
+            // как её и ищут обычно, и опускать её в этом случае нельзя (см. OpcPenalty ниже).
+            bool byOpcNumber = false;
             foreach (var token in qTokens)
             {
                 bool hit = false;
@@ -302,8 +305,8 @@ public partial class Database
                 // Вес как у тега, а не как у названия папки: это не описание, а точный указатель, вписанный
                 // человеком осознанно. Сравнение тем же TokenMatches, что и всюду: номера пишут то с нулями
                 // впереди, то без, и требовать точного совпадения значило бы не находить половину.
-                if (TokenMatches(token, row.RequestNum, false)) { weighted += 2; hit = true; }
-                if (TokenMatches(token, row.CabinetSn, false)) { weighted += 2; hit = true; }
+                if (TokenMatches(token, row.RequestNum, false)) { weighted += 2; hit = true; byOpcNumber = true; }
+                if (TokenMatches(token, row.CabinetSn, false)) { weighted += 2; hit = true; byOpcNumber = true; }
                 // ИСПОЛНЕНИЕ — то, чем прошивка отличается от соседней («3 насоса», «ПЧ Danfoss»). Оно уже
                 // показывается на карточке первым — странно было бы показывать и не давать по этому искать.
                 if (TokenMatches(token, row.Execution, false)) { weighted += 2; hit = true; }
@@ -341,11 +344,33 @@ public partial class Database
                 (normalizedPhrase.Length > 0 && tags.Any(t => SearchService.Normalize(t) == normalizedPhrase)))
                 score += PhraseTagBonus;
 
+            score -= OpcPenaltyFor(row, byOpcNumber);
+
             scored.Add(new ScoredFwVersion(row, score, UsesOf(row, usage), WeightOf(row, usage), matchedTokens));
         }
 
         return scored;
     }
+
+    /// <summary>Насколько опустить ОПЦ в выдаче. Дословно: «опц должны иметь ниже поисковой вес, так
+    /// как они крайне редко нужны и чаще их ищут по номеру заявки или SN».
+    ///
+    /// ОПЦ — разовая сборка под один конкретный шкаф. На обычный запрос («НГР 2 насоса») она почти
+    /// всегда лишняя: совпала она ровно теми же словами, что и обычная прошивка той же линейки,
+    /// потому что это её родственник, — и в выдаче садилась рядом с ней, а то и выше, если её
+    /// случайно пару раз открыли.
+    ///
+    /// Штраф НЕ отсекает: ОПЦ остаётся в выдаче и находится, просто ниже обычных. Величина выбрана
+    /// так, чтобы при РАВНОМ совпадении обычная всегда была выше (OpcPenalty больше, чем бонус «совпали
+    /// все слова»), а ОПЦ, совпавшая заметно лучше — на два слова, — всё-таки поднималась: 2 ×
+    /// MatchedTokenWeight = 16 &gt; 12.
+    ///
+    /// Поиск по НОМЕРУ ЗАЯВКИ или SN штраф снимает целиком: это запрос «дай мне ровно ту сборку»,
+    /// и ответом должна быть именно она, а не линейка, из которой её когда-то собрали.</summary>
+    private const int OpcPenalty = 12;
+
+    private static int OpcPenaltyFor(FwVersionRecord row, bool matchedByNumber) =>
+        row.IsOpc && !matchedByNumber ? OpcPenalty : 0;
 
     /// <summary>Чинит РАСКЛАДКУ каждого слова обычного поиска по отдельности — в отличие от сплошной
     /// замены всего запроса в SearchService.SearchWithLayoutFallback, которая срабатывает, только если
@@ -494,7 +519,12 @@ public partial class Database
                         AnyTagMatchesWholeQuery(tags, queryHasWildcard, normalizedPhrase, phraseUpper);
             if (!inTag && !OrderedContains(phraseUpper, haystack)) continue;
 
-            var score = inTag ? PhraseTagBonus : 3;
+            // Номер заявки/шкафа в кавычках ищут чаще, чем без них, — проверяем попадание фразы
+            // именно в эти два поля, чтобы не опустить ОПЦ, которую спросили по имени.
+            var opcNumbers = CollapseForOrdered(string.Join(" ",
+                new[] { row.RequestNum, row.CabinetSn }.Where(x => !string.IsNullOrEmpty(x))));
+            var score = (inTag ? PhraseTagBonus : 3)
+                        - OpcPenaltyFor(row, OrderedContains(phraseUpper, opcNumbers));
             // Точный (позиционный) поиск: либо вся фраза совпала целиком, либо строки нет в выдаче —
             // «частичных» совпадений тут не бывает. Ставим всем одинаковое число, чтобы выдача не
             // прятала ничего под «Показать ещё» в этом режиме.

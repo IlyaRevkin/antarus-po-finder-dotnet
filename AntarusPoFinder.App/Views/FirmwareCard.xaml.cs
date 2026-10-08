@@ -218,7 +218,17 @@ public partial class FirmwareCard : UserControl
         // решение, а не оформление, и проверять его глазами каждый раз мы уже пробовали.
         MetaLabel.Text = FwCardMeta.Line(
             result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
-            result.WorkType, result.UploadDate?.ToString("dd.MM.yyyy") ?? "", result.UsageCount);
+            result.WorkType, result.UploadDate?.ToString("dd.MM.yyyy") ?? "", result.UsageCount,
+            result.IsOpc, result.RequestNum, result.CabinetSn);
+
+        // Значок «ОПЦ» дублирует первое слово строки намеренно: строка под именем длинная, её
+        // дочитывают не всегда, а перепутать разовую прошивку с обычной — это выехать на объект
+        // с чужой прошивкой.
+        OpcBadge.Visibility = result.IsOpc ? Visibility.Visible : Visibility.Collapsed;
+        OpcBadge.ToolTip = result.IsOpc
+            ? "Разовая прошивка под конкретный шкаф, а не версия линейки: она никого не заменяет и " +
+              "другому шкафу не подходит. Искать её удобнее по номеру заявки или заводскому номеру шкафа."
+            : null;
         // Подсказка объясняет обе пометки — они про разное, и путать их нельзя: исполнение это
         // ОТДЕЛЬНАЯ прошивка своей линейки (свои файлы, свой номер), а конфигурация — вариант ОДНОЙ
         // и той же прошивки, где отличаются только теги.
