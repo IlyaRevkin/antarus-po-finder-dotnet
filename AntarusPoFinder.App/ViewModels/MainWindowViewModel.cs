@@ -1655,11 +1655,64 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             await ScanDiskForNewFirmwareAsync();
             await CleanupInspectionFolderAsync();
             await CheckForUnknownItemsAsync();
+            await PublishDiskSnapshotAsync();
         }
         finally
         {
             _syncRunning = false;
         }
+    }
+
+    /// <summary>Как часто слепок дерева ПО уезжает в хранилище сам по себе. Сутки — потому что
+    /// слепок нужен не для скорости, а для разбора: «что лежало на диске, когда это сломалось».
+    /// Изменения на диске не ждут суток — их слепок догоняет сразу (см. ScanDiskForNewFirmwareAsync).</summary>
+    internal static TimeSpan DiskSnapshotInterval { get; set; } = TimeSpan.FromHours(24);
+
+    private const string DiskSnapshotLastKey = "disk_snapshot_last_at";
+    private bool _diskSnapshotRunning;
+
+    /// <summary>СЛЕПОК ДЕРЕВА ПО В ХРАНИЛИЩЕ (см. DiskSnapshotService).
+    ///
+    /// Зачем. Сетевой диск конторы виден только из конторы; тот, кто чинит программу, о структуре
+    /// диска может только спрашивать. Слепок — список путей, размеров и дат плюс то, что об этом
+    /// думает база, — позволяет разбирать расхождения «база против диска», не имея к диску доступа.
+    /// Содержимого файлов в нём нет и быть не должно: прошивки — собственность конторы.
+    ///
+    /// Ничем не управляет и ничего не меняет: это снимок, а не канал команд.
+    ///
+    /// <param name="diskChanged">Диск только что изменился (нашлись новые версии) — снимаем сразу,
+    /// не дожидаясь суточного срока: смысл слепка в том, чтобы отражать сегодняшний диск.</param></summary>
+    private async Task PublishDiskSnapshotAsync(bool diskChanged = false)
+    {
+        if (_diskSnapshotRunning) return;
+
+        var snapshots = new DiskSnapshotService(_services.Cfg.S3());
+        // Ключей нет — ШТАТНОЕ состояние, как и у всей остальной выкладки на хостинг: молчим.
+        if (!snapshots.CanPublish) return;
+
+        if (!diskChanged)
+        {
+            var last = DateTime.TryParse(_services.Cfg.Get(DiskSnapshotLastKey), out var at) ? at : DateTime.MinValue;
+            if (DateTime.UtcNow - last < DiskSnapshotInterval) return;
+        }
+
+        var root = _services.Cfg.RootPath();
+        if (string.IsNullOrEmpty(root)) return;
+
+        _diskSnapshotRunning = true;
+        try
+        {
+            // Обход дерева — в фоновый поток: на сетевом диске это тысячи файлов, и держать на них
+            // поток интерфейса нельзя. Запись отметки обратно на нём же, как и везде.
+            var outcome = await Task.Run(() => snapshots.RunAsync(_services.Db, root, Environment.MachineName));
+
+            // Отметку ставим только на удачу: иначе первая же неудача отодвинула бы следующую
+            // попытку на сутки.
+            if (outcome.Ok)
+                _services.Cfg.Set(DiskSnapshotLastKey, DateTime.UtcNow.ToString("O"));
+        }
+        catch { /* best effort — повторится следующим тиком, как и остальная фоновая работа */ }
+        finally { _diskSnapshotRunning = false; }
     }
 
     /// <summary>Досмотр сетевого диска на предмет версий, которых нет в локальной базе.
@@ -1699,6 +1752,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
             var result = _services.Hierarchy.ImportFwCandidates(scan);
             if (result.Added <= 0) return;
+
+            // Диск изменился — слепок снимаем сразу, не дожидаясь суточного срока.
+            await PublishDiskSnapshotAsync(diskChanged: true);
 
             var preview = string.Join(", ", result.AddedItems.Take(3));
             var more = result.AddedItems.Count > 3 ? $" и ещё {result.AddedItems.Count - 3}" : "";
