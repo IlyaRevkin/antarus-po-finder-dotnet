@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -94,6 +94,7 @@ public class DiskSnapshotTests
                 SyncId = "s1", GroupName = "НГР", SubtypeName = "2.0", CtrlName = "SMH5",
                 VersionRaw = "1.1.4.32", DiskPath = @"Z:\Software\ПО\НГР\2.0\SMH5\1.1.4.32",
                 IsOpc = true, RequestNum = "01312", CabinetSn = "778899", Status = "active",
+                Released = false, Archived = false, SwVersion = 32, HwVersion = 4, Execution = "3 насоса",
             },
         };
 
@@ -103,6 +104,33 @@ public class DiskSnapshotTests
         Assert.Equal("ПО/НГР/2.0/SMH5/1.1.4.32", s.Db[0].DiskPath);
         Assert.True(s.Db[0].IsOpc);
         Assert.Equal("01312", s.Db[0].RequestNum);
+    }
+
+    /// <summary>Состояние модерации едет в слепке. Вопрос, ради которого это заведено: «у коллеги 20
+    /// на модерации, а у меня 3». Очередь модерации — это строки с released = 0, не архивные и не
+    /// заменённые более свежей версией той же линейки; чтобы понять, какая из трёх причин расхождения
+    /// сработала, нужны именно эти поля — и номер версии ПО, по которому считается «заменена».</summary>
+    [Fact]
+    public void В_слепке_видно_состояние_модерации()
+    {
+        var rows = new List<FwVersionRecord>
+        {
+            new()
+            {
+                SyncId = "s1", GroupName = "НГР", SubtypeName = "2.0", CtrlName = "SMH5",
+                VersionRaw = "1.1.4.32", DiskPath = @"Z:\Software\ПО\НГР",
+                Status = "active", Released = false, Archived = false,
+                SwVersion = 32, HwVersion = 4, Execution = "3 насоса",
+            },
+        };
+
+        var s = Build(Files(@"ПО\НГР\ф.psl"), rows);
+
+        Assert.False(s.Db[0].Released);
+        Assert.False(s.Db[0].Archived);
+        Assert.Equal(32, s.Db[0].SwVersion);
+        Assert.Equal(4, s.Db[0].HwVersion);
+        Assert.Equal("3 насоса", s.Db[0].Execution);
     }
 
     /// <summary>Слепок переживает поездку в JSON и обратно, а кириллица остаётся читаемой: его

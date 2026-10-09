@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using AntarusPoFinder.Core.Domain;
 
@@ -26,7 +26,17 @@ public sealed record DiskSnapshotDbRow(
     [property: JsonPropertyName("isOpc")] bool IsOpc,
     [property: JsonPropertyName("requestNum")] string RequestNum,
     [property: JsonPropertyName("cabinetSn")] string CabinetSn,
-    [property: JsonPropertyName("status")] string Status);
+    [property: JsonPropertyName("status")] string Status,
+    // Состояние МОДЕРАЦИИ. Добавлено по конкретному вопросу: «у коллеги 20 на модерации, а у меня
+    // 3». Очередь модерации — это строки с released = 0 (плюс не архивные и не заменённые более
+    // свежей), и расхождение между машинами бывает трёх разных пород: решение не доехало, строки
+    // нет вовсе, или она скрыта как заменённая. Без этих двух полей в слепке отличить их нельзя,
+    // и остаётся только переспрашивать.
+    [property: JsonPropertyName("released")] bool Released,
+    [property: JsonPropertyName("archived")] bool Archived,
+    [property: JsonPropertyName("swVersion")] int SwVersion,
+    [property: JsonPropertyName("hwVersion")] int HwVersion,
+    [property: JsonPropertyName("execution")] string Execution);
 
 /// <summary>СЛЕПОК ДЕРЕВА ПРОШИВОК — то, что машина с подключённым сетевым диском выкладывает в
 /// хранилище, чтобы структуру диска можно было разбирать, НЕ имея к этому диску доступа.
@@ -87,7 +97,8 @@ public sealed record DiskSnapshot(
                 r.GroupName ?? "", r.SubtypeName ?? "", r.CtrlName ?? "",
                 r.VersionRaw ?? "",
                 NormalizePath(Relative(root, r.DiskPath ?? "")),
-                r.IsOpc, r.RequestNum ?? "", r.CabinetSn ?? "", r.Status ?? ""))
+                r.IsOpc, r.RequestNum ?? "", r.CabinetSn ?? "", r.Status ?? "",
+                r.Released, r.Archived, r.SwVersion, r.HwVersion, r.Execution ?? ""))
             .OrderBy(r => r.DiskPath, StringComparer.Ordinal)
             .ThenBy(r => r.Version, StringComparer.Ordinal)
             .ToList();
