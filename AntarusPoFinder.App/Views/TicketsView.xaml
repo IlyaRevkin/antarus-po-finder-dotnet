@@ -20,7 +20,7 @@
              (программист, а не тот, кто чинит приложение), свои столбцы и свои права. Смешанные в одну
              кучу, они терялись среди жалоб на интерфейс. -->
         <StackPanel Grid.Row="1" Margin="0,0,0,12">
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <StackPanel x:Name="TabsRow" Orientation="Horizontal" Margin="0,0,0,8">
                 <Button x:Name="TabBtnApp" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                     <TextBlock Text="Программа" Style="{StaticResource NavButtonContentText}"/>
                 </Button>

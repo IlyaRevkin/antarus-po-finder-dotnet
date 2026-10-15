@@ -16,7 +16,16 @@ public enum NavSection
     /// место.</summary>
     Setup,
 
-    /// <summary>Свёрнутая секция «ДОПОЛНИТЕЛЬНО»: Настройки, Сетевые диски, Тикеты — «заглянуть раз в
+    /// <summary>Свёрнутая секция «ДЛЯ ПРОГРАММИСТА» — ровно та же мысль, что и Setup, но про другую
+    /// работу: загрузка ПО и баги прошивок, по которым программист и правит.
+    ///
+    /// Просьба Ильи (бета 2.0): «вкладку тикетов для программиста сделай отображаемой слева как у
+    /// наладчика есть параметры ПЧ упп наклейки и та». До этого баги прошивок жили второй пилюлей
+    /// внутри страницы «Тикеты», в «Дополнительно», — то есть в двух кликах и не на виду у того, кому
+    /// они адресованы.</summary>
+    Dev,
+
+    /// <summary>Свёрнутая секция «ДОПОЛНИТЕЛЬНО»: Настройки, Хранилище, Тикеты — «заглянуть раз в
     /// месяц».</summary>
     More,
 }
@@ -45,12 +54,14 @@ public partial class NavItem : ObservableObject
 
     public bool ShowInMainList => IsVisible && Section == NavSection.Main;
     public bool ShowInSetupList => IsVisible && Section == NavSection.Setup;
+    public bool ShowInDevList => IsVisible && Section == NavSection.Dev;
     public bool ShowInCompactList => IsVisible && Section == NavSection.More;
 
     partial void OnIsVisibleChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowInMainList));
         OnPropertyChanged(nameof(ShowInSetupList));
+        OnPropertyChanged(nameof(ShowInDevList));
         OnPropertyChanged(nameof(ShowInCompactList));
     }
 }

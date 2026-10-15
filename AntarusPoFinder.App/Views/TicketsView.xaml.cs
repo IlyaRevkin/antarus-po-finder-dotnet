@@ -88,11 +88,18 @@ public partial class TicketsView : UserControl
     /// config auto-push and app auto-update had — see PushConfigNow/AppUpdateService.TakeLastUpdateError).</summary>
     private bool _syncLastFailed;
 
-    public TicketsView(AppServices services, IAppHost host)
+    /// <param name="fwBugsOnly">Страница открыта как САМОСТОЯТЕЛЬНАЯ «Баги прошивок» — отдельный
+    /// пункт меню в секции «ДЛЯ ПРОГРАММИСТА» (бета 2.0, просьба «все же раздели вкладку тикетов
+    /// программиста и тикетов по приложению»). Тогда пилюли сверху не нужны: переключать не на что,
+    /// тикеты по программе живут своей страницей.</param>
+    public TicketsView(AppServices services, IAppHost host, bool fwBugsOnly = false)
     {
         InitializeComponent();
         _services = services;
         _host = host;
+        _fwBugsOnly = fwBugsOnly;
+        _fwBugsTab = fwBugsOnly;
+        if (fwBugsOnly) TabsRow.Visibility = Visibility.Collapsed;
 
         // «Баг прошивки» здесь НЕ предлагается намеренно: такой тикет осмыслен только вместе со
         // ссылкой на конкретную прошивку, а её может подставить только карточка выдачи (жучок). Заведённый
@@ -115,6 +122,10 @@ public partial class TicketsView : UserControl
     /// <summary>Какая вкладка открыта. Не запоминается между запусками намеренно: «Тикеты» открывают,
     /// чтобы пожаловаться на программу, а баги прошивок смотрят осознанно.</summary>
     private bool _fwBugsTab;
+
+    /// <summary>Страница открыта отдельным пунктом меню и показывает ТОЛЬКО баги прошивок:
+    /// переключаться ей не на что.</summary>
+    private readonly bool _fwBugsOnly;
 
     private bool IsAdmin => _services.Cfg.CurrentRole() == "administrator";
 

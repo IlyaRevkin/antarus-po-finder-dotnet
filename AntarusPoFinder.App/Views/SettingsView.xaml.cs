@@ -192,7 +192,7 @@ public partial class SettingsView : UserControl
     private Button[] AllTabButtons() => new[]
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
-        TabBtnTags, TabBtnExecutions, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
+        TabBtnTags, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
 
@@ -219,7 +219,6 @@ public partial class SettingsView : UserControl
         ModerationTab.Visibility = Visibility.Collapsed;
         ReservationsTab.Visibility = Visibility.Collapsed;
         TagsTab.Visibility = Visibility.Collapsed;
-        ExecutionsTab.Visibility = Visibility.Collapsed;
         EmailTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
@@ -233,12 +232,13 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnConnection) { ConnectionTab.Visibility = Visibility.Visible; LoadConnectionTab(); }
         else if (sender == TabBtnPrinting) { PrintingTab.Visibility = Visibility.Visible; LoadPrintingTab(); }
         else if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
-        else if (sender == TabBtnHierarchy) HierarchyTab.Visibility = Visibility.Visible;
+        // Исполнения теперь живут ВНУТРИ «Иерархии» (бета 2.0), поэтому и перерисовываются вместе
+        // с ней: отдельной вкладки, по заходу на которую это делалось, больше нет.
+        else if (sender == TabBtnHierarchy) { HierarchyTab.Visibility = Visibility.Visible; RenderExecutions(); }
         else if (sender == TabBtnFirmware) FirmwareTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
-        else if (sender == TabBtnExecutions) { ExecutionsTab.Visibility = Visibility.Visible; RenderExecutions(); }
         else if (sender == TabBtnEmail) { EmailTab.Visibility = Visibility.Visible; LoadEmailTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
@@ -291,7 +291,6 @@ public partial class SettingsView : UserControl
         TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnTags.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
         // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
-        TabBtnExecutions.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
         // адресатов, общий на всех. Настройка одного человека здесь меняет почту всем остальным.
@@ -478,44 +477,33 @@ public partial class SettingsView : UserControl
         }
     }
 
-    /// <summary>Справочник исполнений (см. Database.Executions.cs). Рисуется теми же «пузырьками»,
-    /// что теги и слова-исключения: справочник коротких названий, и вести себя должен так же.</summary>
+    /// <summary>СПРАВОЧНИК ИСПОЛНЕНИЙ — таблицей, внутри «Иерархии».
+    ///
+    /// Переехал сюда из отдельной вкладки настроек (бета 2.0): это часть справочника оборудования,
+    /// ровно как контроллеры и производители. Просьба Ильи: «исполнения вкладку перенеси в иерархия»
+    /// и «отображение таблицей уже удобней будет» — у исполнения появились состояние и дата, а
+    /// пузырьки их показать не могут.</summary>
     private void RenderExecutions()
     {
-        ExecutionsPanel.Children.Clear();
-        var items = _services.Db.GetExecutionCatalog();
-        ExecutionsEmptyText.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-        foreach (var name in items)
-        {
-            var captured = name;
-            var row = new StackPanel { Orientation = Orientation.Horizontal };
-            row.Children.Add(new TextBlock { Text = captured, VerticalAlignment = VerticalAlignment.Center });
-
-            var remove = new Button
-            {
-                Content = "×",
-                Style = (Style)FindResource("SecondaryButton"),
-                Margin = new Thickness(6, 0, 0, 0),
-                Padding = new Thickness(6, 0, 6, 0),
-                ToolTip = "Убрать из списка. У загруженных прошивок пометка сохранится — перестанет только предлагаться при новой загрузке.",
-            };
-            remove.Click += (_, _) =>
-            {
-                _services.Db.DeleteExecutionFromCatalog(captured);
-                RenderExecutions();
-            };
-            row.Children.Add(remove);
-
-            ExecutionsPanel.Children.Add(new Border
-            {
-                Style = (Style)FindResource("CardBorder"),
-                Padding = new Thickness(10, 4, 6, 4),
-                Margin = new Thickness(0, 0, 6, 6),
-                Child = row,
-            });
-        }
+        if (ExecutionsGrid is null) return;
+        ExecutionsGrid.ItemsSource = _services.Db.GetExecutionRows()
+            .Select(r => new ExecutionRowView(r.Name, r.Active, r.CreatedAt))
+            .ToList();
     }
+
+    /// <summary>Строка таблицы исполнений. Отдельный тип, а не запись из БД напрямую: таблица
+    /// показывает «Да/Нет» и прочерк вместо пустой даты, и превращать одно в другое должен тот, кто
+    /// рисует, а не тот, кто хранит.</summary>
+    private sealed record ExecutionRowView(string Name, bool Active, string CreatedAt)
+    {
+        public string ActiveText => Active ? "Да" : "Нет";
+
+        /// <summary>Прочерк, а не сегодняшнее число: исполнения, заведённые до того, как дату начали
+        /// записывать, честно показывают, что даты у них нет.</summary>
+        public string CreatedText => string.IsNullOrEmpty(CreatedAt) ? "—" : CreatedAt;
+    }
+
+    private ExecutionRowView? SelectedExecution => ExecutionsGrid?.SelectedItem as ExecutionRowView;
 
     private void AddExecution_Click(object sender, RoutedEventArgs e) => CommitExecution();
 
@@ -532,6 +520,63 @@ public partial class SettingsView : UserControl
         if (name.Length == 0) return;
         _services.Db.AddExecutionToCatalog(name);
         ExecutionInput.Clear();
+        RenderExecutions();
+    }
+
+    private void ExecutionsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        RenameExecution_Click(sender, e);
+
+    /// <summary>Переименование идёт через Database.RenameExecution, а не «удалить и завести заново»:
+    /// оно обязано перенести пометку и у самих прошивок. Исполнения сравниваются точно, строка в
+    /// строку (см. FwExecution), и без переноса линейка разорвалась бы надвое — версии со старым
+    /// написанием перестали бы заменять новые и повисли бы в модерации все разом.</summary>
+    private void RenameExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedExecution is not { } row) return;
+
+        var next = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать исполнение",
+            "Новое название:", row.Name);
+        if (string.IsNullOrWhiteSpace(next) || next.Trim() == row.Name) return;
+
+        if (!_services.Db.RenameExecution(row.Name, next))
+        {
+            AppMessageBox.Show(
+                "Такое исполнение уже есть. Склеивать два исполнения переименованием нельзя — "
+                + "прошивки разных линеек перемешались бы молча.",
+                "Исполнения", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        RenderExecutions();
+        _host.ShowStatus($"Исполнение переименовано: {row.Name} → {next.Trim()}",
+            category: NotificationCategory.Hierarchy);
+    }
+
+    /// <summary>Выключить — не то же самое, что удалить: пометка у загруженных прошивок остаётся,
+    /// исполнение просто перестаёт предлагаться при новой загрузке. Линейку закрыли, история по ней
+    /// читается.</summary>
+    private void ToggleExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedExecution is not { } row) return;
+        _services.Db.SetExecutionActive(row.Name, !row.Active);
+        RenderExecutions();
+        _host.ShowStatus(row.Active
+            ? $"Исполнение «{row.Name}» выключено — при загрузке больше не предлагается"
+            : $"Исполнение «{row.Name}» включено",
+            category: NotificationCategory.Hierarchy);
+    }
+
+    private void DeleteExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedExecution is not { } row) return;
+        if (AppMessageBox.Show(
+                $"Убрать исполнение «{row.Name}» из справочника?" + Environment.NewLine + Environment.NewLine
+                + "У уже загруженных прошивок пометка сохранится — перестанет только предлагаться "
+                + "при новой загрузке.",
+                "Исполнения", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+            != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteExecutionFromCatalog(row.Name);
         RenderExecutions();
     }
 

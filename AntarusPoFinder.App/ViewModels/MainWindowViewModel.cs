@@ -144,6 +144,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// проверка обязана быть на месте раньше, чем это случится.</summary>
     [ObservableProperty] private bool _setupSectionVisible = true;
 
+    /// <summary>Развёрнута ли секция «ДЛЯ ПРОГРАММИСТА» (бета 2.0). В отличие от соседней, состояние
+    /// НЕ запоминается между запусками: пунктов в ней пока один, и восстанавливать свёрнутость
+    /// нечего — лишняя настройка в конфиге дороже.</summary>
+    [ObservableProperty] private bool _devSectionExpanded = true;
+
+    /// <summary>Показывать ли секцию «ДЛЯ ПРОГРАММИСТА». Та же причина, что и у соседней: пустой
+    /// заголовок, который ничего не открывает, — обман. У наладчика пунктов этой секции нет вовсе
+    /// (баг прошивки он заводит жучком на карточке), поэтому у него секции не будет.</summary>
+    [ObservableProperty] private bool _devSectionVisible;
+
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
     /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
     /// "syncing" — идёт синхра (стрелки крутятся), "error" — последний тик упал (оранжевый ⚠),
@@ -195,7 +205,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         Notifications = new NotificationCenter(services.Db, services.Cfg);
 
         foreach (var (pageId, label, section) in RolesConfig.NavItems)
+        {
+            // Секция «ДЛЯ ПРОГРАММИСТА» — переделка 2.0, и в СТАБИЛЬНОЙ программе её быть не должно:
+            // обе собираются из одного дерева, и без этой проверки ближайший обычный релиз принёс бы
+            // всем недоделанную перестройку меню. Бета ставится отдельным приложением — см.
+            // Core/Domain/AppIdentity.
+            if (section == NavSection.Dev && !AppIdentity.IsBeta) continue;
             NavItems.Add(new NavItem(pageId, label, section));
+        }
 
         // Свёрнута/развёрнута секция «ДЛЯ НАЛАДЧИКА» — запоминается между запусками (в отличие от
         // «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой): туда ходят работать, а не смотреть
@@ -449,6 +466,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         MoreSectionBadgeCount = NavItems.Where(n => n.Section == NavSection.More && n.IsVisible).Sum(n => n.BadgeCount);
         SetupSectionBadgeCount = NavItems.Where(n => n.Section == NavSection.Setup && n.IsVisible).Sum(n => n.BadgeCount);
         SetupSectionVisible = NavItems.Any(n => n.Section == NavSection.Setup && n.IsVisible) || SetupToolsVisible;
+        DevSectionVisible = NavItems.Any(n => n.Section == NavSection.Dev && n.IsVisible);
     }
 
     /// <summary>Секцию раскрыли/свернули — запомнить. Единственное состояние сайдбара, которое
@@ -604,6 +622,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             "params" => new ParamsView(_services, this),
             "settings" => new SettingsView(_services, this),
             "network" => new NetworkSyncView(_services, this),
+            // Та же страница, но открытая сразу багами прошивок и без пилюль — отдельный пункт
+            // меню для программиста (бета 2.0, см. RolesConfig).
+            "fwbugs" => new TicketsView(_services, this, fwBugsOnly: true),
             "hosting" => new HostingView(_services, this),
             "tickets" => new TicketsView(_services, this),
             _ => null,

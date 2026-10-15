@@ -546,6 +546,51 @@
                                 </StackPanel>
                             </StackPanel>
 
+                            <!-- ─── ДЛЯ ПРОГРАММИСТА (бета 2.0) ───────────────────────────────
+                                 Та же мысль, что и «ДЛЯ НАЛАДЧИКА», но про другую работу: баги
+                                 прошивок, по которым программист и правит. Раньше они были второй
+                                 пилюлей внутри страницы «Тикеты» в «Дополнительно» — в двух кликах
+                                 и не на виду у того, кому адресованы. Просьба Ильи: «вкладку тикетов
+                                 для программиста сделай отображаемой слева как у наладчика есть
+                                 параметры ПЧ упп наклейки и та». -->
+                            <StackPanel Visibility="{Binding DevSectionVisible, Converter={StaticResource BoolToVis}}">
+                                <Separator Margin="0,8,0,0"/>
+                                <Grid Margin="12,0,12,0">
+                                    <ToggleButton x:Name="DevSectionToggle" HorizontalAlignment="Left"
+                                                  Content="ДЛЯ ПРОГРАММИСТА" Style="{StaticResource SidebarSectionHeader}"
+                                                  IsChecked="{Binding DevSectionExpanded, Mode=TwoWay}"/>
+                                </Grid>
+                                <StackPanel Margin="8,4,8,0"
+                                            Visibility="{Binding IsChecked, ElementName=DevSectionToggle, Converter={StaticResource BoolToVis}}">
+                                    <ItemsControl x:Name="DevNavItemsControl" ItemsSource="{Binding NavItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Style="{StaticResource CompactNavButton}"
+                                                        Margin="0,0,0,2" HorizontalAlignment="Stretch"
+                                                        Visibility="{Binding ShowInDevList, Converter={StaticResource BoolToVis}}"
+                                                        Tag="{Binding IsActive, Converter={StaticResource ActiveTagConverter}}"
+                                                        Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding PageId}">
+                                                    <!-- Явный стиль на TextBlock — тот же приём, что в соседних списках:
+                                                         на активной кнопке текст обязан быть TextOnAccentBrush. -->
+                                                    <TextBlock Text="{Binding Label}">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </StackPanel>
+
                             <!-- "sidebar" display mode (default) — see Настройки → Быстрый доступ for
                                  the "top" alternative (horizontal bubble dock above the page content,
                                  ContentColumn below) and ConfigService.QuickAppsDisplayMode. -->
