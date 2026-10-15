@@ -427,6 +427,15 @@ public partial class MainWindow : Window
     // окне; те же двенадцать с зажатым Ctrl — добавляют в неё файл (копия ложится на диск). Тихо:
     // никаких подсказок и уведомлений. Вся логика счётчика — в EasterEggClickCounter (проверена
     // тестами без WPF).
+    /// <summary>Щелчок по состоянию диска в нижней строке открывает «Сетевые диски» — там и путь к
+    /// диску, и обмен. Тем же, чем ведёт значок синхронизации рядом: оба конца этой строки про диск
+    /// ведут в одно место.</summary>
+    private void DiskStatusText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is ViewModels.MainWindowViewModel vm && vm.ShowSyncDetailsCommand.CanExecute(null))
+            vm.ShowSyncDetailsCommand.Execute(null);
+    }
+
     private void SidebarVersionText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
