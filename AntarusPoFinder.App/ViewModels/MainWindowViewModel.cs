@@ -705,12 +705,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>If the category is disabled in Настройки → Уведомления, the message is fully
     /// suppressed — no status-bar flash, no history entry — per the user's explicit request that a
     /// muted category shouldn't show up anywhere, not just skip the history.</summary>
-    public void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General, Action? reopen = null)
+    public void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General,
+        Action? reopen = null, bool record = true)
     {
         if (!_services.Cfg.IsNotificationCategoryEnabled(category)) return;
 
         StatusMessage = message;
-        if (!string.IsNullOrEmpty(message)) AddNotification(message, category, reopen);
+        // record = false — сообщение НЕ попадает ни в колокольчик, ни письмом: так показывается то,
+        // что является логом работы, а не новостью (см. SyncReportNoise).
+        if (record && !string.IsNullOrEmpty(message)) AddNotification(message, category, reopen);
         _statusClearTimer?.Stop();
         _statusClearTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
         _statusClearTimer.Tick += (_, _) =>
@@ -1785,6 +1788,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // конфигом между двумя машинами может молча не работать месяцами, а диск между ними
             // работает всегда — файлы прошивок они видят одни и те же. Подробности — ModerationOnDisk.
             // Монотонно и в одну сторону, поэтому безопасно гонять на каждом тике синхронизации.
+            // СНАЧАЛА ОТДАЁМ СВОЁ, потом принимаем чужое. Без первого шага канал работал бы только
+            // для будущих решений: 1.75.0.0 писала отметку лишь в момент нажатия «вывести из
+            // модерации», а версии, выпущенные раньше, остались на диске без неё — и у коллеги
+            // продолжили висеть в очереди («обращаю внимание модерации не подчинилась»).
+            var published = await Task.Run(() => ModerationOnDisk.Publish(
+                _services.Db, $"{_services.CurrentUserName} ({RoleLabel})"));
+            if (published > 0)
+                ShowStatus($"Решения модерации выложены на диск: {published}", 6000,
+                    NotificationCategory.FirmwareAndParams);
+
             var absorbed = await Task.Run(() => ModerationOnDisk.Absorb(_services.Db));
             if (absorbed.Released + absorbed.Archived > 0)
             {

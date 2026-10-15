@@ -123,6 +123,16 @@
                                               Checked="DarkTheme_Changed" Unchecked="DarkTheme_Changed"/>
                             </Grid>
 
+                            <!-- Выбор темы списком — когда тем больше двух, тумблер «светлая/тёмная»
+                                 их показать не может. Панель скрыта, пока доступны только эти две:
+                                 в стабильной программе новых тем нет (см. ThemeCatalog.Available),
+                                 и список из двух пунктов рядом с тумблером был бы дублем. -->
+                            <StackPanel x:Name="ThemePickerPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                                <TextBlock Text="Тема оформления" Margin="0,0,0,4"/>
+                                <ComboBox x:Name="ThemeCombo" Height="34" Width="260" HorizontalAlignment="Left"
+                                          DisplayMemberPath="Label" SelectionChanged="ThemeCombo_Changed"/>
+                            </StackPanel>
+
                             <TextBlock Text="ЦВЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Цвет кнопок и выделения. Работает и в светлой, и в тёмной теме — при переключении сохраняется."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
@@ -959,18 +969,11 @@
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="КОМУ ЧТО ПРИСЫЛАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="220"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <ComboBox Grid.Column="0" x:Name="EmailCategoryCombo" Height="34" Margin="0,0,8,0" DisplayMemberPath="Label"/>
-                                <TextBox Grid.Column="1" x:Name="EmailRecipientInput" Height="34" Margin="0,0,8,0"
-                                         KeyDown="EmailRecipientInput_KeyDown"
-                                         ToolTip="Почтовый ящик или название группы AD. Enter — добавить."/>
-                                <Button Grid.Column="2" Content="Добавить" Style="{StaticResource SecondaryButton}" Click="AddEmailRule_Click"/>
-                            </Grid>
+                            <!-- Одна кнопка вместо «список категорий + поле адреса»: рассылка
+                                 настраивается отдельным окном, где у адреса отмечается ВЕСЬ набор
+                                 того, что на него уходит (см. EmailSubscriptionDialog). -->
+                            <Button Content="Добавить адрес" Style="{StaticResource SecondaryButton}"
+                                    HorizontalAlignment="Left" Margin="0,0,0,10" Click="AddEmailRule_Click"/>
                             <StackPanel x:Name="EmailRulesPanel"/>
                             <TextBlock x:Name="EmailRulesEmptyText" Style="{StaticResource MutedText}"
                                        Text="Правил нет — письма не уходят никому." Visibility="Collapsed"/>

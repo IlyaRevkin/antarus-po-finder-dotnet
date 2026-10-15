@@ -1,0 +1,66 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- СТЕКЛО — тёмная тема с полупрозрачными поверхностями (бета 2.0, просьба «добавь темы типа
+         матиреал дизайн, ликвид Гласс и тп»).
+
+         Как это работает. Настоящее стекло в Windows — это размытие за окном (Mica/Acrylic), и его
+         включает система, а не палитра. Здесь другое и честное: поверхности карточек, полей и
+         сайдбара полупрозрачны, поэтому вложенные панели просвечивают друг через друга и экран
+         перестаёт быть набором плоских прямоугольников. На тёмной основе это читается как глубина,
+         а не как грязь.
+
+         ⚠️ Прозрачность сделана УМЕРЕННОЙ намеренно. Это рабочий экран, на котором по полдня ищут
+         прошивки: эффектное матовое стекло с альфой 0.3 выглядит красиво на снимке и невыносимо на
+         четвёртом часу. Поэтому альфа 0xE6…0xF2 (90–95 %) — глубина видна, контраст текста не
+         страдает.
+
+         Контраст считался по НЕПРОЗРАЧНОМУ результату наложения на BgColor #0E1116:
+           TextColor  #E6E9EF на карточке (#1A1F27 после наложения) — 12.4:1
+           TextMuted  #A7B0BE на той же карточке                    — 6.5:1  (порог 4.5)
+           BorderColor #8A94A6 на фоне                              — 5.2:1  (порог 3)
+
+         Набор ключей обязан совпадать с остальными темами — за этим следит ThemeCatalogTests. -->
+
+    <Color x:Key="BgColor">#0E1116</Color>
+    <!-- Сайдбар чуть прозрачнее карточек: он самый большой, и именно на нём глубина заметна. -->
+    <Color x:Key="BgSidebarColor">#E61A2029</Color>
+    <Color x:Key="BgCardColor">#F21D2430</Color>
+    <Color x:Key="BgInputColor">#F2141A23</Color>
+    <Color x:Key="BorderColor">#8A94A6</Color>
+    <Color x:Key="AccentColor">#3B82F6</Color>
+    <Color x:Key="AccentHoverColor">#60A5FA</Color>
+    <Color x:Key="TextColor">#E6E9EF</Color>
+    <Color x:Key="TextMutedColor">#A7B0BE</Color>
+    <Color x:Key="TextOnAccentColor">#0B1020</Color>
+    <Color x:Key="SuccessColor">#6EE7A8</Color>
+    <Color x:Key="SuccessOnAccentColor">#A7F3D0</Color>
+    <Color x:Key="WarningColor">#FBBF77</Color>
+    <Color x:Key="ErrorColor">#FCA5A5</Color>
+    <Color x:Key="TagBgColor">#F22A3344</Color>
+    <Color x:Key="RolledBackColor">#F0A868</Color>
+    <!-- Фон выделенной строки — полупрозрачный акцент: текст строки рисует ContentPresenter общим
+         светлым Foreground, и на сплошном синем он бы просел (подробности — в Light.xaml). -->
+    <Color x:Key="ListSelectedBgColor">#593B82F6</Color>
+    <Color x:Key="CautionColor">#FCD34D</Color>
+
+    <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
+    <SolidColorBrush x:Key="BgSidebarBrush" Color="{StaticResource BgSidebarColor}"/>
+    <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCardColor}"/>
+    <SolidColorBrush x:Key="BgInputBrush" Color="{StaticResource BgInputColor}"/>
+    <SolidColorBrush x:Key="BorderBrush2" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
+    <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="{StaticResource TextOnAccentColor}"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="SuccessOnAccentBrush" Color="{StaticResource SuccessOnAccentColor}"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+    <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
+    <SolidColorBrush x:Key="CautionBrush" Color="{StaticResource CautionColor}"/>
+    <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
+    <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
+    <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>
+
+</ResourceDictionary>

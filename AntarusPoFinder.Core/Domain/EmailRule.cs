@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace AntarusPoFinder.Core.Domain;
@@ -51,6 +53,87 @@ public static class EmailRouting
             result.Add(to);
         }
         return result;
+    }
+
+    /// <summary>ПОДПИСКА — один адрес и ВЕСЬ набор того, что на него уходит.
+    ///
+    /// Зачем поверх правил. В хранилище правило — это «одна категория → один адрес», и чтобы прислать
+    /// человеку три вида событий, их надо завести тремя строками. Жалоба Ильи: «надо сделать чтобы
+    /// выбор что получать на почту не выпадающим списком было где можно что-то одно выбрать, а
+    /// что-то конкретное» и «нужно добавить для почт что заведены редакт рассылки что получать и
+    /// почты в целом».
+    ///
+    /// Формат хранения при этом НЕ меняется: правила так и ездят в общем конфиге по одной категории
+    /// на строку, и старые машины читают их как раньше. Меняется только то, как человек их видит и
+    /// правит — одной строкой на адрес.
+    ///
+    /// Пустой <see cref="Categories"/> означает «всё подряд» — ровно как пустая категория в правиле.</summary>
+    public sealed record EmailSubscription(string Recipient, IReadOnlyList<string> Categories, bool Enabled)
+    {
+        /// <summary>Подписан на всё — в правилах это пустая категория.</summary>
+        public bool Everything => Categories.Count == 0;
+    }
+
+    /// <summary>Свернуть правила в подписки: по строке на адрес.
+    ///
+    /// Порядок адресов сохраняется по первому появлению — список правят глазами, и перетасовка
+    /// строк при каждом сохранении читалась бы как «что-то изменилось само».
+    ///
+    /// Правило «на всё» перебивает перечисление: если человеку заведены и «всё подряд», и
+    /// «прошивки», он всё равно получает всё — показывать это как «прошивки» значило бы врать.</summary>
+    public static List<EmailSubscription> ToSubscriptions(IEnumerable<EmailRule> rules)
+    {
+        var order = new List<string>();
+        var byRecipient = new Dictionary<string, (List<string> Cats, bool Everything, bool Enabled)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var r in rules)
+        {
+            var to = (r.Recipient ?? "").Trim();
+            if (to.Length == 0) continue;
+            if (!byRecipient.TryGetValue(to, out var acc))
+            {
+                acc = (new List<string>(), false, false);
+                order.Add(to);
+            }
+
+            var cat = (r.Category ?? "").Trim();
+            if (cat.Length == 0) acc.Everything = true;
+            else if (!acc.Cats.Contains(cat, StringComparer.OrdinalIgnoreCase)) acc.Cats.Add(cat);
+
+            // Адрес считается включённым, если включена хотя бы одна его строка: выключенная
+            // половина — это «часть рассылки отключили», а не «адрес отключён».
+            acc.Enabled |= r.Enabled;
+            byRecipient[to] = acc;
+        }
+
+        return order
+            .Select(to => byRecipient[to])
+            .Zip(order, (acc, to) => new EmailSubscription(
+                to, acc.Everything ? Array.Empty<string>() : acc.Cats, acc.Enabled))
+            .ToList();
+    }
+
+    /// <summary>Развернуть подписки обратно в правила — то, что ложится в хранилище и едет коллегам.
+    ///
+    /// Идентификаторы выдаёт вызывающий: они должны быть уникальны между машинами (см. EmailRule.Id),
+    /// а Core о способе их получения ничего не знает.</summary>
+    public static List<EmailRule> ToRules(IEnumerable<EmailSubscription> subscriptions, Func<string> newId)
+    {
+        var rules = new List<EmailRule>();
+        foreach (var s in subscriptions)
+        {
+            var to = (s.Recipient ?? "").Trim();
+            if (to.Length == 0) continue;
+
+            if (s.Everything)
+            {
+                rules.Add(new EmailRule { Id = newId(), Category = "", Recipient = to, Enabled = s.Enabled });
+                continue;
+            }
+            foreach (var cat in s.Categories)
+                rules.Add(new EmailRule { Id = newId(), Category = cat, Recipient = to, Enabled = s.Enabled });
+        }
+        return rules;
     }
 
     /// <summary>Похоже ли на почтовый ящик. Всё прочее считается ГРУППОЙ AD, а не ошибкой: группы

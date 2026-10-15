@@ -123,6 +123,10 @@ public class ViewsRenderTests
         new object[] { "network" },
         new object[] { "hosting" },
         new object[] { "tickets" },
+        // Отдельная страница багов прошивок — пункт секции «ДЛЯ ПРОГРАММИСТА» (бета 2.0). Она
+        // рисуется тем же TicketsView, но в другом режиме: пилюли сверху скрыты, вкладка
+        // зафиксирована. Режим меняет видимость контролов, поэтому и проверяется отдельно.
+        new object[] { "fwbugs" },
         // «Чистка диска» пунктом меню больше не является (переехала во вкладку Настроек), но
         // остаётся отдельным контролом — и строиться обязана так же: разбор её разметки от переезда
         // не изменился, а вкладка создаёт её тем же конструктором.
@@ -150,6 +154,7 @@ public class ViewsRenderTests
                 "network" => new NetworkSyncView(services, host),
                 "hosting" => new HostingView(services, host),
                 "tickets" => new TicketsView(services, host),
+                "fwbugs" => new TicketsView(services, host, fwBugsOnly: true),
                 "cleanup" => new DiskCleanupView(services, host),
                 _ => throw new ArgumentOutOfRangeException(nameof(pageId), pageId, "неизвестная страница"),
             };

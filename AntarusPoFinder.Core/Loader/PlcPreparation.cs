@@ -93,6 +93,37 @@ public static class PlcPreparation
               + "форматированием — поэтому вариант «без форматирования» здесь не предлагается."
             : "";
 
+    /// <summary>ПОЧЕМУ ПОДГОТОВКУ НЕЛЬЗЯ ЗАПУСКАТЬ ПРЯМО СЕЙЧАС — или пусто, если можно.
+    ///
+    /// Обновление ядра Segnetics Loader делает ТОЛЬКО по USB (docs/loader/LOADER_AUTOMATION_API.md:
+    /// «Сценарий поддерживает USB-режим; выбранный Ethernet-режим завершается событием failed с
+    /// кодом PREPARATION_FAILED»). Узнавать об этом ПОСЛЕ старта — значит показать наладчику
+    /// красную «Ошибку» там, где достаточно было одной фразы заранее. Именно так это и выглядело на
+    /// машине коллеги 15.10.2026.
+    ///
+    /// Три случая, и они разные:
+    /// <list type="bullet">
+    /// <item>USB — можно;</item>
+    /// <item>Ethernet — нельзя, и это точно известно;</item>
+    /// <item>неизвестно — настройки Loader прочитать не удалось (другой формат файла, его ещё нет).
+    /// Запрещать нельзя: запрет по догадке остановил бы работу там, где всё исправно. Предупреждаем
+    /// и оставляем решение человеку.</item>
+    /// </list></summary>
+    public static string ConnectionObstacle(PlcConnectionMode loaderMode) => loaderMode switch
+    {
+        PlcConnectionMode.Usb => "",
+        PlcConnectionMode.Ethernet =>
+            "Loader сейчас настроен на Ethernet, а обновление ядра он делает только по USB — "
+            + "подготовка прервётся с ошибкой. Переключите подключение на USB.",
+        _ =>
+            "Не удалось прочитать, какое подключение выбрано в самом Loader. Обновление ядра "
+            + "работает только по USB: если в Loader стоит Ethernet, подготовка прервётся с ошибкой.",
+    };
+
+    /// <summary>Точно ли подготовка сейчас НЕ сработает. Только Ethernet: «неизвестно» — повод
+    /// предупредить, а не запретить.</summary>
+    public static bool ConnectionBlocks(PlcConnectionMode loaderMode) => loaderMode == PlcConnectionMode.Ethernet;
+
     /// <summary>Строка в журнале операции: что именно наладчик выбрал. Пишется всегда, включая
     /// «без форматирования», — по журналу должно быть видно, что вопрос задавали и что ответили.</summary>
     public static string LogLine(PlcPreparationAnswer answer) => answer switch

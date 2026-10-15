@@ -214,4 +214,82 @@ public class ModerationOnDiskTests
         Assert.Equal(0, ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов"));
         Assert.Equal(0, ModerationOnDisk.Absorb(m.DbA).Released);
     }
+
+    /// <summary>⚠️ ТО, ЧЕГО НЕ ХВАТИЛО В 1.75.0.0.
+    ///
+    /// Отметка писалась ТОЛЬКО в момент нажатия «вывести из модерации». Версии, выпущенные раньше,
+    /// остались на диске без неё — и у коллеги продолжили висеть в очереди. Жалоба Ильи сразу после
+    /// выхода: «обращаю внимание модерации не подчинилась».
+    ///
+    /// Теперь машина выкладывает на диск ВСЁ, что у неё уже решено, — и только после этого канал
+    /// действительно начинает работать.</summary>
+    [Fact]
+    public void Ранее_выпущенные_версии_тоже_попадают_на_диск()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var a = SeedFirmware(m.DbA, m.HierA, root);
+        var b = SeedFirmware(m.DbB, m.HierB, root);
+        // Выпущено «давно», без всякой отметки на диске — ровно как у всех версий до 1.75.0.0.
+        m.DbA.MarkFwVersionReleased(a.FwId);
+        Assert.Null(ChangelogFile.TryRead(a.Folder)!.Moderation);
+
+        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+
+        Assert.True(ChangelogFile.TryRead(a.Folder)!.Moderation!.Released);
+        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB).Released);
+        Assert.False(InQueue(m.DbB));
+    }
+
+    /// <summary>Выкладка не трогает файл, если на диске уже стоит не менее сильная отметка: каждая
+    /// лишняя запись — это обращение к чужой папке на общей шаре и повод для отказа в доступе.</summary>
+    [Fact]
+    public void Повторная_выкладка_ничего_не_переписывает()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var a = SeedFirmware(m.DbA, m.HierA, root);
+        m.DbA.MarkFwVersionReleased(a.FwId);
+        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+
+        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+    }
+
+    /// <summary>Выкладка не ослабляет чужое решение: если на диске «выпущена», а здесь версия ещё и
+    /// в архиве, на диск уходит и то и другое, а не замена одного другим.</summary>
+    [Fact]
+    public void Выкладка_не_ослабляет_отметку_на_диске()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var a = SeedFirmware(m.DbA, m.HierA, root);
+        ChangelogFile.TryMarkModeration(a.Folder, new FwModerationMark(true, false, "2026-10-01T00:00:00", "Петров"));
+        m.DbA.ArchiveFwVersion(a.FwId);
+
+        ModerationOnDisk.Publish(m.DbA, "Иванов");
+
+        var mark = ChangelogFile.TryRead(a.Folder)!.Moderation!;
+        Assert.True(mark.Released, "чужое «выпущена» обязано остаться");
+        Assert.True(mark.Archived);
+    }
+
+    /// <summary>Невыпущенную версию выкладывать нечего: «в очереди» — это отсутствие решения, а не
+    /// решение, и записывать его на общий диск значило бы спорить с теми, кто уже решил.</summary>
+    [Fact]
+    public void Версия_в_очереди_на_диск_не_выкладывается()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        SeedFirmware(m.DbA, m.HierA, root);
+
+        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+    }
 }

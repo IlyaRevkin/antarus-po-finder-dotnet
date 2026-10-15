@@ -144,6 +144,42 @@ public static class LoaderConnectionSettings
     /// <summary>Ставит значение первому найденному полю из списка синонимов — на любой глубине, но
     /// только если поле уже существует И сейчас хранит строку (иначе мы не понимаем, что это за поле,
     /// и правильнее не трогать). Возвращает true, если что-то изменилось.</summary>
+    /// <summary>ЧТО НА САМОМ ДЕЛЕ СТОИТ В НАСТРОЙКАХ LOADER.
+    ///
+    /// Зачем читать, если мы же их и пишем. Потому что пишем мы их УГАДЫВАЯ: подменяется строковое
+    /// свойство с одним из знакомых имён (см. ModeKeys), и если в этой версии Loader режим хранится
+    /// иначе — числом, галочкой, другим именем, — подмена молча не происходит. Снаружи это выглядит
+    /// так: в программе выбран USB, а Loader работает по Ethernet.
+    ///
+    /// Так и поймали 15.10.2026 на машине коллеги: заливка с подготовкой упала с «Обновление ядра
+    /// поддерживается только при USB-подключении», хотя в карточке стоял USB.
+    ///
+    /// <see cref="PlcConnectionMode.Unspecified"/> — «прочитать не удалось»: файла нет, он не
+    /// разобрался или знакомого ключа в нём не оказалось. Это НЕ «значит Ethernet» — выводов из
+    /// этого делать нельзя, можно только предупредить человека.</summary>
+    public static PlcConnectionMode ReadMode(string? settingsPath = null)
+    {
+        var path = string.IsNullOrWhiteSpace(settingsPath) ? DefaultSettingsPath : settingsPath!;
+        try
+        {
+            if (!File.Exists(path)) return PlcConnectionMode.Unspecified;
+            var root = JsonNode.Parse(File.ReadAllText(path), documentOptions: new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+            if (root is not JsonObject obj) return PlcConnectionMode.Unspecified;
+
+            foreach (var (parent, key) in FindStringProperties(obj))
+            {
+                if (!ModeKeys.Any(n => string.Equals(n, key, StringComparison.OrdinalIgnoreCase))) continue;
+                return ParseMode(parent[key]?.GetValue<string>());
+            }
+        }
+        catch { /* чужой файл — любые неожиданности здесь означают «не знаем», а не ошибку */ }
+        return PlcConnectionMode.Unspecified;
+    }
+
     private static bool TrySetString(JsonObject obj, string[] names, string value, List<string> changed)
     {
         foreach (var (parent, key) in FindStringProperties(obj))

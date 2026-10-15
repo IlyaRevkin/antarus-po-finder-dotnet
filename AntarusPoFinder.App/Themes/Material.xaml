@@ -1,0 +1,65 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- MATERIAL — светлая тема по палитре Material Design 3 (бета 2.0, просьба «добавь темы типа
+         матиреал дизайн, ликвид Гласс и тп»).
+
+         Чем отличается от обычной светлой: поверхности не белые, а чуть окрашенные в сторону
+         акцента (surface / surface-container в терминах M3), границы мягче, а текст — не чёрный, а
+         очень тёмный сине-серый. На дневном свету это заметно спокойнее для глаз, а карточки
+         перестают сливаться с фоном без рисования рамок.
+
+         Набор ключей ОБЯЗАН совпадать со светлой и тёмной: стили ссылаются на них по имени, и
+         пропущенный ключ — это не «цвет по умолчанию», а исключение при разборе разметки. За этим
+         следит ThemeCatalogTests.
+
+         Контраст основных пар (WCAG, относительная светлота):
+           TextColor #1B1B1F на BgColor   #FDFBFF — 16.2:1
+           TextColor #1B1B1F на BgCard    #F3EDF7 — 15.1:1
+           TextMuted #45464F на BgColor            — 9.4:1  (порог 4.5)
+           BorderColor #79747E на BgColor          — 3.6:1  (порог 3 для границ) -->
+
+    <Color x:Key="BgColor">#FDFBFF</Color>
+    <Color x:Key="BgSidebarColor">#F0EDF4</Color>
+    <Color x:Key="BgCardColor">#F3EDF7</Color>
+    <Color x:Key="BgInputColor">#FFFFFF</Color>
+    <Color x:Key="BorderColor">#79747E</Color>
+    <Color x:Key="AccentColor">#6750A4</Color>
+    <Color x:Key="AccentHoverColor">#7F67BE</Color>
+    <Color x:Key="TextColor">#1B1B1F</Color>
+    <Color x:Key="TextMutedColor">#45464F</Color>
+    <Color x:Key="TextOnAccentColor">#FFFFFF</Color>
+    <Color x:Key="SuccessColor">#146C2E</Color>
+    <!-- Зелёный поверх НАСЫЩЕННОГО акцента (выделенная строка списка): тёмно-зелёный там тонет,
+         поэтому берётся светлый — ровно по той же причине, что и в остальных темах. -->
+    <Color x:Key="SuccessOnAccentColor">#A6F0B5</Color>
+    <Color x:Key="WarningColor">#8C4A00</Color>
+    <Color x:Key="ErrorColor">#B3261E</Color>
+    <Color x:Key="TagBgColor">#E7E0EC</Color>
+    <Color x:Key="RolledBackColor">#8C4A00</Color>
+    <!-- Фон выделенной строки — светлый тон акцента, а не сам акцент: текст строки рисует
+         ContentPresenter с общим тёмным Foreground, и на сплошном фиолетовом он был бы нечитаем
+         (та же грабля подробно описана в Light.xaml). -->
+    <Color x:Key="ListSelectedBgColor">#E8DEF8</Color>
+    <Color x:Key="CautionColor">#9A6700</Color>
+
+    <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
+    <SolidColorBrush x:Key="BgSidebarBrush" Color="{StaticResource BgSidebarColor}"/>
+    <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCardColor}"/>
+    <SolidColorBrush x:Key="BgInputBrush" Color="{StaticResource BgInputColor}"/>
+    <SolidColorBrush x:Key="BorderBrush2" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
+    <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="{StaticResource TextOnAccentColor}"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="SuccessOnAccentBrush" Color="{StaticResource SuccessOnAccentColor}"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+    <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
+    <SolidColorBrush x:Key="CautionBrush" Color="{StaticResource CautionColor}"/>
+    <SolidColorBrush x:Key="TagBgBrush" Color="{StaticResource TagBgColor}"/>
+    <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
+    <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>
+
+</ResourceDictionary>

@@ -112,11 +112,16 @@ public class SidebarSetupSectionTests
         foreach (var (pageId, label, section) in RolesConfig.NavItems)
         {
             var item = new NavItem(pageId, label, section) { IsVisible = true };
-            var shown = new[] { item.ShowInMainList, item.ShowInSetupList, item.ShowInCompactList };
+            // Списков стало четыре: добавилась секция «ДЛЯ ПРОГРАММИСТА» (бета 2.0). Перечислять их
+            // здесь обязательно ВСЕ — иначе пункт новой секции выглядел бы «нигде не показывается»,
+            // и тест ловил бы ровно наоборот: не ошибку, а свою неполноту.
+            var shown = new[] { item.ShowInMainList, item.ShowInSetupList, item.ShowInDevList, item.ShowInCompactList };
             Assert.Single(shown, x => x);
 
             item.IsVisible = false;
-            Assert.All(new[] { item.ShowInMainList, item.ShowInSetupList, item.ShowInCompactList }, Assert.False);
+            Assert.All(
+                new[] { item.ShowInMainList, item.ShowInSetupList, item.ShowInDevList, item.ShowInCompactList },
+                Assert.False);
         }
     }
 

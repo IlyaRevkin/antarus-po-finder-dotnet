@@ -13,7 +13,13 @@ public interface IAppHost
     /// fully suppressed: no status-bar flash, no history entry (see MainWindowViewModel.ShowStatus).</summary>
     /// <summary>reopen (необязателен) — действие кнопки «Показать» у записи в истории уведомлений:
     /// напр. перейти на страницу «Тикеты». Без него запись без кнопки, как и раньше.</summary>
-    void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General, Action? reopen = null);
+    /// <param name="record">Записывать ли сообщение в журнал уведомлений (а значит — слать его
+    /// почтой). false — сообщение живёт только в строке состояния и исчезает вместе с ней: так
+    /// показывается то, что является ЛОГОМ, а не событием. Жалоба, из-за которой это появилось:
+    /// «получать уведомление что синхра была и получено 0 изменений не нужно, это лог а не
+    /// уведомление». См. Core/Domain/SyncReportNoise.</param>
+    void ShowStatus(string message, int ms = 4000, NotificationCategory category = NotificationCategory.General,
+        Action? reopen = null, bool record = true);
 
     /// <summary>Открывает индикатор фоновой работы внизу окна (рядом с «Диск: …») до Dispose.
     /// Обязателен для всего, что ходит на сетевой диск дольше мгновения: страница сама может

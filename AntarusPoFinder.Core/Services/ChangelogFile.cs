@@ -184,9 +184,18 @@ public static class ChangelogFile
             parts.Length > 2 ? parts[2] : "");
     }
 
+    /// <summary>Состояния пишутся ВМЕСТЕ, а не одно вместо другого: «выпущена» и «в архиве» —
+    /// независимые признаки, и версия вполне бывает и той, и другой сразу. Пока писалось одно слово,
+    /// архивирование затирало отметку о выпуске, и на другой машине версия снова всплывала в очереди
+    /// модерации — то есть ровно та беда, от которой этот канал и заводился. Разбор обе эти пометки
+    /// и так ищет по отдельности (см. ParseModeration), так что формат никуда не «расширяется»,
+    /// просто перестаёт терять половину решения.</summary>
     private static string FormatModeration(FwModerationMark m)
     {
-        var state = m.Archived ? WordArchived : m.Released ? WordReleased : WordQueued;
+        var words = new List<string>();
+        if (m.Released) words.Add(WordReleased);
+        if (m.Archived) words.Add(WordArchived);
+        var state = words.Count > 0 ? string.Join(", ", words) : WordQueued;
         return $"{ModerationPrefix} {state}; {m.At}; {m.By}".TrimEnd(';', ' ');
     }
 

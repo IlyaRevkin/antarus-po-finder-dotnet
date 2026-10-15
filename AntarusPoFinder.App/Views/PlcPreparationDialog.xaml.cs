@@ -20,10 +20,21 @@ public partial class PlcPreparationDialog : Window
 
         // Для контроллеров, которым заливка без подготовки кирпичит ПЛК (SMH5), прошлый выбор
         // наладчика НЕ наследуется — см. PlcPreparation.NeedsFormatByDefault.
+        // ДВА РАЗНЫХ ПРЕДУПРЕЖДЕНИЯ, и оба показываются ДО запуска:
+        //   • про контроллер — «этому заливка без подготовки ломает ПЛК» (SMH5);
+        //   • про подключение — «подготовка сейчас не сработает, Loader не на USB».
+        // Второе появилось после того, как у коллеги заливка упала красной «Ошибкой» уже в процессе,
+        // хотя сказать об этом можно было одной фразой заранее.
+        var notes = new System.Collections.Generic.List<string>();
         var warning = PlcPreparation.WarningFor(controllerName);
-        if (warning.Length > 0)
+        if (warning.Length > 0) notes.Add(warning);
+
+        var obstacle = PlcPreparation.ConnectionObstacle(LoaderConnectionSettings.ReadMode());
+        if (obstacle.Length > 0) notes.Add(obstacle);
+
+        if (notes.Count > 0)
         {
-            WarningText.Text = warning;
+            WarningText.Text = string.Join(System.Environment.NewLine + System.Environment.NewLine, notes);
             WarningBox.Visibility = Visibility.Visible;
         }
 
@@ -32,7 +43,12 @@ public partial class PlcPreparationDialog : Window
         // гасится: выключенная кнопка читается как «что-то настрой, и станет можно».
         if (!PlcPreparation.AllowKeep(controllerName)) KeepBtn.Visibility = Visibility.Collapsed;
 
-        var wasFormat = PlcPreparation.DefaultAnswer(rememberedFormat, controllerName) == PlcPreparationAnswer.Format;
+        // Loader точно не на USB — подготовка не сработает, поэтому по умолчанию предлагаем залить
+        // как есть (а у SMH5, где «как есть» ломает ПЛК, выбора не остаётся вовсе: там сперва надо
+        // починить подключение, и об этом прямо написано выше).
+        var blocked = PlcPreparation.ConnectionBlocks(LoaderConnectionSettings.ReadMode());
+        var wasFormat = !blocked
+                        && PlcPreparation.DefaultAnswer(rememberedFormat, controllerName) == PlcPreparationAnswer.Format;
         RememberedText.Text = warning.Length > 0
             ? "Для этого контроллера по умолчанию предлагается подготовка, независимо от прошлого выбора."
             : wasFormat

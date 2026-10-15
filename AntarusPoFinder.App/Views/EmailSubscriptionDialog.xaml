@@ -1,0 +1,35 @@
+<Window x:Class="AntarusPoFinder.App.Views.EmailSubscriptionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Рассылка на адрес" SizeToContent="Height" Width="520"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{DynamicResource BgBrush}" Foreground="{DynamicResource TextBrush}">
+    <StackPanel Margin="18">
+        <TextBlock Text="Адрес или группа AD" Margin="0,0,0,4"/>
+        <TextBox x:Name="RecipientInput" Height="34" Margin="0,0,0,4"/>
+        <TextBlock x:Name="RecipientHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Строка без собачки считается группой AD — её раскрывает почтовый сервер, и только если у группы есть собственный адрес."/>
+
+        <TextBlock Text="Что присылать на этот адрес" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <!-- Галочки, а не выпадающий список: «надо сделать чтобы выбор что получать на почту не
+             выпадающим списком было где можно что-то одно выбрать, а что-то конкретное». Список
+             позволял выбрать ровно одно, и чтобы прислать человеку три вида событий, приходилось
+             заводить три строки. -->
+        <CheckBox x:Name="EverythingCheck" Content="Всё подряд" Margin="0,0,0,8"
+                  Checked="Everything_Changed" Unchecked="Everything_Changed"
+                  ToolTip="Все события, включая те, что появятся в будущих версиях"/>
+        <StackPanel x:Name="CategoriesPanel" Margin="16,0,0,12"/>
+
+        <!-- Галочки «включено» здесь нет намеренно: в хранилище правил такого признака нет (см.
+             Database.EmailRules — строка «категория|адрес» и всё), и показывать выключатель,
+             который не переживёт перезапуск, значит врать. Выключить рассылку = убрать адрес. -->
+
+        <TextBlock x:Name="ErrorText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                   Foreground="{DynamicResource ErrorBrush}" Visibility="Collapsed" Margin="0,0,0,8"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Сохранить" MinWidth="120" Margin="0,0,8,0" IsDefault="True" Click="Save_Click"/>
+            <Button Content="Отмена" Style="{StaticResource SecondaryButton}" MinWidth="100" IsCancel="True" Click="Cancel_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

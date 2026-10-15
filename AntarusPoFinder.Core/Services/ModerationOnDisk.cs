@@ -42,6 +42,47 @@ public static class ModerationOnDisk
         return written;
     }
 
+    /// <summary>ВЫЛОЖИТЬ НА ДИСК ВСЁ, ЧТО ЗДЕСЬ УЖЕ РЕШЕНО.
+    ///
+    /// ⚠️ Без этого вся затея работает только для БУДУЩИХ решений, и ровно так и вышло: 1.75.0.0
+    /// писала отметку только в момент нажатия «вывести из модерации», а шестнадцать версий,
+    /// выпущенных раньше, остались на диске без неё — и у коллеги продолжили висеть в очереди.
+    /// Жалоба Ильи сразу после выхода: «обращаю внимание модерации не подчинилась».
+    ///
+    /// Поэтому машина выкладывает своё состояние сама: для каждой живой версии, которую она считает
+    /// выпущенной или архивной, в CHANGELOG.md появляется отметка — если её там ещё нет или она
+    /// СЛАБЕЕ (на диске «в очереди», здесь «выпущена»). Ослаблять чужую отметку нельзя: решения
+    /// монотонны, и «в очереди» никогда не перебивает «выпущена».
+    ///
+    /// Автор отметки здесь — не человек, а машина: решение принимали неизвестно когда и неизвестно
+    /// кто, и подписывать им того, кто сейчас сидит за компьютером, было бы выдумкой.</summary>
+    public static int Publish(Database db, string author, DateTime? now = null, bool apply = true)
+    {
+        var stamp = (now ?? DateTime.Now).ToString("yyyy-MM-ddTHH:mm:ss");
+        var written = 0;
+
+        foreach (var row in db.GetAllFwVersionsWithNames(includeArchived: true))
+        {
+            if (!row.Released && !row.Archived) continue;          // решения ещё нет — выкладывать нечего
+            if (string.IsNullOrEmpty(row.DiskPath) || !Directory.Exists(row.DiskPath)) continue;
+
+            var onDisk = ChangelogFile.TryRead(row.DiskPath)?.Moderation;
+            // На диске уже стоит не менее сильная отметка — трогать файл незачем: лишняя запись в
+            // чужую папку на общей шаре и лишний повод для конфликта доступа.
+            if (onDisk is not null
+                && (!row.Released || onDisk.Released)
+                && (!row.Archived || onDisk.Archived)) continue;
+
+            written++;
+            if (!apply) continue;
+            ChangelogFile.TryMarkModeration(row.DiskPath, new FwModerationMark(
+                onDisk?.Released == true || row.Released,
+                onDisk?.Archived == true || row.Archived,
+                stamp, author ?? ""));
+        }
+        return written;
+    }
+
     /// <summary>Сколько версий подняло бы по решениям с диска, и какие именно.</summary>
     public record AbsorbResult(int Released, int Archived, List<string> Items);
 

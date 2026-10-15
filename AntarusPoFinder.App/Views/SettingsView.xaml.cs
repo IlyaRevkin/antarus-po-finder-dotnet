@@ -730,7 +730,7 @@ public partial class SettingsView : UserControl
     private void LoadGeneral()
     {
         _loadingGeneral = true;
-        try { LoadGeneralCore(); }
+        try { LoadGeneralCore(); LoadThemePicker(); }
         finally { _loadingGeneral = false; }
     }
 
@@ -1261,6 +1261,36 @@ public partial class SettingsView : UserControl
     private void RunOnboarding_Click(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is MainWindow main) main.RunOnboardingAgain();
+    }
+
+    /// <summary>Выбор темы списком. Появляется, только когда тем больше двух: тумблер
+    /// «светлая/тёмная» их показать не может, а дублировать его списком из двух пунктов незачем.
+    /// Просьба Ильи (бета 2.0): «добавь темы типа матиреал дизайн, ликвид Гласс и тп».</summary>
+    private void LoadThemePicker()
+    {
+        var themes = ThemeCatalog.Available;
+        if (themes.Count <= 2) return;
+
+        ThemePickerPanel.Visibility = Visibility.Visible;
+        // Тумблер прячем: две ручки на одну настройку — верный способ получить вопрос «а почему
+        // переключатель показывает не то».
+        DarkThemeCheck.Visibility = Visibility.Collapsed;
+        ThemeLabelText.Visibility = Visibility.Collapsed;
+
+        ThemeCombo.ItemsSource = themes;
+        ThemeCombo.SelectedItem = themes.FirstOrDefault(t => t.Id == _services.Cfg.Theme()) ?? themes[0];
+    }
+
+    private void ThemeCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        if (ThemeCombo.SelectedItem is not AppTheme theme) return;
+
+        _services.Cfg.SetTheme(theme.Id);
+        ThemeManager.Apply(theme.Id, ThemeManager.CurrentAccent);
+        // Образец цвета перерисовываем по той же причине, что и у тумблера: оттенок под курсором и
+        // подсветка строки считаются с оглядкой на тему.
+        ShowAccent(AccentPalette.NormalizeStored(_services.Cfg.Accent()));
     }
 
     private void DarkTheme_Changed(object sender, RoutedEventArgs e)
@@ -3965,19 +3995,10 @@ public partial class SettingsView : UserControl
 
     // ═════════════════════════ ПОЧТА (БЕТА) ════════════════════════
 
-    private sealed record EmailCategoryOption(string Id, string Label);
-
     private void LoadEmailTab()
     {
-        if (EmailCategoryCombo.Items.Count == 0)
-        {
-            // Первым пунктом — «всё подряд»: при первой настройке хотят именно его, а не выбирать
-            // категорию из списка, смысл которого ещё не знают.
-            EmailCategoryCombo.Items.Add(new EmailCategoryOption("", "Всё подряд"));
-            foreach (var (category, label) in NotificationCategoryInfo.All)
-                EmailCategoryCombo.Items.Add(new EmailCategoryOption(category.ToString(), label));
-            EmailCategoryCombo.SelectedIndex = 0;
-        }
+        // Списка категорий здесь больше нет: что присылать на адрес, отмечается галочками в окне
+        // рассылки (EmailSubscriptionDialog) — выпадающий список позволял выбрать ровно одно.
 
         EmailEnabledCheck.IsChecked = _services.Cfg.EmailEnabled();
         SmtpHostInput.Text = _services.Cfg.SmtpHost();
@@ -4397,69 +4418,114 @@ public partial class SettingsView : UserControl
         RefreshEmailReadiness();
     }
 
-    private void EmailRecipientInput_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter) AddEmailRule_Click(sender, e);
-    }
 
-    private void AddEmailRule_Click(object sender, RoutedEventArgs e)
-    {
-        var recipient = EmailRecipientInput.Text.Trim();
-        if (recipient.Length == 0) return;
-
-        var category = (EmailCategoryCombo.SelectedItem as EmailCategoryOption)?.Id ?? "";
-        _services.Db.AddEmailRule(category, recipient);
-        EmailRecipientInput.Clear();
-        RenderEmailRules();
-        RefreshEmailReadiness();
-    }
-
+    /// <summary>Список рассылок — ПО СТРОКЕ НА АДРЕС, а не по строке на «категория+адрес».
+    ///
+    /// Жалобы Ильи 15.10.2026: «надо сделать чтобы выбор что получать на почту не выпадающим списком
+    /// было где можно что-то одно выбрать, а что-то конкретное» и «нужно добавить для почт что
+    /// заведены редакт рассылки что получать и почты в целом».
+    ///
+    /// В хранилище правила так и остаются по одной категории на строку (они ездят в общем конфиге, и
+    /// менять формат ради экрана нельзя) — свернуть их в подписки умеет EmailRouting.</summary>
     private void RenderEmailRules()
     {
         EmailRulesPanel.Children.Clear();
-        var rules = _services.Db.GetEmailRules();
-        EmailRulesEmptyText.Visibility = rules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var subscriptions = EmailRouting.ToSubscriptions(_services.Db.GetEmailRules());
+        EmailRulesEmptyText.Visibility = subscriptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        foreach (var rule in rules)
+        foreach (var sub in subscriptions)
         {
-            var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var who = new TextBlock { Text = sub.Recipient, VerticalAlignment = VerticalAlignment.Center };
+            // Группа AD подписана явно: строка без собачки легко читается как опечатка, а она
+            // намеренная — и раскрывает её почтовый сервер, а не мы.
+            if (!EmailRouting.LooksLikeMailbox(sub.Recipient)) who.Text += "  — группа AD";
 
             var what = new TextBlock
             {
-                Text = rule.Category.Length == 0 ? "Всё подряд" : LabelForCategoryId(rule.Category),
-                VerticalAlignment = VerticalAlignment.Center,
+                Text = sub.Everything
+                    ? "всё подряд"
+                    : string.Join(", ", sub.Categories.Select(LabelForCategoryId)),
+                Style = (Style)FindResource("MutedText"),
+                TextWrapping = TextWrapping.Wrap,
             };
-            Grid.SetColumn(what, 0);
 
-            var who = new TextBlock { Text = rule.Recipient, VerticalAlignment = VerticalAlignment.Center };
-            // Группа AD подписана явно: строка без собачки легко читается как опечатка, а она
-            // намеренная — и раскрывает её почтовый сервер, а не мы.
-            if (!EmailRouting.LooksLikeMailbox(rule.Recipient))
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            text.Children.Add(who);
+            text.Children.Add(what);
+            Grid.SetColumn(text, 0);
+
+            var edit = new Button
             {
-                who.Text += "  — группа AD";
-                who.Style = (Style)FindResource("MutedText");
-            }
-            Grid.SetColumn(who, 1);
+                Content = "Изменить",
+                Style = (Style)FindResource("SecondaryButton"),
+                Padding = new Thickness(10, 2, 10, 2),
+                Margin = new Thickness(8, 0, 6, 0),
+                ToolTip = "Поправить адрес и то, что на него присылать",
+            };
+            var captured = sub;
+            edit.Click += (_, _) => EditSubscription(captured);
+            Grid.SetColumn(edit, 1);
 
             var del = new Button
             {
                 Content = "×",
                 Style = (Style)FindResource("SecondaryButton"),
                 Padding = new Thickness(10, 2, 10, 2),
-                ToolTip = "Убрать правило",
+                ToolTip = "Убрать адрес из рассылки целиком",
             };
-            var id = rule.Id;
-            del.Click += (_, _) => { _services.Db.DeleteEmailRule(id); RenderEmailRules(); RefreshEmailReadiness(); };
+            del.Click += (_, _) =>
+            {
+                if (AppMessageBox.Show($"Убрать «{captured.Recipient}» из рассылки?", "Почта",
+                        MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+                    return;
+                ReplaceSubscription(captured.Recipient, null);
+            };
             Grid.SetColumn(del, 2);
 
-            row.Children.Add(what);
-            row.Children.Add(who);
+            row.Children.Add(text);
+            row.Children.Add(edit);
             row.Children.Add(del);
             EmailRulesPanel.Children.Add(row);
         }
+    }
+
+    private void AddEmailRule_Click(object sender, RoutedEventArgs e) => EditSubscription(null);
+
+    private void EditSubscription(EmailRouting.EmailSubscription? existing)
+    {
+        var next = EmailSubscriptionDialog.Edit(Window.GetWindow(this), existing);
+        if (next is null) return;
+        ReplaceSubscription(existing?.Recipient, next);
+    }
+
+    /// <summary>Заменить всё, что заведено на адрес, новым набором. Сначала сносим старые строки
+    /// этого адреса, потом пишем новые: иначе снятая галочка осталась бы в хранилище и человек
+    /// продолжал бы получать то, от чего отписался.
+    ///
+    /// <paramref name="next"/> = null — адрес убирают целиком.</summary>
+    private void ReplaceSubscription(string? oldRecipient, EmailRouting.EmailSubscription? next)
+    {
+        var rules = _services.Db.GetEmailRules();
+        if (!string.IsNullOrWhiteSpace(oldRecipient))
+            foreach (var r in rules.Where(r => string.Equals(r.Recipient, oldRecipient, StringComparison.OrdinalIgnoreCase)))
+                _services.Db.DeleteEmailRule(r.Id);
+
+        if (next is not null)
+        {
+            if (next.Everything) _services.Db.AddEmailRule("", next.Recipient);
+            else foreach (var category in next.Categories) _services.Db.AddEmailRule(category, next.Recipient);
+        }
+
+        RenderEmailRules();
+        RefreshEmailReadiness();
+        _host.ShowStatus(next is null
+            ? $"Адрес убран из рассылки: {oldRecipient}"
+            : $"Рассылка сохранена: {next.Recipient}", category: NotificationCategory.General);
     }
 
     private static string LabelForCategoryId(string id) =>

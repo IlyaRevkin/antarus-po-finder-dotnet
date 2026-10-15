@@ -280,7 +280,13 @@ public partial class NetworkSyncView : UserControl
             $"Изменений в справочнике: {result.Counts.TotalChanges}" + conflictNote + skipNote,
             "Синхронизация завершена", MessageBoxButton.OK,
             skipNote.Length > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
-        _host.ShowStatus($"Конфиг обновлён: настроек {result.SettingsApplied}, изменений {result.Counts.TotalChanges}", category: NotificationCategory.Sync);
+        // «Получено 0 изменений» — это лог, а не событие: синхронизация идёт по таймеру и почти
+        // всегда заканчивается ничем. В журнал (и письмом) уходит только то, где что-то произошло
+        // или что-то не приняли — см. SyncReportNoise.
+        var worthLogging = SyncReportNoise.Worth(result.Counts.TotalChanges, result.SettingsApplied,
+            result.Counts.ConflictsFound, result.Counts.FwVersionsSkippedNoParent);
+        _host.ShowStatus(SyncReportNoise.Describe(result.Counts.TotalChanges, result.SettingsApplied),
+            category: NotificationCategory.Sync, record: worthLogging);
 
         // A manual sync is already a deliberate, blocking action — open the resolution dialog right
         // here instead of just raising the passive banner the periodic auto-pull uses (see
