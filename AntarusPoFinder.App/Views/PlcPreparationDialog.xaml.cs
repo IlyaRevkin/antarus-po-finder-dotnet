@@ -27,6 +27,11 @@ public partial class PlcPreparationDialog : Window
             WarningBox.Visibility = Visibility.Visible;
         }
 
+        // «Залить как есть» у SMH5 не просто не выбрано — его нет: этот путь подтверждённо кирпичит
+        // заводской контроллер (см. PlcPreparation.AllowKeep). Кнопка убирается целиком, а не
+        // гасится: выключенная кнопка читается как «что-то настрой, и станет можно».
+        if (!PlcPreparation.AllowKeep(controllerName)) KeepBtn.Visibility = Visibility.Collapsed;
+
         var wasFormat = PlcPreparation.DefaultAnswer(rememberedFormat, controllerName) == PlcPreparationAnswer.Format;
         RememberedText.Text = warning.Length > 0
             ? "Для этого контроллера по умолчанию предлагается подготовка, независимо от прошлого выбора."

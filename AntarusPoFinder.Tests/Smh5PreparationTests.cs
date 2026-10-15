@@ -76,4 +76,22 @@ public class Smh5PreparationTests
     {
         Assert.True(PlcPreparation.NeedsFormatByDefault(controller));
     }
+
+    /// <summary>Подтверждено 15.10.2026: форматирование не выбиралось, оба файла собрал Finder,
+    /// контроллер был ЗАВОДСКОЙ. Значит это штатный путь каждого нового шкафа, а не редкий случай, —
+    /// и «залить как есть» для SMH5 не предлагается вовсе.</summary>
+    [Fact]
+    public void У_SMH5_вариант_без_форматирования_недоступен()
+    {
+        Assert.False(PlcPreparation.AllowKeep("SMH5"));
+    }
+
+    [Theory]
+    [InlineData("SMH4")]
+    [InlineData("PIXEL2-1321")]
+    [InlineData("")]
+    public void У_остальных_контроллеров_выбор_остаётся(string controller)
+    {
+        Assert.True(PlcPreparation.AllowKeep(controller));
+    }
 }
