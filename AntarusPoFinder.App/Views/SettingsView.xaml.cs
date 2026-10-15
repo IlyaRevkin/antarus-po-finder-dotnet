@@ -1952,6 +1952,55 @@ public partial class SettingsView : UserControl
     /// GitHub» выглядело точно так же, как «папка не настроена» — то есть недоступность источника
     /// была не видна. Список версий для отката по-прежнему берётся из ТОГО источника, который будет
     /// использован (устанавливать можно только оттуда, откуда действительно можно скачать).</summary>
+    /// <summary>Подключить бета-тестирование.
+    ///
+    /// Бета — ОТДЕЛЬНАЯ программа: ставится рядом, со своей папкой, своим ярлыком и своей базой
+    /// настроек. Поэтому здесь ничего не скачивается и не запускается само — открывается страница
+    /// релиза, откуда человек сам берёт установщик. Это не лень: подменять работающую программу
+    /// нажатием кнопки в настройках нельзя, а установка рядом — осознанное действие, после которого
+    /// рабочая версия остаётся ровно такой, какой была.
+    ///
+    /// Сама эта (рабочая) программа бету как обновление НЕ ВИДИТ и увидеть не может — предрелизы
+    /// отсекаются тремя независимыми барьерами в AppUpdateService.</summary>
+    private async void JoinBeta_Click(object sender, RoutedEventArgs e)
+    {
+        BetaJoinBtn.IsEnabled = false;
+        BetaStatusText.Text = "Ищу бета-версию…";
+        try
+        {
+            var beta = await AppUpdateService.FindLatestBetaAsync();
+            if (beta is null)
+            {
+                BetaStatusText.Text = "Бета-версии сейчас нет — либо её ещё не выпускали, либо не вышло связаться с GitHub.";
+                return;
+            }
+
+            var answer = AppMessageBox.Show(
+                $"Бета-версия {beta.Value.Version} ставится ОТДЕЛЬНОЙ программой, рядом с этой."
+                + Environment.NewLine + Environment.NewLine
+                + "Рабочая версия останется на месте: свой ярлык, свои настройки, своя база. "
+                + "Открыть страницу загрузки?",
+                "Бета-тестирование", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+            if (answer != MessageBoxResult.Yes)
+            {
+                BetaStatusText.Text = $"Доступна бета {beta.Value.Version}.";
+                return;
+            }
+
+            BetaStatusText.Text = $"Открыл страницу беты {beta.Value.Version}. Там лежит установщик "
+                                + "AntarusPoFinderBeta-…-setup.msi — он ставится рядом с рабочей программой.";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(beta.Value.PageUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            BetaStatusText.Text = $"Не вышло: {ex.Message}";
+        }
+        finally
+        {
+            BetaJoinBtn.IsEnabled = true;
+        }
+    }
+
     private async void CheckAppUpdates_Click(object sender, RoutedEventArgs e)
     {
         AppUpdateStatusText.Text = "Проверка обновлений…";
@@ -3897,8 +3946,141 @@ public partial class SettingsView : UserControl
         SmtpPasswordInput.Password = "";
         SmtpStatusText.Text = _services.Cfg.SmtpPassword().Length > 0 ? "Пароль сохранён." : "";
 
+        LoadEmailSchedule();
         RenderEmailRules();
         RefreshEmailReadiness();
+    }
+
+    // ── Когда и что слать ─────────────────────────────────────────────
+    //
+    // Жалоба Ильи: «более обширная настройка — что, как, когда, время и т.п. отправки по почте».
+    // Вся арифметика («пора или ещё нет», переход тихих часов через полночь) живёт в
+    // Core.Domain.EmailSchedule и проверена тестами; здесь только поля и их сохранение.
+
+    /// <summary>Пока идёт заполнение полей, обработчик переключателей обязан молчать. Без этого
+    /// флага возврат на вкладку «Почта» (страница живёт в кэше, LoadEmailTab зовётся снова при
+    /// уже IsLoaded == true) запускал бы сохранение ПОСРЕДИ заполнения: режим уже выставлен, а поля
+    /// времени и флажки категорий — ещё старые/пустые, и в конфиг уехал бы пустой список категорий.
+    /// То есть простой заход на вкладку молча сбрасывал бы настройку.</summary>
+    private bool _loadingEmailSchedule;
+
+    private void LoadEmailSchedule()
+    {
+        _loadingEmailSchedule = true;
+        try { FillEmailScheduleFields(); }
+        finally { _loadingEmailSchedule = false; }
+
+        DescribeEmailSchedule();
+    }
+
+    /// <summary>Флажки категорий строятся кодом по тому же списку, что и выпадашка правил
+    /// (NotificationCategoryInfo.All): два списка в XAML разъехались бы при первой же новой
+    /// категории, и разъехались бы молча.</summary>
+    private void FillEmailScheduleFields()
+    {
+        var s = _services.Cfg.EmailDelivery();
+
+        EmailModeImmediate.IsChecked = s.Mode == EmailDeliveryMode.Immediate;
+        EmailModeEveryN.IsChecked = s.Mode == EmailDeliveryMode.EveryNHours;
+        EmailModeDaily.IsChecked = s.Mode == EmailDeliveryMode.DailyAtTime;
+        EmailDigestHoursInput.Text = s.DigestHours.ToString();
+        EmailDailyAtInput.Text = EmailSchedule.FormatTime(s.DailyAt);
+        EmailQuietCheck.IsChecked = s.QuietHoursEnabled;
+        EmailQuietFromInput.Text = EmailSchedule.FormatTime(s.QuietFrom);
+        EmailQuietToInput.Text = EmailSchedule.FormatTime(s.QuietTo);
+
+        if (EmailCategoriesPanel.Children.Count == 0)
+            foreach (var (category, label) in NotificationCategoryInfo.All)
+            {
+                var box = new CheckBox
+                {
+                    Content = label,
+                    Tag = category.ToString(),
+                    Margin = new Thickness(0, 0, 0, 4),
+                };
+                // Галочка сохраняется сразу, как и остальные переключатели: ждать кнопки от флажка
+                // человек не станет — он уже «сделал выбор» и ушёл со страницы.
+                box.Checked += EmailSchedule_Changed;
+                box.Unchecked += EmailSchedule_Changed;
+                EmailCategoriesPanel.Children.Add(box);
+            }
+
+        var chosen = s.AllowedCategories;
+        foreach (var box in EmailCategoriesPanel.Children.OfType<CheckBox>())
+            box.IsChecked = chosen.Contains((string)box.Tag!, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Переключили режим или тихие часы — сохраняем сразу, как и галочка «дублировать».
+    /// Кнопка «Сохранить» рядом нужна полям ВВОДА (часы, время): их человек дописывает по символу,
+    /// и сохранять «2» из недопечатанного «22:00» нельзя.</summary>
+    private void EmailSchedule_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _loadingEmailSchedule) return;
+        SaveEmailSchedule_Click(sender, e);
+    }
+
+    private void SaveEmailSchedule_Click(object sender, RoutedEventArgs e)
+    {
+        var mode = EmailModeDaily.IsChecked == true ? EmailDeliveryMode.DailyAtTime
+            : EmailModeEveryN.IsChecked == true ? EmailDeliveryMode.EveryNHours
+            : EmailDeliveryMode.Immediate;
+        _services.Cfg.SetEmailMode(mode);
+
+        var complaints = new List<string>();
+
+        if (int.TryParse(EmailDigestHoursInput.Text.Trim(), out var hours) && hours > 0)
+            _services.Cfg.SetEmailDigestHours(hours);
+        else if (EmailDigestHoursInput.Text.Trim().Length > 0)
+            complaints.Add("шаг сводки — целое число часов");
+
+        // Время, которое не разобралось, НЕ сохраняется и о нём говорится вслух. Молча подставить
+        // «09:00» вместо непонятого «9 утра» значит получить письма не тогда, когда просили, и
+        // никакого следа почему.
+        if (EmailSchedule.ParseTime(EmailDailyAtInput.Text) is { } daily) _services.Cfg.SetEmailDailyAt(daily);
+        else complaints.Add("время суточной сводки — в виде 09:00");
+
+        _services.Cfg.SetEmailQuietEnabled(EmailQuietCheck.IsChecked == true);
+        if (EmailSchedule.ParseTime(EmailQuietFromInput.Text) is { } from) _services.Cfg.SetEmailQuietFrom(from);
+        else complaints.Add("начало тихих часов — в виде 22:00");
+        if (EmailSchedule.ParseTime(EmailQuietToInput.Text) is { } to) _services.Cfg.SetEmailQuietTo(to);
+        else complaints.Add("конец тихих часов — в виде 08:00");
+
+        _services.Cfg.SetEmailCategories(EmailCategoriesPanel.Children.OfType<CheckBox>()
+            .Where(b => b.IsChecked == true).Select(b => (string)b.Tag!));
+
+        DescribeEmailSchedule(complaints);
+    }
+
+    /// <summary>Одной строкой — что из этого следует на практике. Настройка расписания проверяется
+    /// только ожиданием, поэтому сказать словами, когда ждать письма, здесь важнее обычного.</summary>
+    private void DescribeEmailSchedule(List<string>? complaints = null)
+    {
+        var s = _services.Cfg.EmailDelivery();
+        var parts = new List<string>
+        {
+            s.Mode switch
+            {
+                EmailDeliveryMode.EveryNHours => $"Сводка раз в {s.DigestHours} ч",
+                EmailDeliveryMode.DailyAtTime => $"Сводка раз в сутки в {EmailSchedule.FormatTime(s.DailyAt)}",
+                _ => "Каждое уведомление уходит сразу",
+            },
+        };
+        if (s.QuietHoursEnabled)
+            parts.Add($"тихо с {EmailSchedule.FormatTime(s.QuietFrom)} по {EmailSchedule.FormatTime(s.QuietTo)}");
+        parts.Add(s.AllowedCategories.Count == 0
+            ? "уходят уведомления всех видов"
+            : $"уходят только выбранные виды ({s.AllowedCategories.Count})");
+
+        if (s.Mode != EmailDeliveryMode.Immediate)
+            parts.Add($"ближайшая отправка — не раньше {EmailSchedule.NextDue(s, DateTime.Now, DateTime.Now):dd.MM HH:mm}");
+
+        var text = string.Join(", ", parts) + ".";
+        if (complaints is { Count: > 0 })
+            text += " НЕ сохранено: " + string.Join("; ", complaints) + ".";
+
+        EmailScheduleStatusText.Text = text;
+        EmailScheduleStatusText.Foreground = (System.Windows.Media.Brush)FindResource(
+            complaints is { Count: > 0 } ? "WarningBrush" : "TextMutedBrush");
     }
 
     // ── Реквизиты почты файлом ────────────────────────────────────────
@@ -4003,15 +4185,17 @@ public partial class SettingsView : UserControl
     /// <summary>Опрос почтового сервера — то же, что делают руками через консоль: открыть соединение,
     /// прочитать баннер, сказать EHLO и посмотреть, что сервер умеет.
     ///
-    /// Адрес берётся из поля сервера, а если оно пусто — угадывается по домену адреса «От кого».
+    /// Перебирается вписанный адрес И обычные имена по домену «От кого» — см.
+    /// SmtpProbe.BuildCandidates. Ровно на этом была жалоба: «нажимаю определить сервер, он находил,
+    /// но автоматически не подставляет». Вписанный по памяти неверный адрес останавливал поиск на
+    /// себе, и кнопка не подставляла НИЧЕГО.
+    ///
     /// Пароль здесь НЕ нужен и письмо НЕ отправляется: иначе непонятно, в чём беда — в адресе,
     /// в порте или в пароле.</summary>
     private async void DetectSmtp_Click(object sender, RoutedEventArgs e)
     {
         var typed = SmtpHostInput.Text.Trim();
-        var candidates = typed.Length > 0
-            ? new List<string> { typed }
-            : SmtpProbe.GuessHosts(SmtpFromInput.Text.Trim());
+        var candidates = SmtpProbe.BuildCandidates(typed, SmtpFromInput.Text.Trim());
 
         if (candidates.Count == 0)
         {
@@ -4041,19 +4225,49 @@ public partial class SettingsView : UserControl
             return;
         }
 
+        var replacedTyped = typed.Length > 0 && !string.Equals(typed, found.Host, StringComparison.OrdinalIgnoreCase);
+
         SmtpHostInput.Text = found.Host;
         SmtpPortInput.Text = found.Port.ToString();
         // Порт 465 — это TLS с первой секунды, 587/25 — STARTTLS поверх открытого соединения. SmtpClient
         // в обоих случаях хочет EnableSsl, если сервер шифрование умеет.
         SmtpSslCheck.IsChecked = found.StartTls || found.Port == 465;
 
+        // Логин подставляем только в ПУСТОЕ поле и только когда сервер прямо сказал, что вход
+        // нужен: у большинства серверов логин и есть адрес «От кого», и человек, которому не
+        // объяснили, что требуется пароль, уходит с настройкой, которая не отправит ни одного
+        // письма. Затирать уже вписанный логин догадкой нельзя — он мог отличаться от адреса
+        // (DOMAIN\user на Exchange).
+        var filledUser = false;
+        if (found.NeedsAuth && SmtpUserInput.Text.Trim().Length == 0 && SmtpFromInput.Text.Trim().Length > 0)
+        {
+            SmtpUserInput.Text = SmtpFromInput.Text.Trim();
+            filledUser = true;
+        }
+
         SaveSmtp_Click(this, new RoutedEventArgs());
 
-        var parts = new List<string> { $"Нашёлся: {found.Host}, порт {found.Port}" };
+        var parts = new List<string>();
+        if (replacedTyped)
+            // Молча подменить вписанный человеком адрес нельзя: он потом будет искать, почему в поле
+            // не то, что он набирал, и решит, что программа «сама переписывает настройки».
+            parts.Add($"Вписанный {typed} не ответил — подставлен {found.Host}, порт {found.Port}");
+        else
+            parts.Add($"Нашёлся: {found.Host}, порт {found.Port}");
+        parts.Add(SmtpSslCheck.IsChecked == true ? "SSL включён" : "SSL выключен");
         if (found.Banner.Length > 0) parts.Add($"сервер представился: {found.Banner}");
-        if (found.StartTls) parts.Add("шифрование поддерживается");
-        parts.Add(found.NeedsAuth ? "нужен логин и пароль" : "вход не требуется");
+        if (found.NeedsAuth)
+        {
+            parts.Add(filledUser
+                ? $"сервер ТРЕБУЕТ логин и пароль — логин подставлен ({SmtpUserInput.Text}), пароль впишите сами"
+                : "сервер ТРЕБУЕТ логин и пароль");
+        }
+        else
+        {
+            parts.Add("вход не требуется");
+        }
         if (found.CertificateSubject.Length > 0) parts.Add($"сертификат: {found.CertificateSubject}");
+        parts.Add("всё подставленное сохранено");
         SmtpStatusText.Text = string.Join(". ", parts) + ".";
 
         RefreshEmailReadiness();
@@ -4085,29 +4299,42 @@ public partial class SettingsView : UserControl
         SmtpStatusText.Text = "Сохранено.";
     }
 
-    /// <summary>Пробное письмо самому себе. Единственное место, где ошибка почты говорится вслух: в бою
-    /// она молчит намеренно (см. NotificationCenter.MirrorToEmail), иначе недошедшее письмо порождало бы
-    /// уведомление, которое снова пыталось бы уйти почтой.</summary>
+    private void TestEmailToInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) TestSmtp_Click(sender, e);
+    }
+
+    /// <summary>Пробное письмо — себе или по вписанному адресу. Жалоба Ильи: «не могу тестовое письмо
+    /// отправить конкретному email». Пустое поле оставлено прежним поведением (письмо на «От кого»):
+    /// привычная кнопка не должна вдруг начать требовать ввода.
+    ///
+    /// Здесь ошибка почты говорится вслух целиком; в бою о ней сообщается один раз на переходе в
+    /// «не работает» (см. NotificationCenter.ReportMailResult), а не на каждое событие.</summary>
     private async void TestSmtp_Click(object sender, RoutedEventArgs e)
     {
         SaveSmtp_Click(sender, e);
 
+        // Галочка «дублировать» здесь принудительно включена: проверка связи с сервером не должна
+        // зависеть от того, включено ли дублирование, — его как раз и настраивают после проверки.
         var smtp = _services.Cfg.Smtp() with { Enabled = true };
-        var to = smtp.From.Trim();
-        if (to.Length == 0)
+
+        var target = EmailTestTarget.Resolve(TestEmailToInput.Text, smtp.From);
+        if (!target.Ok)
         {
-            SmtpStatusText.Text = "Укажите адрес «От кого» — на него и уйдёт пробное письмо.";
+            SmtpStatusText.Text = target.Error;
             return;
         }
+        var to = target.Address;
 
-        SmtpStatusText.Text = "Отправляем…";
+        SmtpStatusText.Text = $"Отправляем на {to}…";
         var error = await Task.Run(() => EmailNotifier.Send(smtp, new[] { to },
             "Antarus ПО Finder: проверка почты",
-            "Это пробное письмо из настроек. Если оно пришло, дублирование уведомлений на почту работает."));
+            $"Это пробное письмо из настроек Antarus ПО Finder, отправлено на {to}. "
+            + "Если оно пришло — почтовый сервер настроен верно."));
 
         if (error.Length > 0)
         {
-            SmtpStatusText.Text = error;
+            SmtpStatusText.Text = $"Письмо на {to} НЕ отправлено. {error}";
             return;
         }
 
@@ -4116,9 +4343,10 @@ public partial class SettingsView : UserControl
         // и обожглись: «тестовое письмо дошло, опубликовал прошивку — и письмо не отправилось».
         var rules = _services.Db.GetEmailRules();
         var problems = EmailReadiness.Problems(_services.Cfg.Smtp(), rules);
+        var where = target.ToSelf ? $"на {to} (адрес «От кого»)" : $"на {to}";
         SmtpStatusText.Text = problems.Count == 0
-            ? $"Письмо отправлено на {to}. Дублирование настроено и работает."
-            : $"Письмо отправлено на {to} — значит, сервер доступен. НО уведомления по-прежнему НЕ будут дублироваться: "
+            ? $"Письмо отправлено {where}. Дублирование настроено и работает."
+            : $"Письмо отправлено {where} — значит, сервер доступен. НО уведомления по-прежнему НЕ будут дублироваться: "
               + string.Join("; ", problems) + ".";
 
         RefreshEmailReadiness();

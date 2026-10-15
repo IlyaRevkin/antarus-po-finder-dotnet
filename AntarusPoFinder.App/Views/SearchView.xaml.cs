@@ -2247,6 +2247,9 @@ public partial class SearchView : UserControl
         LoaderDialog.StartDeploy(Window.GetWindow(this), _services.Cfg, new LoaderJob
         {
             VersionName = versionName,
+            // Модель контроллера едет вместе с заданием: по ней решается, можно ли вообще предлагать
+            // заливку без подготовки ПЛК (SMH5 после такой заливки уходит в вечную перезагрузку).
+            ControllerName = result.Controller ?? "",
             SourcePath = files.LfsPath ?? files.PslPath!,
             NetworkFolder = result.FirmwareDir ?? "",
             LocalFolder = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),

@@ -131,6 +131,32 @@ public static class SmtpProbe
         return ["mail." + domain, "smtp." + domain, domain, "exchange." + domain];
     }
 
+    /// <summary>Что именно опрашивать по нажатию «Определить сервер»: сначала то, что человек вписал
+    /// сам, потом обычные догадки по домену «От кого».
+    ///
+    /// Жалоба Ильи: «я нажимаю определить сервер, он находил, но автоматически не подставляет».
+    /// Разгадка была здесь: догадки перебирались ТОЛЬКО когда поле сервера пусто. Вписанный
+    /// по памяти неверный адрес («mail.elita.ru» вместо «mail.elitacompany.ru») останавливал поиск
+    /// на себе — кнопка честно сообщала, что адрес не отвечает, и не подставляла ничего. То есть
+    /// работала она ровно в том случае, когда и так ничего не было, и молчала в том, ради которого
+    /// её нажимают.
+    ///
+    /// Вписанное идёт ПЕРВЫМ намеренно: человек мог указать адрес, который по домену не угадать
+    /// (релей с другим именем), и подменять его догадкой, пока он отвечает, нельзя.</summary>
+    public static List<string> BuildCandidates(string? typedHost, string? fromAddress)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var typed = (typedHost ?? "").Trim();
+        if (typed.Length > 0 && seen.Add(typed)) result.Add(typed);
+
+        foreach (var guess in GuessHosts(fromAddress ?? ""))
+            if (seen.Add(guess)) result.Add(guess);
+
+        return result;
+    }
+
     private static SmtpProbeResult Fail(string host, int port, string error) =>
         new(host, port, "", false, false, "", error);
 }

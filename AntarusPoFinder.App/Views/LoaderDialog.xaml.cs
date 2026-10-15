@@ -259,7 +259,8 @@ public partial class LoaderDialog : Window
         PlcPreparationAnswer? preparation = null;
         if (PlcPreparation.ShouldAsk(job.Operation))
         {
-            var answer = PlcPreparationDialog.Ask(owner, job.VersionName, cfg.LoaderFormatAndUpdateDefault());
+            var answer = PlcPreparationDialog.Ask(owner, job.VersionName, cfg.LoaderFormatAndUpdateDefault(),
+                job.ControllerName);
             if (PlcPreparation.IsCancelled(answer))
             {
                 lease?.Dispose();

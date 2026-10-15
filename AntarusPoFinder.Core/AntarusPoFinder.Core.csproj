@@ -26,4 +26,10 @@
     <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 
+
+  <!-- Та же константа, что и у App: AppIdentity и ConfigService.AppData живут здесь, и бета обязана
+       отличаться профилем с самого первого обращения к настройкам. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
+    <DefineConstants>$(DefineConstants);BETA</DefineConstants>
+  </PropertyGroup>
 </Project>

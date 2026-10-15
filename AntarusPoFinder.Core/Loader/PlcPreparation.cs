@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace AntarusPoFinder.Core.Loader;
 
 /// <summary>Ответ наладчика на вопрос «форматировать ли контроллер перед загрузкой».</summary>
@@ -37,9 +39,48 @@ public static class PlcPreparation
 
     public static bool IsCancelled(PlcPreparationAnswer answer) => answer == PlcPreparationAnswer.Cancel;
 
-    /// <summary>Ответ, на котором стоит фокус при открытии окна, — прошлый выбор наладчика.</summary>
-    public static PlcPreparationAnswer DefaultAnswer(bool rememberedFormat) =>
-        rememberedFormat ? PlcPreparationAnswer.Format : PlcPreparationAnswer.Keep;
+    /// <summary>Контроллеры, которым заливка БЕЗ подготовки известна как опасная.
+    ///
+    /// SMH5 — новое поколение (Rockchip): его проект в контроллере состоит не только из LFS, но и из
+    /// ELF/ZOP-части, и Loader чистит её ИМЕННО в сценарии formatAndUpdateFirmware (см.
+    /// docs/loader/LOADER_AUTOMATION_API.md, раздел про подготовку). Если залить один свежий LFS
+    /// поверх чужой ELF/ZOP-части, контроллер получает несогласованную пару и после выключения
+    /// питания уходит в бесконечную перезагрузку.
+    ///
+    /// Это ровно то, о чём сообщил Илья 15.10.2026: «при прошивке через фаиндер SMH5 они
+    /// окирпичиваются… уходят в цикл бесконечной перезагрузки, потому приходится форматировать и
+    /// заливать через SMLogix». Форматирование при ручной заливке и есть недостающий шаг.
+    ///
+    /// Поэтому для таких контроллеров «не форматировать» перестаёт быть выбором ПО УМОЛЧАНИЮ:
+    /// прошлый ответ наладчика его больше не определяет. Запрета нет — решение остаётся за
+    /// человеком, но принимается осознанно и с предупреждением перед глазами.</summary>
+    private static readonly string[] FormatByDefaultFamilies = ["SMH5"];
+
+    public static bool NeedsFormatByDefault(string? controllerName)
+    {
+        if (string.IsNullOrWhiteSpace(controllerName)) return false;
+        var name = controllerName.Trim().ToUpperInvariant();
+        return FormatByDefaultFamilies.Any(f => name.StartsWith(f, System.StringComparison.Ordinal));
+    }
+
+    /// <summary>Ответ, на котором стоит фокус при открытии окна, — прошлый выбор наладчика. Но для
+    /// контроллеров из <see cref="NeedsFormatByDefault"/> прошлый выбор не наследуется: у них
+    /// «залить как есть» кирпичит ПЛК, и предлагать это по привычке нельзя.</summary>
+    public static PlcPreparationAnswer DefaultAnswer(bool rememberedFormat, string? controllerName = null) =>
+        NeedsFormatByDefault(controllerName) || rememberedFormat
+            ? PlcPreparationAnswer.Format
+            : PlcPreparationAnswer.Keep;
+
+    /// <summary>Предупреждение в окне подготовки — пусто, если предупреждать не о чем. Текст живёт
+    /// здесь, рядом с правилом, а не в разметке окна: это часть решения, и проверяется тестом.</summary>
+    public static string WarningFor(string? controllerName) =>
+        NeedsFormatByDefault(controllerName)
+            ? $"У {controllerName?.Trim()} загрузка без форматирования и обновления ядра приводила к "
+              + "бесконечной перезагрузке контроллера после выключения питания: в нём остаётся "
+              + "ELF/ZOP-часть от прежнего проекта, не совпадающая с новой прошивкой. "
+              + "Её очищает только подготовка. Выбирайте «залить как есть», только если точно "
+              + "понимаете, что делаете."
+            : "";
 
     /// <summary>Строка в журнале операции: что именно наладчик выбрал. Пишется всегда, включая
     /// «без форматирования», — по журналу должно быть видно, что вопрос задавали и что ответили.</summary>

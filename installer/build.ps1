@@ -8,7 +8,13 @@
     powershell -File installer/build.ps1   # reads <Version> from AntarusPoFinder.App.csproj
 #>
 param(
-    [string]$Version
+    [string]$Version,
+    # БЕТА СТАВИТСЯ ОТДЕЛЬНЫМ ПРИЛОЖЕНИЕМ, рядом со стабильным: свой UpgradeCode (иначе MSI снёс бы
+    # рабочую программу), своя папка, свой ярлык и свой профиль в %LocalAppData%. Прямая просьба:
+    # «чтобы если там что-то не то, то работники смогли бы пользоваться предыдущей версией без
+    # необходимости переустановки». Конфигурация сборки Beta задаёт константу BETA — по ней
+    # приложение берёт своё имя, свой профиль и СВОЮ ленту релизов (теги beta-v…).
+    [switch]$Beta
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,17 +30,29 @@ $isolatedSmLogixPayloadDir = Join-Path $installerDir "loader\SMLogix isolated pa
 # doesn't see the old version" case. Falls back to reading the csproj directly so the two can't drift
 # apart just because nobody remembered to pass a matching -Version by hand; still overridable for a
 # deliberate one-off (e.g. building an installer for a version not yet committed to the csproj).
+$configuration = if ($Beta) { "Beta" } else { "Release" }
+$productName   = if ($Beta) { "Antarus ПО Finder (бета)" } else { "Antarus ПО Finder" }
+# Второй UpgradeCode — ровно то, что делает бету отдельным продуктом для Windows Installer.
+$upgradeGuid   = if ($Beta) { "b17a4c20-9f3e-4a51-8c6d-2e5f7a1b4d90" } else { "6e74f83e-15ca-46d2-bf18-e927ba2635ad" }
+$appDirName    = if ($Beta) { "AntarusPoFinderBeta" } else { "AntarusPoFinder" }
+$appDataName   = if ($Beta) { "AntarusPOFinderBeta" } else { "AntarusPOFinder" }
+$regKeyName    = if ($Beta) { "AntarusPoFinderBeta" } else { "AntarusPoFinder" }
+$namePrefix    = if ($Beta) { "AntarusPoFinderBeta" } else { "AntarusPoFinder" }
+
 if (-not $Version) {
     $csprojContent = Get-Content $appProject -Raw
-    if ($csprojContent -notmatch '<Version>([^<]+)</Version>') {
+    # У беты свой <Version> внутри PropertyGroup с Condition Beta — берём ПОСЛЕДНЕЕ совпадение,
+    # иначе бета собралась бы под номером стабильной и автообновление беты никогда бы не сработало.
+    $versions = [regex]::Matches($csprojContent, '<Version>([^<]+)</Version>')
+    if ($versions.Count -eq 0) {
         throw "Could not find <Version> in $appProject - pass -Version explicitly."
     }
-    $Version = $Matches[1]
+    $Version = if ($Beta) { $versions[$versions.Count - 1].Groups[1].Value } else { $versions[0].Groups[1].Value }
     Write-Host "No -Version passed - using $Version from AntarusPoFinder.App.csproj."
 }
 
 Write-Host "Publishing AntarusPoFinder.App $Version (self-contained win-x64, single file)..."
-dotnet publish $appProject -c Release -r win-x64 --self-contained true `
+dotnet publish $appProject -c $configuration -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:Version=$Version -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
@@ -45,9 +63,10 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 # and both release artifacts were only present in past releases because someone copied the exe out
 # by hand after the fact. AppUpdateService/the update banner specifically expect the exe under this
 # exact "AntarusPoFinder-{version}.exe" name, not the plain "AntarusPoFinder.App.exe" publish uses.
-$exeName = "AntarusPoFinder-$Version.exe"
+$exeName = "$namePrefix-$Version.exe"
 $exePath = Join-Path $installerDir $exeName
-Copy-Item (Join-Path $publishDir "AntarusPoFinder.App.exe") $exePath -Force
+$publishedExe = if ($Beta) { "AntarusPoFinder.Beta.exe" } else { "AntarusPoFinder.App.exe" }
+Copy-Item (Join-Path $publishDir $publishedExe) $exePath -Force
 
 # Фикс подлинности обновлений (см. AntarusPoFinder.App/AppUpdateService.cs): файл с голым hex-хешем
 # SHA256, рядом с exe, под именем "<exe>.sha256" — попадает в тот же релиз ассетом (gh release
@@ -59,7 +78,7 @@ $sha256Hash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLower()
 $sha256Path = "$exePath.sha256"
 Set-Content -Path $sha256Path -Value $sha256Hash -NoNewline -Encoding ascii
 
-$msiName = "AntarusPoFinder-$Version-setup.msi"
+$msiName = "$namePrefix-$Version-setup.msi"
 $msiPath = Join-Path $installerDir $msiName
 
 Write-Host "Building MSI installer $msiName..."
@@ -73,7 +92,9 @@ if (-not (Test-Path -LiteralPath $isolatedSmLogixPayloadDir)) {
 Push-Location $installerDir
 try {
     wix build Package.wxs -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-        -d ProductVersion=$Version -culture ru-RU -o $msiName
+        -d ProductVersion=$Version -d ProductName="$productName" -d UpgradeGuid=$upgradeGuid `
+        -d AppDirName=$appDirName -d AppDataDirName=$appDataName -d RegistryKeyName=$regKeyName `
+        -d PublishedExeName=$publishedExe -culture ru-RU -o $msiName
     if ($LASTEXITCODE -ne 0) { throw "wix build failed." }
 } finally {
     Remove-Item -Recurse -Force $publishDir -ErrorAction SilentlyContinue

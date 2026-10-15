@@ -1213,7 +1213,11 @@ public partial class Database
         // иначе вторая наберёт его руками в другом написании и заведёт третью линейку.
         ImportFlatList(Database.FlatKindExecution,
             data.FwExecutions ?? new(),
-            data.FlatListState, apply, GetExecutionCatalog, AddExecutionToCatalog, DeleteExecutionFromCatalog,
+            // Синхронизируется ВЕСЬ справочник, включая выключенные: «выключено» — это состояние
+            // линейки на конкретной машине, а не признак «такого исполнения не существует».
+            // Отдать коллеге только активные значило бы, что его машина заведёт выключенное заново
+            // как новое — и линейка раздвоится по написанию.
+            data.FlatListState, apply, () => GetExecutionCatalog(), AddExecutionToCatalog, DeleteExecutionFromCatalog,
             () => counts.ExecutionsAdded++, () => counts.ExecutionsRemoved++);
 
         // Группы параметров ПЧ/УПП — пятый справочник того же устройства. С одной особенностью:

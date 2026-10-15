@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App;
@@ -73,8 +74,13 @@ public static class AppUpdateService
     private const string GitHubRepo = "antarus-po-finder-dotnet";
     public const string GitHubSourceLabel = $"репозиторий GitHub ({GitHubOwner}/{GitHubRepo}, публичный)";
 
-    private static readonly Regex ReleaseFileRegex =
-        new(@"^AntarusPoFinder-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase);
+    /// <summary>Имя ассета релиза. У беты оно своё — «AntarusPoFinderBeta-2.0.0.0.exe», — и это не
+    /// косметика: бета и стабильная выкладываются в один репозиторий, и если бы имя совпадало,
+    /// каждая могла бы скачать чужой файл и подменить им себя. Регулярка отличает их так же строго,
+    /// как раньше отличала наш exe от посторонних ассетов вроде antarus-sync.exe.</summary>
+    private static readonly Regex ReleaseFileRegex = AppIdentity.IsBeta
+        ? new(@"^AntarusPoFinderBeta-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase)
+        : new(@"^AntarusPoFinder-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase);
 
     // Not `readonly` — see SetHttpClientForTests below, the seam AppUpdateServiceTests uses to
     // substitute a fake HttpMessageHandler instead of making real network calls to GitHub.
@@ -303,6 +309,39 @@ public static class AppUpdateService
     /// на такой бросает исключение — отчёт о состоянии не должен падать из-за формата чужого тега.</summary>
     private static string FormatVersion(Version version) => Format(version);
 
+    /// <summary>Последний бета-релиз: его номер и страница, где лежит установщик.
+    ///
+    /// Отдельный метод, а не «проверка обновлений с другим фильтром», потому что бета — ДРУГАЯ
+    /// программа: ставить её поверх себя нельзя ни при каких условиях. Поэтому здесь не скачивается
+    /// и не запускается ничего: мы лишь показываем, что бета есть, и открываем страницу релиза,
+    /// откуда человек сам берёт установщик. Установка рядом — его осознанное действие, а не
+    /// побочный эффект нажатия кнопки в настройках.
+    ///
+    /// null — предварительных релизов нет вовсе либо до GitHub не достучались.</summary>
+    public static async Task<(Version Version, string PageUrl)?> FindLatestBetaAsync(
+        System.Threading.CancellationToken ct = default)
+    {
+        try
+        {
+            var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases", ct);
+            using var doc = JsonDocument.Parse(json);
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) continue;
+                var tag = item.GetProperty("tag_name").GetString() ?? "";
+                if (!tag.StartsWith(AppIdentity.BetaTagPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var versionStr = tag[AppIdentity.BetaTagPrefix.Length..].TrimStart('v', 'V');
+                if (!Version.TryParse(versionStr, out var version)) continue;
+
+                var url = item.TryGetProperty("html_url", out var html) ? html.GetString() ?? "" : "";
+                return (version, url);
+            }
+        }
+        catch { /* нет сети или GitHub недоступен — кнопка честно скажет об этом */ }
+        return null;
+    }
+
     private static List<UpdateRelease> ListFolderReleases(string updatePath)
     {
         var releases = new List<UpdateRelease>();
@@ -328,8 +367,37 @@ public static class AppUpdateService
         var releases = new List<UpdateRelease>();
         foreach (var item in doc.RootElement.EnumerateArray())
         {
+            // ⛔ ПРЕДВАРИТЕЛЬНЫЕ РЕЛИЗЫ НЕ ЕДУТ НА РАБОЧИЕ МАШИНЫ.
+            //
+            // Это предохранитель под бета-тестирование: бета выпускается в тот же репозиторий,
+            // помеченная prerelease, и БЕЗ этой проверки она прилетела бы автообновлением всем
+            // подряд — просто потому, что номер у неё больше. Бета ставится отдельным приложением,
+            // рядом со стабильным (см. AppIdentity), и обновляется своим каналом; здесь же, в
+            // стабильном, предварительного не существует вовсе.
+            //
+            // draft — то же самое по другой причине: черновик релиза виден только автору и может не
+            // иметь готовых ассетов.
+            if (!AppIdentity.IsBeta)
+            {
+                if (item.TryGetProperty("prerelease", out var pre) && pre.ValueKind == JsonValueKind.True) continue;
+                if (item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) continue;
+            }
+
             var tag = item.GetProperty("tag_name").GetString() ?? "";
             var versionStr = tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? tag[1..] : tag;
+            // Бета живёт на тегах вида «beta-v2.0.0.0» — это и есть её отдельная лента: стабильные
+            // теги она не подхватывает, а стабильное приложение не видит её вовсе (фильтр выше).
+            if (versionStr.StartsWith(AppIdentity.BetaTagPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                // Тег беты В СТАБИЛЬНОЙ СБОРКЕ — мимо, без разговоров. Барьер по флагу prerelease
+                // выше ставится РУКАМИ при выпуске, и руками же забывается; тег забыть нельзя, он и
+                // есть лента. Пока этой строки не было, релиз «beta-v2.0.0.0» без галочки
+                // prerelease спокойно разбирался как версия 2.0.0.0 и уехал бы автообновлением на
+                // все рабочие машины — это поймал тест SkipsBetaTagEvenWithoutPrereleaseFlag.
+                if (!AppIdentity.IsBeta) continue;
+                versionStr = versionStr[AppIdentity.BetaTagPrefix.Length..].TrimStart('v', 'V');
+            }
+            else if (AppIdentity.IsBeta) continue;
             if (!Version.TryParse(versionStr, out var version)) continue;
             if (!item.TryGetProperty("assets", out var assets)) continue;
 

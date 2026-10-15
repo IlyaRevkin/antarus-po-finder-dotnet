@@ -32,18 +32,35 @@ public class SidebarSetupSectionTests
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
-    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: сетевые диски, хранилище на хостинге и
-    /// тикеты. На неё завязан живой GUI-стенд, и переезд наклеек с паспортами не должен был её
-    /// задеть. Состав фиксируется тестом целиком, чтобы пополнение было осознанным, а не заезжало
-    /// сюда случайно.</summary>
+    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: хранилище на хостинге и тикеты. Состав
+    /// фиксируется тестом целиком, чтобы пополнение было осознанным, а не заезжало сюда случайно.
+    ///
+    /// «Сетевые диски» отсюда УБРАНЫ (15.10.2026): «лучше убрать из дополнительного сетевые диски и
+    /// как раз сделать там где диск и значок синхронизации сделать переход на вкладку сетевых
+    /// дисков». В «Дополнительно» пункт лежал мёртвым грузом — о диске вспоминают, глядя на его
+    /// состояние в нижней строке, а не копаясь в меню.</summary>
     [Fact]
     public void TheOldMoreSection_IsUntouched()
     {
-        Assert.Equal(NavSection.More, SectionOf("network"));
         Assert.Equal(NavSection.More, SectionOf("hosting"));
         Assert.Equal(NavSection.More, SectionOf("tickets"));
-        Assert.Equal(new[] { "network", "hosting", "tickets" },
+        Assert.Equal(new[] { "hosting", "tickets" },
             RolesConfig.NavItems.Where(n => n.Section == NavSection.More).Select(n => n.PageId).ToArray());
+    }
+
+    /// <summary>Пункта «Сетевые диски» в меню больше нет, но САМА СТРАНИЦА доступна — её открывают
+    /// щелчком по состоянию диска и по значку синхронизации в нижней строке (ShowSyncDetailsCommand
+    /// → Navigate("network")), и ссылкой из Настроек.
+    ///
+    /// Права при этом обязаны остаться: убрать страницу из RoleAccess значило бы, что нижняя строка
+    /// ведёт в никуда. Это ровно обратный случай «Чистки диска» ниже — там страницы не стало вовсе,
+    /// здесь не стало только пункта меню.</summary>
+    [Fact]
+    public void NetworkPage_LeftTheMenuButStaysReachable()
+    {
+        Assert.DoesNotContain(RolesConfig.NavItems, n => n.PageId == "network");
+        foreach (var (role, pages) in RolesConfig.RoleAccess)
+            Assert.True(pages.Contains("network"), $"роль «{role}» потеряла доступ к сетевым дискам");
     }
 
     /// <summary>«Чистка диска» больше не пункт меню: она переехала во вкладку Настроек (просьба

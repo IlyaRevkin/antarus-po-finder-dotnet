@@ -104,21 +104,31 @@ public class NotificationCenter : ObservableObject
     ///
     /// 1. В ФОНЕ. Отправка письма — это сеть, а значит секунды ожидания на молчащем сервере. Здесь
     ///    поток интерфейса: синхронная отправка подвешивала бы окно на каждом уведомлении.
-    /// 2. МОЛЧА. Не дошло письмо — не заводим про это второе уведомление: оно ушло бы туда же
-    ///    сюда, снова попыталось бы уйти почтой и зациклилось. Состояние почты смотрят в Настройках кнопкой
-    ///    «Проверить отправку» — там ошибка видна целиком и сразу.
-    /// 3. ЭТО ДУБЛЬ. Уведомление всегда остаётся в программе. Именно поэтому молчаливый отказ
-    ///    безопасен: ничто не пропадает, теряется только удобство.</summary>
+    /// 2. ОДИН РАЗ НА ПЕРЕХОДЕ. Раньше здесь был глухой `Task.Run(...)` без разбора ответа: почта
+    ///    могла не работать месяцами, и узнать об этом было негде. Теперь о поломке говорится —
+    ///    но ровно один раз, на переходе в «не работает», как у автоотправки конфига и проверки
+    ///    обновлений. Зацикливания нет: уведомление о неудаче помечается флагом и само почтой
+    ///    не дублируется (см. <see cref="_reportingMailFailure"/>).
+    /// 3. ЭТО ДУБЛЬ. Уведомление всегда остаётся в программе. Поэтому и накопление в сводку
+    ///    безопасно: ничто не пропадает, откладывается только письмо.</summary>
     private void MirrorToEmail(string text, NotificationCategory category)
     {
-        SmtpSettings smtp;
-        List<string> to;
+        // Уведомление «почта не работает» само по почте не уходит — иначе неудачная отправка
+        // порождала бы уведомление, которое снова пыталось бы уйти почтой, и так по кругу.
+        if (_reportingMailFailure) return;
+
         try
         {
-            smtp = _cfg.Smtp();
-            if (!smtp.CanSend) return;
-            to = EmailRouting.RecipientsFor(category.ToString(), _db.GetEmailRules());
-            if (to.Count == 0) return;
+            if (!_cfg.Smtp().CanSend) return;
+
+            var schedule = _cfg.EmailDelivery();
+            // Категория, выключенная в настройках «что слать», отсекается ЗДЕСЬ, до накопителя:
+            // правила решают кому, эта настройка — что. Складывать в очередь то, что всё равно не
+            // уйдёт, значит однажды прислать это сводкой после смены настроек.
+            if (!schedule.CategoryAllowed(category.ToString())) return;
+
+            lock (_pendingLock)
+                _pending.Add(new PendingEmail(DateTime.Now, category.ToString(), text));
         }
         catch
         {
@@ -126,8 +136,163 @@ public class NotificationCenter : ObservableObject
             return;
         }
 
-        var subject = "Antarus ПО Finder: " + NotificationCategoryInfo.Label(category);
-        _ = Task.Run(() => EmailNotifier.Send(smtp, to, subject, text));
+        PumpEmailQueue();
+    }
+
+    // ── Очередь писем и расписание ────────────────────────────────────
+    //
+    // Вся арифметика «слать сейчас или ждать» живёт в Core.Domain.EmailSchedule — чистой функцией,
+    // которую можно проверить тестом. Здесь остаётся только то, что тестом не проверяется: таймер,
+    // блокировка списка и собственно сеть.
+    //
+    // Очередь живёт В ПАМЯТИ и переживает перезапуск не больше, чем окно программы. Это осознанно:
+    // почта — ДУБЛЬ, событие уже лежит в истории уведомлений и никуда не делось, а очередь в базе
+    // означала бы пачку писем недельной давности после починки сервера — ровно то, от чего
+    // отказались в EmailNotifier.
+
+    private readonly object _pendingLock = new();
+    private readonly List<PendingEmail> _pending = new();
+    private System.Threading.Timer? _emailTimer;
+    private bool _emailSending;
+    private bool _mailLastFailed;
+    private bool _reportingMailFailure;
+
+    /// <summary>Точка отсчёта для режима «раз в N часов». Момент старта программы, а не
+    /// DateTime.MinValue: иначе первая же строка улетела бы мгновенно, и режим сводок выглядел бы
+    /// невключившимся.</summary>
+    private DateTime _lastEmailSentAt = DateTime.Now;
+
+    /// <summary>Как часто спрашиваем расписание. Минута — не точность доставки, а цена опоздания:
+    /// сводка «в 9:00», ушедшая в 9:00:40, человеку неотличима от точной, а тик раз в секунду ради
+    /// этого будит процесс 86 тысяч раз в сутки.</summary>
+    private static readonly TimeSpan EmailTick = TimeSpan.FromMinutes(1);
+
+    /// <summary>Разобрать очередь: спросить расписание и либо отправить, либо продолжить ждать.
+    /// Зовётся и из <see cref="MirrorToEmail"/> (новая строка — режим «сразу» уедет без задержки),
+    /// и по таймеру.</summary>
+    private void PumpEmailQueue()
+    {
+        EnsureEmailTimer();
+
+        if (_emailSending) return;
+
+        EmailScheduleDecision decision;
+        SmtpSettings smtp;
+        List<EmailRule> rules;
+        try
+        {
+            smtp = _cfg.Smtp();
+            if (!smtp.CanSend) return;
+            rules = _db.GetEmailRules();
+
+            PendingEmail[] snapshot;
+            lock (_pendingLock) snapshot = _pending.ToArray();
+            decision = Core.Domain.EmailSchedule.Decide(_cfg.EmailDelivery(), DateTime.Now, snapshot, _lastEmailSentAt);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!decision.SendNow || decision.Items.Count == 0) return;
+
+        // Из очереди убираем СРАЗУ, до отправки: иначе следующий тик (или новое уведомление) успел
+        // бы подхватить те же строки и прислать их вторым письмом.
+        lock (_pendingLock)
+            foreach (var item in decision.Items) _pending.Remove(item);
+
+        _lastEmailSentAt = DateTime.Now;
+        _emailSending = true;
+
+        // Письма режутся по адресатам, а не шлются одним на всех: категории у строк разные, а
+        // правила решают, кому какая положена. Сводка «всё подряд» в адрес того, кто подписан
+        // только на прошивки, — это утечка лишнего, а не удобство.
+        var byRecipient = new Dictionary<string, List<PendingEmail>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in decision.Items)
+            foreach (var to in EmailRouting.RecipientsFor(item.Category, rules))
+            {
+                if (!byRecipient.TryGetValue(to, out var list)) byRecipient[to] = list = new List<PendingEmail>();
+                list.Add(item);
+            }
+
+        _ = Task.Run(() =>
+        {
+            var error = "";
+            foreach (var (to, items) in byRecipient)
+            {
+                var (subject, body) = Core.Domain.EmailSchedule.Compose(items);
+                var result = EmailNotifier.Send(smtp, new[] { to }, subject, body);
+                if (result.Length > 0 && error.Length == 0) error = result;
+            }
+            return error;
+        }).ContinueWith(task =>
+        {
+            _emailSending = false;
+            var error = task.IsCompletedSuccessfully ? task.Result : "не удалось отправить письмо";
+            // Некому было слать (все адресаты — группы AD) — это не поломка почты, об этом говорит
+            // сводка готовности на вкладке «Почта», а не уведомление на каждое событие.
+            if (byRecipient.Count == 0) return;
+            ReportMailResult(error);
+        }, TaskScheduler.Default);
+    }
+
+    /// <summary>Сказать о поломке почты один раз — на переходе в «не работает», и один раз о
+    /// починке. Правило то же, что у автоотправки конфига и проверки обновлений: тихо молчащая
+    /// почта уже стоила месяцев «а я думал, оно работает», а сообщение на каждую неудачу превратило
+    /// бы колокольчик в журнал сетевых таймаутов.</summary>
+    private void ReportMailResult(string error)
+    {
+        if (error.Length == 0)
+        {
+            if (!_mailLastFailed) return;
+            _mailLastFailed = false;
+            PostNotification("Почта снова работает — дублирование уведомлений восстановилось.", NotificationCategory.General);
+            return;
+        }
+
+        if (_mailLastFailed) return;
+        _mailLastFailed = true;
+        PostNotification($"Уведомления не уходят на почту: {error} Настройки → Почта.", NotificationCategory.General);
+    }
+
+    /// <summary>Уведомление из фонового потока. Add трогает ObservableCollection, а значит обязан
+    /// идти через диспетчер интерфейса — иначе падение «объект принадлежит другому потоку» прямо
+    /// в момент, когда мы сообщаем о чужой поломке.</summary>
+    private void PostNotification(string text, NotificationCategory category)
+    {
+        void Report()
+        {
+            _reportingMailFailure = true;
+            try { Add(text, category); }
+            finally { _reportingMailFailure = false; }
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess()) Report();
+        else dispatcher.BeginInvoke(Report);
+    }
+
+    private void EnsureEmailTimer()
+    {
+        // Таймер заводится лениво, при первом же письме: у машины, где почту не настраивали (а это
+        // большинство), фонового тика быть не должно вовсе.
+        // Тик уходит в поток интерфейса намеренно: PumpEmailQueue читает правила из SQLite, а весь
+        // остальной класс ходит в базу только отсюда. Разбор очереди на потоке таймера завёл бы
+        // второй поток у соединения, которое на это не рассчитано, — и падало бы оно редко и не там.
+        _emailTimer ??= new System.Threading.Timer(_ =>
+        {
+            try
+            {
+                var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                if (dispatcher is null) return;
+                dispatcher.BeginInvoke(() =>
+                {
+                    try { PumpEmailQueue(); }
+                    catch { /* очередь писем не повод ронять окно */ }
+                });
+            }
+            catch { /* фоновому тику некуда падать — иначе он убьёт процесс целиком */ }
+        }, null, EmailTick, EmailTick);
     }
 
     /// <summary>Пометить одно уведомление прочитанным — зовётся, когда строка ДЕЙСТВИТЕЛЬНО показана

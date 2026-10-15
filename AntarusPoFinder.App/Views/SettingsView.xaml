@@ -314,6 +314,26 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ─── БЕТА-ТЕСТИРОВАНИЕ. Отдельная программа, которая ставится РЯДОМ с этой,
+                         а не вместо неё: своя папка, свой ярлык, своя база настроек. Рабочая версия
+                         от установки беты не меняется вообще никак — в этом весь смысл («чтобы если
+                         там что-то не то, то работники смогли бы пользоваться предыдущей версией без
+                         необходимости переустановки»). Эта программа обновления беты не получает:
+                         предварительные релизы она не видит принципиально (см. AppUpdateService). -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="БЕТА-ТЕСТИРОВАНИЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                       Text="Бета — отдельная программа, она ставится рядом с рабочей и не трогает её: ни ярлык, ни настройки, ни базу. В бете новое появляется раньше, но там же раньше находятся и ошибки. Рабочую версию можно открывать как обычно в любой момент."/>
+                            <TextBlock x:Name="BetaStatusText" Text="" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="BetaJoinBtn" Content="Подключить бета-тестирование" Style="{StaticResource SecondaryButton}"
+                                        Margin="0,0,8,0" Click="JoinBeta_Click"
+                                        ToolTip="Скачать и установить бета-версию рядом с рабочей"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ─── Поиск и загрузка: всё, что происходит после нахождения прошивки — синхронизация
                          на локальную копию, что делать с распакованными архивами, куда грузить прошивку в
                          контроллер, подсказка по раскладке клавиатуры в поиске и статистика выборов версии.
@@ -839,14 +859,95 @@
                             </Grid>
                             <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
                                        Text="Пароль хранится зашифрованным и едет в общем конфиге вместе с остальными реквизитами — так же, как ключи хранилища. Это защита от случайного взгляда в файл базы, а не от того, у кого есть сама программа."/>
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveSmtp_Click"/>
-                                <Button x:Name="DetectSmtpBtn" Content="Определить сервер" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DetectSmtp_Click"
-                                        ToolTip="Опросить сервер и самому подставить порт и SSL. Если адрес сервера не заполнен, берётся домен из адреса «От кого». Письмо не отправляется и пароль не нужен"/>
-                                <Button Content="Проверить отправку" Style="{StaticResource SecondaryButton}" Click="TestSmtp_Click"
-                                        ToolTip="Отправить пробное письмо на адрес «От кого»"/>
+                                <Button x:Name="DetectSmtpBtn" Content="Определить сервер" Style="{StaticResource SecondaryButton}" Click="DetectSmtp_Click"
+                                        ToolTip="Опросить сервер и самому подставить адрес, порт и SSL. Неверно вписанный адрес не мешает: обычные имена по домену «От кого» всё равно перебираются. Письмо не отправляется и пароль не нужен"/>
                             </StackPanel>
+
+                            <!-- Поле адреса рядом с кнопкой, а не вместо неё: жалоба «не могу тестовое письмо
+                                 отправить конкретному email». Пустое поле обязано работать как раньше (письмо
+                                 себе), иначе привычная кнопка вдруг начнёт требовать ввода. -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" x:Name="TestEmailToInput" Height="34" Margin="0,0,8,0"
+                                         KeyDown="TestEmailToInput_KeyDown"
+                                         ToolTip="Кому отправить пробное письмо. Пусто — себе, на адрес «От кого». Enter — отправить."/>
+                                <Button Grid.Column="1" Content="Проверить отправку" Style="{StaticResource SecondaryButton}" Click="TestSmtp_Click"
+                                        ToolTip="Отправить пробное письмо. Если поле слева пустое — на адрес «От кого»"/>
+                            </Grid>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="В поле слева можно вписать любой адрес — например коллеги, чтобы убедиться, что письма доходят не только до самого себя. Пустое поле — письмо уходит на «От кого», как раньше."/>
                             <TextBlock x:Name="SmtpStatusText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── КОГДА И ЧТО СЛАТЬ ──────────────────────────────────────────────
+                         Просьба Ильи: «более обширная настройка — что, как, когда, время и т.п.
+                         отправки по почте». Поверх правил ниже, а не вместо них: правила решают
+                         КОМУ, эта карточка — КОГДА и О ЧЁМ. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="КОГДА И ЧТО СЛАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
+                            <RadioButton x:Name="EmailModeImmediate" GroupName="EmailMode" Margin="0,0,0,6"
+                                         Content="Сразу — каждое уведомление отдельным письмом"
+                                         Checked="EmailSchedule_Changed"/>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <RadioButton Grid.Column="0" x:Name="EmailModeEveryN" GroupName="EmailMode" VerticalAlignment="Center"
+                                             Content="Сводкой раз в" Margin="0,0,8,0" Checked="EmailSchedule_Changed"/>
+                                <TextBox Grid.Column="1" x:Name="EmailDigestHoursInput" Height="30" Margin="0,0,8,0"
+                                         ToolTip="Часов между сводками, от 1 до 24"/>
+                                <TextBlock Grid.Column="2" Text="часов" VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <RadioButton Grid.Column="0" x:Name="EmailModeDaily" GroupName="EmailMode" VerticalAlignment="Center"
+                                             Content="Сводкой раз в сутки, в" Margin="0,0,8,0" Checked="EmailSchedule_Changed"/>
+                                <TextBox Grid.Column="1" x:Name="EmailDailyAtInput" Height="30" Margin="0,0,8,0"
+                                         ToolTip="Время суток в виде 09:00"/>
+                            </Grid>
+
+                            <Separator Margin="0,8"/>
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Grid.Column="0" x:Name="EmailQuietCheck" VerticalAlignment="Center" Margin="0,0,8,0"
+                                          Content="Не слать с" Checked="EmailSchedule_Changed" Unchecked="EmailSchedule_Changed"/>
+                                <TextBox Grid.Column="1" x:Name="EmailQuietFromInput" Height="30" Margin="0,0,8,0" ToolTip="Например 22:00"/>
+                                <TextBlock Grid.Column="2" Text="по" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Grid.Column="3" x:Name="EmailQuietToInput" Height="30" Margin="0,0,8,0" ToolTip="Например 08:00"/>
+                            </Grid>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Text="В тихие часы письма не уходят, а копятся и уезжают одной сводкой сразу после их окончания. Ничего не теряется: уведомление в любом случае остаётся в колокольчике."/>
+
+                            <TextBlock Text="КАКИЕ УВЕДОМЛЕНИЯ УХОДЯТ ПОЧТОЙ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                            <StackPanel x:Name="EmailCategoriesPanel"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="Ни одной галочки — уходят все: так было до появления этой настройки, и так остаётся по умолчанию. Эти флажки решают, О ЧЁМ письма; кому они уходят — в списке ниже."/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveEmailSchedule_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="EmailScheduleStatusText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                         </StackPanel>
                     </Border>
 

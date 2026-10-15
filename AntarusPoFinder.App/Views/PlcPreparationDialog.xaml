@@ -26,6 +26,13 @@
             </StackPanel>
         </Border>
 
+        <!-- Предупреждение про контроллеры, которым заливка без подготовки кирпичит ПЛК (SMH5).
+             Свёрнуто, когда предупреждать не о чем, — пустая рамка на каждом запуске приучает
+             не читать её вовсе. Цвета только ресурсами: на акценте текст обязан быть читаемым. -->
+        <Border x:Name="WarningBox" Visibility="Collapsed" Margin="0,0,0,12" Padding="10"
+                CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource WarningBrush}">
+            <TextBlock x:Name="WarningText" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
+        </Border>
         <TextBlock x:Name="RememberedText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

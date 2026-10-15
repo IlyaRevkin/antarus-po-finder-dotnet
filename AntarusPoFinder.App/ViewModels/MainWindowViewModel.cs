@@ -1171,7 +1171,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         FwUpdateBannerText = $"Доступно обновление прошивок: {manualOnes.Count}";
         FwUpdateBannerVisible = true;
-        AddNotification(FwUpdateBannerText, NotificationCategory.FirmwareAndParams, reopen: () => FwUpdateBannerVisible = true);
+        // Плашка, поднятая из истории уведомлений, обязана уметь гаснуть сама так же, как при первом
+        // появлении. Без таймера она висела до ручного «Скрыть» — часть той же жалобы «нажал
+        // показать, закрыл окно, а плашка не исчезла».
+        AddNotification(FwUpdateBannerText, NotificationCategory.FirmwareAndParams, reopen: () =>
+        {
+            FwUpdateBannerVisible = true;
+            ScheduleBannerAutoHide(() => FwUpdateBannerVisible = false);
+        });
         ScheduleBannerAutoHide(() => FwUpdateBannerVisible = false);
     }
 
@@ -1259,14 +1266,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _pendingFwUpdates = FirmwareUpdateService.GetAvailableUpdates(_services.Db)
             .Where(u => !_services.Cfg.IsFwAutoUpdate(u.LocalDir))
             .ToList();
-        if (_pendingFwUpdates.Count == 0)
-        {
-            FwUpdateBannerVisible = false;
-        }
-        else
-        {
+        // ОКНО ЗАКРЫТО — ПЛАШКУ УБИРАЕМ В ЛЮБОМ СЛУЧАЕ. Раньше она гасла, только если обновить
+        // успели ВСЁ: закрыл окно, не обновив (или обновив часть) — плашка оставалась висеть, и
+        // убрать её можно было лишь отдельным «Скрыть». Жалоба: «я нажал показать закрыл окно а
+        // плашка с уведомлением не исчезла». Непросмотренные обновления не теряются: они остаются в
+        // списке, плашка вернётся на следующем тике проверки, а запись уже лежит в истории.
+        FwUpdateBannerVisible = false;
+        if (_pendingFwUpdates.Count > 0)
             FwUpdateBannerText = $"Доступно обновление прошивок: {_pendingFwUpdates.Count}";
-        }
     }
 
     [RelayCommand]
@@ -1475,10 +1482,18 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     }
 
     [RelayCommand]
-    private void ShowIncomingChangesDetails() =>
+    private void ShowIncomingChangesDetails()
+    {
         Views.TextViewDialog.Show(System.Windows.Application.Current?.MainWindow,
             "Поступившие изменения",
             string.IsNullOrEmpty(_incomingChangesDetails) ? "Список изменений пуст." : _incomingChangesDetails);
+        // ПРОЧИТАНО — ЗНАЧИТ ПОКАЗАНО. Жалоба: «я нажал показать закрыл окно а плашка с уведомлением
+        // не исчезла». Плашка существует ровно для того, чтобы человек узнал о поступивших
+        // изменениях; он их только что увидел списком, и держать её дальше — требовать второго
+        // нажатия («Скрыть») за то же самое. Сам список остаётся в истории уведомлений, так что
+        // ничего не теряется.
+        IncomingChangesBannerVisible = false;
+    }
 
     [RelayCommand]
     private void DismissIncomingChangesBanner() => IncomingChangesBannerVisible = false;
@@ -1743,6 +1758,23 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             var pruned = await Task.Run(() => _services.Hierarchy.PruneOrphanedFirmwareShortcuts(root));
             if (pruned.Removed > 0) RefreshSearchIfActive();
 
+            // РЕШЕНИЯ МОДЕРАЦИИ, ЗАПИСАННЫЕ НА ДИСКЕ ДРУГИМИ МАШИНАМИ.
+            //
+            // Это лекарство от расхождения очередей («у коллеги 21 на модерации, а у меня 4»): обмен
+            // конфигом между двумя машинами может молча не работать месяцами, а диск между ними
+            // работает всегда — файлы прошивок они видят одни и те же. Подробности — ModerationOnDisk.
+            // Монотонно и в одну сторону, поэтому безопасно гонять на каждом тике синхронизации.
+            var absorbed = await Task.Run(() => ModerationOnDisk.Absorb(_services.Db));
+            if (absorbed.Released + absorbed.Archived > 0)
+            {
+                var what = string.Join(", ", absorbed.Items.Take(3));
+                var rest = absorbed.Items.Count > 3 ? $" и ещё {absorbed.Items.Count - 3}" : "";
+                ShowStatus($"С диска приехали решения модерации: {absorbed.Items.Count} ({what}{rest})",
+                    10000, NotificationCategory.FirmwareAndParams);
+                RefreshModerationBadge();
+                RefreshSearchIfActive();
+            }
+
             var plan = _services.Hierarchy.PlanFwSync(root);
             FwDiskScan scan;
             using (Busy.Begin("Поиск новых прошивок на диске…"))
@@ -1836,9 +1868,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// stale until the next periodic RunSync tick — which, with sync_interval_min=0, never comes.</summary>
     public void RefreshDiskStatus() => _ = RefreshDiskStatusAsync();
 
-    /// <summary>Пересчёт индикатора — это рекурсивный обход ВСЕГО сетевого диска (EnumerateFiles по
-    /// всем подпапкам), самая заметная из «программа зависла» пауз: на общей шаре он занимает
-    /// секунды. Считаем в фоновом потоке, в БД при этом не ходим вообще.</summary>
+    /// <summary>Индикатор диска в нижней строке. Отвечает ровно на один вопрос: «диск виден или
+    /// нет».
+    ///
+    /// ЧИСЛО ФАЙЛОВ УБРАНО. Во-первых, оно никому ничего не говорило — «10 858 файлов» это не
+    /// состояние, а шум (жалоба: «сколько файлов на диске лишнее отображение в нижней строке, лучше
+    /// убрать»). Во-вторых, оно стоило рекурсивного обхода ВСЕЙ шары (EnumerateFiles по всем
+    /// подпапкам) — самой заметной из пауз «программа зависла», по нескольку секунд на каждую
+    /// проверку. Теперь это одна проверка существования папки, то есть почти ничего.</summary>
     public async Task RefreshDiskStatusAsync()
     {
         var root = _services.Cfg.RootPath();
@@ -1848,21 +1885,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             return;
         }
 
-        using var busy = Busy.Begin("Проверка диска…");
         DiskStatusText = await Task.Run(() =>
         {
-            try
-            {
-                if (!System.IO.Directory.Exists(root)) return "Диск: ✗ недоступен";
-                var fileCount = System.Linq.Enumerable.Count(
-                    System.IO.Directory.EnumerateFiles(root, "*", System.IO.SearchOption.AllDirectories));
-                return $"Диск: ✓  ({fileCount} файлов)";
-            }
-            catch
-            {
-                // Шара отвалилась посреди обхода — для индикатора это то же самое, что «недоступен».
-                return "Диск: ✗ недоступен";
-            }
+            // Проверка существования на отвалившейся шаре может ждать таймаута SMB — поэтому всё
+            // ещё в фоновом потоке, хотя обхода здесь больше нет.
+            try { return System.IO.Directory.Exists(root) ? "Диск: ✓" : "Диск: ✗ недоступен"; }
+            catch { return "Диск: ✗ недоступен"; }
         });
     }
 

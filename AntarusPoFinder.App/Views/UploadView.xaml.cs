@@ -1145,7 +1145,20 @@ public partial class UploadView : UserControl
                 // Раньше загрузка в накопитель не попадала, плашка «изменений не отправлено» не
                 // появлялась, и человек узнавал о том, что прошивки у коллег нет, через день и три
                 // скриншота — дословная жалоба «залил две прошивки, у коллеги их наотрез нет».
-                _host.PushCatalogChange($"Загружена прошивка {result.Record!.VersionRaw}",
+                // Текст собирается из того, что уже введено в форме: имена типа/подтипа/контроллера
+                // в свежей записи ещё пусты (они подтягиваются join'ом только при поиске). Голый
+                // номер версии коллеге ничего не говорит — жалоба «в уведомлении написано только
+                // номер прошивки, надо ещё отображать что изменилось, какой тип прошивки и в целом
+                // больше инфы». Сам формат — FwChangeAnnouncement, он же покрыт тестами.
+                _host.PushCatalogChange(
+                    FwChangeAnnouncement.Uploaded(
+                        (GroupCombo.SelectedItem as EquipmentGroup)?.Name ?? "",
+                        SubtypesSelect.MainSubtype?.Name ?? "",
+                        (CtrlCombo.SelectedItem as ControllerModification)?.ControllerName ?? "",
+                        result.Record!.VersionRaw,
+                        result.Record.Execution,
+                        result.Record.Description,
+                        result.Record.IsOpc, result.Record.RequestNum, result.Record.CabinetSn),
                     result.Record.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
                 // We just wrote files to the disk — refresh the footer file count now instead of
                 // letting it sit stale until the next periodic RunSync tick.

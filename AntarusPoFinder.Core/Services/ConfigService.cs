@@ -21,7 +21,12 @@ public class ConfigService
     public static readonly string AppData =
         Environment.GetEnvironmentVariable("ANTARUS_TEST_APPDATA") is { Length: > 0 } testDir
             ? testDir
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AntarusPOFinder");
+            // Имя папки РАЗНОЕ у стабильной программы и у беты (Domain.AppIdentity): бета ставится
+            // отдельным приложением рядом, и общий профиль перечеркнул бы весь смысл — сломанная
+            // бета испортила бы рабочую базу, и «просто вернуться на предыдущую версию» перестало
+            // бы помогать.
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Domain.AppIdentity.AppDataFolderName);
     public static readonly string DbPath = Path.Combine(AppData, "po_finder.db");
     public static readonly string LocalFw = Path.Combine(AppData, "firmware");
     public static readonly string LocalTemplates = Path.Combine(AppData, "templates");
@@ -484,6 +489,58 @@ public class ConfigService
     public SmtpSettings Smtp() => new(
         Host: SmtpHost(), Port: SmtpPort(), UseSsl: SmtpSsl(),
         User: SmtpUser(), Password: SmtpPassword(), From: SmtpFrom(), Enabled: EmailEnabled());
+
+    // ── Почта: когда и что слать ────────────────────────────────────────
+    //
+    // Просьба Ильи: «более обширная настройка — что, как, когда, время и т.п. отправки по почте».
+    // Значения по умолчанию подобраны так, чтобы НИЧЕГО не изменилось у тех, у кого почта уже
+    // настроена: режим «сразу», тихих часов нет, список категорий пуст = все. Появление настройки
+    // не должно быть заметно, пока в неё не залезли.
+
+    /// <summary>Режим отправки. Неизвестное значение читается как «сразу» — настройка едет в общем
+    /// конфиге, и версия постарше не должна спотыкаться о режим, которого она не знает.</summary>
+    public EmailDeliveryMode EmailMode() =>
+        Enum.TryParse<EmailDeliveryMode>(Get("email_mode"), ignoreCase: true, out var mode)
+            ? mode
+            : EmailDeliveryMode.Immediate;
+
+    public void SetEmailMode(EmailDeliveryMode v) => Set("email_mode", v.ToString());
+
+    /// <summary>Шаг сводки в часах. Меньше часа не бывает: сводка раз в пять минут — это прежний
+    /// режим «каждое письмо», только с задержкой и без пометки категории в теме.</summary>
+    public int EmailDigestHours()
+    {
+        var raw = Get("email_digest_hours");
+        return int.TryParse(raw, out var hours) && hours > 0 ? Math.Min(hours, 24) : 4;
+    }
+    public void SetEmailDigestHours(int v) => Set("email_digest_hours", Math.Clamp(v, 1, 24).ToString());
+
+    public TimeSpan EmailDailyAt() => EmailSchedule.ParseTime(Get("email_daily_at")) ?? new TimeSpan(9, 0, 0);
+    public void SetEmailDailyAt(TimeSpan v) => Set("email_daily_at", EmailSchedule.FormatTime(v));
+
+    public bool EmailQuietEnabled() => Get("email_quiet_enabled").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetEmailQuietEnabled(bool v) => Set("email_quiet_enabled", v ? "true" : "false");
+
+    public TimeSpan EmailQuietFrom() => EmailSchedule.ParseTime(Get("email_quiet_from")) ?? new TimeSpan(22, 0, 0);
+    public void SetEmailQuietFrom(TimeSpan v) => Set("email_quiet_from", EmailSchedule.FormatTime(v));
+
+    public TimeSpan EmailQuietTo() => EmailSchedule.ParseTime(Get("email_quiet_to")) ?? new TimeSpan(8, 0, 0);
+    public void SetEmailQuietTo(TimeSpan v) => Set("email_quiet_to", EmailSchedule.FormatTime(v));
+
+    /// <summary>Какие категории уходят почтой. Хранится строкой через запятую именно потому, что
+    /// пустая строка здесь обязана означать «все» — так же, как пустая категория в правиле значит
+    /// «всё подряд» (см. EmailRule.Category). Заводить отдельную таблицу ради шести флажков значило
+    /// бы ещё одну сущность в синхронизации конфига.</summary>
+    public List<string> EmailCategories() =>
+        Get("email_categories").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    public void SetEmailCategories(IEnumerable<string> categories) =>
+        Set("email_categories", string.Join(",", categories.Select(c => c.Trim()).Where(c => c.Length > 0)));
+
+    public EmailScheduleSettings EmailDelivery() => new(
+        Mode: EmailMode(), DigestHours: EmailDigestHours(), DailyAt: EmailDailyAt(),
+        QuietHoursEnabled: EmailQuietEnabled(), QuietFrom: EmailQuietFrom(), QuietTo: EmailQuietTo(),
+        Categories: EmailCategories());
 
     /// <summary>Метка «дальше зашифрованное значение» — по ней же отличается ключ, вписанный в базу
     /// руками до появления шифрования.</summary>

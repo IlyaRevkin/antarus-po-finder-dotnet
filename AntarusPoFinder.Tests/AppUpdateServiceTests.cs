@@ -653,4 +653,102 @@ public class AppUpdateServiceTests
     }
 
     private static string ToJsonString(string value) => System.Text.Json.JsonSerializer.Serialize(value);
+
+    // ── ПРЕДОХРАНИТЕЛЬ ПОД БЕТА-ТЕСТИРОВАНИЕ ───────────────────────────────────────────────────
+    //
+    // Бета выпускается в ТОТ ЖЕ репозиторий, помеченная prerelease, и номер у неё заведомо больше
+    // (2.0.0.0 против 1.75.x). Без фильтра автообновление притащило бы её на все рабочие машины —
+    // то есть ровно то, чего просили избежать: «чтобы если там что-то не то, то работники смогли бы
+    // пользоваться предыдущей версией». Это тот случай, когда отсутствие проверки ломает не бету, а
+    // продакшен у всех разом, поэтому тест стоит рядом с остальными правилами выбора релиза.
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_SkipsPrereleases()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "beta-v2.0.0.0",
+                "prerelease": true,
+                "assets": [
+                  { "name": "AntarusPoFinderBeta-2.0.0.0.exe", "browser_download_url": "https://example.invalid/beta.exe", "size": 1 }
+                ]
+              },
+              {
+                "tag_name": "v1.75.0.0",
+                "prerelease": false,
+                "assets": [
+                  { "name": "AntarusPoFinder-1.75.0.0.exe", "browser_download_url": "https://example.invalid/stable.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal(new Version(1, 75, 0, 0), result.Releases[0].Version);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    /// <summary>Черновик релиза — по той же причине: ассетов у него может не быть вовсе, а виден он
+    /// только автору.</summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_SkipsDrafts()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v9.9.9",
+                "draft": true,
+                "assets": [
+                  { "name": "AntarusPoFinder-9.9.9.exe", "browser_download_url": "https://example.invalid/draft.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Empty(result.Releases);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    /// <summary>Тег беты не разбирается как обычная версия и в стабильном канале: даже если релиз
+    /// забыли пометить prerelease, «beta-v2.0.0.0» обязан остаться бетой. Два независимых барьера —
+    /// потому что пометка ставится руками, а руками её и забывают.</summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_SkipsBetaTagEvenWithoutPrereleaseFlag()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "beta-v2.0.0.0",
+                "assets": [
+                  { "name": "AntarusPoFinder-2.0.0.0.exe", "browser_download_url": "https://example.invalid/beta.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Empty(result.Releases);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
 }

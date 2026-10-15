@@ -13,15 +13,26 @@ public partial class PlcPreparationDialog : Window
 {
     public PlcPreparationAnswer Answer { get; private set; } = PlcPreparationAnswer.Cancel;
 
-    private PlcPreparationDialog(string versionName, bool rememberedFormat)
+    private PlcPreparationDialog(string versionName, bool rememberedFormat, string? controllerName)
     {
         InitializeComponent();
         QuestionText.Text = PlcPreparation.QuestionFor(versionName);
 
-        var wasFormat = PlcPreparation.DefaultAnswer(rememberedFormat) == PlcPreparationAnswer.Format;
-        RememberedText.Text = wasFormat
-            ? "В прошлый раз выбирали «Форматировать и обновить ядро»."
-            : "В прошлый раз выбирали «Без форматирования».";
+        // Для контроллеров, которым заливка без подготовки кирпичит ПЛК (SMH5), прошлый выбор
+        // наладчика НЕ наследуется — см. PlcPreparation.NeedsFormatByDefault.
+        var warning = PlcPreparation.WarningFor(controllerName);
+        if (warning.Length > 0)
+        {
+            WarningText.Text = warning;
+            WarningBox.Visibility = Visibility.Visible;
+        }
+
+        var wasFormat = PlcPreparation.DefaultAnswer(rememberedFormat, controllerName) == PlcPreparationAnswer.Format;
+        RememberedText.Text = warning.Length > 0
+            ? "Для этого контроллера по умолчанию предлагается подготовка, независимо от прошлого выбора."
+            : wasFormat
+                ? "В прошлый раз выбирали «Форматировать и обновить ядро»."
+                : "В прошлый раз выбирали «Без форматирования».";
 
         // Прошлый выбор — только подсветка и Enter, а не готовый ответ: окно всё равно ждёт нажатия.
         if (wasFormat) FormatBtn.IsDefault = true; else KeepBtn.IsDefault = true;
@@ -42,9 +53,10 @@ public partial class PlcPreparationDialog : Window
     }
 
     /// <summary>Спросить. Возвращает ответ; отмена — <see cref="PlcPreparationAnswer.Cancel"/>.</summary>
-    public static PlcPreparationAnswer Ask(Window? owner, string versionName, bool rememberedFormat)
+    public static PlcPreparationAnswer Ask(Window? owner, string versionName, bool rememberedFormat,
+        string? controllerName = null)
     {
-        var dialog = new PlcPreparationDialog(versionName, rememberedFormat) { Owner = owner };
+        var dialog = new PlcPreparationDialog(versionName, rememberedFormat, controllerName) { Owner = owner };
         dialog.ShowDialog();
         return dialog.Answer;
     }

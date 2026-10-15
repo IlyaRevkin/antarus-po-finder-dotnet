@@ -27,7 +27,20 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
-    <Version>1.74.28.1</Version>
+    <Version>1.75.0.0</Version>
+  </PropertyGroup>
+
+  <!-- БЕТА — ОТДЕЛЬНОЕ ПРИЛОЖЕНИЕ, А НЕ РЕЖИМ.
+       Собирается как `dotnet publish -c Beta`, ставится рядом со стабильным, со своей папкой,
+       своим ярлыком и своим профилем в %LocalAppData% (Core/Domain/AppIdentity). Смысл ровно в
+       этом: «если там что-то не то, то работники смогли бы пользоваться предыдущей версией без
+       необходимости переустановки».
+       Константа компиляции, а не настройка: настройка уехала бы на чужую машину с общим конфигом,
+       и рабочая программа начала бы считать себя бетой. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
+    <DefineConstants>$(DefineConstants);BETA</DefineConstants>
+    <Version>2.0.0.0</Version>
+    <AssemblyName>AntarusPoFinder.Beta</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

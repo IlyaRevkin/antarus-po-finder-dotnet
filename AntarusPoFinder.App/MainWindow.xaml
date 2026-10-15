@@ -714,8 +714,24 @@
                     </Button.Template>
                 </Button>
 
-                <TextBlock Grid.Column="4" Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
-                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <!-- Диск — КНОПКА, а не надпись. Переход к сетевым дискам лежал только в
+                     «Дополнительно», где его никто не искал: «лучше убрать из дополнительного
+                     сетевые диски и как раз сделать там где диск и значок синхронизации сделать
+                     переход на вкладку сетевых дисков». Значок синхронизации рядом уже ведёт туда
+                     же — теперь оба конца строки про диск ведут в одно место. -->
+                <Button Grid.Column="4" Command="{Binding ShowSyncDetailsCommand}"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Cursor="Hand" ToolTip="Открыть «Сетевые диски»">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="Transparent" Padding="6,2">
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <TextBlock Text="{Binding DiskStatusText}" Style="{StaticResource MutedText}"
+                               VerticalAlignment="Center"/>
+                </Button>
 
                 <!-- Уведомления. Раньше это была широкая кнопка в сайдбаре — единственная там в своём
                      роде, из-за чего и была жалоба «отличается от всех остальных». Место нашлось

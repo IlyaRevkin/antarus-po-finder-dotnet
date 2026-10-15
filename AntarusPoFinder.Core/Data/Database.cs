@@ -184,7 +184,11 @@ public partial class Database : IDisposable
              -- прошивок, чтобы исполнение можно было завести ДО первой загрузки.
              CREATE TABLE IF NOT EXISTS fw_executions (
                  name       TEXT PRIMARY KEY,
-                 sort_order INTEGER NOT NULL DEFAULT 0
+                 sort_order INTEGER NOT NULL DEFAULT 0,
+                 -- Неактивное исполнение не предлагается при загрузке, но у уже загруженных
+                 -- прошивок остаётся: это пометка линейки (см. EnsureColumnsExist).
+                 active     INTEGER NOT NULL DEFAULT 1,
+                 created_at TEXT NOT NULL DEFAULT ''
              );
 
              -- Слова-исключения поиска: см. Database.SearchWords.cs.
@@ -819,6 +823,23 @@ public partial class Database : IDisposable
         // DEFAULT '' проставляет уже существующим строкам ровно то значение, которое и означает
         // «обычная прошивка». См. FwExecution.
         AddColumnsIfMissing("fw_versions", ("execution", "TEXT NOT NULL DEFAULT ''"));
+
+        // СПРАВОЧНИК ИСПОЛНЕНИЙ: активность и дата заведения.
+        //
+        // Просьба Ильи: «добавь возможность редактировать исполнения, также делать из активными или
+        // нет дату создания исполнения и та и отображение таблицей уже удобней будет».
+        //
+        // active = 0 — исполнение больше НЕ ПРЕДЛАГАЕТСЯ при загрузке, но у уже загруженных прошивок
+        // остаётся: это пометка линейки, и стереть её задним числом значило бы слить две линейки в
+        // одну (ровно та же причина, по которой удаление из справочника не трогает прошивки, см.
+        // DeleteExecutionFromCatalog). Именно поэтому «неактивно» и нужно отдельно от удаления:
+        // линейку закрыли, но история по ней читается.
+        //
+        // created_at пустая у всех, кто заведён до этой миграции — выдумывать им дату нельзя, в
+        // таблице такая строка честно показывается прочерком.
+        AddColumnsIfMissing("fw_executions",
+            ("active", "INTEGER NOT NULL DEFAULT 1"),
+            ("created_at", "TEXT NOT NULL DEFAULT ''"));
 
         // Баги ПРОШИВОК: критичность и ссылка на ту самую прошивку.
         //

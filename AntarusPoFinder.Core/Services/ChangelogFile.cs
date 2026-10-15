@@ -13,7 +13,26 @@ public record ChangelogContent(string Description, List<string> LaunchTypes)
     /// <summary>Теги версии, если загрузившая машина их записала. Пустой список — файл старого
     /// формата (строки «Теги:» в нём нет) либо тегов не было.</summary>
     public List<string> Tags { get; init; } = new();
+
+    /// <summary>РЕШЕНИЕ МОДЕРАЦИИ, записанное на диск. null — в файле строки «Модерация:» нет вовсе,
+    /// и это НЕ то же самое, что «в очереди»: файл мог быть написан старой версией программы, и
+    /// принять её молчание за «не выпущена» значило бы снимать чужие решения.</summary>
+    public FwModerationMark? Moderation { get; init; }
 }
+
+/// <summary>Отметка модерации из CHANGELOG.md: выпущена ли версия, не в архиве ли она, когда и кем
+/// решено.
+///
+/// Зачем она на диске. Состояние модерации ездило между машинами ТОЛЬКО обменом конфига, а он между
+/// двумя конкретными машинами может не работать месяцами и молча: каталоги при этом выглядят
+/// одинаковыми, потому что обе машины насканировали их с общего диска сами. Так и вышло — 14.10.2026
+/// по слепкам двух машин: 46 общих прошивок, из них у 28 РАЗНЫЕ sync_id, и 16 версий, выпущенных на
+/// одной машине, на второй всё ещё висели в очереди модерации. Жалоба дословно: «у коллеги 21
+/// прошивок на модерации висит а у меня 4».
+///
+/// Общий диск — единственный канал, который между этими машинами ТОЧНО работает: файлы прошивок они
+/// видят одни и те же. Поэтому решение едет там же, где уже едут описание, тип пуска и теги.</summary>
+public record FwModerationMark(bool Released, bool Archived, string At, string By);
 
 /// <summary>CHANGELOG.md, который кладётся в папку каждой версии при загрузке — единственный носитель
 /// описания и типов пуска, который живёт НА ДИСКЕ, а не только в локальной базе конкретной машины.
@@ -93,6 +112,7 @@ public static class ChangelogFile
         var launchTypes = new List<string>();
         var tags = new List<string>();
         var descLines = new List<string>();
+        FwModerationMark? moderation = null;
         bool inBody = false;
 
         foreach (var line in lines)
@@ -113,6 +133,11 @@ public static class ChangelogFile
                         .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     continue;
                 }
+                if (line.StartsWith(ModerationPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    moderation = ParseModeration(line[ModerationPrefix.Length..]);
+                    continue;
+                }
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 inBody = true;
             }
@@ -124,6 +149,99 @@ public static class ChangelogFile
         while (descLines.Count > 0 && string.IsNullOrWhiteSpace(descLines[^1]))
             descLines.RemoveAt(descLines.Count - 1);
 
-        return new ChangelogContent(string.Join("\n", descLines).Trim(), launchTypes) { Tags = tags };
+        return new ChangelogContent(string.Join("\n", descLines).Trim(), launchTypes)
+        {
+            Tags = tags,
+            Moderation = moderation,
+        };
     }
+
+    /// <summary>Шапка строки с решением модерации. Отдельной константой, потому что по ней идёт и
+    /// разбор, и замена строки при повторной записи.</summary>
+    public const string ModerationPrefix = "Модерация:";
+
+    private const string WordReleased = "выпущена";
+    private const string WordQueued = "в очереди";
+    private const string WordArchived = "в архиве";
+
+    /// <summary>Строка вида «Модерация: выпущена; 2026-10-05T12:00:00; Иванов». Разбор снисходительный
+    /// к тому же, к чему и остальной файл: люди правят CHANGELOG.md руками прямо на сетевом диске, и
+    /// потерянная дата не должна отменять само решение.</summary>
+    private static FwModerationMark? ParseModeration(string tail)
+    {
+        var parts = tail.Split(';', StringSplitOptions.TrimEntries);
+        var state = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+        if (state.Length == 0) return null;
+
+        var released = state.Contains(WordReleased, StringComparison.Ordinal);
+        var archived = state.Contains(WordArchived, StringComparison.Ordinal);
+        // Ни одного знакомого слова — файл правили руками и написали что-то своё. Выдумывать за
+        // человека решение модерации нельзя: считаем, что отметки нет.
+        if (!released && !archived && !state.Contains(WordQueued, StringComparison.Ordinal)) return null;
+
+        return new FwModerationMark(released, archived,
+            parts.Length > 1 ? parts[1] : "",
+            parts.Length > 2 ? parts[2] : "");
+    }
+
+    private static string FormatModeration(FwModerationMark m)
+    {
+        var state = m.Archived ? WordArchived : m.Released ? WordReleased : WordQueued;
+        return $"{ModerationPrefix} {state}; {m.At}; {m.By}".TrimEnd(';', ' ');
+    }
+
+    /// <summary>Записать решение модерации В ПАПКУ ВЕРСИИ, рядом с самой прошивкой.
+    ///
+    /// Перезаписывается ТОЛЬКО строка «Модерация:»: всё остальное в файле — описание, тип пуска, теги,
+    /// ручные правки инженеров — остаётся как было. Строка ставится в шапку, сразу после последнего
+    /// шапочного поля, чтобы не разрывать текст описания.
+    ///
+    /// Если файла нет вовсе, он НЕ создаётся: пустой CHANGELOG с одной строкой модерации выглядел бы
+    /// как потерянное описание. Возвращает false — вызывающий решает, беда это или нет (на чужой
+    /// шаре может не быть прав на запись, и ронять из-за этого модерацию нельзя).</summary>
+    public static bool TryMarkModeration(string versionFolder, FwModerationMark mark)
+    {
+        var path = Path.Combine(versionFolder, FileName);
+        string[] lines;
+        try
+        {
+            if (!File.Exists(path)) return false;
+            lines = File.ReadAllLines(path);
+        }
+        catch { return false; }
+
+        var next = new List<string>();
+        var written = false;
+        var inHead = true;
+        foreach (var line in lines)
+        {
+            if (line.StartsWith(ModerationPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                // Своя же строка с прошлого раза — заменяем на месте, чтобы файл не обрастал
+                // историей решений: источник истины один, последнее решение.
+                next.Add(FormatModeration(mark));
+                written = true;
+                inHead = false;
+                continue;
+            }
+            if (inHead && !written && !IsHeadLine(line))
+            {
+                next.Add(FormatModeration(mark));
+                written = true;
+                inHead = false;
+            }
+            next.Add(line);
+        }
+        if (!written) next.Add(FormatModeration(mark));
+
+        try { File.WriteAllText(path, string.Join("\n", next), new UTF8Encoding(false)); }
+        catch { return false; }
+        return true;
+    }
+
+    private static bool IsHeadLine(string line) =>
+        line.StartsWith("# ", StringComparison.Ordinal) ||
+        line.StartsWith("Дата:", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith("Тип пуска:", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith("Теги:", StringComparison.OrdinalIgnoreCase);
 }
