@@ -174,6 +174,7 @@ public partial class SettingsView : UserControl
             LoadFirmwareTab();
             LoadQuickApps();
             ApplyRoleVisibility();
+            CollapseRareTabs();
             _reservationCountdownTimer.Start();
         };
         Unloaded += (_, _) => _reservationCountdownTimer.Stop();
@@ -195,6 +196,55 @@ public partial class SettingsView : UserControl
         TabBtnTags, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
+
+    /// <summary>Вкладки, которые в бете уезжают под «Ещё»: нужны считанные разы в месяц, а ряд
+    /// занимали наравне с ежедневными («пелюль сверху стало уже слишком много»). Это НЕ урезание
+    /// прав: что из них вообще доступно роли, по-прежнему решает ApplyRoleVisibility, а «Ещё»
+    /// показывает только разрешённое.</summary>
+    private (Button Button, string Label)[] RareTabs() => new[]
+    {
+        (TabBtnReservations, "Резервация номеров"),
+        (TabBtnQuickApps, "Быстрый доступ"),
+        (TabBtnLoader, "Лоадер"),
+        (TabBtnConnection, "Подключение"),
+        (TabBtnPrinting, "Печать"),
+        (TabBtnUsers, "Пользователи"),
+        (TabBtnCleanup, "Чистка диска"),
+    };
+
+    /// <summary>Свернуть редкие вкладки под «Ещё». Зовётся ПОСЛЕ ApplyRoleVisibility: прячем только
+    /// то, что этой роли и так было видно, иначе «Ещё» предлагало бы страницы, куда человеку
+    /// нельзя.</summary>
+    private void CollapseRareTabs()
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        var any = false;
+        foreach (var (button, _) in RareTabs())
+        {
+            if (button.Visibility != Visibility.Visible) continue;
+            button.Visibility = Visibility.Collapsed;
+            button.Tag = "Hidden";      // пометка «спрятана, но роли доступна» — читается в меню
+            any = true;
+        }
+        TabBtnMore.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MoreTabs_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = TabBtnMore, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var (button, label) in RareTabs())
+        {
+            // В меню попадает только то, что роли доступно: пометку поставил CollapseRareTabs.
+            if (!Equals(button.Tag, "Hidden")) continue;
+            var item = new MenuItem { Header = label };
+            var captured = button;
+            item.Click += (_, _) => Tab_Click(captured, new RoutedEventArgs());
+            menu.Items.Add(item);
+        }
+        if (menu.Items.Count == 0) return;
+        menu.IsOpen = true;
+    }
 
     /// <summary>Колесо мыши над полосой вкладок крутит саму полосу. В минимальном размере окна
     /// вкладки в строку не влезают, а горизонтальный скроллбар мышью с колесом не связан вовсе —

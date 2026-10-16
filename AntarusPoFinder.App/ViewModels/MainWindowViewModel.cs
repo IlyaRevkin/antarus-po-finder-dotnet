@@ -989,9 +989,20 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         _pendingUpdate = latest;
         var notifyEnabled = _services.Cfg.IsNotificationCategoryEnabled(NotificationCategory.AppUpdates);
-        if (_services.Cfg.AppAutoUpdate())
+        if (AppUpdateService.ShouldInstallAutomatically(latest, _services.Cfg.AppAutoUpdate()))
         {
-            if (notifyEnabled)
+            // Критическое ставится, даже когда автообновление выключено и даже когда выключены
+            // уведомления: человек обязан увидеть, почему программа сейчас перезапустится. Остальные
+            // — как раньше, молча и по настройке.
+            if (latest.Critical)
+            {
+                UpdateBannerText = $"Критическое обновление {latest.Version} — устанавливается сразу. "
+                                 + "Программа перезапустится.";
+                UpdateBannerVisible = true;
+                AddNotification($"Критическое обновление {latest.Version} установлено принудительно "
+                              + $"(источник: {result.SourceLabel}).", NotificationCategory.AppUpdates);
+            }
+            else if (notifyEnabled)
             {
                 UpdateBannerText = $"Устанавливается версия {latest.Version} (источник: {result.SourceLabel})…";
                 UpdateBannerVisible = true;

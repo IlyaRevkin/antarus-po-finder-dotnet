@@ -68,6 +68,14 @@
             <Button x:Name="TabBtnCleanup" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
                 <TextBlock Text="Чистка диска" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- «Ещё» — одна пилюля вместо семи редких (бета 2.0). Жалоба: «пелюль сверху стало уже
+                 слишком много». Наверху остаётся то, куда ходят по работе; резервация номеров,
+                 лоадер, печать, пользователи и уборка диска нужны считанные разы в месяц и занимали
+                 ряд наравне с ежедневным. Сами вкладки никуда не делись и открываются отсюда. -->
+            <Button x:Name="TabBtnMore" Style="{StaticResource NavButton}" Padding="16,8" Margin="4,0,0,0"
+                    Visibility="Collapsed" Click="MoreTabs_Click">
+                <TextBlock Text="Ещё ▾" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
         </StackPanel>
         </ScrollViewer>
 

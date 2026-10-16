@@ -2126,9 +2126,27 @@ public partial class SearchView : UserControl
             TryOpen(repaired);
     }
 
+    /// <summary>«Открыть папку» ищет ПАПКУ, а не открываемый файл.
+    ///
+    /// Жалоба Ильи 16.10.2026: «при отсутствии интернета я нажимаю открыть локальную папку и он
+    /// выдаёт это сообщение, хотя она есть и я шью прошивку». Так и было: действие шло через
+    /// ResolveOpenTarget, который сперва требует найти в папке ОТКРЫВАЕМЫЙ ФАЙЛ (нужно для «Открыть
+    /// прошивку»), а папку отдаёт только как запасной вариант — и только сетевую. Без сети сетевой
+    /// папки нет, локальная копия в расчёт не шла вовсе, и человеку сообщали «файлов нет», когда он
+    /// этими самыми файлами в тот момент шил контроллер.
+    ///
+    /// Здесь достаточно существования папки, и локальная копия идёт первой: она и есть то, что
+    /// просят открыть словом «локальную».</summary>
+    private static string? ResolveFolderTarget(HierarchyResult result)
+    {
+        foreach (var dir in CandidateFolders(result))
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) return dir;
+        return null;
+    }
+
     private void OpenFirmwareFolder(HierarchyResult result)
     {
-        var target = ResolveOpenTarget(result);
+        var target = ResolveFolderTarget(result);
         if (target is null)
         {
             OfferDownload(result, "Открыть папку");

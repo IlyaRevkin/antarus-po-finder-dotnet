@@ -43,7 +43,19 @@ public static class EmailNotifier
             if (s.User.Trim().Length > 0)
                 client.Credentials = new NetworkCredential(s.User.Trim(), s.Password);
 
-            using var msg = new MailMessage { From = new MailAddress(s.From.Trim()), Subject = subject, Body = body };
+            // ОТПРАВИТЕЛЬ ПОДПИСАН ПРОГРАММОЙ, а не просто адресом.
+            //
+            // Жалоба Ильи: «она вчера 120 писем отправила, причём от моего имени». Адрес в поле
+            // «От кого» — это обычно ящик того, кто настраивал почту, и письма выглядели так, будто
+            // человек рассылает их сам: в списке писем видно имя, а не адрес. Отображаемое имя
+            // снимает это, ничего не меняя в самой отправке — адрес остаётся тем же, иначе сервер
+            // отказал бы в релее.
+            using var msg = new MailMessage
+            {
+                From = new MailAddress(s.From.Trim(), "Antarus ПО Finder"),
+                Subject = subject,
+                Body = body,
+            };
             foreach (var addr in to)
             {
                 // Группа AD адресом письма быть не может — её раскрывает почтовый сервер, если у

@@ -62,13 +62,14 @@ public class EmailScheduleTests
         Assert.Single(утреннее.Items);
     }
 
-    /// <summary>Режим «сразу» без тихих часов обязан остаться ровно тем, чем был до появления всей
-    /// этой настройки: письмо уходит немедленно. Это поведение по умолчанию у всех, у кого почта уже
-    /// настроена, и сломать его — значит выключить им почту молча.</summary>
+    /// <summary>Режим «сразу» без тихих часов отправляет немедленно — но от ПРЕДЫДУЩЕЙ отправки
+    /// отсчитывается выдержка (EmailSchedule.MinimumGapMinutes), иначе поток уведомлений рабочего
+    /// дня превращался в сто двадцать писем за сутки. Здесь прошлой отправки не было, значит ждать
+    /// нечего: письмо уходит сразу, как и было до появления всей этой настройки.</summary>
     [Fact]
     public void Режим_сразу_отправляет_немедленно()
     {
-        var решение = EmailSchedule.Decide(new EmailScheduleSettings(), Полдень, new[] { Событие() }, Полдень);
+        var решение = EmailSchedule.Decide(new EmailScheduleSettings(), Полдень, new[] { Событие() }, DateTime.MinValue);
 
         Assert.True(решение.SendNow);
         Assert.Single(решение.Items);
@@ -153,8 +154,10 @@ public class EmailScheduleTests
         Assert.False(настройки.CategoryAllowed("Sync"));
 
         // И в самом решении тоже: настройку могли поменять, пока строки лежали в очереди.
+        // Прошлой отправки не было — выдержка между письмами ни при чём, проверяется именно отбор
+        // категорий (см. «Режим сразу отправляет немедленно»).
         var решение = EmailSchedule.Decide(настройки, Полдень,
-            new[] { Событие("Sync"), Событие("FirmwareAndParams", "новая прошивка") }, Полдень);
+            new[] { Событие("Sync"), Событие("FirmwareAndParams", "новая прошивка") }, DateTime.MinValue);
 
         Assert.True(решение.SendNow);
         Assert.Equal("новая прошивка", Assert.Single(решение.Items).Text);
@@ -224,5 +227,55 @@ public class EmailScheduleTests
         });
 
         Assert.True(тело.IndexOf("раннее", StringComparison.Ordinal) < тело.IndexOf("позднее", StringComparison.Ordinal));
+    }
+
+    // ── ПРЕДОХРАНИТЕЛЬ ОТ ПОТОКА ПИСЕМ ─────────────────────────────────────────────────────────
+    //
+    // 15.10.2026 почта отправила за сутки 120 писем. Жалоба Ильи: «сделай чтобы он не спамила, мб
+    // сводкой раз в час или настраиваемо это, а то она вчера 120 писем отправила». Режимом по
+    // умолчанию было «сразу», а уведомлений в рабочий день набирается именно столько.
+
+    /// <summary>В режиме «сразу» второе письмо не уходит сразу за первым: всё, что случилось в
+    /// ближайшие минуты, догоняет одним письмом. Это предохранитель, а не настройка — выключаемый,
+    /// он вернул бы ровно то, от чего уходили.</summary>
+    [Fact]
+    public void В_режиме_сразу_письма_не_чаще_предела()
+    {
+        var s = new EmailScheduleSettings(Mode: EmailDeliveryMode.Immediate);
+        var sent = new DateTime(2026, 10, 16, 10, 0, 0);
+        var pending = new[] { new PendingEmail(sent.AddMinutes(1), "General", "ещё одно событие") };
+
+        var soon = EmailSchedule.Decide(s, sent.AddMinutes(1), pending, sent);
+        var later = EmailSchedule.Decide(s, sent.AddMinutes(EmailSchedule.MinimumGapMinutes), pending, sent);
+
+        Assert.False(soon.SendNow, "через минуту после письма второе уходить не должно");
+        Assert.True(later.SendNow, "через выдержку накопленное обязано уйти");
+    }
+
+    /// <summary>Первое письмо не задерживается: предел считается от ПРЕДЫДУЩЕЙ отправки, а когда её
+    /// не было, ждать нечего — иначе первое же событие на свежей машине зависло бы на десять минут.</summary>
+    [Fact]
+    public void Первое_письмо_уходит_сразу()
+    {
+        var s = new EmailScheduleSettings(Mode: EmailDeliveryMode.Immediate);
+        var now = new DateTime(2026, 10, 16, 10, 0, 0);
+        var pending = new[] { new PendingEmail(now, "General", "первое событие") };
+
+        Assert.True(EmailSchedule.Decide(s, now, pending, DateTime.MinValue).SendNow);
+    }
+
+    /// <summary>Режим по умолчанию — СВОДКА, а не «сразу»: это и есть лекарство от ста двадцати
+    /// писем. Проверяется у настроек, которые читает программа, а не у значения в коде.</summary>
+    [Fact]
+    public void По_умолчанию_включена_сводка_раз_в_час()
+    {
+        using var tmp = new AntarusPoFinder.Tests.TestHelpers.TempDb();
+        using var db = new AntarusPoFinder.Core.Data.Database(tmp.Path);
+        var cfg = new AntarusPoFinder.Core.Services.ConfigService(db);
+
+        var settings = cfg.EmailDelivery();
+
+        Assert.Equal(EmailDeliveryMode.EveryNHours, settings.Mode);
+        Assert.Equal(1, settings.DigestHours);
     }
 }

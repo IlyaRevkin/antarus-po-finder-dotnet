@@ -19,7 +19,18 @@ public enum UpdateSourceKind { Folder, GitHub }
 /// того же релиза, если он есть (см. build.ps1 — генерирует его рядом с exe при сборке). Пусто,
 /// если релиз собран до появления этого фикса и такого ассета в нём нет — тогда проверка
 /// целостности пропускается (обратная совместимость, см. DownloadReleaseAsync).</summary>
-public record UpdateRelease(Version Version, string FileName, UpdateSourceKind Source, string LocalPath = "", string DownloadUrl = "", long ExpectedSize = 0, string Sha256Url = "");
+public record UpdateRelease(Version Version, string FileName, UpdateSourceKind Source, string LocalPath = "", string DownloadUrl = "", long ExpectedSize = 0, string Sha256Url = "")
+{
+    /// <summary>КРИТИЧЕСКОЕ обновление — ставится само, даже если автообновление выключено.
+    ///
+    /// Зачем понадобилось: 15.10.2026 выяснилось, что заливка кирпичит SMH4/SMH5 — то есть прошивка
+    /// портит оборудование, пока у людей стоит старая версия. Ждать, пока каждый сам нажмёт
+    /// «установить», в таком случае нельзя: цена промедления — снятый и перешитый вручную шкаф.
+    ///
+    /// Помечается в САМОМ релизе (см. CriticalMarker), а не настройкой на машине: решение «это
+    /// критично» принимается один раз при выпуске и действует на всех.</summary>
+    public bool Critical { get; init; }
+}
 
 /// <summary><paramref name="FolderProblem"/> — заполнено, только когда папка обновлений задана, но
 /// использовать её не вышло (шара недоступна, путь не существует): тогда источником стал GitHub, и
@@ -78,6 +89,20 @@ public static class AppUpdateService
     /// косметика: бета и стабильная выкладываются в один репозиторий, и если бы имя совпадало,
     /// каждая могла бы скачать чужой файл и подменить им себя. Регулярка отличает их так же строго,
     /// как раньше отличала наш exe от посторонних ассетов вроде antarus-sync.exe.</summary>
+    /// <summary>Метка критического выпуска. Ставится в ЗАМЕТКАХ релиза строкой — её видно и
+    /// человеку, который читает «что изменилось», а не только программе. Для папочного источника
+    /// (сетевая папка обновлений) тем же маркером служит файл «&lt;exe&gt;.critical» рядом.</summary>
+    public const string CriticalMarker = "[критическое]";
+
+    /// <summary>Ставить ли эту версию молча и сразу.
+    ///
+    /// Отдельной функцией, а не условием в обработчике: правило «критическое ставится даже при
+    /// выключенном автообновлении» — это то, что должно быть проверено тестом раз и навсегда.
+    /// Обратного правила нет: критический выпуск не спрашивает, потому что промедление в нём и есть
+    /// беда (см. UpdateRelease.Critical).</summary>
+    public static bool ShouldInstallAutomatically(UpdateRelease release, bool autoUpdateEnabled) =>
+        release.Critical || autoUpdateEnabled;
+
     private static readonly Regex ReleaseFileRegex = AppIdentity.IsBeta
         ? new(@"^AntarusPoFinderBeta-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase)
         : new(@"^AntarusPoFinder-(\d+\.\d+\.\d+(?:\.\d+)?)\.exe$", RegexOptions.IgnoreCase);
@@ -350,7 +375,13 @@ public static class AppUpdateService
             var name = Path.GetFileName(file);
             var m = ReleaseFileRegex.Match(name);
             if (m.Success && Version.TryParse(m.Groups[1].Value, out var v))
-                releases.Add(new UpdateRelease(v, name, UpdateSourceKind.Folder, LocalPath: file));
+                // В папке обновлений маркером служит файл рядом: «AntarusPoFinder-1.2.3.exe.critical».
+                // Папку наполняет администратор вручную, и держать признак В ИМЕНИ самого exe нельзя —
+                // имя разбирается регуляркой и участвует в сверке с версией.
+                releases.Add(new UpdateRelease(v, name, UpdateSourceKind.Folder, LocalPath: file)
+                {
+                    Critical = File.Exists(file + ".critical"),
+                });
         }
         return releases.OrderByDescending(r => r.Version).ToList();
     }
@@ -433,7 +464,15 @@ public static class AppUpdateService
                 break;
             }
 
-            releases.Add(new UpdateRelease(version, exeName, UpdateSourceKind.GitHub, DownloadUrl: exeUrl, ExpectedSize: exeSize, Sha256Url: shaUrl));
+            // Критический выпуск помечается строкой в заметках релиза: её видит и человек, который
+            // читает «что изменилось», и программа. Отдельного поля у GitHub для этого нет.
+            var body = item.TryGetProperty("body", out var bodyProp) ? bodyProp.GetString() ?? "" : "";
+            var critical = body.Contains(CriticalMarker, StringComparison.OrdinalIgnoreCase);
+
+            releases.Add(new UpdateRelease(version, exeName, UpdateSourceKind.GitHub, DownloadUrl: exeUrl, ExpectedSize: exeSize, Sha256Url: shaUrl)
+            {
+                Critical = critical,
+            });
         }
         return releases.OrderByDescending(r => r.Version).ToList();
     }

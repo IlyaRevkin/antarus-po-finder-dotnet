@@ -502,7 +502,14 @@ public class ConfigService
     public EmailDeliveryMode EmailMode() =>
         Enum.TryParse<EmailDeliveryMode>(Get("email_mode"), ignoreCase: true, out var mode)
             ? mode
-            : EmailDeliveryMode.Immediate;
+            // ПО УМОЛЧАНИЮ — СВОДКА, а не письмо на каждое событие.
+            //
+            // 15.10.2026 почта отправила за сутки 120 писем: режимом по умолчанию было «сразу», а
+            // уведомлений в рабочий день набирается именно столько. Ящик, в который валится
+            // сто двадцать писем, перестают читать целиком — вместе с тем одним, ради которого всё
+            // и заводилось. Час — это компромисс: срочное приезжает в пределах часа, а поток
+            // схлопывается в одно письмо.
+            : EmailDeliveryMode.EveryNHours;
 
     public void SetEmailMode(EmailDeliveryMode v) => Set("email_mode", v.ToString());
 
@@ -511,7 +518,10 @@ public class ConfigService
     public int EmailDigestHours()
     {
         var raw = Get("email_digest_hours");
-        return int.TryParse(raw, out var hours) && hours > 0 ? Math.Min(hours, 24) : 4;
+        // Час по умолчанию, а не четыре: сводка раз в четыре часа задерживает срочное слишком
+        // надолго, и первым же желанием будет вернуть «сразу» — то есть вернуть сто двадцать писем.
+        // Настраивается на вкладке «Почта».
+        return int.TryParse(raw, out var hours) && hours > 0 ? Math.Min(hours, 24) : 1;
     }
     public void SetEmailDigestHours(int v) => Set("email_digest_hours", Math.Clamp(v, 1, 24).ToString());
 
