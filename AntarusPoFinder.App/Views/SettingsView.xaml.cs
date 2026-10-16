@@ -193,7 +193,7 @@ public partial class SettingsView : UserControl
     private Button[] AllTabButtons() => new[]
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
-        TabBtnTags, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
+        TabBtnTags, TabBtnTickets, TabBtnHosting, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
 
@@ -269,6 +269,8 @@ public partial class SettingsView : UserControl
         ModerationTab.Visibility = Visibility.Collapsed;
         ReservationsTab.Visibility = Visibility.Collapsed;
         TagsTab.Visibility = Visibility.Collapsed;
+        TicketsTab.Visibility = Visibility.Collapsed;
+        HostingTab.Visibility = Visibility.Collapsed;
         EmailTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
@@ -289,6 +291,8 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
         else if (sender == TabBtnTags) { TagsTab.Visibility = Visibility.Visible; LoadTagsTab(); }
+        else if (sender == TabBtnTickets) { TicketsTab.Visibility = Visibility.Visible; ShowServicePage(TicketsTab, "tickets"); }
+        else if (sender == TabBtnHosting) { HostingTab.Visibility = Visibility.Visible; ShowServicePage(HostingTab, "hosting"); }
         else if (sender == TabBtnEmail) { EmailTab.Visibility = Visibility.Visible; LoadEmailTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
@@ -343,6 +347,12 @@ public partial class SettingsView : UserControl
         // уже слишком много»). Панель при этом одна и та же, просто показывается окном. В стабильной
         // программе всё остаётся как было: обе сборки идут из одного дерева, и менять привычное
         // расположение людям посреди рабочего дня незачем.
+        // Сервисные вкладки — только в бете и только тем ролям, которым эти страницы и так были
+        // доступны (RolesConfig.RoleAccess): место поменялось, права нет.
+        TabBtnTickets.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnHosting.Visibility = AppIdentity.IsBeta && (isAdmin || role == "programmer")
+            ? Visibility.Visible : Visibility.Collapsed;
+
         var tagsAllowed = isAdmin || role == "naladchik";
         var tagsAsButton = AppIdentity.IsBeta && tagsAllowed;
         TabBtnTags.Visibility = tagsAllowed && !tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
@@ -491,6 +501,37 @@ public partial class SettingsView : UserControl
         LoadTagsTab();
         if (TagsTab.Parent is not Panel origin) return;
         DetachedPanelWindow.Show(Window.GetWindow(this), "Теги", origin, TagsTab);
+    }
+
+    /// <summary>Страница-вкладка настроек: тикеты и хранилище. Создаётся при первом заходе и дальше
+    /// живёт, пока открыты настройки.
+    ///
+    /// Почему они здесь. «Тикеты это сервисное это убрать надо в настройки», «хранилище не должно
+    /// быть у программиста» — в боковом меню остаётся только работа, а сервисное собрано в одном
+    /// месте. Страницы при этом те же самые, со всеми своими правами и обновлением: ничего не
+    /// переписано, изменилось лишь место.</summary>
+    private void ShowServicePage(ContentControl host, string pageId)
+    {
+        if (host.Content is null)
+        {
+            host.Content = pageId switch
+            {
+                "tickets" => new TicketsView(_services, _host),
+                // HostingView просит именно модель главного окна, а не интерфейс хоста: ей нужны
+                // команды перехода. В настройках хост — он же и есть, просто типизирован шире.
+                "hosting" => _host as ViewModels.MainWindowViewModel is { } vm ? new HostingView(_services, vm) : null,
+                _ => null,
+            };
+            return;
+        }
+
+        // Страница уже построена — просто просим её перечитать данные, как это делает переход по
+        // меню: тикеты приезжают синхронизацией, и показывать вчерашний список нельзя.
+        switch (host.Content)
+        {
+            case TicketsView tickets: tickets.RefreshIfActive(); break;
+            case HostingView hosting: hosting.RefreshIfActive(); break;
+        }
     }
 
     private void LoadTagsTab()

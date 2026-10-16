@@ -203,10 +203,10 @@
          SecondaryButton) so it doesn't blend into the sidebar background next to bordered
          siblings such as "Сменить роль" — highlighted stronger when Tag="Active" -->
     <Style x:Key="NavButton" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource NavIdleBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderThickness" Value="{DynamicResource NavBorderThickness}"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
         <Setter Property="Padding" Value="12,10"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -214,7 +214,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource NavCorner}" Padding="{TemplateBinding Padding}"
                             Margin="0,0,0,3">
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
                     </Border>
@@ -928,8 +928,20 @@
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="14"/>
+        <!-- Скругление, отступы и тень берутся У ТЕМЫ: материал узнают по крупным радиусам и мягкой
+             тени, стекло — по ещё более крупным и по свету по краю. У светлой и тёмной значения те
+             же, что были, — рабочая версия не меняется. -->
+        <Setter Property="CornerRadius" Value="{DynamicResource CardCorner}"/>
+        <Setter Property="Padding" Value="{DynamicResource CardPadding}"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <!-- Тень мягкая и почти без смещения: карточка «приподнята», а не отбрасывает
+                     театральную тень вбок. Прозрачность задаёт тема — у светлой и тёмной это ноль,
+                     то есть тени нет вовсе и отрисовка не дорожает. -->
+                <DropShadowEffect BlurRadius="18" ShadowDepth="2" Direction="270" Color="#000000"
+                                  Opacity="{DynamicResource CardShadowOpacity}" RenderingBias="Performance"/>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Dashed drop-zone border, for drag&drop targets -->

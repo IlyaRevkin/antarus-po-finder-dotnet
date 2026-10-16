@@ -254,6 +254,40 @@ public partial class Database
         return result;
     }
 
+    /// <summary>ТАБЛИЦЫ, НЕ ПРИВЯЗАННЫЕ К ФАЙЛУ.
+    ///
+    /// Решение Ильи по бете 2.0: «в бете мы делаем её как будто бы продукт рабочий и не зависим от
+    /// старых структур, соответственно параметры ПЧ УПП всегда таблица, не зависим от файлов, чиста
+    /// старого диска и тп не нужна».
+    ///
+    /// Раньше документ существовал только «рядом с .par-файлом»: пара диск+имя была его адресом.
+    /// Это наследство файлового порядка — наладчику нужны ЗНАЧЕНИЯ, а не то, из какого файла их
+    /// когда-то вычитали. Свободная таблица — запись с пустыми disk_path/filename; схема это и так
+    /// допускала (оба поля NOT NULL DEFAULT ''), запрета не было нигде, кроме привычки UI создавать
+    /// документ только от файла.
+    ///
+    /// Обмен между машинами, теги, ревизии и тумбстоуны работают ровно так же: привязка к файлу в
+    /// них не участвует.</summary>
+    public List<ParamTable> GetStandaloneParamTables()
+    {
+        var result = new List<ParamTable>();
+        using var reader = ExecuteReader(
+            $"SELECT {ParamTableColumns} FROM param_tables WHERE deleted_at='' AND disk_path='' AND filename='' ORDER BY name, id");
+        while (reader.Read())
+            result.Add(ReadParamTable(reader));
+        return result;
+    }
+
+    /// <summary>Отвязать документ от файла, оставив сам документ. Нужно для перехода на свободные
+    /// таблицы: файл могли удалить с диска, переложить или он просто больше не нужен, а значения
+    /// параметров нужны по-прежнему. Удалять документ ради этого — потерять работу.</summary>
+    public void DetachParamTableFromFile(int id, string? updatedAt = null) =>
+        ExecuteNonQuery("UPDATE param_tables SET disk_path='', filename='', updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@u", updatedAt ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("@id", id);
+        });
+
     /// <summary>Все документы, ВКЛЮЧАЯ СНЯТЫЕ — только для выгрузки конфига. Снятые и есть
     /// тумбстоуны: не отправь их, и удаление осталось бы жить на одной машине, а у коллег документ
     /// висел бы вечно (ровно жалоба «у меня 2 записи, у коллеги 4»).</summary>

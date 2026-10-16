@@ -40,6 +40,17 @@
             <Button x:Name="TabBtnTags" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Теги" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- Сервисное: тикеты и хранилище. В боковом меню их больше нет — «тикеты это
+                 сервисное это убрать надо в настройки», «хранилище не должно быть у программиста».
+                 Страницы те же самые, просто живут здесь. -->
+            <Button x:Name="TabBtnTickets" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0"
+                    Visibility="Collapsed" Click="Tab_Click">
+                <TextBlock Text="Тикеты" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
+            <Button x:Name="TabBtnHosting" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0"
+                    Visibility="Collapsed" Click="Tab_Click">
+                <TextBlock Text="Хранилище" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <Button x:Name="TabBtnEmail" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Почта" Style="{StaticResource NavButtonContentText}"/>
             </Button>
@@ -818,6 +829,12 @@
                 </StackPanel>
 
                 <!-- ═══════════════════════════ ПОЧТА (БЕТА) ═════════════════════ -->
+                <!-- Страницы кладутся сюда кодом при первом заходе: строить их заранее незачем,
+                     а держать второй экземпляр рядом с боковым меню больше не нужно — в меню их
+                     нет. -->
+                <ContentControl x:Name="TicketsTab" Visibility="Collapsed"/>
+                <ContentControl x:Name="HostingTab" Visibility="Collapsed"/>
+
                 <StackPanel x:Name="EmailTab" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
                                Text="Бета. Уведомления программы можно дублировать на почту — это именно дубль: всё, что уходит письмом, по-прежнему остаётся в колокольчике. Не дошёдшее письмо не повторяется и не копится в очереди; проверить связь можно кнопкой ниже."/>

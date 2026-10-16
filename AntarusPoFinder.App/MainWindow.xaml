@@ -247,7 +247,8 @@
                          point was to stop this from being permanently visible clutter; clicking the
                          "› ДОПОЛНИТЕЛЬНО" header expands it downward, in place, standard accordion/
                          disclosure pattern. Not persisted across restarts — always starts collapsed. -->
-                    <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,0">
+                    <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,0"
+                                Visibility="{Binding MoreSectionVisible, Converter={StaticResource BoolToVis}}">
                         <!-- Отступ полосы такой же, как у секции «ДЛЯ НАЛАДЧИКА» выше: обе секции
                              одинаковы по смыслу и обязаны выглядеть одинаково. -->
                         <Separator Margin="0,8,0,0"/>
@@ -447,7 +448,11 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <ToggleButton x:Name="SetupSectionToggle" Grid.Column="0" HorizontalAlignment="Left"
+                                    <TextBlock Text="ДЛЯ НАЛАДЧИКА" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,2"
+                                               VerticalAlignment="Center" HorizontalAlignment="Left"
+                                               Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVisInverse}}"/>
+                                    <ToggleButton x:Name="SetupSectionToggle"
+                                                  Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}" Grid.Column="0" HorizontalAlignment="Left"
                                                   Content="ДЛЯ НАЛАДЧИКА" Style="{StaticResource SidebarSectionHeader}"
                                                   IsChecked="{Binding SetupSectionExpanded, Mode=TwoWay}"/>
                                     <!-- Очередь модерации прошивок, пока секция свёрнута: сам пункт с
@@ -556,7 +561,11 @@
                             <StackPanel Visibility="{Binding DevSectionVisible, Converter={StaticResource BoolToVis}}">
                                 <Separator Margin="0,8,0,0"/>
                                 <Grid Margin="12,0,12,0">
-                                    <ToggleButton x:Name="DevSectionToggle" HorizontalAlignment="Left"
+                                    <TextBlock Text="ДЛЯ ПРОГРАММИСТА" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,2"
+                                               VerticalAlignment="Center" HorizontalAlignment="Left"
+                                               Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVisInverse}}"/>
+                                    <ToggleButton x:Name="DevSectionToggle"
+                                                  Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}" HorizontalAlignment="Left"
                                                   Content="ДЛЯ ПРОГРАММИСТА" Style="{StaticResource SidebarSectionHeader}"
                                                   IsChecked="{Binding DevSectionExpanded, Mode=TwoWay}"/>
                                 </Grid>

@@ -22,7 +22,10 @@ public class DevSectionTests
     [Fact]
     public void Баги_прошивок_это_отдельный_пункт_меню_в_секции_программиста()
     {
-        var item = RolesConfig.NavItems.Single(n => n.PageId == "fwbugs");
+        // Явно по БЕТА-раскладке: в стабильной сборке этой страницы в меню нет вовсе, и тест,
+        // смотрящий на «текущую» раскладку, проверял бы то одно, то другое в зависимости от
+        // конфигурации сборки.
+        var item = RolesConfig.NavItemsFor(beta: true).Single(n => n.PageId == "fwbugs");
 
         Assert.Equal(NavSection.Dev, item.Section);
         Assert.Equal("Баги прошивок", item.Label);
@@ -49,14 +52,30 @@ public class DevSectionTests
 
     /// <summary>Тикеты по программе остались там же, где были: эта переделка РАЗДЕЛЯЕТ, а не
     /// переносит. Человек, который шёл жаловаться на программу, должен найти её на прежнем месте.</summary>
+    /// <summary>Тикеты и хранилище — СЕРВИСНОЕ, и в бете их в меню нет вовсе: «тикеты это сервисное
+    /// это убрать надо в настройки», «хранилище не должно быть у программиста». Страницы живут
+    /// вкладками настроек, права при этом не тронуты — иначе вкладка вела бы в никуда.</summary>
     [Fact]
-    public void Тикеты_по_программе_остались_в_дополнительном()
+    public void Сервисные_страницы_убраны_из_меню_беты_но_доступ_остался()
     {
-        var tickets = RolesConfig.NavItems.Single(n => n.PageId == "tickets");
+        var beta = RolesConfig.NavItemsFor(beta: true);
 
-        Assert.Equal(NavSection.More, tickets.Section);
+        Assert.DoesNotContain(beta, n => n.PageId == "tickets");
+        Assert.DoesNotContain(beta, n => n.PageId == "hosting");
+
         foreach (var (role, pages) in RolesConfig.RoleAccess)
             Assert.True(pages.Contains("tickets"), $"роль «{role}» потеряла страницу тикетов");
+        Assert.Contains("hosting", RolesConfig.RoleAccess["programmer"]);
+    }
+
+    /// <summary>В стабильной программе ничего не переставлено: тикеты там же, где были.</summary>
+    [Fact]
+    public void В_стабильной_сборке_раскладка_прежняя()
+    {
+        var stable = RolesConfig.NavItemsFor(beta: false);
+
+        Assert.Equal(NavSection.More, stable.Single(n => n.PageId == "tickets").Section);
+        Assert.DoesNotContain(stable, n => n.PageId == "fwbugs");
     }
 
     /// <summary>⚠️ Самое важное здесь. Стабильная программа и бета собираются из ОДНОГО дерева, и

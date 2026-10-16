@@ -49,7 +49,13 @@ public static class ThemeManager
         res["TextOnAccentBrush"] = new SolidColorBrush(AccentPalette.TextOn(accent));
 
         foreach (Window window in Application.Current.Windows)
+        {
             DarkTitleBar.Apply(window, dark);
+            // Стекло — это размытие за окном, и включает его система. Тема без размытия обязана его
+            // снять: оставленный прозрачным фон окна выглядел бы дырой.
+            if (theme.Backdrop) WindowBackdrop.Apply(window);
+            else WindowBackdrop.Clear(window);
+        }
 
         ThemeChanged?.Invoke(themeName);
     }

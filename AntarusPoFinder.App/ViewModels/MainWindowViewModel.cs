@@ -154,6 +154,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// (баг прошивки он заводит жучком на карточке), поэтому у него секции не будет.</summary>
     [ObservableProperty] private bool _devSectionVisible;
 
+    /// <summary>Сворачиваются ли секции бокового меню. В бете — НЕТ: «по умолчанию эти поля
+    /// развернуты и убери вообще чтобы они сворачивались просто отдельно отображались в боковой
+    /// панели». Секции там не ящики, которые открывают, а просто подписанные группы.</summary>
+    public bool SectionsCollapsible => !AppIdentity.IsBeta;
+
+    /// <summary>Показывать ли секцию «ДОПОЛНИТЕЛЬНО». В бете её нет вовсе: пункты разошлись по
+    /// секциям, которым принадлежат, а настройки открываются значком внизу («все ещё висит пункт
+    /// дополнительно который нужно было перенести»).</summary>
+    public bool MoreSectionVisible => !AppIdentity.IsBeta;
+
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
     /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
     /// "syncing" — идёт синхра (стрелки крутятся), "error" — последний тик упал (оранжевый ⚠),
@@ -217,7 +227,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // Свёрнута/развёрнута секция «ДЛЯ НАЛАДЧИКА» — запоминается между запусками (в отличие от
         // «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой): туда ходят работать, а не смотреть
         // настройку раз в месяц. Ставится ДО первого показа окна, чтобы секция не «моргала».
-        _setupSectionExpanded = _services.Cfg.SidebarSetupExpanded();
+        // В бете секции всегда раскрыты и не сворачиваются (см. SectionsCollapsible): сохранённое
+        // состояние там не при чём, иначе человек получил бы свёрнутую группу без способа её
+        // раскрыть.
+        _setupSectionExpanded = !AppIdentity.IsBeta ? _services.Cfg.SidebarSetupExpanded() : true;
 
         CurrentRole = _services.Cfg.CurrentRole();
         CurrentTheme = _services.Cfg.Theme();

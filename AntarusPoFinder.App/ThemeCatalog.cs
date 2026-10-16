@@ -11,7 +11,11 @@ namespace AntarusPoFinder.App;
 /// <param name="IsDark">Тёмная ли. От этого зависят не только цвета: заголовок окна красится через
 /// DWM, а наведение и фон выделения считаются от акцента по-разному (см. AccentPalette).</param>
 /// <param name="Beta">Тема из переделки 2.0 — в стабильной программе её не предлагают.</param>
-public sealed record AppTheme(string Id, string Label, string Dictionary, bool IsDark, bool Beta = false);
+/// <param name="Backdrop">Нужно ли этой теме РАЗМЫТИЕ за окном (DWM acrylic). Только цветом стекло
+/// не делается: стекло — это размытие того, что под окном, и рисует его система (см.
+/// WindowBackdrop).</param>
+public sealed record AppTheme(string Id, string Label, string Dictionary, bool IsDark, bool Beta = false,
+    bool Backdrop = false);
 
 /// <summary>СПИСОК ТЕМ — одно место вместо «если dark, то Dark.xaml, иначе Light.xaml».
 ///
@@ -32,7 +36,7 @@ public static class ThemeCatalog
         new("material", "Material", "Material", IsDark: false, Beta: true),
         // «Стекло» — тёмная основа с полупрозрачными карточками: модно и, что важнее, даёт глубину
         // там, где у нас много вложенных панелей.
-        new("glass", "Стекло", "Glass", IsDark: true, Beta: true),
+        new("glass", "Стекло", "Glass", IsDark: true, Beta: true, Backdrop: true),
     };
 
     /// <summary>Что предлагать человеку в настройках. В стабильной программе — только то, что

@@ -62,4 +62,22 @@
     <SolidColorBrush x:Key="RolledBackBrush" Color="{StaticResource RolledBackColor}"/>
     <SolidColorBrush x:Key="ListSelectedBgBrush" Color="{StaticResource ListSelectedBgColor}"/>
 
+
+    <!-- ФОРМА ТЕМЫ, а не только цвет. Замечания Ильи: «Стекло нихер не стекло», «Материал нихера не
+         материал» — и он прав: материал и стекло узнают по скруглениям, воздуху и тени, а не по
+         палитре. Поэтому форму задаёт сама тема, а стили её читают (см. CardBorder в Styles.xaml).
+         У светлой и тёмной значения прежние: рабочая версия не должна измениться ни на пиксель. -->
+    <CornerRadius x:Key="CardCorner">16</CornerRadius>
+    <Thickness x:Key="CardPadding">18</Thickness>
+    <system:Double x:Key="CardShadowOpacity" xmlns:system="clr-namespace:System;assembly=System.Runtime">0.10</system:Double>
+
+    <!-- Форма кнопок и пунктов меню. У material и стекла пункты — скруглённые «таблетки» без
+         рамок: рамка вокруг каждой строки меню читается как сетка таблицы и спорит с заливкой
+         активного пункта. У светлой и тёмной всё как было. -->
+    <CornerRadius x:Key="NavCorner">14</CornerRadius>
+    <Thickness x:Key="NavBorderThickness">0</Thickness>
+    <!-- Фон НЕВЫБРАННОГО пункта меню. У material и стекла он прозрачный: белая плашка под каждой
+         строкой превращает меню в список карточек и спорит с заливкой активного пункта — именно это
+         и выглядело «не материалом». У светлой и тёмной — прежний цвет поля ввода. -->
+    <SolidColorBrush x:Key="NavIdleBrush" Color="Transparent"/>
 </ResourceDictionary>
