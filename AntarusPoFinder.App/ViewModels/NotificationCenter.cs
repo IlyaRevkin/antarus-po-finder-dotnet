@@ -111,6 +111,24 @@ public class NotificationCenter : ObservableObject
     ///    не дублируется (см. <see cref="_reportingMailFailure"/>).
     /// 3. ЭТО ДУБЛЬ. Уведомление всегда остаётся в программе. Поэтому и накопление в сводку
     ///    безопасно: ничто не пропадает, откладывается только письмо.</summary>
+    /// <summary>Пропускает ли ЛИЧНАЯ настройка этого адреса такую категорию.
+    ///
+    /// Касается ровно одного адреса — того, что человек указал своим (ConfigService.MyEmail). Все
+    /// прочие адресаты получают письма по общим правилам, как и раньше: личная настройка на этой
+    /// машине не вправе решать за коллег.
+    ///
+    /// Пустой список категорий — «всё подряд»: настройка, появившаяся пустой, обязана означать
+    /// «как было».</summary>
+    private bool PersonalFilterAllows(string recipient, string category)
+    {
+        var mine = _cfg.MyEmail();
+        if (mine.Length == 0 || !string.Equals(mine, recipient, StringComparison.OrdinalIgnoreCase)) return true;
+
+        var allowed = _cfg.MyEmailCategories();
+        return allowed.Count == 0
+            || allowed.Any(c => string.Equals(c, category, StringComparison.OrdinalIgnoreCase));
+    }
+
     private void MirrorToEmail(string text, NotificationCategory category)
     {
         // Уведомление «почта не работает» само по почте не уходит — иначе неудачная отправка
@@ -211,6 +229,17 @@ public class NotificationCenter : ObservableObject
         foreach (var item in decision.Items)
             foreach (var to in EmailRouting.RecipientsFor(item.Category, rules))
             {
+                // ЛИЧНАЯ НАСТРОЙКА ЧЕЛОВЕКА СИЛЬНЕЕ ОБЩЕГО ПРАВИЛА — но только в сторону «меньше».
+                //
+                // Жалоба: «наладчик который заведен не может настроить себе рассылку и опять весь
+                // спам получает». Общий список заводит администратор, и наладчику туда нельзя: он
+                // менял бы рассылку коллегам. Зато на СВОЙ адрес он вправе сказать «мне только
+                // прошивки» — и это обязано работать поверх общего «всё подряд».
+                //
+                // Расширять себе рассылку личной настройкой нельзя: не подписанный администратором
+                // адрес не начнёт получать лишнее (см. ConfigService.MyEmail).
+                if (!PersonalFilterAllows(to, item.Category)) continue;
+
                 if (!byRecipient.TryGetValue(to, out var list)) byRecipient[to] = list = new List<PendingEmail>();
                 list.Add(item);
             }

@@ -107,6 +107,11 @@ public static class UiSnapshotService
             }
         }
 
+        // ОКНА, А НЕ ТОЛЬКО СТРАНИЦЫ. Окно загрузки в ПЛК — главный экран, на который смотрят
+        // минутами, и именно на нём стилизация оборудования должна быть видна. В обход страниц оно
+        // не попадает вовсе: это отдельное окно, открываемое по кнопке на карточке.
+        await SnapshotLoaderDialogs(dir, Note);
+
         Note("обход закончен");
         Application.Current.Shutdown();
     }
@@ -140,5 +145,46 @@ public static class UiSnapshotService
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    /// <summary>Снимки окна загрузки для разных объектов: насосная, канализационная, тепловой пункт.
+    ///
+    /// Нужны потому, что стилизацию полосы иначе не проверить ничем: страницы её не показывают, а
+    /// глазами на живой заливке её видит только наладчик у шкафа. Окно открывается с заданием,
+    /// которое НИЧЕГО не грузит (операция сборки, несуществующий файл) — нам нужен только его вид.</summary>
+    private static async System.Threading.Tasks.Task SnapshotLoaderDialogs(string dir, Action<string> note)
+    {
+        var cases = new (string Name, string Equipment, string Controller)[]
+        {
+            ("pump", "НГР-КПЧ SMH4", "SMH4"),
+            ("sewage", "НГР-КНС SMH4", "SMH4"),
+            ("heat", "ТГР SMH4", "SMH4"),
+            ("plain", "ВЗУ непонятное", "SMH4"),
+        };
+
+        foreach (var (name, equipment, controller) in cases)
+        {
+            try
+            {
+                var window = Views.LoaderDialog.CreateForSnapshot(new Core.Loader.LoaderJob
+                {
+                    Operation = Core.Loader.LoaderOperation.Build,
+                    VersionName = equipment + " 2.0.0004.0007",
+                    EquipmentName = equipment,
+                    ControllerName = controller,
+                    SourcePath = "",
+                });
+                window.Show();
+                await System.Threading.Tasks.Task.Delay(400);
+                window.UpdateLayout();
+                Save(window, Path.Combine(dir, $"loader--{name}.png"));
+                window.Close();
+                note($"окно загрузки/{name}: ok");
+            }
+            catch (Exception ex)
+            {
+                note($"окно загрузки/{name}: ОШИБКА {ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 }

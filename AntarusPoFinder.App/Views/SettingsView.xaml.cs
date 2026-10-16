@@ -361,7 +361,13 @@ public partial class SettingsView : UserControl
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
         // адресатов, общий на всех. Настройка одного человека здесь меняет почту всем остальным.
-        TabBtnEmail.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // ВКЛАДКА ДОСТУПНА ВСЕМ. Жалоба: «наладчик который заведен не может настроить себе рассылку
+        // и опять весь спам получает». Настройки сервера и общий список адресов внутри остаются
+        // администраторскими — они касаются всей конторы; своя рассылка и категории уведомлений
+        // нужны каждому.
+        TabBtnEmail.Visibility = Visibility.Visible;
+        EmailServerCard.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        EmailRulesCard.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // TabBtnGeneral/TabBtnQuickApps: no role restriction — everyone who can reach Настройки at all sees them.
 
         // «Лоадер» видят наладчик и программист (они и заливают), администратор — как и всё
@@ -4103,8 +4109,130 @@ public partial class SettingsView : UserControl
 
     // ═════════════════════════ ПОЧТА (БЕТА) ════════════════════════
 
+    /// <summary>МОЯ ПОЧТА и КАТЕГОРИИ — на одной вкладке с почтой.
+    ///
+    /// Две жалобы Ильи 16.10.2026 разом: «сделай настройку уведомлений совмещенно с почтой как-то а
+    /// то не очень удобно настраивать» и «наладчик который заведен не может настроить себе рассылку
+    /// и опять весь спам получает». Раньше категории жили в окне истории уведомлений, а почта — в
+    /// настройках, и для одной задачи приходилось ходить в два места; настроить же себе рассылку
+    /// наладчик не мог вовсе — вкладка была администраторской.</summary>
+    private void LoadMyEmailSection()
+    {
+        MyEmailInput.Text = _services.Cfg.MyEmail();
+
+        var mine = _services.Cfg.MyEmailCategories();
+        MyEmailCategoriesPanel.Children.Clear();
+        foreach (var (category, label) in NotificationCategoryInfo.All)
+        {
+            var id = category.ToString();
+            var box = new CheckBox
+            {
+                Content = label,
+                Margin = new Thickness(0, 0, 0, 4),
+                // Пусто — «всё подряд»: при первом заходе отмечено всё, иначе человек увидел бы
+                // пустой список и решил, что ему ничего не приходит.
+                IsChecked = mine.Count == 0 || mine.Any(c => string.Equals(c, id, StringComparison.OrdinalIgnoreCase)),
+            };
+            box.Checked += (_, _) => SaveMyEmailCategories();
+            box.Unchecked += (_, _) => SaveMyEmailCategories();
+            box.Tag = id;
+            MyEmailCategoriesPanel.Children.Add(box);
+        }
+
+        RefreshMyEmailHint();
+    }
+
+    private void SaveMyEmailCategories()
+    {
+        if (_loadingGeneral) return;
+
+        var picked = MyEmailCategoriesPanel.Children.OfType<CheckBox>()
+            .Where(b => b.IsChecked == true)
+            .Select(b => (string)b.Tag!)
+            .ToList();
+
+        // Отмечено всё — значит ограничений нет: храним пусто, чтобы новая категория в будущей
+        // версии приходила сама, а не молча оказалась «не отмеченной».
+        var all = NotificationCategoryInfo.All.Length;
+        _services.Cfg.SetMyEmailCategories(picked.Count == all ? Array.Empty<string>() : picked);
+        RefreshMyEmailHint();
+    }
+
+    private void MyEmail_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        _services.Cfg.SetMyEmail(MyEmailInput.Text);
+        RefreshMyEmailHint();
+    }
+
+    private void RefreshMyEmailHint()
+    {
+        var mine = _services.Cfg.MyEmail();
+        if (mine.Length == 0)
+        {
+            MyEmailHint.Text = "Адрес не указан — письма приходят по общему списку без ограничений.";
+            return;
+        }
+
+        var inRules = EmailRouting.ToSubscriptions(_services.Db.GetEmailRules())
+            .Any(sub => string.Equals(sub.Recipient, mine, StringComparison.OrdinalIgnoreCase));
+
+        // Честно говорим, если адреса нет в общем списке: личная настройка рассылку не РАСШИРЯЕТ,
+        // и человек иначе ждал бы писем, которых никто ему не назначал.
+        MyEmailHint.Text = inRules
+            ? "Адрес есть в общем списке — отмеченное выше и будет приходить."
+            : "Этого адреса нет в общем списке рассылки, поэтому письма на него не идут. "
+              + "Попросите администратора добавить адрес — ограничения отсюда применятся сразу.";
+    }
+
+    /// <summary>Категории уведомлений — те же, что были в окне истории. Настройка машинная и к почте
+    /// отношения не имеет, но стоит рядом намеренно: человек приходит сюда с вопросом «что мне
+    /// приходит», а не «где хранится эта галка».</summary>
+    private void LoadNotificationCategories()
+    {
+        NotificationCategoriesPanel.Children.Clear();
+        foreach (var (category, label) in NotificationCategoryInfo.All)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
+
+            var name = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(name, 0);
+
+            var shown = new CheckBox
+            {
+                Content = "Показывать",
+                IsChecked = _services.Cfg.IsNotificationCategoryEnabled(category),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var counted = new CheckBox
+            {
+                Content = "Непрочитанным",
+                IsChecked = _services.Cfg.IsNotificationCategoryCountedUnread(category),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var captured = category;
+            shown.Checked += (_, _) => _services.Cfg.SetNotificationCategoryEnabled(captured, true);
+            shown.Unchecked += (_, _) => _services.Cfg.SetNotificationCategoryEnabled(captured, false);
+            counted.Checked += (_, _) => _services.Cfg.SetNotificationCategoryCountedUnread(captured, true);
+            counted.Unchecked += (_, _) => _services.Cfg.SetNotificationCategoryCountedUnread(captured, false);
+            Grid.SetColumn(shown, 1);
+            Grid.SetColumn(counted, 2);
+
+            row.Children.Add(name);
+            row.Children.Add(shown);
+            row.Children.Add(counted);
+            NotificationCategoriesPanel.Children.Add(row);
+        }
+    }
+
     private void LoadEmailTab()
     {
+        LoadMyEmailSection();
+        LoadNotificationCategories();
+
         // Списка категорий здесь больше нет: что присылать на адрес, отмечается галочками в окне
         // рассылки (EmailSubscriptionDialog) — выпадающий список позволял выбрать ровно одно.
 

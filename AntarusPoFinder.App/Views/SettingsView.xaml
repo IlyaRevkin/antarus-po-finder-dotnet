@@ -52,7 +52,7 @@
                 <TextBlock Text="Хранилище" Style="{StaticResource NavButtonContentText}"/>
             </Button>
             <Button x:Name="TabBtnEmail" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
-                <TextBlock Text="Почта" Style="{StaticResource NavButtonContentText}"/>
+                <TextBlock Text="Уведомления и почта" Style="{StaticResource NavButtonContentText}"/>
             </Button>
             <Button x:Name="TabBtnQuickApps" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Быстрый доступ" Style="{StaticResource NavButtonContentText}"/>
@@ -837,7 +837,40 @@
 
                 <StackPanel x:Name="EmailTab" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
-                               Text="Бета. Уведомления программы можно дублировать на почту — это именно дубль: всё, что уходит письмом, по-прежнему остаётся в колокольчике. Не дошёдшее письмо не повторяется и не копится в очереди; проверить связь можно кнопкой ниже."/>
+                               Text="Здесь всё про уведомления сразу: что показывать в программе и что из этого дублировать письмом. Письмо — именно дубль: всё, что ушло почтой, остаётся и в колокольчике."/>
+
+                    <!-- МОЯ ПОЧТА — первым делом и доступно КАЖДОМУ. Жалоба: «наладчик который
+                         заведен не может настроить себе рассылку и опять весь спам получает».
+                         Общий список адресов заводит администратор (ниже), и наладчику туда нельзя
+                         — правя его, он менял бы рассылку коллегам. А сказать «мне только
+                         прошивки» про СВОЙ адрес он вправе, и это работает поверх общего правила.
+                         Настройка машинная, в общий конфиг не уезжает. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="МОЯ ПОЧТА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="Если ваш адрес заведён в общем списке ниже, здесь можно оставить себе только нужное. Пусто — приходит всё, что положено по общему списку."/>
+                            <TextBox x:Name="MyEmailInput" Height="34" Margin="0,0,0,8"
+                                     LostFocus="MyEmail_LostFocus"
+                                     ToolTip="Ваш почтовый ящик — тот же, что в общем списке рассылки"/>
+                            <TextBlock Text="Присылать мне:" Margin="0,0,0,4"/>
+                            <StackPanel x:Name="MyEmailCategoriesPanel"/>
+                            <TextBlock x:Name="MyEmailHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Категории уведомлений — здесь же, а не в отдельном окне истории: «сделай
+                         настройку уведомлений совмещенно с почтой как-то а то не очень удобно
+                         настраивать». Это одна и та же настройка, и раньше за ней приходилось идти
+                         в другое место. -->
+                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="ЧТО ПОКАЗЫВАТЬ В ПРОГРАММЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="Снятая галка «Показывать» отключает категорию на этом компьютере целиком: уведомление не появится нигде, включая историю. «Непрочитанным» — категория появляется, но не копит счётчик на колокольчике."/>
+                            <StackPanel x:Name="NotificationCategoriesPanel"/>
+                        </StackPanel>
+                    </Border>
 
                     <!-- Сводка перед всеми полями, а не после: именно она отвечает на вопрос, ради
                          которого сюда заходят. Жалоба: «проверил почту, тестовое письмо дошло, опубликовал
@@ -846,7 +879,10 @@
                         <TextBlock x:Name="EmailReadyText" TextWrapping="Wrap"/>
                     </Border>
 
-                    <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+                    <!-- Настройки СЕРВЕРА — администраторские: это реквизиты конторы, и правит их
+                         один человек. Наладчику на этой вкладке нужна своя рассылка (блок «МОЯ
+                         ПОЧТА» выше), а не адрес SMTP. -->
+                    <Border x:Name="EmailServerCard" Style="{StaticResource CardBorder}" Margin="0,0,0,12">
                         <StackPanel>
                             <TextBlock Text="ПОЧТОВЫЙ СЕРВЕР" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
@@ -991,7 +1027,9 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource CardBorder}">
+                    <!-- Общий список адресов — тоже администраторский: правя его, человек меняет
+                         рассылку КОЛЛЕГАМ. Себе каждый настраивает в блоке «МОЯ ПОЧТА» выше. -->
+                    <Border x:Name="EmailRulesCard" Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="КОМУ ЧТО ПРИСЫЛАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <!-- Одна кнопка вместо «список категорий + поле адреса»: рассылка

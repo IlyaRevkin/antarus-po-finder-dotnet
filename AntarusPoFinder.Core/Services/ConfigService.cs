@@ -547,6 +547,32 @@ public class ConfigService
     public void SetEmailCategories(IEnumerable<string> categories) =>
         Set("email_categories", string.Join(",", categories.Select(c => c.Trim()).Where(c => c.Length > 0)));
 
+    /// <summary>ЛИЧНАЯ РАССЫЛКА ЭТОГО ЧЕЛОВЕКА: свой адрес и свой набор категорий.
+    ///
+    /// Жалоба Ильи 16.10.2026: «наладчик который заведен не может настроить себе рассылку и опять
+    /// весь спам получает».
+    ///
+    /// Почему отдельно от общих правил. Правила «кому что слать» — настройка КОНТОРЫ: их заводит
+    /// администратор, и они едут в общем конфиге на все машины. Наладчику туда нельзя: правя общий
+    /// список, он менял бы рассылку коллегам. А настроить себе он обязан — иначе получает всё
+    /// подряд и перестаёт читать вовсе.
+    ///
+    /// Поэтому личная подписка живёт ЛОКАЛЬНО, на машине человека, и в общий конфиг не уезжает
+    /// (ключи перечислены в ConfigSyncService.SkipKeys: обмен идёт по ЧЁРНОМУ списку, и без этого
+    /// личная настройка уехала бы коллегам — поймано тестом). Складывается с общими правилами: адрес получает то, что
+    /// разрешено ему лично, а если личной настройки нет — поведение ровно прежнее.</summary>
+    public string MyEmail() => Get("my_email").Trim();
+
+    public void SetMyEmail(string value) => Set("my_email", (value ?? "").Trim());
+
+    /// <summary>Категории ЛИЧНОЙ рассылки. Пусто — «всё подряд», как и у общих правил: настройка,
+    /// появившаяся пустой, обязана означать «как было».</summary>
+    public IReadOnlyList<string> MyEmailCategories() =>
+        Get("my_email_categories").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    public void SetMyEmailCategories(IEnumerable<string> categories) =>
+        Set("my_email_categories", string.Join(",", categories.Select(c => c.Trim()).Where(c => c.Length > 0)));
+
     public EmailScheduleSettings EmailDelivery() => new(
         Mode: EmailMode(), DigestHours: EmailDigestHours(), DailyAt: EmailDailyAt(),
         QuietHoursEnabled: EmailQuietEnabled(), QuietFrom: EmailQuietFrom(), QuietTo: EmailQuietTo(),

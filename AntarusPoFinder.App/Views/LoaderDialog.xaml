@@ -31,8 +31,17 @@
 
         <!-- Имя файла подписью, а не полем ввода: полный путь — в подсказке при наведении,
              сменить файл можно в «Дополнительно» ниже. -->
-        <TextBlock Grid.Row="1" x:Name="SourceLabel" Style="{StaticResource MutedText}"
-                   TextTrimming="CharacterEllipsis" Margin="0,0,0,10"/>
+        <!-- ЧТО ЗА ОБЪЕКТ — в шапке, рядом с именем файла, а не мелочью в строке состояния внизу.
+             Это главный ответ на вопрос «куда я сейчас лью», и читать его надо сверху, вместе с
+             названием версии. Значок на полосе ниже — то же самое боковым зрением. -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <Border x:Name="MotifChip" Visibility="Collapsed" CornerRadius="10" Padding="10,2"
+                    Margin="0,0,10,0" BorderThickness="1">
+                <TextBlock x:Name="MotifLabel" FontWeight="SemiBold" FontSize="11"/>
+            </Border>
+            <TextBlock x:Name="SourceLabel" Style="{StaticResource MutedText}"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+        </StackPanel>
 
         <Border Grid.Row="2" x:Name="UnavailableBanner" Style="{StaticResource CardBorder}" Margin="0,0,0,10"
                 Visibility="Collapsed"
@@ -49,6 +58,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -59,17 +69,32 @@
                  минуты, и всё это время на экране должно быть видно, ЧТО шьётся, а не только
                  проценты. Значок и подпись рядом — чтобы прочитать можно было и прямо, не только
                  боковым зрением. Незнакомое оборудование выглядит ровно как раньше. -->
-            <Grid Grid.Row="0" Grid.Column="0">
+            <!-- СХЕМА ОБЪЕКТА над полосой: что именно сейчас происходит — вода идёт из приёмника
+                 через насос в напор, стоки поднимаются из колодца, тепло ходит по кругу. Значка в
+                 24 пикселя для этого мало («стилизации мало»), а картинку линиями можно растянуть
+                 на любую ширину и покрасить кистью темы. Свёрнута, когда объект не опознан. -->
+            <Path Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="MotifScheme"
+                  Visibility="Collapsed" Height="44" Margin="0,0,0,10"
+                  Stretch="Fill" HorizontalAlignment="Stretch"
+                  StrokeThickness="1.6" StrokeLineJoin="Round"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.85"/>
+
+            <Grid Grid.Row="1" Grid.Column="0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Path Grid.Column="0" x:Name="MotifIcon" Width="18" Height="18" Margin="0,0,8,0"
+                <!-- ⚠️ ОБВОДКА, а не заливка: фигуры нарисованы контурами (корпус насоса — окружность,
+                     волны тепла — линии), и Fill превращал их в бесформенное пятно. Именно это
+                     выглядело «кривой стилизацией». Размер 24, а не 18: на 18 пикселях рисунок не
+                     читается вовсе, а он здесь ради того, чтобы читаться боковым зрением. -->
+                <Path Grid.Column="0" x:Name="MotifIcon" Width="24" Height="24" Margin="0,0,10,0"
                       Stretch="Uniform" VerticalAlignment="Center" Visibility="Collapsed"
-                      Fill="{DynamicResource AccentBrush}"/>
+                      StrokeThickness="1.8" StrokeLineJoin="Round" StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"/>
                 <Grid Grid.Column="1">
                     <ProgressBar x:Name="Progress"
-                                 Height="14" Minimum="0" Maximum="100" Value="0"
+                                 Height="18" Minimum="0" Maximum="100" Value="0"
                                  Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource BgInputBrush}"
                                  BorderBrush="{DynamicResource BorderBrush2}"/>
                     <!-- ПОТОК поверх полосы: у напорной станции бежит быстро, у канализационной
@@ -78,9 +103,9 @@
                          Полупрозрачный и тонкий намеренно: заливка идёт минуты, и мигалка во весь
                          экран на четвёртом часу невыносима. IsHitTestVisible=False — чтобы слой не
                          перехватывал мышь у полосы под ним. -->
-                    <Border x:Name="FlowOverlay" Height="14" Visibility="Collapsed"
+                    <Border x:Name="FlowOverlay" Height="18" Visibility="Collapsed"
                             IsHitTestVisible="False" ClipToBounds="True">
-                        <Rectangle x:Name="FlowStripe" Width="46" HorizontalAlignment="Left" Opacity="0.35">
+                        <Rectangle x:Name="FlowStripe" Width="64" HorizontalAlignment="Left" Opacity="0.5">
                             <Rectangle.Fill>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                                     <GradientStop Offset="0" Color="Transparent"/>
@@ -95,12 +120,11 @@
                     </Border>
                 </Grid>
             </Grid>
-            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="PercentLabel"
+            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PercentLabel"
                        VerticalAlignment="Center" Margin="10,0,0,0" Text=""/>
-            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,4,0,0">
+            <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,4,0,0">
                 <TextBlock x:Name="StageLabel" Style="{StaticResource MutedText}" Text="Запуск…"/>
-                <TextBlock x:Name="MotifLabel" Style="{StaticResource MutedText}" Margin="12,0,0,0"
-                           Text="" Visibility="Collapsed"/>
+
                 <TextBlock x:Name="ElapsedLabel" Style="{StaticResource MutedText}"
                            Margin="16,0,0,0" FontFamily="Consolas" Text="00:00"
                            Visibility="Collapsed">

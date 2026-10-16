@@ -107,6 +107,11 @@ public partial class LoaderDialog : Window
     /// <see cref="PlcPreparationDialog"/>). null — вопрос не задавали (сборка LFS).</summary>
     private readonly PlcPreparationAnswer? _preparation;
 
+    /// <summary>Окно открыто только ради снимка (см. UiSnapshotService): операция не запускается.
+    /// Нужно потому, что стилизацию полосы иначе не проверить ничем — на страницах её нет, а на
+    /// живой заливке её видит только наладчик у шкафа.</summary>
+    private readonly bool _snapshotOnly;
+
     public LoaderDialog(
         ConfigService cfg,
         LoaderJob job,
@@ -114,8 +119,10 @@ public partial class LoaderDialog : Window
         IAppHost? host = null,
         LongOperationRegistry? registry = null,
         ILongOperationLease? lease = null,
-        Action<bool>? onFinished = null)
+        Action<bool>? onFinished = null,
+        bool snapshotOnly = false)
     {
+        _snapshotOnly = snapshotOnly;
         InitializeComponent();
         _cfg = cfg;
         _job = job;
@@ -179,7 +186,9 @@ public partial class LoaderDialog : Window
 
         // Старт сразу после первой отрисовки: оператор видит окно с прогрессом, а не пустую форму,
         // которую надо «завести» второй кнопкой.
-        Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => _ = RunAsync()));
+        // В режиме снимка окно только ПОКАЗЫВАЕТСЯ: лезть в Segnetics Loader ради картинки нельзя.
+        if (!_snapshotOnly)
+            Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => _ = RunAsync()));
 
         Task.Run(() =>
         {
@@ -488,15 +497,26 @@ public partial class LoaderDialog : Window
 
         var caption = EquipmentMotifResolver.Caption(motif);
         MotifLabel.Text = caption;
-        MotifLabel.Visibility = Visibility.Visible;
+        MotifChip.Visibility = Visibility.Visible;
 
         // Ключ кисти, а не кисть: тему могут переключить прямо во время заливки.
         var brushKey = EquipmentMotifArt.BrushKey(motif);
         Progress.SetResourceReference(ForegroundProperty, brushKey);
-        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
+        // Обводка, а не заливка: фигуры контурные (см. EquipmentMotifArt).
+        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
+        MotifChip.SetResourceReference(BorderBrushProperty, brushKey);
+        MotifLabel.SetResourceReference(ForegroundProperty, brushKey);
         MotifIcon.Data = EquipmentMotifArt.Icon(motif);
         MotifIcon.ToolTip = caption;
         MotifIcon.Visibility = Visibility.Visible;
+
+        var scheme = EquipmentMotifArt.Scheme(motif);
+        if (!scheme.IsEmpty())
+        {
+            MotifScheme.Data = scheme;
+            MotifScheme.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
+            MotifScheme.Visibility = Visibility.Visible;
+        }
 
         StartFlowAnimation(motif);
     }
@@ -1095,4 +1115,10 @@ public partial class LoaderDialog : Window
             ? (System.Windows.Media.Brush)FindResource("TextMutedBrush")
             : (System.Windows.Media.Brush)FindResource(brushKey);
     }
+
+    /// <summary>Окно загрузки «как оно выглядит», без запуска операции — для автоматического
+    /// прогона по экранам (UiSnapshotService). Отдельной фабрикой, а не публичным флагом в обычном
+    /// конструкторе: случайно открыть рабочее окно в режиме «ничего не делать» нельзя.</summary>
+    public static LoaderDialog CreateForSnapshot(LoaderJob job) =>
+        new(new ConfigService(new Core.Data.Database(ConfigService.DbPath)), job, snapshotOnly: true);
 }
