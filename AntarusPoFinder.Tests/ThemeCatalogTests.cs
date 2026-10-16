@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -28,7 +28,13 @@ public class ThemeCatalogTests
         var doc = XDocument.Load(Path.Combine(ThemesDir, dictionary + ".xaml"));
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         return doc.Descendants()
-            .Where(e => e.Name.LocalName is "Color" or "SolidColorBrush")
+            // ФОРМА тоже считается ключом темы, не только цвет. Скругления и отступы
+            // (CardCorner/NavCorner/ButtonCorner/ControlCorner/CardPadding/CardShadowOpacity) стили
+            // читают через DynamicResource, и тема, где такой ключ забыли, НЕ падает: WPF молча
+            // подставляет ноль, и экран выходит с прямыми углами вместо скруглённых. Заметно это
+            // только глазами и только на той теме, которую забыли открыть.
+            .Where(e => e.Name.LocalName is "Color" or "SolidColorBrush"
+                                         or "CornerRadius" or "Thickness" or "Double")
             .Select(e => e.Attribute(x + "Key")?.Value)
             .Where(k => !string.IsNullOrEmpty(k))
             .Select(k => k!)
