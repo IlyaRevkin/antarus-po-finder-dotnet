@@ -209,6 +209,7 @@ public partial class FirmwareCard : UserControl
         Result = result;
 
         NameLabel.Text = result.Name;
+        ShowMotif(result);
         // НОМЕР ВЕРСИИ У ОПЦ ПОКАЗЫВАЕТСЯ С МЕТКАМИ заявки и заводского номера — «2.1.0004.0002_(47137)»,
         // а не «2.1.0004.0002». Это ровно то, что уезжает в буфер по «Копировать», и показывать здесь
         // другое было бы обманом: человек видит одно, вставляет другое. Жалоба дословно: «условно
@@ -812,5 +813,27 @@ public partial class FirmwareCard : UserControl
             CopyButton.Content = original;
         };
         timer.Start();
+    }
+
+    /// <summary>ЗНАЧОК ОБЪЕКТА перед названием: насосная, канализационная, тепловой пункт, задвижка.
+    ///
+    /// Зачем в выдаче. Поиск — это столбик одинаковых по виду карточек, и «НГР-КПЧ» от «НГР-КНС»
+    /// отличается одной буквой в середине строки. Взгляд их не разделяет, а шкафы это разные, и
+    /// прошивка от одного в другом — не опечатка, а выезд. Цветной знак слева различает их раньше,
+    /// чем прочитано название, — тем же цветом и тем же рисунком, что потом показывает окно
+    /// загрузки (см. EquipmentMotifArt): человек читает их как один знак.
+    ///
+    /// Только в бете: это переделка 2.0, а обе сборки идут из одного дерева.</summary>
+    private void ShowMotif(HierarchyResult result)
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        var motif = EquipmentMotifResolver.For(result.Name, result.Controller);
+        if (motif == EquipmentMotif.Neutral) return;
+
+        MotifIcon.Data = EquipmentMotifArt.Icon(motif);
+        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, EquipmentMotifArt.BrushKey(motif));
+        MotifIcon.ToolTip = EquipmentMotifResolver.Caption(motif);
+        MotifIcon.Visibility = Visibility.Visible;
     }
 }

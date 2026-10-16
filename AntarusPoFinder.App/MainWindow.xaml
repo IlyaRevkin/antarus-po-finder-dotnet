@@ -665,6 +665,8 @@
                     <ColumnDefinition Width="Auto"/>
                     <!-- Колокольчик уведомлений — см. ниже, последним в ряду показателей. -->
                     <ColumnDefinition Width="Auto"/>
+                    <!-- Значок настроек рядом с колокольчиком (бета 2.0). -->
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Переехали сюда из сайдбара: там они стояли в списке кнопок и читались как ещё
@@ -806,6 +808,24 @@
                                    Foreground="{DynamicResource TextOnAccentBrush}"/>
                     </Border>
                 </Grid>
+
+                <!-- НАСТРОЙКИ — значком рядом с уведомлениями (бета 2.0). Просьба Ильи: «в целом
+                     настройки можно значком рядом с уведомлениями сделать чтобы не занимало лишнее
+                     место». Раньше это была широкая кнопка внутри свёрнутой секции
+                     «ДОПОЛНИТЕЛЬНО» — то есть два клика до экрана, куда ходят по делу.
+
+                     Оформление один в один как у колокольчика слева: два значка в одной строке,
+                     разъехавшись на пару пикселей или бордюр, сразу читаются как недоделка. -->
+                <Button Grid.Column="6" x:Name="SettingsIconButton" Style="{StaticResource IconButton}"
+                        Width="20" Height="20" Padding="0" Margin="12,0,0,0"
+                        VerticalAlignment="Center" BorderThickness="0" Background="Transparent"
+                        Visibility="Collapsed"
+                        Command="{Binding NavigateCommand}" CommandParameter="settings"
+                        ToolTip="Настройки">
+                    <Path Data="{StaticResource Icon.Settings}" Stretch="Uniform" Width="13" Height="13"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1.6" StrokeLineJoin="Round"/>
+                </Button>
             </Grid>
         </Border>
 

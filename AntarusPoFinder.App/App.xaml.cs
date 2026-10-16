@@ -130,8 +130,10 @@ public partial class App : Application
         // одним обработчиком на весь класс, а не по строчке в каждом из десятков окон.
         ComboBoxWheelGuard.Install();
 
+        Services.UiSnapshotService.Note("старт: создаю AppServices");
         var services = new AppServices();
         _services = services;
+        Services.UiSnapshotService.Note("AppServices готовы");
 
         // Настройки → Общие → «Требовать вход по AD при запуске» (per-machine, off by default —
         // see ConfigService.AdRequireLogin). AdLastLogin is whichever login last authenticated on
@@ -142,7 +144,12 @@ public partial class App : Application
         // opening MainWindow half-authenticated.
         var lastLogin = services.Cfg.AdLastLogin();
         var sessionValid = AdSessionService.IsValid(services.Db, lastLogin, DateTime.Now);
-        if (AdSessionService.ShouldPromptAtStartup(services.Cfg.AdRequireLogin(), sessionValid))
+        // В режиме самоснимка окно входа пропускаем: прогон идёт без человека, вводить логин
+        // некому, и приложение просто висело бы на диалоге — так и случилось при первых запусках.
+        // К безопасности это отношения не имеет: режим включается переменной окружения на
+        // изолированном профиле, а не настройкой, которая могла бы приехать с чужой машины.
+        if (!Services.UiSnapshotService.Enabled
+            && AdSessionService.ShouldPromptAtStartup(services.Cfg.AdRequireLogin(), sessionValid))
         {
             // Default ShutdownMode (OnLastWindowClose) would otherwise auto-shutdown the moment this
             // dialog — the only open window so far — closes, whether it succeeded or not, racing the
@@ -173,7 +180,20 @@ public partial class App : Application
         }
 
         ShutdownMode = ShutdownMode.OnLastWindowClose;
-        var window = new MainWindow(services);
+        Services.UiSnapshotService.Note("создаю главное окно");
+        MainWindow window;
+        try
+        {
+            window = new MainWindow(services);
+        }
+        catch (Exception ex)
+        {
+            // В режиме прогона исключение построения окна обязано попасть в журнал целиком: без
+            // него на экране только «Ошибка» в окне, которое некому прочитать.
+            Services.UiSnapshotService.Note("ОШИБКА построения окна: " + ex);
+            throw;
+        }
+        Services.UiSnapshotService.Note("главное окно создано");
         MainWindow = window;
 
         // Set BEFORE Show() so the window never flashes visible-then-minimizes — see

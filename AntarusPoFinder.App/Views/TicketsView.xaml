@@ -11,7 +11,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Тикеты" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="0" x:Name="PageTitle" Text="Тикеты" Style="{StaticResource TitleText}" Margin="0,0,0,4"/>
 
         <!-- Две вкладки, а не один список с отбором. Жалоба Ильи: «отправил тестовый баг, оно
              улетело в общие тикеты, вкладка баги прошивок отдельно должно быть».
@@ -119,7 +119,7 @@
             </DataGrid.CellStyle>
             <DataGrid.Columns>
                 <DataGridTextColumn x:Name="TypeColumn" Header="Тип" Binding="{Binding TypeLabel}" Width="110"/>
-                <DataGridTextColumn x:Name="SeverityColumn" Header="Критичность" Binding="{Binding SeverityLabel}" SortMemberPath="SeverityOrder" Width="100"/>
+                <DataGridTextColumn x:Name="SeverityColumn" Header="Критичность" Binding="{Binding SeverityLabel}" SortMemberPath="SeverityOrder" Width="120"/>
                 <DataGridTextColumn x:Name="FwColumn" Header="Прошивка" Binding="{Binding FwLabel}" Width="180">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">

@@ -99,7 +99,13 @@ public partial class TicketsView : UserControl
         _host = host;
         _fwBugsOnly = fwBugsOnly;
         _fwBugsTab = fwBugsOnly;
-        if (fwBugsOnly) TabsRow.Visibility = Visibility.Collapsed;
+        if (fwBugsOnly)
+        {
+            TabsRow.Visibility = Visibility.Collapsed;
+            // Заголовок обязан совпадать с пунктом меню, по которому сюда пришли: страница «Баги
+            // прошивок», открывающаяся словом «Тикеты», читается как «не туда попал».
+            PageTitle.Text = "Баги прошивок";
+        }
 
         // «Баг прошивки» здесь НЕ предлагается намеренно: такой тикет осмыслен только вместе со
         // ссылкой на конкретную прошивку, а её может подставить только карточка выдачи (жучок). Заведённый

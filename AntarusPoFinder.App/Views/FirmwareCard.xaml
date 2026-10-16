@@ -15,10 +15,21 @@
                     <!-- Первая колонка — под значок «ОПЦ»: Auto, поэтому у обычной прошивки (значок
                          свёрнут) она схлопывается в ноль и имя начинается от края, как и раньше. -->
                     <ColumnDefinition Width="Auto"/>
+                    <!-- Значок объекта (насосная / КНС / тепловой пункт) — тоже Auto и тоже
+                         схлопывается, когда объект не опознан. -->
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
+                <!-- ЧТО ЭТО ЗА ОБЪЕКТ — значком, перед названием. Выдача поиска это столбик
+                     одинаковых по виду карточек, и «НГР-КПЧ» от «НГР-КНС» в нём отличается одной
+                     буквой: взгляд их не разделяет, а ставятся они в совершенно разные шкафы.
+                     Цветной знак слева различает их раньше, чем прочитано название.
+                     Видно только в бете (см. ShowMotif) — переделка 2.0. -->
+                <Path Grid.Column="1" x:Name="MotifIcon" Visibility="Collapsed"
+                      Width="15" Height="15" Margin="0,0,7,0" Stretch="Uniform"
+                      VerticalAlignment="Center"/>
                 <!-- Значок «ОПЦ» — САМЫМ ПЕРВЫМ, до названия. Сначала он стоял у номера версии, то
                      есть в правом углу, и не попадал в глаз: «опц давай писать в начале карточки, а
                      не в конце у версии, а то не бросается в глаза». Слева от имени его читают
@@ -31,15 +42,15 @@
                     <TextBlock Text="ОПЦ" FontSize="11" FontWeight="Bold"
                                Foreground="{DynamicResource TextOnAccentBrush}"/>
                 </Border>
-                <TextBlock Grid.Column="1" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock Grid.Column="2" x:Name="NameLabel" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="3" x:Name="VersionLabel" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 <!-- Жучок рядом с номером версии и ЗНАЧКОМ, а не кнопкой в ряду действий.
                      Кнопка внизу выглядела наравне с «Загрузить» и «Открыть HMI» — тем, чем пользуются каждый день,
                      хотя жалоба бывает раз в месяц. Здесь он при версии, к которой и относится.
 
                      Собственный обработчик с Handled=true обязателен: вся шапка по нажатию копирует
                      номер версии, и без этого нажатие на жучка заодно клало бы в буфер номер. -->
-                <Border Grid.Column="3" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
+                <Border Grid.Column="4" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
                         Padding="6,2,0,2" VerticalAlignment="Center"
                         MouseLeftButtonUp="BugIcon_Click"
                         ToolTip="Сообщить о баге в этой прошивке">

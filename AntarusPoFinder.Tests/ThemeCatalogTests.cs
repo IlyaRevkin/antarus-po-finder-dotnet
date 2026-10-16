@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using AntarusPoFinder.App;
+using AntarusPoFinder.Core.Domain;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -85,9 +86,14 @@ public class ThemeCatalogTests
     {
         var available = ThemeCatalog.Available.Select(t => t.Id).ToList();
 
+        // Светлая и тёмная есть всегда — это рабочий минимум.
         Assert.Contains("light", available);
         Assert.Contains("dark", available);
-        Assert.DoesNotContain("material", available);
-        Assert.DoesNotContain("glass", available);
+
+        // А новые — ровно по признаку сборки. Утверждение написано так, чтобы тест был осмысленным
+        // в ОБЕИХ конфигурациях: в стабильной он требует, чтобы их не было, в бете — чтобы были.
+        // Проверка «просто нет» проходила бы в бете мимо и молчала там, где как раз и важна.
+        Assert.Equal(AppIdentity.IsBeta, available.Contains("material"));
+        Assert.Equal(AppIdentity.IsBeta, available.Contains("glass"));
     }
 }

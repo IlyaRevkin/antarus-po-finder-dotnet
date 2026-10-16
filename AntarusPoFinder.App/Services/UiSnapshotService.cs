@@ -1,0 +1,144 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using AntarusPoFinder.App.ViewModels;
+
+namespace AntarusPoFinder.App.Services;
+
+/// <summary>ЖИВОЙ ПРОГОН, КОТОРЫЙ ПРИЛОЖЕНИЕ ДЕЛАЕТ САМО.
+///
+/// Правило проекта — перед релизом посмотреть окна глазами: сборка и тесты не ловят ни контраст, ни
+/// наезжающий текст, ни вёрстку в узком окне. Проблема в том, что снять окно снаружи получается не
+/// всегда: на машине без активного рабочего стола (отключённая сессия, RDP в фоне) и свежеоткрытое
+/// окно, и PrintWindow дают белый прямоугольник — у окна просто нет кадра в кэше DWM. На этом
+/// прогон срывался уже дважды.
+///
+/// Здесь другой путь: приложение рисует само себя в картинку изнутри, через RenderTargetBitmap. Это
+/// настоящее визуальное дерево с настоящими стилями и настоящей темой — не «проверка, что контрол
+/// создаётся», как в тестах рендера, а то самое окно, которое увидит человек. Рабочий стол при этом
+/// не нужен вовсе.
+///
+/// ⚠️ Включается ТОЛЬКО переменной окружения <c>ANTARUS_UI_SNAPSHOT_DIR</c> — тем же способом, что
+/// и остальные испытательные швы этого проекта (ANTARUS_TEST_APPDATA, ANTARUS_TEST_INSTANCE_ID).
+/// Без неё класс не делает ничего и в обычном запуске не участвует.</summary>
+public static class UiSnapshotService
+{
+    public static string? Directory => Environment.GetEnvironmentVariable("ANTARUS_UI_SNAPSHOT_DIR");
+
+    public static bool Enabled => !string.IsNullOrWhiteSpace(Directory);
+
+    /// <summary>Строка в журнал прогона. Публичная, потому что отметки нужны и на пути запуска
+    /// приложения: первые попытки прогона повисали ДО главного окна, и без следа было непонятно, на
+    /// чём именно — окно входа, подключение диска или что-то ещё.</summary>
+    public static void Note(string line)
+    {
+        if (!Enabled) return;
+        try
+        {
+            System.IO.Directory.CreateDirectory(Directory!);
+            File.AppendAllText(Path.Combine(Directory!, "_log.txt"),
+                $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+        }
+        catch { /* журнал прогона не должен мешать самому прогону */ }
+    }
+
+    /// <summary>Темы, которые надо обойти. По умолчанию — все доступные: смысл прогона как раз в
+    /// том, чтобы увидеть каждую, а не ту, что была включена последней.</summary>
+    private static IEnumerable<AppTheme> Themes()
+    {
+        var wanted = Environment.GetEnvironmentVariable("ANTARUS_UI_SNAPSHOT_THEMES");
+        if (string.IsNullOrWhiteSpace(wanted)) return ThemeCatalog.Available;
+
+        var ids = wanted.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return ids.Select(ThemeCatalog.Resolve).Distinct();
+    }
+
+    /// <summary>Снять все страницы во всех темах и закрыть приложение.
+    ///
+    /// Только навигация и снимок: никаких нажатий. Прогон идёт на изолированном профиле, но страницы
+    /// ходят на общий диск и в чужие данные — трогать там что-либо ради картинки нельзя.</summary>
+    public static async void RunAndExit(Window window, MainWindowViewModel vm, AppServices services)
+    {
+        // Прогон идёт под АДМИНИСТРАТОРОМ: у остальных ролей половина страниц и вкладок скрыта, и
+        // проверить глазами то, чего не видно, нельзя. Профиль изолированный, на чужие права это
+        // не влияет никак.
+        if (!string.Equals(vm.CurrentRole, "administrator", StringComparison.Ordinal))
+            vm.SwitchRole("administrator");
+
+        var dir = Directory!;
+        System.IO.Directory.CreateDirectory(dir);
+
+        // Журнал пишется ПО ХОДУ, а не в конце: если прогон где-то повиснет (страница лезет на
+        // недоступный сетевой диск и ждёт таймаута), итоговый файл не появился бы вовсе, и было бы
+        // неизвестно, докуда дошли. Первая же находка такого прогона — именно «встало вот здесь».
+        Note($"обход начат, окно {window.ActualWidth:F0}x{window.ActualHeight:F0}, роль {vm.CurrentRole}");
+
+        var pages = RolesConfig.NavItems.Select(n => n.PageId).Append("settings").Distinct().ToList();
+
+        foreach (var theme in Themes())
+        {
+            // Тему ставим через настройку, а не только применением: экраны настроек показывают
+            // ВЫБРАННУЮ тему, и снимок, где применена одна, а в списке значится другая, толкал бы
+            // к ложному выводу «список не работает».
+            services.Cfg.SetTheme(theme.Id);
+            ThemeManager.Apply(theme.Id, ThemeManager.CurrentAccent);
+            await Settle(window);
+
+            foreach (var page in pages)
+            {
+                try
+                {
+                    vm.NavigateCommand.Execute(page);
+                    await Settle(window);
+                    Save(window, Path.Combine(dir, $"{theme.Id}--{page}.png"));
+                    Note($"{theme.Id}/{page}: ok");
+                }
+                catch (Exception ex)
+                {
+                    // Страница, которая не открылась, — это и есть находка прогона. Записываем и
+                    // идём дальше: один сломанный экран не должен прятать состояние остальных.
+                    Note($"{theme.Id}/{page}: ОШИБКА {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+        }
+
+        Note("обход закончен");
+        Application.Current.Shutdown();
+    }
+
+    /// <summary>Дать разметке пересчитаться и отрисоваться.
+    ///
+    /// Именно ожидание, а не синхронная «прокачка очереди»: прогон запускается из обработчика
+    /// отрисовки, то есть УЖЕ в потоке интерфейса, и синхронный Invoke с фоновым приоритетом там
+    /// встаёт намертво — первый же запуск повис на три минуты и не снял ни одного кадра.</summary>
+    private static async System.Threading.Tasks.Task Settle(Window window)
+    {
+        window.UpdateLayout();
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        await System.Threading.Tasks.Task.Delay(120);
+        window.UpdateLayout();
+    }
+
+    private static void Save(Window window, string path)
+    {
+        var width = (int)Math.Ceiling(window.ActualWidth);
+        var height = (int)Math.Ceiling(window.ActualHeight);
+        if (width <= 0 || height <= 0) return;
+
+        // 96 dpi — снимок в логических пикселях, то есть ровно в той сетке, в которой свёрстано
+        // окно. Экран этой машины 125 %, и снимать в его dpi значило бы каждый раз делить на 1.25
+        // при сравнении.
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(window);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
+    }
+}

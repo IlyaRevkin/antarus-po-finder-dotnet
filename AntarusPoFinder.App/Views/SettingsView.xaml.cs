@@ -289,7 +289,14 @@ public partial class SettingsView : UserControl
         // став вкладкой, осталась администраторской ровно так же.
         TabBtnCleanup.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
-        TabBtnTags.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
+        // ТЕГИ: в бете — кнопкой в «Прошивках», а не отдельной пилюлей сверху («пелюль сверху стало
+        // уже слишком много»). Панель при этом одна и та же, просто показывается окном. В стабильной
+        // программе всё остаётся как было: обе сборки идут из одного дерева, и менять привычное
+        // расположение людям посреди рабочего дня незачем.
+        var tagsAllowed = isAdmin || role == "naladchik";
+        var tagsAsButton = AppIdentity.IsBeta && tagsAllowed;
+        TabBtnTags.Visibility = tagsAllowed && !tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
+        OpenTagsBtn.Visibility = tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
         // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
@@ -425,6 +432,16 @@ public partial class SettingsView : UserControl
 
     private string? _renamingTag;
     private bool _addingTag;
+
+    /// <summary>Теги отдельным окном (бета 2.0). Панель НЕ копируется: настоящая уезжает в окно и
+    /// возвращается на место при закрытии — см. DetachedPanelWindow. Поэтому переименование двойным
+    /// щелчком, фильтр и слова-исключения работают там ровно так же, без единой правки.</summary>
+    private void OpenTags_Click(object sender, RoutedEventArgs e)
+    {
+        LoadTagsTab();
+        if (TagsTab.Parent is not Panel origin) return;
+        DetachedPanelWindow.Show(Window.GetWindow(this), "Теги", origin, TagsTab);
+    }
 
     private void LoadTagsTab()
     {

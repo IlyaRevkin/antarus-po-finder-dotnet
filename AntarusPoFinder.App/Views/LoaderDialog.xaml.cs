@@ -126,6 +126,7 @@ public partial class LoaderDialog : Window
         _onFinished = onFinished;
         _isBuild = job.Operation == LoaderOperation.Build;
         _backend = FirmwareLoaderFactory.Create(cfg.LoaderExePath());
+        ApplyEquipmentMotif();
 
         _operationElapsedTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -467,6 +468,85 @@ public partial class LoaderDialog : Window
     /// Возвращает false, только если наладчик сам отказался продолжать после «связи нет»: запретить
     /// заливку из-за неудачной пробы программа не вправе — он может знать лучше (ПЛК ещё грузится,
     /// адрес временный).</summary>
+    /// <summary>Чем показан ход заливки: цвет полосы, значок и подпись под ней.
+    ///
+    /// Просьба Ильи (бета 2.0): «так как у нас компания делает насосные станции блочные тепловые
+    /// пункты КНС и тп… загрузку прошивки полосу у нгр кпч отображать как насосную станцию… КНС как
+    /// будто качает из канализации».
+    ///
+    /// Смысл не в украшении: заливка идёт минуты, и всё это время на экране одна полоса с
+    /// процентами, по которой не видно, в какой шкаф льём. Мотив отвечает на это боковым зрением, а
+    /// подпись словами — прямо. Что за объект, решает EquipmentMotifResolver по названиям из
+    /// справочника; незнакомое оборудование выглядит ровно как раньше.
+    ///
+    /// Цвета берутся из ТЕМЫ (DynamicResource), а не задаются числами: приложение живёт в четырёх
+    /// темах, и захардкоженный синий в «Стекле» выглядел бы заплаткой.</summary>
+    private void ApplyEquipmentMotif()
+    {
+        var motif = EquipmentMotifResolver.For(_job.EquipmentName, _job.ControllerName);
+        if (motif == EquipmentMotif.Neutral) return;
+
+        var caption = EquipmentMotifResolver.Caption(motif);
+        MotifLabel.Text = caption;
+        MotifLabel.Visibility = Visibility.Visible;
+
+        // Ключ кисти, а не кисть: тему могут переключить прямо во время заливки.
+        var brushKey = EquipmentMotifArt.BrushKey(motif);
+        Progress.SetResourceReference(ForegroundProperty, brushKey);
+        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
+        MotifIcon.Data = EquipmentMotifArt.Icon(motif);
+        MotifIcon.ToolTip = caption;
+        MotifIcon.Visibility = Visibility.Visible;
+
+        StartFlowAnimation(motif);
+    }
+
+    /// <summary>Движение потока по полосе. У каждого объекта своё: напорная станция гонит воду
+    /// быстро, канализационная — медленно и тяжело, тепловой пункт не гонит ничего, а греет, и
+    /// потому пульсирует.
+    ///
+    /// Анимация вечная (RepeatBehavior.Forever) и останавливается вместе с закрытием окна — отдельно
+    /// гасить её не нужно: полоса живёт ровно столько, сколько идёт заливка.</summary>
+    private void StartFlowAnimation(EquipmentMotif motif)
+    {
+        FlowOverlay.Visibility = Visibility.Visible;
+        var seconds = EquipmentMotifArt.FlowSeconds(motif);
+
+        if (EquipmentMotifArt.Pulses(motif))
+        {
+            // Тепло: яркость «дышит» на месте. Нижняя граница не ноль — полностью гаснущая полоса
+            // читается как сбой, а не как пульс.
+            var pulse = new System.Windows.Media.Animation.DoubleAnimation(0.12, 0.42,
+                new Duration(TimeSpan.FromSeconds(seconds)))
+            {
+                AutoReverse = true,
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+            };
+            FlowStripe.Width = double.NaN;                       // во всю ширину — греется целиком
+            FlowStripe.HorizontalAlignment = HorizontalAlignment.Stretch;
+            FlowStripe.BeginAnimation(OpacityProperty, pulse);
+            return;
+        }
+
+        // Остальные: светлая полоска бежит слева направо. Ширину берём у самой полосы, а не числом:
+        // окно растягивается, и пробег обязан совпадать с ней, иначе поток «дёргается» на краю.
+        FlowOverlay.SizeChanged += (_, _) => RestartFlowShift(seconds);
+        RestartFlowShift(seconds);
+    }
+
+    private void RestartFlowShift(double seconds)
+    {
+        var width = FlowOverlay.ActualWidth;
+        if (width <= 0) return;
+
+        var run = new System.Windows.Media.Animation.DoubleAnimation(-FlowStripe.Width, width,
+            new Duration(TimeSpan.FromSeconds(seconds)))
+        {
+            RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+        };
+        FlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, run);
+    }
+
     private async Task<bool> PrepareConnectionAsync(CancellationToken cancellationToken)
     {
         var mode = LoaderConnectionSettings.ParseMode(_cfg.LoaderConnectionMode());

@@ -40,7 +40,12 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
     <DefineConstants>$(DefineConstants);BETA</DefineConstants>
     <Version>2.0.0.0</Version>
-    <AssemblyName>AntarusPoFinder.Beta</AssemblyName>
+    <!-- ⚠️ AssemblyName НЕ меняем. Разметка ссылается на ресурсы pack-URI с именем сборки
+         («/AntarusPoFinder.App;component/Themes/…» в ThemeManager, значки окон в диалогах), и
+         переименование сборки ломает их загрузку: бета падала при построении главного окна с
+         FileNotFoundException на собственной сборке. Отличают бету имя продукта, папка установки,
+         ярлык, UpgradeCode и профиль — всё это задаётся установщиком (installer/build.ps1), а имя
+         файла exe переименовывается при сборке. Внутреннее имя сборки для этого не нужно вовсе. -->
   </PropertyGroup>
 
   <ItemGroup>

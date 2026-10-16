@@ -50,6 +50,25 @@ public partial class MainWindow : Window
         // приложения (см. AppUpdateService.CurrentVersionText), так что оба места не могут разойтись.
         SidebarVersionText.Text = $"v{AppUpdateService.CurrentVersionText}";
 
+        // Настройки значком в нижней строке — переделка 2.0 («настройки можно значком рядом с
+        // уведомлениями сделать чтобы не занимало лишнее место»). В стабильной программе значка нет
+        // и кнопка остаётся в «Дополнительно»: обе сборки идут из одного дерева, и переставлять
+        // людям привычное посреди рабочего дня незачем. Показываем значок — убираем кнопку, иначе
+        // одно и то же оказалось бы в двух местах сразу.
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
+        {
+            SettingsIconButton.Visibility = Visibility.Visible;
+            SettingsNavButton.Visibility = Visibility.Collapsed;
+        }
+
+        // Режим самоснимка цепляется к Loaded, а НЕ к ContentRendered. Разница принципиальная: без
+        // активного рабочего стола (отключённая сессия, RDP в фоне) окно до отрисовки не доходит
+        // вовсе, ContentRendered не наступает, и прогон молча не начинался — первые два запуска
+        // провисели без единого кадра и без строчки в журнале. Loaded срабатывает после построения
+        // дерева, то есть ровно тогда, когда рисовать уже есть что.
+        if (Services.UiSnapshotService.Enabled)
+            Loaded += (_, _) => Services.UiSnapshotService.RunAndExit(this, _vm, services);
+
         ContentRendered += MainWindow_ContentRendered;
         InitTrayIcon();
         Closing += MainWindow_Closing;
@@ -167,6 +186,10 @@ public partial class MainWindow : Window
     private void MainWindow_ContentRendered(object? sender, System.EventArgs e)
     {
         ContentRendered -= MainWindow_ContentRendered;
+
+        // В режиме самоснимка обучение не показываем: оно перекрыло бы собой все снимки до единого.
+        if (Services.UiSnapshotService.Enabled) return;
+
         if (!_services.Cfg.OnboardingShown())
             ShowOnboarding(markAsShown: true);
         SetupOnboardingButton();

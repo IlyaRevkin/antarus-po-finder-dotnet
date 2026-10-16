@@ -1428,6 +1428,12 @@
                 <TextBox Grid.Column="0" x:Name="FwFilterInput" Height="36" Margin="0,0,8,0"
                          ToolTip="Фильтр по группе / контроллеру / версии / тегу…" TextChanged="FwFilter_Changed"/>
                 <Button Grid.Column="1" Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshFirmware_Click"/>
+                <!-- Справочник тегов — здесь, рядом с прошивками, которым эти теги и вешают: «ту же
+                     вкладку теги можно сделать кнопкой в прошивка или иерархии где логичней». Сама
+                     панель при этом одна и та же, просто показывается окном (DetachedPanelWindow). -->
+                <Button x:Name="OpenTagsBtn" Grid.Column="1" Content="Теги…" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,96,0" Visibility="Collapsed" Click="OpenTags_Click"
+                        ToolTip="Справочник тегов и слов, которые не показываются, пока их не спросили"/>
             </Grid>
             <Grid Grid.Row="2" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>

@@ -65,7 +65,10 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 # exact "AntarusPoFinder-{version}.exe" name, not the plain "AntarusPoFinder.App.exe" publish uses.
 $exeName = "$namePrefix-$Version.exe"
 $exePath = Join-Path $installerDir $exeName
-$publishedExe = if ($Beta) { "AntarusPoFinder.Beta.exe" } else { "AntarusPoFinder.App.exe" }
+# Публикуется всегда AntarusPoFinder.App.exe: имя сборки у беты то же, иначе ломаются pack-URI
+# ресурсов (см. комментарий в csproj). Бета отличается тем, как файл НАЗЫВАЕТСЯ после копирования и
+# куда ставится, а не тем, как называется сборка внутри.
+$publishedExe = "AntarusPoFinder.App.exe"
 Copy-Item (Join-Path $publishDir $publishedExe) $exePath -Force
 
 # Фикс подлинности обновлений (см. AntarusPoFinder.App/AppUpdateService.cs): файл с голым hex-хешем
