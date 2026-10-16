@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -125,7 +125,10 @@ public static class UiSnapshotService
     {
         window.UpdateLayout();
         await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
-        await System.Threading.Tasks.Task.Delay(120);
+        // 240 мс, а не 120: в бете переход между страницами анимирован (MainWindow.AnimatePageChange,
+        // 160 мс), и на прежней паузе снимок ловил страницу В СЕРЕДИНЕ проявления — полупрозрачной.
+        // Такой кадр читается как «бледная вёрстка» и толкает чинить то, что не сломано.
+        await System.Threading.Tasks.Task.Delay(240);
         window.UpdateLayout();
     }
 

@@ -174,7 +174,7 @@ public partial class SettingsView : UserControl
             LoadFirmwareTab();
             LoadQuickApps();
             ApplyRoleVisibility();
-            CollapseRareTabs();
+            BuildSidebar();
             _reservationCountdownTimer.Start();
         };
         Unloaded += (_, _) => _reservationCountdownTimer.Stop();
@@ -196,6 +196,125 @@ public partial class SettingsView : UserControl
         TabBtnTags, TabBtnTickets, TabBtnHosting, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
         TabBtnCleanup,
     };
+
+    /// <summary>РАЗДЕЛЫ НАСТРОЕК ПО СМЫСЛУ — порядок и группировка бокового списка в бете.
+    ///
+    /// Группы ровно те же, по которым о настройках и говорят вслух: «работа» — то, во что лазят по
+    /// делу; «сервис» — тикеты и хранилище, которые сюда и переехали из бокового меню («тикеты это
+    /// сервисное это убрать надо в настройки»); «оборудование» — лоадер, подключение, печать;
+    /// «администрирование» — то, что трогает один человек на контору и считанные разы.
+    ///
+    /// Порядок внутри групп — от частого к редкому, а не алфавитный: алфавит ставит «Чистку диска»
+    /// рядом с «Общими», и человек каждый раз перечитывает весь список.</summary>
+    private (string Group, Button Button)[] SidebarLayout() => new[]
+    {
+        ("", TabBtnGeneral),
+        ("РАБОТА", TabBtnHierarchy),
+        ("", TabBtnFirmware),
+        ("", TabBtnModeration),
+        ("", TabBtnTags),
+        ("", TabBtnEmail),
+        ("", TabBtnQuickApps),
+        ("СЕРВИС", TabBtnTickets),
+        ("", TabBtnHosting),
+        ("ОБОРУДОВАНИЕ", TabBtnLoader),
+        ("", TabBtnConnection),
+        ("", TabBtnPrinting),
+        ("АДМИНИСТРИРОВАНИЕ", TabBtnReservations),
+        ("", TabBtnUsers),
+        ("", TabBtnCleanup),
+    };
+
+    /// <summary>Какие разделы боковой список пропустил. Пусто — значит ни один не потерян.
+    ///
+    /// Нужно ПРОВЕРКОЙ, а не внимательностью: боковой список перечисляет кнопки вручную
+    /// (SidebarLayout), и вкладка, заведённая в разметке, но забытая там, в бете просто не
+    /// нарисовалась бы — экран настроек молча лишился бы раздела, и заметил бы это пользователь.
+    /// Отдаётся наружу тестам (ViewsRenderTests), а не прячется за #if BETA: проверять надо сборку,
+    /// которую тесты и собирают.</summary>
+    internal string[] TabsMissingFromSidebar()
+    {
+        var listed = SidebarLayout().Select(x => x.Button).ToList();
+        return AllTabButtons()
+            .Where(b => !listed.Any(x => ReferenceEquals(x, b)))
+            .Select(b => b.Name)
+            .ToArray();
+    }
+
+    /// <summary>БОКОВОЙ СПИСОК РАЗДЕЛОВ вместо ленты пилюль (бета 2.0).
+    ///
+    /// Жалоба была дважды: «пелюль сверху стало уже слишком много» и потом, уже по сделанному,
+    /// «поле настроек все ещё плохо выглядит». Первый заход прятал редкие разделы под «Ещё» —
+    /// пилюль стало меньше, но разделы, которые человек ищет глазами, уехали в выпадающее меню, то
+    /// есть стало не лучше, а по-другому плохо.
+    ///
+    /// Здесь разделы стоят столбиком слева, видны все разом и разбиты подзаголовками по смыслу —
+    /// так устроены настройки везде, где их больше горсти: Windows 11, macOS, телефон. Кнопки — те
+    /// же самые объекты, что и в ленте: переключение, подсветка активного, права роли
+    /// (ApplyRoleVisibility) работают ровно как работали, меняется только то, где они нарисованы.
+    ///
+    /// Зовётся ПОСЛЕ ApplyRoleVisibility: кнопки, закрытые ролью, уже скрыты, и заголовок группы,
+    /// в которой не осталось ни одного видимого раздела, не показывается — иначе у наладчика висел
+    /// бы пустой «АДМИНИСТРИРОВАНИЕ».</summary>
+    private void BuildSidebar()
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        // Лента переезжает из своей строки в левую колонку основной строки — и становится
+        // вертикальной. Отдельного контрола под это не заводим: два списка одних и тех же разделов
+        // разъехались бы при первой же добавленной вкладке.
+        Grid.SetRow(TabBarScroll, 2);
+        Grid.SetColumn(TabBarScroll, 0);
+        Grid.SetColumnSpan(TabBarScroll, 1);
+        TabBarScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        TabBarScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        TabBarScroll.Width = 224;
+        TabBarScroll.Margin = new Thickness(0, 0, 20, 0);
+        TabBar.Orientation = Orientation.Vertical;
+
+        Grid.SetColumn(SettingsBody, 1);
+        Grid.SetColumnSpan(SettingsBody, 1);
+
+        TabBtnMore.Visibility = Visibility.Collapsed;
+
+        TabBar.Children.Clear();
+        foreach (var (group, button) in SidebarLayout())
+        {
+            if (group.Length > 0 && GroupHasVisible(group))
+                TabBar.Children.Add(new TextBlock
+                {
+                    Text = group,
+                    Style = (Style)FindResource("MutedText"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(10, 12, 0, 3),
+                });
+
+            // Плотнее, чем в ленте: столбиком разделов полтора десятка, и с прежними отступами
+            // последние («Пользователи», «Чистка диска») уходили за нижний край окна 1280×800 —
+            // видно на снимке первой сборки бокового списка.
+            button.Margin = new Thickness(0, 0, 0, 1);
+            button.Padding = new Thickness(12, 6, 12, 6);
+            button.HorizontalContentAlignment = HorizontalAlignment.Left;
+            TabBar.Children.Add(button);
+        }
+        TabBar.Children.Add(TabBtnMore);
+    }
+
+    /// <summary>Есть ли в группе хоть один раздел, доступный текущей роли. Нужен ровно затем, чтобы
+    /// не рисовать заголовок над пустотой.</summary>
+    private bool GroupHasVisible(string group)
+    {
+        var layout = SidebarLayout();
+        var start = Array.FindIndex(layout, x => x.Group == group);
+        if (start < 0) return false;
+        for (var i = start; i < layout.Length; i++)
+        {
+            if (i > start && layout[i].Group.Length > 0) break;
+            if (layout[i].Button.Visibility == Visibility.Visible) return true;
+        }
+        return false;
+    }
 
     /// <summary>Вкладки, которые в бете уезжают под «Ещё»: нужны считанные разы в месяц, а ряд
     /// занимали наравне с ежедневными («пелюль сверху стало уже слишком много»). Это НЕ урезание
@@ -400,6 +519,12 @@ public partial class SettingsView : UserControl
         // вызова наладчик, открывший Настройки и затем ставший администратором, видел вкладку
         // «Прошивки» вообще без этих трёх кнопок, пока не нажмёт «Обновить».
         UpdateRollbackAccess();
+
+        // Боковой список пересобирается ПОСЛЕ правки видимости: заголовки групп считаются по тому,
+        // что роли видно, а роль меняют и на лету (MainWindowViewModel зовёт этот метод у уже
+        // созданного экрана). Без этого у вчерашнего наладчика, ставшего администратором, новые
+        // разделы были бы видны, а заголовка над ними — нет.
+        BuildSidebar();
     }
 
     // ── Nested-scroll bubbling ───────────────────────────────────────────────

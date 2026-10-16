@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System;
 using System.Diagnostics;
+using System.Linq;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
@@ -45,7 +47,143 @@ public partial class ParamsView : UserControl
         _services = services;
         _host = host;
         Loaded += (_, _) => PopulateCombos();
+
+        // В БЕТЕ ПАРАМЕТРЫ — ВСЕГДА ТАБЛИЦА, без файлового пути: «не зависим от файлов, чиста
+        // старого диска и тп не нужна». Поэтому карточка загрузки файла скрыта, и разовая чистка
+        // двойников на диске не запускается вовсе — чистить нечего, этим путём там уже не ходят.
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
+        {
+            UploadCard.Visibility = Visibility.Collapsed;
+            TablesCard.Visibility = Visibility.Visible;
+            // Список файлов остаётся, но перестаёт быть главным на экране и называется тем, что он
+            // есть: прежний, файловый порядок. Убрать его совсем нельзя — .par по-прежнему нужен
+            // наладчику, чтобы залить настройки в сам частотник конфигуратором вендора.
+            FilesCardTitle.Text = "ФАЙЛЫ ПАРАМЕТРОВ — ПРЕЖНИЙ ПОРЯДОК";
+            Loaded += (_, _) => ReloadTables();
+            return;
+        }
+
         Loaded += (_, _) => _ = CleanDiskDuplicatesOnceAsync();
+    }
+
+    // ── ТАБЛИЦЫ ПАРАМЕТРОВ (бета) ───────────────────────────────────────────────────────────
+    //
+    // Экран без файла: человек видит СПИСОК ТАБЛИЦ, а не список .par, из которых их когда-то
+    // вычитали. Показываются и свободные, и ещё привязанные к файлам — иначе всё накопленное до
+    // беты просто пропало бы с глаз, а перенос («Отвязать от файла») запускать было бы не из чего.
+
+    private sealed class ParamTableRow
+    {
+        public ParamTable Source { get; init; } = new();
+        public string Name => Source.Name;
+        public string Manufacturer => string.IsNullOrWhiteSpace(Source.Manufacturer) ? "—" : Source.Manufacturer;
+        public string TagsDisplay => string.IsNullOrWhiteSpace(Source.Tags) ? "—" : Source.Tags;
+        public bool Standalone => Source.DiskPath.Length == 0 && Source.Filename.Length == 0;
+        public string Origin => Standalone ? "свободная" : Source.Filename;
+        public string DateOnly
+        {
+            get
+            {
+                var stamp = Source.UpdatedAt.Length > 0 ? Source.UpdatedAt : Source.CreatedAt;
+                return stamp.Length >= 10 ? stamp[..10] : stamp;
+            }
+        }
+    }
+
+    private List<ParamTableRow> _tableRows = new();
+
+    private void ReloadTables()
+    {
+        _tableRows = _services.Db.GetParamTables().Select(t => new ParamTableRow { Source = t }).ToList();
+        ApplyTableFilter();
+    }
+
+    private void ApplyTableFilter()
+    {
+        var query = (TableSearchInput.Text ?? "").Trim();
+        var shown = query.Length == 0
+            ? _tableRows
+            : _tableRows.Where(r =>
+                r.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || r.Source.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || r.Source.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        TablesGrid.ItemsSource = shown;
+        TablesEmptyHint.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        TablesEmptyHint.Text = _tableRows.Count > 0 && shown.Count == 0
+            ? "По запросу ничего не нашлось."
+            : "Таблиц пока нет. «Новая таблица…» заведёт пустую — строки набиваются вручную, файл для этого не нужен.";
+        // Счётчик показывает и сколько ещё не перенесено: пока в списке есть «при файле», переход
+        // на свободные таблицы не закончен, и молчать об этом — значит оставить работу незамеченной.
+        var attached = _tableRows.Count(r => !r.Standalone);
+        TablesCountLabel.Text = attached == 0
+            ? $"Таблиц: {shown.Count}"
+            : $"Таблиц: {shown.Count} · при файлах: {attached}";
+    }
+
+    private void TableSearch_Changed(object sender, TextChangedEventArgs e) => ApplyTableFilter();
+
+    private void NewTable_Click(object sender, RoutedEventArgs e)
+    {
+        OpenTablesWindow(null);
+        ReloadTables();
+    }
+
+    private void OpenTable_Click(object sender, RoutedEventArgs e) => OpenSelectedTable();
+
+    private void TablesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) => OpenSelectedTable();
+
+    private void OpenSelectedTable()
+    {
+        if (TablesGrid.SelectedItem is not ParamTableRow row)
+        {
+            AppMessageBox.Show("Выберите таблицу.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // Таблица при файле открывается В СВОЁМ, файловом окне: там у неё есть привязка к подтипам
+        // шкафов, и показать её «свободной» значило бы спрятать эту привязку до самого переноса.
+        if (row.Standalone) OpenTablesWindow(row.Source.Id);
+        else new ParamTableWindow(_services, _host, row.Source.DiskPath, row.Source.Filename,
+                 row.Source.Filename, row.Source.Id) { Owner = Window.GetWindow(this) }.ShowDialog();
+
+        ReloadTables();
+    }
+
+    private void OpenTablesWindow(int? selectId) =>
+        new ParamTableWindow(_services, _host, "", "", "", selectId) { Owner = Window.GetWindow(this) }.ShowDialog();
+
+    private void DetachTable_Click(object sender, RoutedEventArgs e)
+    {
+        if (TablesGrid.SelectedItem is not ParamTableRow row || row.Source.Id is not int id)
+        {
+            AppMessageBox.Show("Выберите таблицу.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (row.Standalone)
+        {
+            AppMessageBox.Show("Эта таблица уже свободная.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!ParamTableEditing.CanEdit(_services.Cfg.CurrentRole()))
+        {
+            AppMessageBox.Show("Править таблицы параметров может программист или администратор.",
+                "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var answer = AppMessageBox.Show(
+            $"Отвязать «{row.Name}» от файла {row.Source.Filename}?" + Environment.NewLine + Environment.NewLine
+            + "Значения, ревизии и теги остаются — пропадает только привязка к файлу на диске, "
+            + "а вместе с ней и привязка к подтипам шкафов, которая из этого файла выводилась.",
+            "Отвязать от файла", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        _services.Db.DetachParamTableFromFile(id);
+        _host.PushCatalogChange($"Таблица параметров «{row.Name}» отвязана от файла");
+        ReloadTables();
     }
 
     /// <summary>Разовая чистка файлов-двойников «имя (что-то).ext», уже наплодившихся в папках

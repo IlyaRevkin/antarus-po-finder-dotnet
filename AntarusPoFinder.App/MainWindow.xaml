@@ -655,7 +655,18 @@
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
-                <ContentControl Content="{Binding CurrentPageContent}"/>
+                <!-- Страница появляется с лёгким сдвигом снизу и проявлением. Это то, чего не
+                     хватает «перенесённому на ПК мобильному» ощущению: без перехода смена экрана
+                     читается как мигание, с переходом — как движение. Длительность 160 мс выбрана
+                     намеренно короткой: это рабочий инструмент, и ждать анимацию по десять раз на
+                     дню никто не должен. Анимацию запускает код при смене страницы (см.
+                     MainWindow.AnimatePageChange), только в бете. -->
+                <ContentControl x:Name="PageHost" Content="{Binding CurrentPageContent}"
+                                RenderTransformOrigin="0.5,0.5">
+                    <ContentControl.RenderTransform>
+                        <TranslateTransform x:Name="PageShift"/>
+                    </ContentControl.RenderTransform>
+                </ContentControl>
             </Border>
         </Grid>
 

@@ -29,7 +29,12 @@
                  fighting for the same handful of fields read as broken, not compact. Тип шкафа/Подтип
                  paired on one row (same shape, same reasoning as UploadView's "Карта in/out" + "Карта
                  modbus" pairing) trims a full row of height instead. -->
-            <Border Grid.Row="0" Style="{StaticResource CardBorder}">
+            <!-- ЗАГРУЗКА ФАЙЛА — в бете скрыта. Решение Ильи: «в бете мы делаем её как будто бы
+                 продукт рабочий и не зависим от старых структур, соответственно параметры ПЧ УПП
+                 всегда таблица, не зависим от файлов, чиста старого диска и тп не нужна». Наладчику
+                 нужны ЗНАЧЕНИЯ, а не то, из какого файла их когда-то вычитали; файловый путь
+                 остаётся в рабочей версии, где от него пока зависят. -->
+            <Border x:Name="UploadCard" Grid.Row="0" Style="{StaticResource CardBorder}">
                 <StackPanel>
                     <TextBlock Text="ЗАГРУЗИТЬ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
                     <!-- Тип шкафа/Подтип/Производитель side by side, one row — all three are short
@@ -116,6 +121,73 @@
                 </StackPanel>
             </Border>
 
+            <!-- ТАБЛИЦЫ ПАРАМЕТРОВ — главное содержимое страницы в бете, на месте карточки загрузки
+                 файла. Без неё в бете экран оставался почти пустым: загрузку убрали, а взамен не дали
+                 ничего (видно на снимке страницы в теме «Материал»). Решение Ильи: «параметры ПЧ УПП всегда
+                 таблица, не зависим от файлов».
+                 Grid.Row=0 — та же строка, где в рабочей версии стоит UploadCard: обе карточки
+                 никогда не видны одновременно, и держать под них две строки значило бы оставлять
+                 пустую полосу в 12 пикселей в каждой из версий. -->
+            <Border x:Name="TablesCard" Grid.Row="0" Style="{StaticResource CardBorder}" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="ТАБЛИЦЫ ПАРАМЕТРОВ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button x:Name="NewTableBtn" Content="Новая таблица…" Click="NewTable_Click"
+                                ToolTip="Завести пустую таблицу параметров и набить её строками вручную"/>
+                        <Button x:Name="OpenTableBtn" Content="Открыть" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenTable_Click"
+                                ToolTip="Открыть выбранную таблицу — то же, что двойной клик по строке"/>
+                        <!-- ОТВЯЗАТЬ ОТ ФАЙЛА: всё, что накоплено до беты, заведено «при .par-файле»,
+                             и списком свободных таблиц такие документы не видны вообще. Удалять их
+                             ради перехода — терять работу, поэтому перенос идёт по одной и руками:
+                             сам документ, его ревизии, теги и обмен конфигом от этого не меняются
+                             (Database.DetachParamTableFromFile). -->
+                        <Button x:Name="DetachTableBtn" Content="Отвязать от файла" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="DetachTable_Click"
+                                ToolTip="Сделать таблицу свободной: значения остаются, пропадает только привязка к .par-файлу на диске"/>
+                        <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="16,0,6,0"/>
+                        <TextBox x:Name="TableSearchInput" Width="200" VerticalContentAlignment="Center"
+                                 ToolTip="Название, производитель или тег" TextChanged="TableSearch_Changed"/>
+                        <TextBlock x:Name="TablesCountLabel" Text="Таблиц: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- ПУСТОЙ СПИСОК ГОВОРИТ, ЧТО ДЕЛАТЬ. Пустая таблица в 360 пикселей без единой
+                         строки и без подписи читается как «не загрузилось», а не как «здесь пока
+                         ничего нет»: первым делом человек жмёт «Обновить» и ждёт. Поверх сетки, а не
+                         вместо неё, — заголовки столбцов остаются видны, и сразу понятно, что
+                         появится в списке. -->
+                    <TextBlock Grid.Row="2" x:Name="TablesEmptyHint" Visibility="Collapsed"
+                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420" Margin="0,40,0,0"
+                               Text="Таблиц пока нет. «Новая таблица…» заведёт пустую — строки набиваются вручную, файл для этого не нужен."/>
+
+                    <DataGrid Grid.Row="2" x:Name="TablesGrid" SelectionMode="Single" SelectionUnit="FullRow"
+                              Height="360" AutoGenerateColumns="False" IsReadOnly="True"
+                              Style="{StaticResource RoomyDataGrid}" CanUserResizeColumns="True"
+                              MouseDoubleClick="TablesGrid_MouseDoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="200"
+                                                ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Производитель" Binding="{Binding Manufacturer}" Width="Auto" MinWidth="110"
+                                                ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="Auto" MinWidth="130"
+                                                ElementStyle="{StaticResource DataGridCellText}"/>
+                            <!-- Откуда документ: «свободная» или имя .par, при котором он ещё живёт.
+                                 Колонка нужна ровно затем, чтобы было видно, что осталось перенести. -->
+                            <DataGridTextColumn Header="Источник" Binding="{Binding Origin}" Width="Auto" MinWidth="150"
+                                                ElementStyle="{StaticResource DataGridCellText}"/>
+                            <DataGridTextColumn Header="Изменена" Binding="{Binding DateOnly}" Width="Auto" MinWidth="90"
+                                                ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+
             <!-- List section — fixed height (own internal scrollbar via the DataGrid, same pattern
                  as the upload card above) instead of a "*" share of whatever the page grid had left,
                  so the table always shows several rows without needing to maximize the window. -->
@@ -127,7 +199,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="ЗАГРУЖЕННЫЕ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                    <TextBlock Grid.Row="0" x:Name="FilesCardTitle" Text="ЗАГРУЖЕННЫЕ ПАРАМЕТРЫ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
 
                     <!-- Свернуть/Развернуть + the row actions live together in one header row (same
                          physical position regardless of expand state — moved here from below the table

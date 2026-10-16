@@ -27,6 +27,18 @@ public partial class ParamTableWindow : Window
     private readonly string _diskPath;
     private readonly string _filename;
 
+    /// <summary>СВОБОДНАЯ ТАБЛИЦА — документ, не привязанный ни к какому файлу параметров.
+    ///
+    /// Решение Ильи по бете 2.0: «параметры ПЧ УПП всегда таблица, не зависим от файлов, чиста
+    /// старого диска и тп не нужна». Наладчику нужны ЗНАЧЕНИЯ, а не то, из какого .par их когда-то
+    /// вычитали, и привязка к файлу в этом месте была наследством файлового порядка, а не смыслом.
+    ///
+    /// Отдельного поля в базе под это нет и не нужно: свободная таблица — запись с пустыми
+    /// disk_path/filename, схема это допускала всегда (см. Database.GetStandaloneParamTables).
+    /// Поэтому и признак здесь вычисляется, а не передаётся: два источника правды о том, при файле
+    /// документ или нет, разъехались бы на первой же правке.</summary>
+    private readonly bool _standalone;
+
     private List<ParamTableRevision> _revisions = new();
     private List<ParamTableRow> _rows = new();
     private ParamTableDiff.Result? _diff;
@@ -114,13 +126,27 @@ public partial class ParamTableWindow : Window
         _host = host;
         _diskPath = diskPath;
         _filename = filename;
+        _standalone = diskPath.Trim().Length == 0 && filename.Trim().Length == 0;
 
-        FileLabel.Text = "Файл параметров: " + fileLabel;
+        FileLabel.Text = _standalone
+            ? "Свободные таблицы — не привязаны к файлу параметров"
+            : "Файл параметров: " + fileLabel;
+        if (_standalone)
+        {
+            // Привязка к шкафам ВЫВОДИТСЯ из записей файла параметров (ParamTableBinding), а файла
+            // здесь нет — показывать нечего и править нечем. Пустая строка «не привязан» на видном
+            // месте читалась бы как поломка, хотя это штатное состояние документа в бете.
+            BindingLabel.Visibility = Visibility.Collapsed;
+            SubtypesBtn.Visibility = Visibility.Collapsed;
+            ImportBtn.Content = "Из файла…";
+            NewBtn.Visibility = Visibility.Visible;
+        }
         // Сколько колонок задано в XAML — до них своих столбцов не бывает, и при перестроении
         // трогать их нельзя. Считаем один раз здесь, а не числом в коде: добавится встроенный
         // столбец — и число молча разошлось бы с разметкой.
         _builtInColumns = RowsGrid.Columns.Count;
         var canEdit = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
+        NewBtn.IsEnabled = canEdit;
         EditBtn.IsEnabled = canEdit;
         RenameBtn.IsEnabled = canEdit;
         DeleteBtn.IsEnabled = canEdit;
@@ -142,7 +168,9 @@ public partial class ParamTableWindow : Window
 
     private void LoadDocuments(int? selectId)
     {
-        var documents = _services.Db.GetParamTablesForFile(_diskPath, _filename);
+        var documents = _standalone
+            ? _services.Db.GetStandaloneParamTables()
+            : _services.Db.GetParamTablesForFile(_diskPath, _filename);
         DocumentCombo.ItemsSource = documents;
         if (documents.Count == 0)
         {
@@ -160,9 +188,13 @@ public partial class ParamTableWindow : Window
         RowsGrid.ItemsSource = null;
         ApplicabilityCombo.ItemsSource = null;
         ShowTags();
-        ReasonText.Text = "У этого файла параметров таблицы ещё нет.";
+        ReasonText.Text = _standalone
+            ? "Свободных таблиц пока нет."
+            : "У этого файла параметров таблицы ещё нет.";
         AuthorText.Text = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole())
-            ? "«Новый документ из файла…» разберёт накопленный txt в таблицу — с предпросмотром и правкой до сохранения."
+            ? (_standalone
+                ? "«Новая таблица…» заведёт пустую — строки набиваются руками. «Из файла…» разберёт накопленный txt."
+                : "«Новый документ из файла…» разберёт накопленный txt в таблицу — с предпросмотром и правкой до сохранения.")
             : "Завести её может программист или администратор.";
         SummaryText.Text = "";
     }
@@ -315,6 +347,8 @@ public partial class ParamTableWindow : Window
     /// должно.</summary>
     private void ShowBinding()
     {
+        if (_standalone) return;
+
         _binding = ParamTableBinding.For(_services.Db, _diskPath, _filename,
             _services.Hierarchy, _services.Cfg.RootPath());
 
@@ -460,6 +494,33 @@ public partial class ParamTableWindow : Window
     }
 
     // ── Действия ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Пустая таблица с нуля. Тот же редактор, что и у правки существующей, только список
+    /// строк пустой: заводить ради этого отдельное окно незачем, а расхождение двух окон в том, как
+    /// выглядит и проверяется строка, человек заметил бы сразу.</summary>
+    private void New_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ParamTableEditorDialog(_services.Db.GetParamGroups(),
+            new List<ParamTableColumn>(), "Новая таблица", new List<ParamTableRow>()) { Owner = this };
+        // Окно правки говорит про «новую ревизию прежнего документа» — здесь прежнего нет, и
+        // оставить тот текст значило бы соврать на первом же экране.
+        dialog.Title = "Новая таблица параметров";
+        dialog.Intro.Text = "Пустая таблица: строки добавляются кнопкой ниже. Документ уедет к коллегам общим конфигом, "
+                            + "так что название стоит писать так, чтобы его понял не только автор.";
+        dialog.NameInput.Text = "";
+        if (dialog.ShowDialog() != true) return;
+
+        var (tableId, _) = ParamTableEditing.CreateFromImport(_services.Db, new ParamTable
+        {
+            DiskPath = "",
+            Filename = "",
+            Name = dialog.ResultName,
+            Manufacturer = "",
+        }, dialog.ResultRows, dialog.ResultReason, _services.CurrentUserName);
+
+        LoadDocuments(tableId);
+        Announce($"Заведена таблица параметров «{dialog.ResultName}»: строк {dialog.ResultRows.Count}");
+    }
 
     private void Import_Click(object sender, RoutedEventArgs e)
     {

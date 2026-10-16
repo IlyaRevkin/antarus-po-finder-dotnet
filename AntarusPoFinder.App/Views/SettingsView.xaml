@@ -8,8 +8,18 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+        <!-- Вторая колонка — под БОКОВОЙ СПИСОК РАЗДЕЛОВ в бете (см. SettingsView.BuildSidebar).
+             В рабочей версии она пустая и ширины не занимает: Auto у пустой колонки — это ноль.
+             Разделов полтора десятка, и в строку они не влезали никогда — отсюда и ездящая лента, и
+             «Ещё», и жалоба «пелюль сверху стало уже слишком много». Вертикальный список — то, как
+             это устроено и в Настройках Windows 11, и в системных настройках macOS: разделы стоят
+             столбиком, видны все сразу и разбиты по смыслу. -->
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="SidebarColumn" Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Настройки" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Настройки" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
 
         <!-- Content is an explicit TextBlock (not Content="…") with NavButtonContentText, not a bare
              string — see that style's comment in Themes/Styles.xaml: a bare string here left active-
@@ -19,7 +29,7 @@
              влезают, а до крайних («Подключение», «Пользователи») было не добраться вовсе — обрезались
              без единого способа прокрутить. Колесо мыши над полосой крутит её же (см.
              TabBar_PreviewMouseWheel), вертикальный скроллбар отключён — полоса всегда в одну строку. -->
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+        <ScrollViewer Grid.Row="1" Grid.ColumnSpan="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                       x:Name="TabBarScroll" Margin="0,0,0,16" PreviewMouseWheel="TabBar_PreviewMouseWheel">
         <StackPanel x:Name="TabBar" Orientation="Horizontal">
             <Button x:Name="TabBtnGeneral" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
@@ -100,7 +110,7 @@
              ограничена самим Grid), у них своя раскладка Auto/*/Auto: таблица растягивается на
              оставшееся место и прокручивается сама (у DataGrid есть свой скроллбар), а кнопки —
              в последней Auto-строке, всегда на виду. -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="2" Grid.ColumnSpan="2" x:Name="SettingsBody">
         <ScrollViewer x:Name="MainScrollViewer" VerticalScrollBarVisibility="Auto">
             <Grid>
 

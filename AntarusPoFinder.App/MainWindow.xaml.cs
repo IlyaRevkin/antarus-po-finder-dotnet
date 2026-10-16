@@ -2,6 +2,8 @@ using System.Windows.Threading;
 ﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Navigation;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.App.Views;
@@ -69,10 +71,37 @@ public partial class MainWindow : Window
         if (Services.UiSnapshotService.Enabled)
             Loaded += (_, _) => Services.UiSnapshotService.RunAndExit(this, _vm, services);
 
+        // Переход между страницами — только в бете: в рабочей версии менять поведение экрана,
+        // которым пользуются каждый день, без просьбы незачем.
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
+            _vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(ViewModels.MainWindowViewModel.CurrentPageContent))
+                    AnimatePageChange();
+            };
+
         ContentRendered += MainWindow_ContentRendered;
         InitTrayIcon();
         Closing += MainWindow_Closing;
         StateChanged += MainWindow_StateChanged;
+    }
+
+    /// <summary>Появление новой страницы: короткий сдвиг снизу вверх с проявлением.
+    ///
+    /// Зачем вообще. Просьба Ильи — «будто бы мы на ПК перенесли этот дизайн мобильный»: половину
+    /// этого ощущения дают именно переходы, без них смена экрана читается как мигание.
+    ///
+    /// 160 мс и 12 пикселей — сознательно мало. Это рабочий инструмент: наладчик переключает экраны
+    /// десятки раз за смену, и анимация, которую приходится ЖДАТЬ, раздражает ровно с третьего
+    /// раза. Движение должно быть заметно краем глаза и закончиться раньше, чем его осознают.</summary>
+    private void AnimatePageChange()
+    {
+        var duration = new Duration(TimeSpan.FromMilliseconds(160));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        PageHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration));
+        PageShift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(12, 0, duration) { EasingFunction = ease });
     }
 
     // ── Системный трей ───────────────────────────────────────────────────────

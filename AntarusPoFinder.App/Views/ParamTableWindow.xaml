@@ -131,9 +131,20 @@
                           SelectionChanged="Applicability_Changed"
                           ToolTip="Строки без пометки годятся всем аппаратам и показываются всегда"/>
 
-                <Button Grid.Column="6" x:Name="ImportBtn" Content="Новый документ из файла…"
-                        Style="{StaticResource SecondaryButton}" Click="Import_Click"
-                        ToolTip="Разобрать накопленный txt в таблицу — с предпросмотром и правкой до сохранения"/>
+                <StackPanel Grid.Column="6" Orientation="Horizontal">
+                    <!-- ПУСТАЯ ТАБЛИЦА С НУЛЯ — путь, которого раньше не было вовсе: документ умел
+                         родиться только из txt рядом с .par. Решение Ильи по бете 2.0: «параметры ПЧ
+                         УПП всегда таблица, не зависим от файлов». Кнопка показывается только там,
+                         где таблица и так свободная (ParamTableWindow._standalone): у документа,
+                         живущего при файле, «новая пустая» означала бы вторую, ни к чему не
+                         привязанную запись в чужом списке. -->
+                    <Button x:Name="NewBtn" Content="Новая таблица…" Visibility="Collapsed"
+                            Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="New_Click"
+                            ToolTip="Завести пустую таблицу и набить её строками вручную"/>
+                    <Button x:Name="ImportBtn" Content="Новый документ из файла…"
+                            Style="{StaticResource SecondaryButton}" Click="Import_Click"
+                            ToolTip="Разобрать накопленный txt в таблицу — с предпросмотром и правкой до сохранения"/>
+                </StackPanel>
             </Grid>
         </Grid>
 
