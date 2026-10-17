@@ -116,6 +116,7 @@ public partial class ParamsView : UserControl
         // Счётчик показывает и сколько ещё не перенесено: пока в списке есть «при файле», переход
         // на свободные таблицы не закончен, и молчать об этом — значит оставить работу незамеченной.
         var attached = _tableRows.Count(r => !r.Standalone);
+        DetachAllBtn.Visibility = attached > 0 ? Visibility.Visible : Visibility.Collapsed;
         TablesCountLabel.Text = attached == 0
             ? $"Таблиц: {shown.Count}"
             : $"Таблиц: {shown.Count} · при файлах: {attached}";
@@ -183,6 +184,39 @@ public partial class ParamsView : UserControl
 
         _services.Db.DetachParamTableFromFile(id);
         _host.PushCatalogChange($"Таблица параметров «{row.Name}» отвязана от файла");
+        ReloadTables();
+    }
+
+    /// <summary>Перенести ВСЕ таблицы в свободные одним действием.
+    ///
+    /// Показывается, только пока есть что переносить, и спрашивает ровно один раз — на весь список:
+    /// «уходим от файлов» это решение про порядок работы, а не про конкретную таблицу. Отдельная
+    /// отмена не нужна — обратный ход есть и так: привязку к файлу заводят заново из окна таблицы,
+    /// а сами значения эта операция не трогает вовсе.</summary>
+    private void DetachAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ParamTableEditing.CanEdit(_services.Cfg.CurrentRole()))
+        {
+            AppMessageBox.Show("Править таблицы параметров может программист или администратор.",
+                "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var attached = _tableRows.Where(r => !r.Standalone && r.Source.Id is int).ToList();
+        if (attached.Count == 0) return;
+
+        var answer = AppMessageBox.Show(
+            $"Отвязать от файлов все таблицы — их {attached.Count}?" + Environment.NewLine + Environment.NewLine
+            + "Значения, ревизии и теги остаются. Пропадает привязка к .par на диске, а вместе с ней "
+            + "и привязка к подтипам шкафов, которая из этого файла выводилась: её после переноса "
+            + "задают в самой таблице.",
+            "Перенести все", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        foreach (var row in attached)
+            _services.Db.DetachParamTableFromFile((int)row.Source.Id!);
+
+        _host.PushCatalogChange($"Таблицы параметров отвязаны от файлов: {attached.Count}");
         ReloadTables();
     }
 

@@ -150,21 +150,18 @@
                              (Database.DetachParamTableFromFile). -->
                         <Button x:Name="DetachTableBtn" Content="Отвязать от файла" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="DetachTable_Click"
                                 ToolTip="Сделать таблицу свободной: значения остаются, пропадает только привязка к .par-файлу на диске"/>
+                        <!-- ВСЕ РАЗОМ. Переносить полтора десятка таблиц по одной — работа ради
+                             работы: решение «уходим от файлов» принимается один раз и на весь
+                             список, а не для каждой таблицы отдельно. Кнопка прячется, когда
+                             переносить уже нечего (см. ApplyTableFilter). -->
+                        <Button x:Name="DetachAllBtn" Content="Перенести все…" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="DetachAll_Click"
+                                Visibility="Collapsed"
+                                ToolTip="Отвязать от файлов сразу все таблицы: значения, ревизии и теги остаются, пропадает только привязка к .par на диске"/>
                         <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="16,0,6,0"/>
                         <TextBox x:Name="TableSearchInput" Width="200" VerticalContentAlignment="Center"
                                  ToolTip="Название, производитель или тег" TextChanged="TableSearch_Changed"/>
                         <TextBlock x:Name="TablesCountLabel" Text="Таблиц: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     </StackPanel>
-
-                    <!-- ПУСТОЙ СПИСОК ГОВОРИТ, ЧТО ДЕЛАТЬ. Пустая таблица в 360 пикселей без единой
-                         строки и без подписи читается как «не загрузилось», а не как «здесь пока
-                         ничего нет»: первым делом человек жмёт «Обновить» и ждёт. Поверх сетки, а не
-                         вместо неё, — заголовки столбцов остаются видны, и сразу понятно, что
-                         появится в списке. -->
-                    <TextBlock Grid.Row="2" x:Name="TablesEmptyHint" Visibility="Collapsed"
-                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420" Margin="0,40,0,0"
-                               Text="Таблиц пока нет. «Новая таблица…» заведёт пустую — строки набиваются вручную, файл для этого не нужен."/>
 
                     <DataGrid Grid.Row="2" x:Name="TablesGrid" SelectionMode="Single" SelectionUnit="FullRow"
                               Height="360" AutoGenerateColumns="False" IsReadOnly="True"
@@ -185,6 +182,16 @@
                                                 ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                         </DataGrid.Columns>
                     </DataGrid>
+                    <!-- ПУСТОЙ СПИСОК ГОВОРИТ, ЧТО ДЕЛАТЬ. Пустая таблица в 360 пикселей без единой
+                         строки и без подписи читается как «не загрузилось», а не как «здесь пока
+                         ничего нет»: первым делом человек жмёт «Обновить» и ждёт. Поверх сетки, а не
+                         вместо неё, — заголовки столбцов остаются видны, и сразу понятно, что
+                         появится в списке. -->
+                    <TextBlock Grid.Row="2" x:Name="TablesEmptyHint" Visibility="Collapsed"
+                               Style="{StaticResource MutedText}" TextAlignment="Center" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420" Margin="0,40,0,0"
+                               Text="Таблиц пока нет. «Новая таблица…» заведёт пустую — строки набиваются вручную, файл для этого не нужен."/>
+
                 </Grid>
             </Border>
 

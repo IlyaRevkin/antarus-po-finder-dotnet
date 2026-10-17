@@ -39,7 +39,7 @@
        и рабочая программа начала бы считать себя бетой. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
     <DefineConstants>$(DefineConstants);BETA</DefineConstants>
-    <Version>2.0.0.3</Version>
+    <Version>2.0.0.4</Version>
     <!-- ⚠️ AssemblyName НЕ меняем. Разметка ссылается на ресурсы pack-URI с именем сборки
          («/AntarusPoFinder.App;component/Themes/…» в ThemeManager, значки окон в диалогах), и
          переименование сборки ломает их загрузку: бета падала при построении главного окна с

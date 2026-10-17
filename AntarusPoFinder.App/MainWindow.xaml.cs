@@ -1,5 +1,7 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Windows.Threading;
-﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -102,7 +104,88 @@ public partial class MainWindow : Window
         PageHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration));
         PageShift.BeginAnimation(TranslateTransform.YProperty,
             new DoubleAnimation(12, 0, duration) { EasingFunction = ease });
+
+        // Карточки подхватываются ПОСЛЕ раскладки: до неё страница ещё не построена, искать в ней
+        // нечего. Loaded — первый приоритет, на котором дерево уже есть.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(StaggerCards));
     }
+
+    /// <summary>Карточки страницы появляются не разом, а каскадом — по очереди, с шагом в 35 мс.
+    ///
+    /// Ровно это и отличает мобильный интерфейс от настольного: экран не «возникает», а
+    /// собирается, и глаз успевает заметить, из чего он состоит. Просьба Ильи — «будто бы мы на ПК
+    /// перенесли этот дизайн мобильный».
+    ///
+    /// Ограничения сознательные. Первые ПЯТЬ карточек: дальше каскад превращается в ожидание, а
+    /// нижние карточки на экран всё равно не попадают без прокрутки. Смещение 10 пикселей и 180 мс
+    /// на карточку — движение заметно краем глаза и заканчивается раньше, чем его осознают.
+    ///
+    /// ⚠️ Трогаются только карточки БЕЗ собственного преобразования, и своё снимается по окончании.
+    /// Чужой RenderTransform здесь — это чья-то живая анимация (плашки, полосы загрузки), и
+    /// затереть её значило бы сломать её молча.</summary>
+    private void StaggerCards()
+    {
+        if (PageHost.Content is not DependencyObject root) return;
+
+        var step = 0;
+        foreach (var card in FindCards(root))
+        {
+            if (step >= 5) break;
+            if (card.RenderTransform is not null && card.RenderTransform != Transform.Identity) continue;
+
+            var shift = new TranslateTransform(0, 10);
+            card.RenderTransform = shift;
+            var animation = new DoubleAnimation(10, 0, new Duration(TimeSpan.FromMilliseconds(180)))
+            {
+                BeginTime = TimeSpan.FromMilliseconds(35 * step),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            };
+            var finished = card;
+            animation.Completed += (_, _) =>
+            {
+                finished.RenderTransform.BeginAnimation(TranslateTransform.YProperty, null);
+                finished.RenderTransform = Transform.Identity;
+            };
+            shift.BeginAnimation(TranslateTransform.YProperty, animation);
+            step++;
+        }
+    }
+
+    /// <summary>Карточки страницы — сверху вниз, по уровням. Вглубь найденной карточки не идём:
+    /// вложенная карточка — часть своей, а не следующая в каскаде, и отдельное движение внутри уже
+    /// движущейся карточки читается как рябь.</summary>
+    private static IEnumerable<System.Windows.Controls.Border> FindCards(DependencyObject root)
+    {
+        // Обход в ШИРИНУ и с потолком в 1500 узлов. Карточки лежат у самого верха страницы, а вот
+        // низ дерева бывает каким угодно: выдача поиска — это сотни строк со своей разметкой внутри.
+        // В глубину и без потолка поиск пяти карточек иногда означал бы обход всей выдачи, и платил
+        // бы за это каждый переход между экранами.
+        var queue = new Queue<DependencyObject>();
+        queue.Enqueue(root);
+        var visited = 0;
+
+        while (queue.Count > 0 && visited < 1500)
+        {
+            var node = queue.Dequeue();
+            var count = VisualTreeHelper.GetChildrenCount(node);
+            for (var i = 0; i < count; i++)
+            {
+                visited++;
+                var child = VisualTreeHelper.GetChild(node, i);
+                // Внутрь найденной карточки не идём: вложенная карточка — часть своей.
+                if (child is System.Windows.Controls.Border border && IsCard(border)) yield return border;
+                else queue.Enqueue(child);
+            }
+        }
+    }
+
+    /// <summary>Карточка — это Border со стилем CardBorder. По стилю, а не по виду: «похоже на
+    /// карточку» нельзя ни проверить, ни удержать, а стиль — то же самое определение, по которому
+    /// карточку рисует тема.</summary>
+    private static bool IsCard(System.Windows.Controls.Border border) =>
+        border.Style is not null
+        && border.TryFindResource("CardBorder") is Style card
+        && ReferenceEquals(border.Style, card);
 
     // ── Системный трей ───────────────────────────────────────────────────────
     // See ConfigService.CloseAction: "close" (default) leaves the X button/taskbar-minimize behaving

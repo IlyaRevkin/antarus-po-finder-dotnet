@@ -125,10 +125,11 @@ public static class UiSnapshotService
     {
         window.UpdateLayout();
         await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
-        // 240 мс, а не 120: в бете переход между страницами анимирован (MainWindow.AnimatePageChange,
-        // 160 мс), и на прежней паузе снимок ловил страницу В СЕРЕДИНЕ проявления — полупрозрачной.
-        // Такой кадр читается как «бледная вёрстка» и толкает чинить то, что не сломано.
-        await System.Threading.Tasks.Task.Delay(240);
+        // 420 мс, а не 120: в бете страница не просто проявляется (160 мс), а собирается каскадом
+        // карточек (MainWindow.StaggerCards — до ~320 мс на пятой). На прежней паузе снимок ловил
+        // страницу В СЕРЕДИНЕ движения: полупрозрачной и со съехавшими карточками. Такой кадр
+        // читается как «бледная кривая вёрстка» и толкает чинить то, что не сломано.
+        await System.Threading.Tasks.Task.Delay(420);
         window.UpdateLayout();
     }
 
