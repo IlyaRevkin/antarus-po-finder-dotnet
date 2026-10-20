@@ -832,7 +832,9 @@ public partial class FirmwareCard : UserControl
         if (motif == EquipmentMotif.Neutral) return;
 
         MotifIcon.Data = EquipmentMotifArt.Icon(motif);
-        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, EquipmentMotifArt.BrushKey(motif));
+        // ОБВОДКА, а не заливка: геометрии мотивов контурные (см. EquipmentMotifArt), и залитый
+        // контур превращается в чёрную кляксу — жалоба Ильи «при поиске значок бомбы почему-то».
+        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, EquipmentMotifArt.BrushKey(motif));
         MotifIcon.ToolTip = EquipmentMotifResolver.Caption(motif);
         MotifIcon.Visibility = Visibility.Visible;
     }

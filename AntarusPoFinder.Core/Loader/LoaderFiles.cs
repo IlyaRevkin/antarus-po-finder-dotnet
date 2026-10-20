@@ -1,15 +1,20 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Loader;
 
-public sealed record LoaderProjectFiles(string? LfsPath, string? PslPath)
+public sealed record LoaderProjectFiles(string? LfsPath, string? PslPath, string? ZopPath = null)
 {
     public bool HasLfs => LfsPath is not null;
     public bool HasPsl => PslPath is not null;
-    public bool HasAny => HasLfs || HasPsl;
+
+    /// <summary>.zop — проект SMH5 целиком: LFS и ELF в одном файле. Добавлен, когда выяснилось,
+    /// что заливка одного LFS кирпичит SMH5 (см. DeployArtifact).</summary>
+    public bool HasZop => ZopPath is not null;
+
+    public bool HasAny => HasLfs || HasPsl || HasZop;
 }
 
 /// <summary>Поиск файлов Segnetics внутри папки версии: .psl — исходный проект SMLogix, .lfs —
@@ -19,6 +24,7 @@ public static class LoaderFiles
 {
     public const string PslExtension = ".psl";
     public const string LfsExtension = ".lfs";
+    public const string ZopExtension = ".zop";
 
     public static string? FindPsl(string dir) => Find(dir, PslExtension);
     public static string? FindLfs(string dir) => Find(dir, LfsExtension);
@@ -88,7 +94,8 @@ public static class LoaderFiles
         var candidates = dirs as IReadOnlyList<string> ?? dirs.ToList();
         return new LoaderProjectFiles(
             ResolvePreferHint(candidates, executableHint, LfsExtension),
-            ResolvePreferHint(candidates, executableHint, PslExtension));
+            ResolvePreferHint(candidates, executableHint, PslExtension),
+            ResolvePreferHint(candidates, executableHint, ZopExtension));
     }
 
     /// <summary>Имя собранного файла для этого исходника: <c>проект.psl</c> → <c>проект.lfs</c>.

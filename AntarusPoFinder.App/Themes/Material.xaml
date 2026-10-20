@@ -19,10 +19,17 @@
            TextMuted #45464F на BgColor            — 9.4:1  (порог 4.5)
            BorderColor #79747E на BgColor          — 3.6:1  (порог 3 для границ) -->
 
-    <Color x:Key="BgColor">#FDFBFF</Color>
-    <Color x:Key="BgSidebarColor">#F0EDF4</Color>
-    <Color x:Key="BgCardColor">#F3EDF7</Color>
-    <Color x:Key="BgInputColor">#FFFFFF</Color>
+    <!-- ПОВЕРХНОСТИ ПО M3, а не «светлая тема другого оттенка». Было наоборот: фон почти белый
+         (#FDFBFF), а карточка серее фона (#F3EDF7) — то есть карточка «проваливалась», и экран
+         читался как светлая тема с лиловым отливом. Отсюда «материал нихера не материал».
+         Теперь как в Material 3: страница — тонированная поверхность, карточка — чистый белый лист
+         НАД ней, с мягкой тенью и без рамки (CardBorderThickness = 0), поле ввода — залитое, на
+         тон темнее карточки. Разницу даёт тон и высота, а не линии.
+         Контраст: TextColor #1B1B1F на белой карточке — 16.1:1; TextMuted #45464F на фоне — 8.9:1. -->
+    <Color x:Key="BgColor">#F7F3FB</Color>
+    <Color x:Key="BgSidebarColor">#F2ECF8</Color>
+    <Color x:Key="BgCardColor">#FFFFFF</Color>
+    <Color x:Key="BgInputColor">#F1EBF7</Color>
     <Color x:Key="BorderColor">#79747E</Color>
     <Color x:Key="AccentColor">#6750A4</Color>
     <Color x:Key="AccentHoverColor">#7F67BE</Color>
@@ -35,7 +42,7 @@
     <Color x:Key="SuccessOnAccentColor">#A6F0B5</Color>
     <Color x:Key="WarningColor">#8C4A00</Color>
     <Color x:Key="ErrorColor">#B3261E</Color>
-    <Color x:Key="TagBgColor">#E7E0EC</Color>
+    <Color x:Key="TagBgColor">#EADDFF</Color>
     <Color x:Key="RolledBackColor">#8C4A00</Color>
     <!-- Фон выделенной строки — светлый тон акцента, а не сам акцент: текст строки рисует
          ContentPresenter с общим тёмным Foreground, и на сплошном фиолетовом он был бы нечитаем
@@ -69,7 +76,7 @@
          У светлой и тёмной значения прежние: рабочая версия не должна измениться ни на пиксель. -->
     <CornerRadius x:Key="CardCorner">16</CornerRadius>
     <Thickness x:Key="CardPadding">18</Thickness>
-    <system:Double x:Key="CardShadowOpacity" xmlns:system="clr-namespace:System;assembly=System.Runtime">0.10</system:Double>
+    <system:Double x:Key="CardShadowOpacity" xmlns:system="clr-namespace:System;assembly=System.Runtime">0.16</system:Double>
 
     <!-- Форма кнопок и пунктов меню. У material и стекла пункты — скруглённые «таблетки» без
          рамок: рамка вокруг каждой строки меню читается как сетка таблицы и спорит с заливкой
@@ -90,4 +97,15 @@
          У светлой и тёмной — прежняя шестёрка: рабочая версия не должна измениться ни на пиксель. -->
     <CornerRadius x:Key="ButtonCorner">20</CornerRadius>
     <CornerRadius x:Key="ControlCorner">14</CornerRadius>
+
+    <!-- ПЛОТНОСТЬ БОКОВОГО МЕНЮ. Илья про переделанные настройки: «вот настройки сделал хорошо прям
+         организацию пространства, переработай и левую панель к такому дизайну». В настройках
+         разделы стоят столбиком плотно (padding 12,6, зазор 1), а в главном меню пункты были
+         заметно разреженнее (12,10 и зазор 3) — рядом это читалось как два разных приложения.
+         Значения задаёт ТЕМА: у светлой и тёмной прежние, у «Материала» и «Стекла» — как в
+         настройках. Так плотность меняется только там, где и сам дизайн новый. -->
+    <Thickness x:Key="NavItemPadding">12,7</Thickness>
+    <Thickness x:Key="NavItemMargin">0,0,0,1</Thickness>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource BorderColor}"/>
+    <Thickness x:Key="CardBorderThickness">0</Thickness>
 </ResourceDictionary>

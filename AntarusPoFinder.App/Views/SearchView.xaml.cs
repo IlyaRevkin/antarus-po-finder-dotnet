@@ -2249,10 +2249,18 @@ public partial class SearchView : UserControl
         // может лежать пачка прошивок (пожарные шкафы), и «первый найденный .lfs» уезжал в контроллер
         // вместо нужного.
         var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result), result.ExecutableHint);
-        if (!files.HasAny)
+        // ЧТО ИМЕННО УЙДЁТ В ПЛК — решает DeployArtifact, а не «что первым нашлось».
+        //
+        // Раньше здесь стояло files.LfsPath ?? files.PslPath, то есть предпочтение отдавалось уже
+        // собранному .lfs. Для SMH5 это и оказалось причиной окирпичивания: его проект состоит из
+        // LFS и ELF, и заливка одного LFS оставляет в контроллере чужую ELF-часть (разбор — в
+        // DeployArtifact). Через SMLogix и через сам Loader человек открывал ПРОЕКТ, поэтому там
+        // всё работало и без форматирования.
+        var choice = DeployArtifact.Pick(files.ZopPath, files.PslPath, files.LfsPath, result.Controller);
+        if (!choice.Ok)
         {
             AppMessageBox.Show(
-                "Для этой версии не найден файл LFS или PSL.",
+                choice.Problem ?? "Для этой версии не найден файл проекта.",
                 "Загрузка в ПЛК",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -2269,7 +2277,7 @@ public partial class SearchView : UserControl
             // заливку без подготовки ПЛК (SMH5 после такой заливки уходит в вечную перезагрузку).
             ControllerName = result.Controller ?? "",
             EquipmentName = result.Name ?? "",
-            SourcePath = files.LfsPath ?? files.PslPath!,
+            SourcePath = choice.Path!,
             NetworkFolder = result.FirmwareDir ?? "",
             LocalFolder = Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
         }, _host, _services.Operations, succeeded =>

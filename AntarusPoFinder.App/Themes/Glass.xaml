@@ -22,11 +22,18 @@
 
          Набор ключей обязан совпадать с остальными темами — за этим следит ThemeCatalogTests. -->
 
-    <Color x:Key="BgColor">#0E1116</Color>
+    <!-- ПРОЗРАЧНОСТЬ СДЕЛАНА ЗАМЕТНОЙ. Было 90–95 % непрозрачности «чтобы не уставали глаза» — на
+         экране это неотличимо от обычной тёмной темы, что Илья и сказал: «стекло нихера не стекло».
+         Теперь панели действительно просвечивают (65–80 %), а по краю карточки идёт светлая грань
+         (GlassEdgeColor) — именно она читается как стекло, а не сама прозрачность.
+         Контраст считался по непрозрачному результату наложения на #0A0E14:
+           TextColor  #E6E9EF на карточке (после наложения ≈ #141C27) — 12.9:1
+           TextMuted  #A7B0BE там же                                  — 6.8:1 (порог 4.5) -->
+    <Color x:Key="BgColor">#0A0E14</Color>
     <!-- Сайдбар чуть прозрачнее карточек: он самый большой, и именно на нём глубина заметна. -->
-    <Color x:Key="BgSidebarColor">#E61A2029</Color>
-    <Color x:Key="BgCardColor">#F21D2430</Color>
-    <Color x:Key="BgInputColor">#F2141A23</Color>
+    <Color x:Key="BgSidebarColor">#CC121A24</Color>
+    <Color x:Key="BgCardColor">#A61A2334</Color>
+    <Color x:Key="BgInputColor">#99101722</Color>
     <Color x:Key="BorderColor">#8A94A6</Color>
     <Color x:Key="AccentColor">#3B82F6</Color>
     <Color x:Key="AccentHoverColor">#60A5FA</Color>
@@ -70,7 +77,7 @@
          У светлой и тёмной значения прежние: рабочая версия не должна измениться ни на пиксель. -->
     <CornerRadius x:Key="CardCorner">18</CornerRadius>
     <Thickness x:Key="CardPadding">18</Thickness>
-    <system:Double x:Key="CardShadowOpacity" xmlns:system="clr-namespace:System;assembly=System.Runtime">0.22</system:Double>
+    <system:Double x:Key="CardShadowOpacity" xmlns:system="clr-namespace:System;assembly=System.Runtime">0.32</system:Double>
 
     <!-- Форма кнопок и пунктов меню. У material и стекла пункты — скруглённые «таблетки» без
          рамок: рамка вокруг каждой строки меню читается как сетка таблицы и спорит с заливкой
@@ -91,4 +98,19 @@
          У светлой и тёмной — прежняя шестёрка: рабочая версия не должна измениться ни на пиксель. -->
     <CornerRadius x:Key="ButtonCorner">16</CornerRadius>
     <CornerRadius x:Key="ControlCorner">12</CornerRadius>
+
+    <!-- ПЛОТНОСТЬ БОКОВОГО МЕНЮ. Илья про переделанные настройки: «вот настройки сделал хорошо прям
+         организацию пространства, переработай и левую панель к такому дизайну». В настройках
+         разделы стоят столбиком плотно (padding 12,6, зазор 1), а в главном меню пункты были
+         заметно разреженнее (12,10 и зазор 3) — рядом это читалось как два разных приложения.
+         Значения задаёт ТЕМА: у светлой и тёмной прежние, у «Материала» и «Стекла» — как в
+         настройках. Так плотность меняется только там, где и сам дизайн новый. -->
+    <Thickness x:Key="NavItemPadding">12,7</Thickness>
+    <Thickness x:Key="NavItemMargin">0,0,0,1</Thickness>
+    <!-- Светлая грань по краю стекла: ровно то, чем «стекло» отличается от просто
+         тёмной панели — край ловит свет. -->
+    <Color x:Key="GlassEdgeColor">#40FFFFFF</Color>
+    <SolidColorBrush x:Key="GlassEdgeBrush" Color="{StaticResource GlassEdgeColor}"/>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource GlassEdgeColor}"/>
+    <Thickness x:Key="CardBorderThickness">1</Thickness>
 </ResourceDictionary>

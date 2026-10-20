@@ -28,7 +28,8 @@
                      Цветной знак слева различает их раньше, чем прочитано название.
                      Видно только в бете (см. ShowMotif) — переделка 2.0. -->
                 <Path Grid.Column="1" x:Name="MotifIcon" Visibility="Collapsed"
-                      Width="15" Height="15" Margin="0,0,7,0" Stretch="Uniform"
+                      Width="16" Height="16" Margin="0,0,7,0" Stretch="Uniform"
+                      StrokeThickness="1.6" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       VerticalAlignment="Center"/>
                 <!-- Значок «ОПЦ» — САМЫМ ПЕРВЫМ, до названия. Сначала он стоял у номера версии, то
                      есть в правом углу, и не попадал в глаз: «опц давай писать в начале карточки, а

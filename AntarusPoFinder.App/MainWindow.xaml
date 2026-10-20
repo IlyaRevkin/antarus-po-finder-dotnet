@@ -182,15 +182,26 @@
                         <TextBlock Text="{Binding CurrentUserLabel}" VerticalAlignment="Center" Style="{StaticResource MutedText}"
                                    TextTrimming="CharacterEllipsis" MaxWidth="140"
                                    ToolTip="{Binding RoleLabel, StringFormat=Роль: {0}}"/>
-                        <Button x:Name="RoleSwitchNavButton" Style="{StaticResource IconButton}" Width="18" Height="18" Padding="0"
-                                Margin="4,0,0,0" ToolTip="Сменить роль" Click="RoleSwitchButton_Click">
-                            <TextBlock Text="&#8635;" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"/>
+                        <!-- Смена роли и выход — ДВА ОДИНАКОВЫХ значка без рамок.
+                             Было: символ «↻» из системного шрифта в кнопке 18×18 и рядом «Выход»
+                             текстом в десять пикселей внутри кнопки с рамкой. В «Материале», где
+                             кнопка стала таблеткой, этот «Выход» окончательно превратился в
+                             кривую капсулу с мелкой подписью — жалоба Ильи дословно: «Выход
+                             какая-то кривая кнопка». Два ровных значка в ряд читаются как пара
+                             действий над учётной записью, а не как случайная кнопка рядом с
+                             именем. Подписи ушли в подсказки: место в шапке дорогое. -->
+                        <Button x:Name="RoleSwitchNavButton" Style="{StaticResource IconButton}" Width="22" Height="22" Padding="0"
+                                Margin="6,0,0,0" BorderThickness="0" Background="Transparent"
+                                ToolTip="Сменить роль" Click="RoleSwitchButton_Click">
+                            <Path Data="{StaticResource Icon.SwapFilled}" Stretch="Uniform" Width="13" Height="13"
+                                  Fill="{DynamicResource TextMutedBrush}"/>
                         </Button>
-                        <Button x:Name="LogOutNavButton" Style="{StaticResource SecondaryButton}" Padding="7,1"
-                                Margin="6,0,0,0" VerticalAlignment="Center"
+                        <Button x:Name="LogOutNavButton" Style="{StaticResource IconButton}" Width="22" Height="22" Padding="0"
+                                Margin="2,0,0,0" BorderThickness="0" Background="Transparent"
                                 ToolTip="Выйти из учётной записи — потребуется снова войти по логину и паролю AD"
                                 Click="LogOutButton_Click">
-                            <TextBlock Text="Выход" FontSize="10" Foreground="{DynamicResource TextMutedBrush}"/>
+                            <Path Data="{StaticResource Icon.LogoutFilled}" Stretch="Uniform" Width="13" Height="13"
+                                  Fill="{DynamicResource TextMutedBrush}"/>
                         </Button>
                     </StackPanel>
                 </StackPanel>
@@ -251,7 +262,7 @@
                                 Visibility="{Binding MoreSectionVisible, Converter={StaticResource BoolToVis}}">
                         <!-- Отступ полосы такой же, как у секции «ДЛЯ НАЛАДЧИКА» выше: обе секции
                              одинаковы по смыслу и обязаны выглядеть одинаково. -->
-                        <Separator Margin="0,8,0,0"/>
+                        <Separator Margin="0,8,0,0" Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -442,13 +453,13 @@
                                      (разделитель во всю ширину, заголовок с 12, кнопки с 8): это
                                      соседние блоки одного списка, и разъехавшиеся на 4 пикселя
                                      отступы видны сразу. -->
-                                <Separator Margin="0,8,0,0"/>
+                                <Separator Margin="0,8,0,0" Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}"/>
                                 <Grid Margin="12,0,12,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="ДЛЯ НАЛАДЧИКА" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,2"
+                                    <TextBlock Text="ДЛЯ НАЛАДЧИКА" Style="{StaticResource MutedText}" FontSize="10" FontWeight="SemiBold" Margin="0,8,0,3"
                                                VerticalAlignment="Center" HorizontalAlignment="Left"
                                                Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVisInverse}}"/>
                                     <ToggleButton x:Name="SetupSectionToggle"
@@ -559,9 +570,9 @@
                                  для программиста сделай отображаемой слева как у наладчика есть
                                  параметры ПЧ упп наклейки и та». -->
                             <StackPanel Visibility="{Binding DevSectionVisible, Converter={StaticResource BoolToVis}}">
-                                <Separator Margin="0,8,0,0"/>
+                                <Separator Margin="0,8,0,0" Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}"/>
                                 <Grid Margin="12,0,12,0">
-                                    <TextBlock Text="ДЛЯ ПРОГРАММИСТА" Style="{StaticResource MutedText}" FontSize="10" Margin="0,2,0,2"
+                                    <TextBlock Text="ДЛЯ ПРОГРАММИСТА" Style="{StaticResource MutedText}" FontSize="10" FontWeight="SemiBold" Margin="0,8,0,3"
                                                VerticalAlignment="Center" HorizontalAlignment="Left"
                                                Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVisInverse}}"/>
                                     <ToggleButton x:Name="DevSectionToggle"
@@ -604,7 +615,7 @@
                                  the "top" alternative (horizontal bubble dock above the page content,
                                  ContentColumn below) and ConfigService.QuickAppsDisplayMode. -->
                             <StackPanel Visibility="{Binding QuickAppsSidebarVisible, Converter={StaticResource BoolToVis}}">
-                                <Separator Margin="0,8,0,8"/>
+                                <Separator Margin="0,8,0,8" Visibility="{Binding SectionsCollapsible, Converter={StaticResource BoolToVis}}"/>
                                 <TextBlock Text="БЫСТРЫЙ ДОСТУП" Style="{StaticResource MutedText}" Margin="12,0,0,4" FontSize="10"/>
                                 <ItemsControl ItemsSource="{Binding QuickApps}" Margin="8,0">
                                     <ItemsControl.ItemTemplate>
@@ -706,7 +717,10 @@
                            HorizontalAlignment="Left" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0"
                             Visibility="{Binding Busy.IsBusy, Converter={StaticResource BoolToVis}}">
-                    <ProgressBar Width="90" Height="6" VerticalAlignment="Center" Maximum="100"
+                    <!-- Полоса с бегущей волной (FlowProgressBar): обход диска идёт десятки
+                         секунд, и ровная серая полоска не отличалась от застывшей. -->
+                    <ProgressBar x:Name="StatusProgress" Width="90" Height="8" VerticalAlignment="Center" Maximum="100"
+                                 Style="{StaticResource FlowProgressBar}"
                                  IsIndeterminate="{Binding Busy.IsIndeterminate}" Value="{Binding Busy.Progress}"/>
                     <TextBlock Text="{Binding Busy.Text}" Style="{StaticResource MutedText}" Margin="8,0,0,0"
                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
@@ -813,9 +827,10 @@
                             BorderThickness="0" Background="Transparent"
                             Command="{Binding ShowNotificationHistoryCommand}"
                             ToolTip="История сообщений этой строки и настройка их категорий">
-                        <Path Data="{StaticResource Icon.Bell}" Stretch="Uniform" Width="12" Height="12"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.6" StrokeLineJoin="Round"/>
+                        <!-- Заливной значок и 15 пикселей вместо контурного на 12: контур в этом
+                             размере истончался до размазанной серой кляксы (см. Icons.xaml). -->
+                        <Path Data="{StaticResource Icon.BellFilled}" Stretch="Uniform" Width="15" Height="15"
+                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                     </Button>
                     <!-- IsHitTestVisible=False — иначе бейдж перехватывал бы клик по колокольчику. -->
                     <Border Background="{DynamicResource AccentBrush}" CornerRadius="6"
@@ -842,9 +857,10 @@
                         Visibility="Collapsed"
                         Command="{Binding NavigateCommand}" CommandParameter="settings"
                         ToolTip="Настройки">
-                    <Path Data="{StaticResource Icon.Settings}" Stretch="Uniform" Width="13" Height="13"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="1.6" StrokeLineJoin="Round"/>
+                    <!-- Шестерёнка, а не круг с лучами: прежний Icon.Settings был неотличим от
+                         Icon.Sun, стоящего рядом в той же строке («настройки неверный значок»). -->
+                    <Path Data="{StaticResource Icon.GearFilled}" Stretch="Uniform" Width="15" Height="15"
+                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                 </Button>
             </Grid>
         </Border>

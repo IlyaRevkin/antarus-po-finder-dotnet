@@ -208,14 +208,14 @@
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="{DynamicResource NavBorderThickness}"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="Padding" Value="{DynamicResource NavItemPadding}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource NavCorner}" Padding="{TemplateBinding Padding}"
-                            Margin="0,0,0,3">
+                            Margin="{DynamicResource NavItemMargin}">
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -395,6 +395,11 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="8,6"/>
         <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
+        <!-- ТЕКСТ ПО ЦЕНТРУ ПОЛЯ. У однострочных полей высота задана жёстко (34 почти везде), а
+             содержимое по умолчанию прижимается к верху — со скруглением «Материала» это читалось
+             как «текст не влезает» (дословная жалоба Ильи по 2.0.0.4). Многострочным полям центр
+             противопоказан: там текст обязан начинаться сверху, поэтому ниже стоит триггер. -->
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
@@ -403,7 +408,9 @@
                             CornerRadius="{DynamicResource ControlCorner}" SnapsToDevicePixels="True">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                      Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                                      Focusable="False"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -419,6 +426,11 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <Trigger Property="AcceptsReturn" Value="True">
+                <Setter Property="VerticalContentAlignment" Value="Top"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style TargetType="PasswordBox">
@@ -435,7 +447,9 @@
                             CornerRadius="{DynamicResource ControlCorner}" SnapsToDevicePixels="True">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                      Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                                      Focusable="False"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
@@ -981,8 +995,11 @@
     <!-- Card container (search results, dialogs) -->
     <Style x:Key="CardBorder" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}"/>
+        <!-- Толщина рамки — у темы. В «Материале» карточку отделяет от фона тень и свой тон
+             поверхности, а не линия: обведённая карточка там выглядит как таблица, а не как
+             карточка. У светлой и тёмной рамка прежняя. -->
+        <Setter Property="BorderThickness" Value="{DynamicResource CardBorderThickness}"/>
         <!-- Скругление, отступы и тень берутся У ТЕМЫ: материал узнают по крупным радиусам и мягкой
              тени, стекло — по ещё более крупным и по свету по краю. У светлой и тёмной значения те
              же, что были, — рабочая версия не меняется. -->
@@ -1280,4 +1297,63 @@
         </Style.Triggers>
     </Style>
 
+
+    <!-- ПОЛОСА С ПОТОКОМ — полоса прогресса, по которой бежит светлая волна.
+         Нужна в строке состояния: там идёт обход диска и поиск новых прошивок, а показывала это
+         ровно такая же серая полоска, как у любого индикатора («в нижней строке всё ещё нет
+         стилизации»). Волна говорит боковым зрением, что программа работает, а не висит.
+         Анимация живёт в шаблоне и заводится от IsVisible: отдельного кода на запуск/остановку нет,
+         значит нечему и забыться включённым после скрытия полосы. -->
+    <Style x:Key="FlowProgressBar" TargetType="ProgressBar">
+        <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Border x:Name="Track" Background="{TemplateBinding Background}"
+                            CornerRadius="{DynamicResource ControlCorner}" ClipToBounds="True">
+                        <Grid>
+                            <Rectangle x:Name="PART_Track"/>
+                            <Rectangle x:Name="PART_Indicator" Fill="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Left"/>
+                            <Rectangle x:Name="Wave" Width="48" HorizontalAlignment="Left" Opacity="0.55"
+                                       IsHitTestVisible="False">
+                                <Rectangle.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Offset="0" Color="#00FFFFFF"/>
+                                        <GradientStop Offset="0.5" Color="#CCFFFFFF"/>
+                                        <GradientStop Offset="1" Color="#00FFFFFF"/>
+                                    </LinearGradientBrush>
+                                </Rectangle.Fill>
+                                <Rectangle.RenderTransform>
+                                    <TranslateTransform X="-48"/>
+                                </Rectangle.RenderTransform>
+                            </Rectangle>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsVisible" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="FlowRun">
+                                    <Storyboard RepeatBehavior="Forever">
+                                        <!-- Пробег в 240 пикселей покрывает любую ширину, где эта
+                                             полоса встречается (90 в строке состояния, ~500 в окне
+                                             загрузки): волна уходит за правый край и появляется
+                                             слева, шов при этом не виден. -->
+                                        <DoubleAnimation Storyboard.TargetName="Wave"
+                                                         Storyboard.TargetProperty="RenderTransform.X"
+                                                         From="-48" To="240" Duration="0:0:1.8"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="FlowRun"/>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

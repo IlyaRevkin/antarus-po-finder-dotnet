@@ -129,4 +129,15 @@
          У светлой и тёмной — прежняя шестёрка: рабочая версия не должна измениться ни на пиксель. -->
     <CornerRadius x:Key="ButtonCorner">6</CornerRadius>
     <CornerRadius x:Key="ControlCorner">6</CornerRadius>
+
+    <!-- ПЛОТНОСТЬ БОКОВОГО МЕНЮ. Илья про переделанные настройки: «вот настройки сделал хорошо прям
+         организацию пространства, переработай и левую панель к такому дизайну». В настройках
+         разделы стоят столбиком плотно (padding 12,6, зазор 1), а в главном меню пункты были
+         заметно разреженнее (12,10 и зазор 3) — рядом это читалось как два разных приложения.
+         Значения задаёт ТЕМА: у светлой и тёмной прежние, у «Материала» и «Стекла» — как в
+         настройках. Так плотность меняется только там, где и сам дизайн новый. -->
+    <Thickness x:Key="NavItemPadding">12,10</Thickness>
+    <Thickness x:Key="NavItemMargin">0,0,0,3</Thickness>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource BorderColor}"/>
+    <Thickness x:Key="CardBorderThickness">1</Thickness>
 </ResourceDictionary>

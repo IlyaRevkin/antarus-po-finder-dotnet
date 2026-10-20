@@ -492,6 +492,11 @@ public partial class LoaderDialog : Window
     /// темах, и захардкоженный синий в «Стекле» выглядел бы заплаткой.</summary>
     private void ApplyEquipmentMotif()
     {
+        // ТОЛЬКО В БЕТЕ. Отраслевая стилизация — переделка 2.0, а обе сборки идут из одного дерева:
+        // забытая проверка — и она уезжает в рабочую версию. Ровно это и случилось с 1.75.2
+        // («почему-то стилизация которая только в 2.0.0.0 должна быть попала в 1.75.2»).
+        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) return;
+
         var motif = EquipmentMotifResolver.For(_job.EquipmentName, _job.ControllerName);
         if (motif == EquipmentMotif.Neutral) return;
 
