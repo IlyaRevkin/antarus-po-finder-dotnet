@@ -61,6 +61,15 @@ public partial class Database
                     GroupName = GetString(r, "group_name"), GroupSyncId = GetString(r, "group_sync_id"),
                 });
 
+        // Надгробия иерархии: без них удаление подтипа у коллеги, где под ним лежат версии, не
+        // доезжало никогда, а его снимок возвращал подтип обратно (Database.HierarchyTombstones).
+        data.HierarchyTombstones = GetHierarchyTombstones()
+            .Select(t => new ExportedTombstone
+            {
+                Kind = t.Kind, SyncId = t.SyncId, Label = t.Label, DeletedAt = t.DeletedAt,
+            })
+            .ToList();
+
         using (var r = ExecuteReader("SELECT name, prefix, sort_order, sync_id, updated_at FROM controller_models ORDER BY sort_order"))
             while (r.Read())
                 data.ControllerModels.Add(new ExportedController { Name = r.GetString(0), Prefix = r.GetInt32(1), SortOrder = r.GetInt32(2), SyncId = GetString(r, "sync_id"), UpdatedAt = GetString(r, "updated_at") });
@@ -733,6 +742,18 @@ public partial class Database
             }
         }
 
+        // ── НАДГРОБИЯ ИЕРАРХИИ ─────────────────────────────────────────────────
+        //
+        // Принимаются ПЕРВЫМИ, до разбора самих подтипов: дальше по ним решается, какие входящие
+        // записи не заводить обратно. Знание о том, что подтип удалён, распространяется так же, как
+        // сам справочник, — иначе каждая машина узнавала бы об удалении только от того, кто удалял,
+        // а между собой они по-прежнему воскрешали бы его друг у друга.
+        foreach (var t in data.HierarchyTombstones ?? new List<ExportedTombstone>())
+        {
+            if (string.IsNullOrWhiteSpace(t.SyncId)) continue;
+            if (apply) MarkHierarchyDeleted(t.Kind, t.SyncId, t.Label, t.DeletedAt);
+        }
+
         // ── Subtypes (upsert by sync_id, fallback to (group,name)) ──────────────
         var subtypeSyncToId = new Dictionary<string, int>();
         // Строки, которые входящий снимок ОПОЗНАЛ. Нужен зеркалированию удалений ниже: оно
@@ -749,6 +770,16 @@ public partial class Database
             var existing = FindSubtype(s.SyncId, groupId.Value, s.Name, s.PrevName);
             if (existing is null)
             {
+                // УДАЛЁННОЕ НЕ ЗАВОДИМ ОБРАТНО. Коллега мог не повторить удаление у себя (под
+                // подтипом остались версии — см. SubtypesSkippedDelete ниже) и прислать подтип
+                // живым. Если удаление позже его последней правки, побеждает удаление; если он
+                // правил подтип ПОСЛЕ удаления — побеждает правка, как и везде в обмене.
+                if (DeletedLaterThan(TombstoneSubtype, s.SyncId, s.UpdatedAt))
+                {
+                    counts.SubtypesSkippedResurrect++;
+                    continue;
+                }
+
                 counts.SubtypesAdded++;
                 if (apply)
                 {

@@ -73,15 +73,23 @@
                  через насос в напор, стоки поднимаются из колодца, тепло ходит по кругу. Значка в
                  24 пикселя для этого мало («стилизации мало»), а картинку линиями можно растянуть
                  на любую ширину и покрасить кистью темы. Свёрнута, когда объект не опознан. -->
-            <!-- Uniform и слева, а не Fill во всю ширину: схема нарисована в сетке 100x40, и
-                 растягивание по ширине окна ломало пропорции — окружность насоса превращалась в
-                 плоский эллипс, а линии шли под случайными углами. Именно это Илья и увидел как
-                 «какие-то непонятные линии при загрузке насосной». -->
-            <Path Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="MotifScheme"
-                  Visibility="Collapsed" Height="40" Margin="0,0,0,10" MaxWidth="260"
-                  Stretch="Uniform" HorizontalAlignment="Left"
-                  StrokeThickness="1.6" StrokeLineJoin="Round"
-                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.85"/>
+            <!-- СХЕМА ОБЪЕКТА — две фигуры одна поверх другой: тела заливкой, трубы линиями
+                 (см. EquipmentMotifArt.SchemeFill/SchemeLine). Одними линиями это читалось как
+                 случайный проволочный чертёж — «стилизации мало, та что есть кривая».
+
+                 ⚠️ ОБЕ фигуры лежат в ОДНОМ Viewbox поверх Canvas размером 120×48 и рисуются БЕЗ
+                 собственного растягивания. Иначе каждая масштабируется по СВОИМ границам: вода
+                 уезжает вбок от резервуара, а крыльчатка повисает в стороне от насоса — ровно это
+                 и было на первом снимке новой схемы. -->
+            <Viewbox Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="MotifScheme"
+                     Visibility="Collapsed" Height="54" Margin="0,2,0,12"
+                     HorizontalAlignment="Left" Stretch="Uniform">
+                <Canvas Width="120" Height="48">
+                    <Path x:Name="MotifSchemeFill" Opacity="0.3"/>
+                    <Path x:Name="MotifSchemeLine" StrokeThickness="2.2" StrokeLineJoin="Round"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                </Canvas>
+            </Viewbox>
 
             <Grid Grid.Row="1" Grid.Column="0">
                 <Grid.ColumnDefinitions>
@@ -104,7 +112,7 @@
                          анимации, которую приходилось заводить и останавливать руками. Один стиль
                          на окно загрузки и на строку состояния — одно движение в обоих местах. -->
                     <ProgressBar x:Name="Progress" Style="{StaticResource FlowProgressBar}"
-                                 Height="18" Minimum="0" Maximum="100" Value="0"
+                                 Height="22" Minimum="0" Maximum="100" Value="0"
                                  Foreground="{DynamicResource AccentBrush}"/>
                 </Grid>
             </Grid>

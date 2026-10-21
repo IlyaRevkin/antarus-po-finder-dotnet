@@ -179,7 +179,7 @@ public static class UiSnapshotService
                     EquipmentName = equipment,
                     ControllerName = controller,
                     SourcePath = "",
-                });
+                }, percent: 58);
                 window.Show();
                 await System.Threading.Tasks.Task.Delay(400);
                 window.UpdateLayout();

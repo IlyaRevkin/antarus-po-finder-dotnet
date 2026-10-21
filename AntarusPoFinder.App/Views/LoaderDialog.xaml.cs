@@ -553,7 +553,13 @@ public partial class LoaderDialog : Window
 
         // Ключ кисти, а не кисть: тему могут переключить прямо во время заливки.
         var brushKey = EquipmentMotifArt.BrushKey(motif);
-        Progress.SetResourceReference(ForegroundProperty, brushKey);
+
+        // ⚠️ У ПОЖАРНОГО ШКАФА ПОЛОСА — ЭТО ВОДА, А НЕ ОГОНЬ.
+        // Оранжевым красится всё остальное: подпись, схема, пламя под полосой. Сама заливка идёт
+        // акцентом (синим): иначе по трубе «течёт огонь», и смысл переворачивается — вода должна
+        // гасить пламя, а не подменять его.
+        Progress.SetResourceReference(ForegroundProperty,
+            motif == EquipmentMotif.Fire ? "AccentBrush" : brushKey);
         // Метка выбирает ДВИЖЕНИЕ полосы: вентиль, ручной насос, нагрев или тушение пожара
         // (разбирается триггерами стиля FlowProgressBar).
         Progress.Tag = EquipmentMotifArt.BarTag(motif);
@@ -567,14 +573,26 @@ public partial class LoaderDialog : Window
         // объекта над полосой и цвет полосы.
         MotifIcon.Visibility = Visibility.Collapsed;
 
-        var scheme = EquipmentMotifArt.Scheme(motif);
-        if (!scheme.IsEmpty())
+        // Схема рисуется ДВУМЯ фигурами: тела заливкой, трубы линиями поверх. Одними линиями она
+        // читалась как проволочный чертёж (жалоба «стилизации мало, та что есть кривая»).
+        var line = EquipmentMotifArt.SchemeLine(motif);
+        if (!line.IsEmpty())
         {
-            MotifScheme.Data = scheme;
-            MotifScheme.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
+            MotifSchemeLine.Data = line;
+            MotifSchemeLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
+
+            var fill = EquipmentMotifArt.SchemeFill(motif);
+            if (!fill.IsEmpty())
+            {
+                MotifSchemeFill.Data = fill;
+                MotifSchemeFill.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
+                // Вода и теплообменник — подложка, они приглушены. Пламя — нет: бледный огонь
+                // выглядит как пятно, а он здесь главное, что должно броситься в глаза.
+                MotifSchemeFill.Opacity = motif == EquipmentMotif.Fire ? 0.9 : 0.3;
+            }
+
             MotifScheme.Visibility = Visibility.Visible;
         }
-
     }
 
 
@@ -1130,6 +1148,15 @@ public partial class LoaderDialog : Window
     /// <summary>Окно загрузки «как оно выглядит», без запуска операции — для автоматического
     /// прогона по экранам (UiSnapshotService). Отдельной фабрикой, а не публичным флагом в обычном
     /// конструкторе: случайно открыть рабочее окно в режиме «ничего не делать» нельзя.</summary>
-    public static LoaderDialog CreateForSnapshot(LoaderJob job) =>
-        new(new ConfigService(new Core.Data.Database(ConfigService.DbPath)), job, snapshotOnly: true);
+    public static LoaderDialog CreateForSnapshot(LoaderJob job, int percent = 0)
+    {
+        var dialog = new LoaderDialog(new ConfigService(new Core.Data.Database(ConfigService.DbPath)), job,
+            snapshotOnly: true);
+        // Процент ставится намеренно: на пустой полосе отраслевой стилизации почти не видно, и
+        // снимок с нулём отвечал не на тот вопрос. Заливку, пламя под ней и струи имеет смысл
+        // смотреть ровно так, как их видит человек во время заливки.
+        dialog.Progress.IsIndeterminate = false;
+        dialog.Progress.Value = percent;
+        return dialog;
+    }
 }

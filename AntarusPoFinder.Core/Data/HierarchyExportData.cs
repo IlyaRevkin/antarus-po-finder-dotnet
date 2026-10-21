@@ -430,6 +430,15 @@ public class ExportedFwUsage
     [JsonPropertyName("weight")] public int Weight { get; set; }
 }
 
+/// <summary>Запись об удалении из справочника — kind + sync_id + когда.</summary>
+public class ExportedTombstone
+{
+    [JsonPropertyName("kind")] public string Kind { get; set; } = "";
+    [JsonPropertyName("sync_id")] public string SyncId { get; set; } = "";
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
+}
+
 public class HierarchyExportData
 {
     [JsonPropertyName("equipment_groups")] public List<ExportedGroup> EquipmentGroups { get; set; } = new();
@@ -452,6 +461,15 @@ public class HierarchyExportData
     [JsonPropertyName("fw_version_reservations")] public List<ExportedReservation> Reservations { get; set; } = new();
     [JsonPropertyName("fw_versions")] public List<ExportedFwVersion> FwVersions { get; set; } = new();
     [JsonPropertyName("param_files")] public List<ExportedParamFile> ParamFiles { get; set; } = new();
+
+    /// <summary>ЧТО УДАЛИЛИ ИЗ СПРАВОЧНИКА. Без этого списка удаление подтипа не доезжало до
+    /// коллег вовсе: у них под ним лежали версии, обмен удаление пропускал, их снимок возвращал
+    /// подтип живым — и так по кругу («всё ещё не удаляется НГР 2.0»). Разбор — в
+    /// Database.HierarchyTombstones.
+    ///
+    /// Nullable без значения по умолчанию, как у списков выше: снимок, написанный прежней версией
+    /// программы, ключа не содержит вовсе, и это не то же самое, что «удалений не было».</summary>
+    [JsonPropertyName("hierarchy_tombstones")] public List<ExportedTombstone>? HierarchyTombstones { get; set; }
 
     /// <summary>true — снимок писало приложение, которое уже умеет sync_id/тумбстоуны у файлов
     /// параметров, т.е. список param_files выше ПОЛНЫЙ (включая архивные) и каждая строка адресуема.
@@ -571,6 +589,12 @@ public class ImportCounts
     public int SubtypesUpdated { get; set; }
     public int SubtypesRemoved { get; set; }
     public int SubtypesSkippedDelete { get; set; }
+
+    /// <summary>Сколько входящих подтипов НЕ стали заводить обратно, потому что они удалены (и
+    /// удалены позже своей последней правки). Отдельный счётчик, а не молчание: человек, который
+    /// третий раз удаляет «НГР 2.0», должен видеть в отчёте, что возврат прекращён, — иначе он
+    /// по-прежнему не знает, сработало или нет.</summary>
+    public int SubtypesSkippedResurrect { get; set; }
     public int ControllersAdded { get; set; }
     public int ControllersUpdated { get; set; }
     public int ControllersRemoved { get; set; }

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Data;
@@ -82,7 +82,15 @@ public partial class Database
 
     public void DeleteEquipmentGroup(int groupId)
     {
+        // Надгробия и на сам тип, и на каждый его подтип: подтипы уходят вместе с типом (ON DELETE
+        // CASCADE), и без своих надгробий они вернулись бы по отдельности, как только тип заведут
+        // заново или пришлют с другой машины.
+        MarkHierarchyDeleted(TombstoneGroup, GroupSyncId(groupId), GroupLabel(groupId));
+
         var subtypeIds = QueryIntsParam("SELECT id FROM equipment_subtypes WHERE group_id=@g", "@g", groupId);
+        foreach (var id in subtypeIds)
+            MarkHierarchyDeleted(TombstoneSubtype, SubtypeSyncId(id), SubtypeLabel(id));
+
         if (subtypeIds.Count > 0)
         {
             var ph = IntParamPlaceholders(subtypeIds);
@@ -227,10 +235,36 @@ public partial class Database
 
     public void DeleteEquipmentSubtype(int subtypeId)
     {
+        // НАДГРОБИЕ — ДО удаления: после него sync_id уже негде взять, а без него факт удаления не
+        // доедет до других машин и подтип вернётся с первым же чужим конфигом (см.
+        // Database.HierarchyTombstones — там разобрано, как именно он возвращался).
+        MarkHierarchyDeleted(TombstoneSubtype, SubtypeSyncId(subtypeId), SubtypeLabel(subtypeId));
+
         ExecuteNonQuery("DELETE FROM fw_versions WHERE subtype_id=@s", cmd => cmd.Parameters.AddWithValue("@s", subtypeId));
         ExecuteNonQuery("DELETE FROM param_files WHERE subtype_id=@s", cmd => cmd.Parameters.AddWithValue("@s", subtypeId));
         ExecuteNonQuery("DELETE FROM equipment_subtypes WHERE id=@s", cmd => cmd.Parameters.AddWithValue("@s", subtypeId));
     }
+
+    private string? SubtypeSyncId(int subtypeId) =>
+        ExecuteScalar("SELECT sync_id FROM equipment_subtypes WHERE id=@s",
+            cmd => cmd.Parameters.AddWithValue("@s", subtypeId)) as string;
+
+    /// <summary>Подпись для надгробия — «НГР / 2.0». Нужна только людям: в отчёте обмена и в журнале
+    /// должно быть видно, ЧТО именно не стали заводить обратно, а не голый идентификатор.</summary>
+    private string SubtypeLabel(int subtypeId) =>
+        ExecuteScalar("""
+            SELECT eg.name || ' / ' || es.name
+            FROM equipment_subtypes es JOIN equipment_groups eg ON eg.id = es.group_id
+            WHERE es.id=@s
+            """, cmd => cmd.Parameters.AddWithValue("@s", subtypeId)) as string ?? "";
+
+    private string? GroupSyncId(int groupId) =>
+        ExecuteScalar("SELECT sync_id FROM equipment_groups WHERE id=@g",
+            cmd => cmd.Parameters.AddWithValue("@g", groupId)) as string;
+
+    private string GroupLabel(int groupId) =>
+        ExecuteScalar("SELECT name FROM equipment_groups WHERE id=@g",
+            cmd => cmd.Parameters.AddWithValue("@g", groupId)) as string ?? "";
 
     // ── Controller Models ─────────────────────────────────────────────────────
 
