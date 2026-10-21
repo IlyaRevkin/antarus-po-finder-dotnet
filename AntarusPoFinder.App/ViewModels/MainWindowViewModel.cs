@@ -374,6 +374,15 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (_ticketStorageSyncRunning) return;
         if (!force && DateTime.UtcNow - _lastTicketStorageSyncAt < TicketStorageQuietPeriod) return;
 
+        // ЖУРНАЛЫ ЗАЛИВОК — своим каналом и ДО проверки бакета (см. LoaderDiagnostics).
+        //
+        // Именно до: ключей от бакета на цеховой машине может не быть вовсе, а журнал заливки нужен
+        // как раз оттуда, где заливают. Поэтому диагностика ездит не бакетом, а страницей приёма
+        // файлов, и выход из этого метода по «бакет не настроен» не должен её отменять.
+        // Ошибку не показываем: это фоновая мелочь, человек её не просил и чинить ему нечего.
+        _ = LoaderDiagnostics.FlushAsync(ConfigService.AppData,
+            _services.Cfg.DiagnosticsDropUrl(), _services.Cfg.DiagnosticsDropCode());
+
         var storage = new S3TicketStorage(_services.Cfg.S3());
         // Ключей нет или выкладка выключена — ШТАТНОЕ состояние (см. S3Settings.CanPublish):
         // молча ничего не делаем, ровно как выкладка инструкций.

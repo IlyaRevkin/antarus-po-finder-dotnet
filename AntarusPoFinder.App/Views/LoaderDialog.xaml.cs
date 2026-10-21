@@ -447,6 +447,45 @@ public partial class LoaderDialog : Window
         }
 
         _onFinished?.Invoke(outcome == LoaderOutcome.Succeeded);
+
+        // СЛЕД ЗАЛИВКИ — в очередь на отправку в хранилище. Молча и всегда, включая успешные
+        // операции: беда SMH5 в том и состоит, что заливка выглядит удачной, а контроллер умирает
+        // позже, при снятии питания. Разбор этой беды дважды упёрся в то, что следов не осталось
+        // вовсе (см. LoaderDiagnostics).
+        QueueDiagnostics(outcome, message);
+    }
+
+    /// <summary>Положить журнал этой операции в очередь на выгрузку. Ничего не бросает и ничего не
+    /// показывает человеку: диагностика не имеет права ни мешать заливке, ни отвлекать от неё.</summary>
+    private void QueueDiagnostics(LoaderOutcome outcome, string message)
+    {
+        try
+        {
+            LoaderDiagnostics.Enqueue(ConfigService.AppData, new LoaderDiagnostics.Entry
+            {
+                At = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                Machine = Environment.MachineName,
+                User = Environment.UserName,
+                AppVersion = AppIdentity.ProductName + " " + AppUpdateService.CurrentVersionText,
+                LoaderVersion = _backend.DisplayVersion ?? "",
+                Operation = _isBuild ? "build" : "deploy",
+                Controller = _job.ControllerName,
+                Equipment = _job.EquipmentName,
+                Version = _job.VersionName,
+                Artifact = _job.SourcePath,
+                ArtifactType = System.IO.Path.GetExtension(_job.SourcePath ?? "").TrimStart('.').ToLowerInvariant(),
+                Preparation = _preparation is { } chosen ? chosen.ToString() : "",
+                Ok = outcome == LoaderOutcome.Succeeded,
+                Outcome = outcome + (string.IsNullOrWhiteSpace(message) ? "" : ": " + message),
+                Seconds = (int)_operationStopwatch.Elapsed.TotalSeconds,
+                Log = string.Join(Environment.NewLine, _logLines),
+            });
+        }
+        catch (Exception)
+        {
+            // Диагностика — побочная задача. Её отказ не должен быть виден там, где человек ждёт
+            // результата заливки.
+        }
     }
 
     /// <summary>Показать окно операции и поднять его. Это же действие уезжает кнопкой «Показать» в

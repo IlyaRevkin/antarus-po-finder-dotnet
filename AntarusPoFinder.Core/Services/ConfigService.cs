@@ -891,6 +891,39 @@ public class ConfigService
     public bool SearchShowAllVersions() => Get("search_show_all_versions").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetSearchShowAllVersions(bool value) => Set("search_show_all_versions", value ? "true" : "false");
 
+    // ── Куда уезжают журналы заливок ─────────────────────────────────────────
+    //
+    // Журнал каждой заливки уходит сам, без участия человека (LoaderDiagnostics): причину
+    // окирпичивания SMH5 дважды искали вслепую именно потому, что следов не оставалось. Адрес и код
+    // лежат настройками, а не в коде намертво, чтобы их можно было сменить, не пересобирая
+    // программу. Канал — страница приёма файлов, та же, через которую уходят архивы тикетов: она
+    // умеет ТОЛЬКО принимать, ограничена по размеру, расширениям и попыткам, и живёт на домашнем
+    // сервере, куда с цехового компьютера открыт только 443.
+
+    public string DiagnosticsDropUrl()
+    {
+        var value = Get("diagnostics_drop_url");
+        return string.IsNullOrWhiteSpace(value) ? LoaderDiagnostics.DefaultDropUrl : value.Trim();
+    }
+
+    public void SetDiagnosticsDropUrl(string url) => Set("diagnostics_drop_url", url.Trim());
+
+    public string DiagnosticsDropCode()
+    {
+        var value = Get("diagnostics_drop_code");
+        return string.IsNullOrWhiteSpace(value) ? DefaultDiagnosticsDropCode : value.Trim();
+    }
+
+    public void SetDiagnosticsDropCode(string code) => Set("diagnostics_drop_code", code.Trim());
+
+    /// <summary>Код страницы приёма по умолчанию. Да, он попадает в собранную программу — и это
+    /// осознанный размен: без него журнал заливки не уедет ни с одной машины, пока кто-нибудь
+    /// руками не настроит каждую, а именно этого и просили избежать («сделай чтобы логи через
+    /// хранилище тебе дошли и от меня ничего не требовалось»). Цена утечки невелика: по этому коду
+    /// можно только ПОЛОЖИТЬ файл на домашний сервер — скачивания страница не умеет вовсе, размер и
+    /// расширения ограничены, повторные промахи блокируются, всё старше 90 дней удаляется само.</summary>
+    private const string DefaultDiagnosticsDropCode = "drop-6a55a74b8d";
+
     /// <summary>Необязательный путь к папке Segnetics Loader, GUI exe или Automation exe.
     /// Пустое значение выбирает Loader, поставляемый вместе с приложением.</summary>
     public string LoaderExePath() => Get("loader_exe_path");

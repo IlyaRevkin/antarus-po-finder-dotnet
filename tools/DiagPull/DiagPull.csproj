@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ЗАБРАТЬ ЖУРНАЛЫ ЗАЛИВОК ИЗ ХРАНИЛИЩА.
+       Инструмент разработчика, а не часть программы: в установщик не входит, в решение подключён
+       отдельно и ссылается только на Core. Нужен затем, чтобы разбор очередной беды с контроллером
+       начинался с фактов, а не с просьбы к человеку «пришли, пожалуйста, журнал». -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AntarusPoFinder.Tools.DiagPull</RootNamespace>
+    <AssemblyName>diag-pull</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\AntarusPoFinder.Core\AntarusPoFinder.Core.csproj" />
+  </ItemGroup>
+
+</Project>
