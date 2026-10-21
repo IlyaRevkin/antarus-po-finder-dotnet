@@ -43,9 +43,10 @@
     </conv:ToolTipTextTemplateSelector>
 
     <Style TargetType="{x:Type ToolTip}">
-        <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
+        <!-- Непрозрачная поверхность: подсказка — тоже всплывающее окно (см. PopupBgBrush). -->
+        <Setter Property="Background" Value="{DynamicResource PopupBgBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource PopupBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="8,5"/>
         <!-- Ширина, на которой подсказка переносится. 420 против прежних 480: подсказка не должна
@@ -594,7 +595,10 @@
                         </ToggleButton>
                         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"
                                Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
-                            <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                            <!-- Непрозрачная поверхность (PopupBgBrush), а не фон карточки: список
+                                 висит НАД окном, и в «Стекле» сквозь полупрозрачную карточку был бы
+                                 виден рабочий стол. -->
+                            <Border Background="{DynamicResource PopupBgBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
                                     BorderThickness="1" CornerRadius="{DynamicResource ControlCorner}" Margin="0,4,0,0"
                                     Width="{TemplateBinding ActualWidth}" MaxHeight="320">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,4">
@@ -1017,7 +1021,7 @@
     <!-- Пузырь с подробностями рядом с кнопкой «i». Ширина ограничена: длинный текст в одну строку
          уехал бы за край экрана. -->
     <Style x:Key="InfoPopupCard" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource BgCardBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource PopupBgBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="6"/>

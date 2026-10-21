@@ -57,6 +57,36 @@ public class ThemeCatalogTests
         }
     }
 
+    /// <summary>ВСПЛЫВАЮЩИЕ ОКНА НЕПРОЗРАЧНЫ — ВО ВСЕХ ТЕМАХ.
+    ///
+    /// «Стекло» делает карточки полупрозрачными намеренно: так видна глубина. Но выпадающий список,
+    /// подсказка и всплывающее меню висят НАД окном, и сквозь них виден рабочий стол — читать такой
+    /// список невозможно. Предупреждение Ильи 21.10.2026 дословно: «в стекле проверь чтобы
+    /// выпадающие списки не смотря на стекло не сливались с фоном за ними».
+    ///
+    /// Поэтому цвет этих поверхностей обязан быть полностью непрозрачным: либо шесть цифр без
+    /// альфы, либо восемь, начинающихся с FF. Проверяется по словарю, а не глазами: прозрачность
+    /// здесь ломается одной цифрой и замечается только на чужой машине с открытым списком.</summary>
+    [Fact]
+    public void Поверхность_всплывающих_окон_непрозрачна_в_каждой_теме()
+    {
+        foreach (var theme in ThemeCatalog.All)
+        {
+            var doc = XDocument.Load(Path.Combine(ThemesDir, theme.Dictionary + ".xaml"));
+            XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+            var colour = doc.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "Color" && e.Attribute(x + "Key")?.Value == "PopupBgColor")
+                ?.Value.Trim();
+
+            Assert.True(colour is not null, $"в теме «{theme.Label}» нет PopupBgColor");
+
+            var hex = colour!.TrimStart('#');
+            Assert.True(hex.Length == 6 || hex.StartsWith("FF", StringComparison.OrdinalIgnoreCase),
+                $"в теме «{theme.Label}» всплывающие окна полупрозрачны ({colour}) — сквозь список будет виден рабочий стол");
+        }
+    }
+
     /// <summary>Словарь должен существовать на диске и собираться в ресурсы: опечатка в имени файла
     /// каталога даёт исключение при переключении темы, а не «тема не нашлась».</summary>
     [Fact]

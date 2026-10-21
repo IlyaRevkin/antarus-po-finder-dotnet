@@ -119,9 +119,11 @@
 
             <WrapPanel x:Name="ActionsPanel" Margin="0,8,0,0"/>
 
+            <!-- Всплывающее меню: непрозрачная поверхность (PopupBgBrush) — в «Стекле» сквозь
+                 полупрозрачную карточку был бы виден рабочий стол за окном. -->
             <Popup x:Name="MorePopup" StaysOpen="False" AllowsTransparency="True"
                    Placement="Bottom" HorizontalOffset="0" VerticalOffset="2">
-                <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                <Border Background="{DynamicResource PopupBgBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
                         BorderThickness="1" CornerRadius="6" Padding="6">
                     <StackPanel x:Name="MorePanel" MinWidth="230"/>
                 </Border>

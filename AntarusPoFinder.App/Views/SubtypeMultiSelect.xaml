@@ -1,4 +1,4 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.SubtypeMultiSelect"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.SubtypeMultiSelect"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Комбобокс с чекбоксами: выглядит и открывается как обычный ComboBox (та же окантовка/стрелка,
@@ -30,7 +30,7 @@
         <Popup x:Name="ItemsPopup" PlacementTarget="{Binding ElementName=MainBorder}" Placement="Bottom"
                StaysOpen="False" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide"
                Width="{Binding ElementName=MainBorder, Path=ActualWidth}">
-            <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+            <Border Background="{DynamicResource PopupBgBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
                     BorderThickness="1" CornerRadius="6" Margin="0,4,0,0" MaxHeight="280">
                 <DockPanel Margin="0,4">
                     <!-- Список по умолчанию показывает подтипы выбранного типа шкафа (иначе выбор

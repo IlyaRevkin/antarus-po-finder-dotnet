@@ -111,4 +111,14 @@
     <Thickness x:Key="ButtonSoftBorderThickness">1</Thickness>
     <SolidColorBrush x:Key="NavActiveBrush" Color="{StaticResource AccentColor}"/>
     <SolidColorBrush x:Key="NavActiveTextBrush" Color="{StaticResource TextOnAccentColor}"/>
+
+    <!-- ПОВЕРХНОСТЬ ВСПЛЫВАЮЩИХ ОКОН — выпадающие списки, подсказки, меню.
+         Отдельно от карточек, и только ради «Стекла»: карточка внутри окна просвечивает
+         намеренно, а всплывающий список висит НАД окном, и сквозь него виден рабочий
+         стол. Такой список нечитаем, сколько бы красиво он ни выглядел на снимке.
+         Поэтому здесь тон НЕПРОЗРАЧНЫЙ во всех темах; «стеклянность» остаётся на окне
+         (размытие за ним делает система) и на карточках внутри него. -->
+    <Color x:Key="PopupBgColor">#FFFFFF</Color>
+    <SolidColorBrush x:Key="PopupBgBrush" Color="{StaticResource PopupBgColor}"/>
+    <SolidColorBrush x:Key="PopupBorderBrush" Color="{StaticResource BorderColor}"/>
 </ResourceDictionary>
