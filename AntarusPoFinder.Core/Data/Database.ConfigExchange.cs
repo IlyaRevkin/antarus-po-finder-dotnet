@@ -748,10 +748,32 @@ public partial class Database
         // записи не заводить обратно. Знание о том, что подтип удалён, распространяется так же, как
         // сам справочник, — иначе каждая машина узнавала бы об удалении только от того, кто удалял,
         // а между собой они по-прежнему воскрешали бы его друг у друга.
+        // ⚠️ Входящие надгробия держим ещё и СПИСКОМ в памяти, а не только пишем в базу: при
+        // предпросмотре (apply: false) в базу ничего не пишется, и проверка «удалён ли подтип»,
+        // заглядывающая только в базу, показала бы одно, а настоящий приём сделал бы другое. Отчёт
+        // перед необратимой отправкой обязан совпадать с тем, что произойдёт.
+        var incomingTombstones = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var t in data.HierarchyTombstones ?? new List<ExportedTombstone>())
         {
             if (string.IsNullOrWhiteSpace(t.SyncId)) continue;
+            if (string.Equals(t.Kind, TombstoneSubtype, StringComparison.OrdinalIgnoreCase))
+                incomingTombstones[t.SyncId.Trim()] = t.DeletedAt ?? "";
             if (apply) MarkHierarchyDeleted(t.Kind, t.SyncId, t.Label, t.DeletedAt);
+        }
+
+        // Удалён ли подтип — по входящему снимку ИЛИ по тому, что эта машина уже знает.
+        bool SubtypeDeleted(string? syncId, string? incomingUpdatedAt)
+        {
+            if (string.IsNullOrWhiteSpace(syncId)) return false;
+
+            if (incomingTombstones.TryGetValue(syncId!.Trim(), out var deletedAt))
+            {
+                if (string.IsNullOrWhiteSpace(incomingUpdatedAt)) return true;
+                if (string.IsNullOrWhiteSpace(deletedAt)) return false;
+                if (string.CompareOrdinal(deletedAt, incomingUpdatedAt) >= 0) return true;
+            }
+
+            return DeletedLaterThan(TombstoneSubtype, syncId, incomingUpdatedAt);
         }
 
         // ── Subtypes (upsert by sync_id, fallback to (group,name)) ──────────────
@@ -774,7 +796,7 @@ public partial class Database
                 // подтипом остались версии — см. SubtypesSkippedDelete ниже) и прислать подтип
                 // живым. Если удаление позже его последней правки, побеждает удаление; если он
                 // правил подтип ПОСЛЕ удаления — побеждает правка, как и везде в обмене.
-                if (DeletedLaterThan(TombstoneSubtype, s.SyncId, s.UpdatedAt))
+                if (SubtypeDeleted(s.SyncId, s.UpdatedAt))
                 {
                     counts.SubtypesSkippedResurrect++;
                     continue;
@@ -937,6 +959,37 @@ public partial class Database
                 """, cmd => cmd.Parameters.AddWithValue("@id", id)) is not null;
             if (referenced)
             {
+                // ЭТАЛОННАЯ СИНХРОНИЗАЦИЯ + ЯВНОЕ УДАЛЕНИЕ = УДАЛЯЕМ ВМЕСТЕ С ДАННЫМИ.
+                //
+                // Жалоба Ильи 21.10.2026: «я удалял 2.0 и потом делал эталонную синхронизацию и всё
+                // равно не затиралось у остальных и возвращался 2.0». Так и было: у коллег под
+                // «НГР 2.0» лежали старые версии, мягкий предохранитель оставлял подтип вместе с
+                // ними, а их конфиг возвращал его обратно.
+                //
+                // Предохранитель остаётся для ОБЫЧНОГО обмена: снимок рядового коллеги не должен
+                // стирать чужие записи. Но у эталонной синхронизации смысл ровно обратный —
+                // администратор прямо говорит «вот полное состояние справочника для всех», и подтип
+                // он УЖЕ удалил у себя вместе с его версиями (DeleteEquipmentSubtype). Оставлять их
+                // у получателей значит оставлять расхождение, ради устранения которого эталон и
+                // жмут.
+                //
+                // ⚠️ Снимаем только по НАДГРОБИЮ (явное удаление оператором), а не по простому
+                // отсутствию во входящем снимке: отсутствие бывает и у машины, которая про подтип
+                // просто ещё не знает, и тогда эталон сносил бы живые данные ни за что.
+                if (authoritative && SubtypeDeleted(syncId, null))
+                {
+                    counts.SubtypesRemovedWithData++;
+                    if (apply)
+                    {
+                        ExecuteNonQuery("DELETE FROM fw_versions WHERE subtype_id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+                        ExecuteNonQuery("DELETE FROM param_files WHERE subtype_id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+                        ExecuteNonQuery("DELETE FROM passports WHERE subtype_id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+                        ExecuteNonQuery("DELETE FROM fw_version_reservations WHERE subtype_id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+                        ExecuteNonQuery("DELETE FROM equipment_subtypes WHERE id=@id", cmd => cmd.Parameters.AddWithValue("@id", id));
+                    }
+                    continue;
+                }
+
                 counts.SubtypesSkippedDelete++;
                 continue;
             }

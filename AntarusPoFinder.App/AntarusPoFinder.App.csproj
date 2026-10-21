@@ -27,7 +27,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
-    <Version>1.75.4.0</Version>
+    <Version>1.75.5.0</Version>
   </PropertyGroup>
 
   <!-- БЕТА — ОТДЕЛЬНОЕ ПРИЛОЖЕНИЕ, А НЕ РЕЖИМ.
@@ -39,7 +39,7 @@
        и рабочая программа начала бы считать себя бетой. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
     <DefineConstants>$(DefineConstants);BETA</DefineConstants>
-    <Version>2.0.0.9</Version>
+    <Version>2.0.1.0</Version>
     <!-- ⚠️ AssemblyName НЕ меняем. Разметка ссылается на ресурсы pack-URI с именем сборки
          («/AntarusPoFinder.App;component/Themes/…» в ThemeManager, значки окон в диалогах), и
          переименование сборки ломает их загрузку: бета падала при построении главного окна с

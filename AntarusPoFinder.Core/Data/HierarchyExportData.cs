@@ -595,6 +595,12 @@ public class ImportCounts
     /// третий раз удаляет «НГР 2.0», должен видеть в отчёте, что возврат прекращён, — иначе он
     /// по-прежнему не знает, сработало или нет.</summary>
     public int SubtypesSkippedResurrect { get; set; }
+
+    /// <summary>Сколько подтипов эталонная синхронизация удалила ВМЕСТЕ С ИХ ДАННЫМИ (версии,
+    /// параметры, паспорта, резервации). Отдельный счётчик, потому что это единственное место, где
+    /// обмен справочником трогает данные: в отчёте такое обязано быть видно отдельной строкой, а не
+    /// теряться среди «подтипов удалено».</summary>
+    public int SubtypesRemovedWithData { get; set; }
     public int ControllersAdded { get; set; }
     public int ControllersUpdated { get; set; }
     public int ControllersRemoved { get; set; }

@@ -89,6 +89,93 @@ public class HierarchyTombstoneTests
             "подтип вернулся с чужой машины — ровно то, на что жаловались трижды");
     }
 
+    /// <summary>ЭТАЛОННАЯ СИНХРОНИЗАЦИЯ СНОСИТ ПОДТИП ВМЕСТЕ С ЕГО ВЕРСИЯМИ.
+    ///
+    /// Уточнение Ильи 21.10.2026: «я удалял 2.0 и потом делал эталонную синхронизацию и всё равно не
+    /// затиралось у остальных и возвращался 2.0». Так и было: мягкий предохранитель оставлял подтип
+    /// у того, под чьим подтипом лежали версии, — и в обычном обмене это правильно, чужие записи по
+    /// чужому снимку стирать нельзя. Но эталонная синхронизация означает ровно обратное:
+    /// администратор объявляет полное состояние справочника для всех, а подтип он уже удалил у себя
+    /// вместе с версиями.
+    ///
+    /// Снос происходит ТОЛЬКО по надгробию (явному удалению), а не по простому отсутствию записи во
+    /// входящем снимке: иначе эталон сносил бы данные под подтипом, про который он просто не
+    /// знает.</summary>
+    [Fact]
+    public void Эталонная_синхронизация_сносит_удалённый_подтип_вместе_с_версиями()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var subtypeA = AddSubtype(m.DbA, GroupId(m.DbA, "НГР"), "2.0-тест");
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        ConfigSyncService.Apply(m.SvcB, ConfigSyncService.ConfigPathFor(root), root);
+
+        var subtypeB = m.DbB.GetSubtypesForGroup(GroupId(m.DbB, "НГР")).First(s => s.Name == "2.0-тест");
+        var modification = m.DbB.GetAllModifications().First(x => x.ControllerName == "SMH4");
+        m.DbB.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtypeB.Id!.Value,
+            ControllerId = modification.ControllerId,
+            HwVersion = modification.HwVersion,
+            SwVersion = 1,
+            DtStr = "20260101_0000",
+            VersionRaw = "9.9.9.1.20260101_0000",
+            Filename = "старая.psl",
+            DiskPath = "",
+            Description = "версия под заменённым подтипом",
+            Status = "active",
+        });
+
+        m.DbA.DeleteEquipmentSubtype(subtypeA);
+
+        // ОБЫЧНЫЙ обмен подтип у второй машины не трогает — под ним данные.
+        var ordinary = m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData());
+        Assert.Equal(1, ordinary.SubtypesSkippedDelete);
+        Assert.True(HasSubtype(m.DbB, "НГР", "2.0-тест"));
+
+        // ЭТАЛОННЫЙ — сносит вместе с версиями, и это видно отдельным счётчиком.
+        var authoritative = m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData(), authoritative: true);
+
+        Assert.Equal(1, authoritative.SubtypesRemovedWithData);
+        Assert.False(HasSubtype(m.DbB, "НГР", "2.0-тест"),
+            "эталонная синхронизация не убрала подтип — ровно то, на что жаловались");
+        Assert.DoesNotContain(m.DbB.GetAllFwVersionsWithNames(includeArchived: true), v => v.Filename == "старая.psl");
+    }
+
+    /// <summary>А вот подтип, которого в эталонном снимке просто НЕТ (и надгробия на него тоже нет),
+    /// эталон не трогает: его данные ни в чём не виноваты. Это предохранитель от сноса работы той
+    /// машины, которая завела подтип сама и ещё не поделилась им.</summary>
+    [Fact]
+    public void Эталон_без_надгробия_данные_не_сносит()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+
+        var onlyOnB = AddSubtype(m.DbB, GroupId(m.DbB, "НГР"), "только-у-B");
+        var modification = m.DbB.GetAllModifications().First(x => x.ControllerName == "SMH4");
+        m.DbB.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = onlyOnB,
+            ControllerId = modification.ControllerId,
+            HwVersion = modification.HwVersion,
+            SwVersion = 1,
+            DtStr = "20260101_0000",
+            VersionRaw = "9.9.9.2.20260101_0000",
+            Filename = "своя.psl",
+            DiskPath = "",
+            Description = "работа, про которую эталон не знает",
+            Status = "active",
+        });
+
+        var counts = m.DbB.ImportHierarchyData(m.DbA.ExportHierarchyData(), authoritative: true);
+
+        Assert.Equal(0, counts.SubtypesRemovedWithData);
+        Assert.True(HasSubtype(m.DbB, "НГР", "только-у-B"));
+        Assert.Contains(m.DbB.GetAllFwVersionsWithNames(includeArchived: true), v => v.Filename == "своя.psl");
+    }
+
     /// <summary>Надгробие не запрещает завести подтип заново: у новой записи свой sync_id, и старое
     /// удаление к ней отношения не имеет. Иначе «удалил по ошибке» стало бы необратимым.</summary>
     [Fact]
