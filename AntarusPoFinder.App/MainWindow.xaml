@@ -307,7 +307,7 @@
                                         <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsSettingsActive}" Value="True">
-                                                    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -327,8 +327,10 @@
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                         <Style.Triggers>
+                                                            <!-- Цвет подписи выбранного пункта берётся у темы: в «Материале» и «Стекле» выбранный
+                                                                 пункт залит мягким оттенком акцента, и белая подпись на нём не видна. -->
                                                             <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -389,7 +391,7 @@
                                                         <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                    <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -509,7 +511,7 @@
                                                                 <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                            <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
@@ -598,7 +600,7 @@
                                                             <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                                 <Style.Triggers>
                                                                     <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                                        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                                                                     </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>

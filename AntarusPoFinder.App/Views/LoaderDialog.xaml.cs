@@ -554,6 +554,9 @@ public partial class LoaderDialog : Window
         // Ключ кисти, а не кисть: тему могут переключить прямо во время заливки.
         var brushKey = EquipmentMotifArt.BrushKey(motif);
         Progress.SetResourceReference(ForegroundProperty, brushKey);
+        // Метка выбирает ДВИЖЕНИЕ полосы: вентиль, ручной насос, нагрев или тушение пожара
+        // (разбирается триггерами стиля FlowProgressBar).
+        Progress.Tag = EquipmentMotifArt.BarTag(motif);
         // Обводка, а не заливка: фигуры контурные (см. EquipmentMotifArt).
         MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
         MotifChip.SetResourceReference(BorderBrushProperty, brushKey);

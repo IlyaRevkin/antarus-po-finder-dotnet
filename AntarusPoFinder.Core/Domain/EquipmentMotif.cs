@@ -1,4 +1,4 @@
-namespace AntarusPoFinder.Core.Domain;
+﻿namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>Чем рисовать ход загрузки для этого шкафа.
 ///
@@ -31,6 +31,12 @@ public enum EquipmentMotif
 
     /// <summary>Шкаф управления задвижкой/заслонкой: створка открывается.</summary>
     Valve,
+
+    /// <summary>ПОЖАРНЫЙ ШКАФ. Отдельно от обычной насосной, хотя качает ту же воду: просьба Ильи
+    /// 21.10.2026 — «для пожарных можно чтобы в оранжево-красный открывалось и заливалось и типа
+    /// тушило пожар». Смысл тот же, что у остальных мотивов: не перепутать шкаф боковым зрением, а
+    /// пожарный от обычного отличается и по назначению, и по ответственности.</summary>
+    Fire,
 }
 
 public static class EquipmentMotifResolver
@@ -56,8 +62,13 @@ public static class EquipmentMotifResolver
         if (text.Contains("ТГР") || text.Contains("БТП") || text.Contains("ИТП") || text.Contains("ТЕПЛО"))
             return EquipmentMotif.HeatPoint;
 
-        // НГР — насосные группы, ПЖ — пожарные насосные: и те и другие качают воду.
-        if (text.Contains("НГР") || text.Contains("ПЖ") || text.Contains("НАСОС") || text.Contains("КПЧ"))
+        // ПЖ — пожарные шкафы. Раньше они попадали в общую насосную: воду качают и те и другие.
+        // Но пожарный шкаф отличается назначением, и показывать его так же, как обычную станцию,
+        // значит терять ровно то различие, ради которого мотивы и заводились.
+        if (text.Contains("ПЖ") || text.Contains("ПОЖАР")) return EquipmentMotif.Fire;
+
+        // НГР — насосные группы и прочее, что качает воду.
+        if (text.Contains("НГР") || text.Contains("НАСОС") || text.Contains("КПЧ"))
             return EquipmentMotif.PumpStation;
 
         if (text.Contains("ЗАДВИЖ") || text.Contains("ШУЗ")) return EquipmentMotif.Valve;
@@ -73,6 +84,7 @@ public static class EquipmentMotifResolver
         EquipmentMotif.Sewage => "канализационная насосная",
         EquipmentMotif.HeatPoint => "тепловой пункт",
         EquipmentMotif.Valve => "шкаф управления задвижкой",
+        EquipmentMotif.Fire => "пожарный шкаф",
         _ => "",
     };
 }

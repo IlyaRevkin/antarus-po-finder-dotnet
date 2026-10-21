@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -14,8 +14,13 @@ namespace AntarusPoFinder.App;
 /// <param name="Backdrop">Нужно ли этой теме РАЗМЫТИЕ за окном (DWM acrylic). Только цветом стекло
 /// не делается: стекло — это размытие того, что под окном, и рисует его система (см.
 /// WindowBackdrop).</param>
+/// <param name="Tonal">Мягкие поверхности вместо сплошного акцента: вторичные кнопки и выбранный
+/// пункт меню заливаются ОТТЕНКОМ текущего акцента, а подпись на них остаётся обычного цвета
+/// текста. Так устроены Material 3 (tonal button, secondary container) и интерфейсы Apple
+/// (подсвеченная строка вместо плашки). Оттенок считает ThemeManager от выбранного акцента —
+/// только так он остаётся верным при любом цвете, который человек поставил себе сам.</param>
 public sealed record AppTheme(string Id, string Label, string Dictionary, bool IsDark, bool Beta = false,
-    bool Backdrop = false);
+    bool Backdrop = false, bool Tonal = false);
 
 /// <summary>СПИСОК ТЕМ — одно место вместо «если dark, то Dark.xaml, иначе Light.xaml».
 ///
@@ -33,10 +38,10 @@ public static class ThemeCatalog
         new("light", "Светлая", "Light", IsDark: false),
         new("dark", "Тёмная", "Dark", IsDark: true),
         // Material — плотные поверхности и спокойный контраст, привычные по Android и вебу.
-        new("material", "Material", "Material", IsDark: false, Beta: true),
+        new("material", "Material", "Material", IsDark: false, Beta: true, Tonal: true),
         // «Стекло» — тёмная основа с полупрозрачными карточками: модно и, что важнее, даёт глубину
         // там, где у нас много вложенных панелей.
-        new("glass", "Стекло", "Glass", IsDark: true, Beta: true, Backdrop: true),
+        new("glass", "Стекло", "Glass", IsDark: true, Beta: true, Backdrop: true, Tonal: true),
     };
 
     /// <summary>Что предлагать человеку в настройках. В стабильной программе — только то, что

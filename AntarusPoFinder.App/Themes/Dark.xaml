@@ -140,4 +140,19 @@
     <Thickness x:Key="NavItemMargin">0,0,0,3</Thickness>
     <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource BorderColor}"/>
     <Thickness x:Key="CardBorderThickness">1</Thickness>
+
+    <!-- ОГОНЬ у пожарных шкафов: пламя под полосой загрузки, которое гасит вода.
+         Оранжево-красный, а не красный ошибки: это не авария программы, а то, для чего
+         шкаф предназначен. -->
+    <Color x:Key="FireColor">#FF8A3D</Color>
+    <SolidColorBrush x:Key="FireBrush" Color="{StaticResource FireColor}"/>
+
+    <!-- ВИД ВТОРИЧНОЙ КНОПКИ И АКТИВНОГО ПУНКТА МЕНЮ.
+         У светлой и тёмной всё как было: обведённая кнопка и сплошной акцент у активного пункта. -->
+    <SolidColorBrush x:Key="ButtonSoftBrush" Color="{StaticResource BgInputColor}"/>
+    <SolidColorBrush x:Key="ButtonSoftTextBrush" Color="{StaticResource TextColor}"/>
+    <SolidColorBrush x:Key="ButtonSoftBorderBrush" Color="{StaticResource BorderColor}"/>
+    <Thickness x:Key="ButtonSoftBorderThickness">1</Thickness>
+    <SolidColorBrush x:Key="NavActiveBrush" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="NavActiveTextBrush" Color="{StaticResource TextOnAccentColor}"/>
 </ResourceDictionary>

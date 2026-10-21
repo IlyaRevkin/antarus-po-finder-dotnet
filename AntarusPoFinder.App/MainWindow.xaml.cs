@@ -133,19 +133,22 @@ public partial class MainWindow : Window
             if (step >= 5) break;
             if (card.RenderTransform is not null && card.RenderTransform != Transform.Identity) continue;
 
-            var shift = new TranslateTransform(0, 10);
+            // ⚠️ БАЗОВОЕ ЗНАЧЕНИЕ — НОЛЬ, а сдвиг задаётся только анимацией (From=10) с
+            // FillBehavior.Stop. Так карточка возвращается на место САМА, даже если анимацию
+            // оборвали переходом на другую страницу. Прежний вариант (TranslateTransform(0,10) и
+            // возврат в обработчике Completed) при обрыве оставлял карточку сдвинутой на дробный
+            // пиксель — а текст на дробной позиции рисуется размыто. Похоже, именно это Илья и
+            // увидел: «в настройках во вкладке общее блок оформление будто бы размыт».
+            var shift = new TranslateTransform(0, 0);
             card.RenderTransform = shift;
             var animation = new DoubleAnimation(10, 0, new Duration(TimeSpan.FromMilliseconds(180)))
             {
                 BeginTime = TimeSpan.FromMilliseconds(35 * step),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop,
             };
             var finished = card;
-            animation.Completed += (_, _) =>
-            {
-                finished.RenderTransform.BeginAnimation(TranslateTransform.YProperty, null);
-                finished.RenderTransform = Transform.Identity;
-            };
+            animation.Completed += (_, _) => finished.RenderTransform = Transform.Identity;
             shift.BeginAnimation(TranslateTransform.YProperty, animation);
             step++;
         }

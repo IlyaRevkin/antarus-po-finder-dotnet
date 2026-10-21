@@ -48,6 +48,34 @@ public static class ThemeManager
         // цвета пришлось бы ограничивать тёмными: на светлом акценте белая подпись пропадает.
         res["TextOnAccentBrush"] = new SolidColorBrush(AccentPalette.TextOn(accent));
 
+        // МЯГКИЕ ПОВЕРХНОСТИ считаются ОТ АКЦЕНТА, а не берутся из словаря темы.
+        //
+        // В «Материале» и «Стекле» вторичная кнопка и выбранный пункт меню заливаются оттенком
+        // акцента (tonal surface у Material 3, подсвеченная строка у Apple). Если бы этот оттенок
+        // лежал в теме числом, он разошёлся бы с акцентом, который человек выбрал себе сам:
+        // сиреневая плашка под синей кнопкой — ровно то, что на снимке и получилось.
+        // Подпись на такой заливке — обычного цвета текста: заливка светлая, и «белое на акценте»
+        // на ней пропадает.
+        if (theme.Tonal)
+        {
+            res["ButtonSoftBrush"] = new SolidColorBrush(AccentPalette.SelectedBackground(accent, dark));
+            res["NavActiveBrush"] = new SolidColorBrush(AccentPalette.SelectedBackground(accent, dark));
+            if (dict["TextBrush"] is Brush text)
+            {
+                res["ButtonSoftTextBrush"] = text;
+                res["NavActiveTextBrush"] = text;
+            }
+        }
+        else
+        {
+            // Светлая и тёмная: ключи возвращаются к значениям своей темы — иначе мягкие
+            // поверхности «залипли» бы после переключения с беты на обычную тему.
+            res.Remove("ButtonSoftBrush");
+            res.Remove("NavActiveBrush");
+            res.Remove("ButtonSoftTextBrush");
+            res.Remove("NavActiveTextBrush");
+        }
+
         foreach (Window window in Application.Current.Windows)
         {
             DarkTitleBar.Apply(window, dark);

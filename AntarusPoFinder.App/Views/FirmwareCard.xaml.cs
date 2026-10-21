@@ -834,7 +834,12 @@ public partial class FirmwareCard : UserControl
         MotifIcon.Data = EquipmentMotifArt.Icon(motif);
         // ОБВОДКА, а не заливка: геометрии мотивов контурные (см. EquipmentMotifArt), и залитый
         // контур превращается в чёрную кляксу — жалоба Ильи «при поиске значок бомбы почему-то».
-        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, EquipmentMotifArt.BrushKey(motif));
+        // Исключение — пламя пожарного шкафа: оно нарисовано сплошной фигурой, и обводка оставила
+        // бы от него пустой силуэт.
+        if (motif == EquipmentMotif.Fire)
+            MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, EquipmentMotifArt.BrushKey(motif));
+        else
+            MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, EquipmentMotifArt.BrushKey(motif));
         MotifIcon.ToolTip = EquipmentMotifResolver.Caption(motif);
         MotifIcon.Visibility = Visibility.Visible;
     }

@@ -17,7 +17,31 @@ public partial class NewVersionsView : UserControl
         public string SubtypeName => Record.SubtypeName;
         public string CtrlName => Record.CtrlName;
         public string VersionRaw => Record.VersionRaw;
-        public string Description => Record.Description;
+        /// <summary>Описание В ОДНУ СТРОКУ.
+        ///
+        /// Программист пишет «что изменилось» в несколько абзацев — это правильно и так и задумано.
+        /// Но в таблице перенос строки растягивал строку таблицы на всю высоту текста: у одной
+        /// версии строка в три сантиметра, у соседней в сантиметр, и список переставал читаться
+        /// («если описание длинное у файла на несколько строк то он растягивается поублюдски в
+        /// высоту»). TextWrapping="NoWrap" от этого не спасает: он запрещает ПЕРЕНОС, а явные
+        /// переводы строки всё равно остаются переводами строки.
+        ///
+        /// Абзацы склеиваются через « · », а не выбрасываются: в таблице нужен обзор, и видеть,
+        /// что там было несколько пунктов, полезно. Полный текст — в карточке версии.</summary>
+        public string Description => OneLine(Record.Description);
+
+        private static string OneLine(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            var parts = text.Split(NewLines, StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .Where(p => p.Length > 0);
+            return string.Join(" · ", parts);
+        }
+
+        /// <summary>Возврат каретки и перевод строки. Заданы кодами, а не символьными
+        /// литералами: файл правится и скриптами тоже, а там обратный слэш легко теряется.</summary>
+        private static readonly char[] NewLines = { (char)13, (char)10 };
         public string TagsDisplay => string.IsNullOrWhiteSpace(Record.Tags) ? "—" : Record.Tags;
         public string DateOnly => Record.UploadDate.Length >= 10 ? Record.UploadDate[..10] : Record.UploadDate;
     }

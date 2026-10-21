@@ -16,7 +16,11 @@
         <TextBlock Grid.Row="1" Text="Загруженные версии ждут здесь, чтобы им проставили теги/описание, при необходимости поправили подтипы шкафов и подтвердили релиз. Двойной клик по строке или кнопка «Открыть». Откатанные и уже заменённые более свежей версией сюда не попадают."
                    Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
+        <!-- Общий просторный стиль таблиц (RoomyDataGrid): у него высота строки задана числом,
+             поэтому ни длинное описание, ни многострочный текст в любой другой ячейке не могут
+             растянуть строку. Заодно модерация перестаёт отличаться по виду от соседних таблиц. -->
         <DataGrid Grid.Row="2" x:Name="RecentGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                  Style="{StaticResource RoomyDataGrid}"
                   MouseDoubleClick="RecentGrid_MouseDoubleClick">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80" ElementStyle="{StaticResource DataGridCellText}"/>

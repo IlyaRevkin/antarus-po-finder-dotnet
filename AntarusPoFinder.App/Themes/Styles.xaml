@@ -152,11 +152,16 @@
     <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}"/>
 
     <!-- Secondary (outline) button -->
+    <!-- Вид вторичной кнопки задаёт ТЕМА. У светлой и тёмной это обведённая кнопка, как было.
+         У «Материала» — tonal button: мягкая заливка оттенком акцента без рамки, ровно как у
+         Android (жалоба «материал всё ещё не как у андроид» — обведённые серые кнопки и были
+         главным, что выдавало чужой стиль). У «Стекла» — почти прозрачная поверхность со светлой
+         гранью, как кнопки в системах Apple. -->
     <Style x:Key="SecondaryButton" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Background" Value="{DynamicResource ButtonSoftBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource ButtonSoftTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ButtonSoftBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="{DynamicResource ButtonSoftBorderThickness}"/>
         <Setter Property="Padding" Value="14,8"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
@@ -222,10 +227,14 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                         </Trigger>
+                        <!-- Активный пункт: у светлой и тёмной — сплошной акцент, как было. У
+                             «Материала» — tonal container (мягкая заливка, текст акцентом): так
+                             выглядит выбранный пункт в Material 3. У «Стекла» — полупрозрачный
+                             акцент, как выделение в системах Apple. Цвета берёт тема. -->
                         <Trigger Property="Tag" Value="Active">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource NavActiveBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource NavActiveBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -243,8 +252,12 @@
          repeats this exact button shape seven times. -->
     <Style x:Key="NavButtonContentText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Style.Triggers>
+            <!-- Цвет активного пункта берётся у темы (NavActiveTextBrush), а не как «белое на
+                 акценте»: у «Материала» выбранный пункт — tonal container, там заливка светлая, и
+                 белый текст на ней не виден вовсе. Проверено снимком: при жёстком
+                 TextOnAccentBrush подпись «Общие» пропадала. -->
             <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}}" Value="Active">
-                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource NavActiveTextBrush}"/>
             </DataTrigger>
         </Style.Triggers>
     </Style>
@@ -393,7 +406,16 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="8,6"/>
+        <!-- ⚠️ ВЕРТИКАЛЬНОГО ОТСТУПА НЕТ, и это не недосмотр.
+             Высота полей в программе задана числом (30, 32, 34, 38 — они стоят в ряд с кнопками и
+             списками). Отступ 6 сверху и снизу плюс рамка съедали 14 пикселей из этой высоты: в
+             поле 30 строка не помещалась ВООБЩЕ (жалоба «я нажал сформировать паспорт и текст в
+             поле ввода вообще не видно»), в 32–34 обрезалась снизу, в 38 сидела у нижнего края
+             («в поиске всё ещё текст уехавший вниз»). Это видно на пробе из ViewsRenderTests.
+             Положение строки по высоте задаёт VerticalContentAlignment ниже, и для этого ей нужна
+             вся высота поля. Многострочным полям отступ возвращается триггером в конце стиля:
+             там текст начинается сверху, и прижимать его к самой рамке нельзя. -->
+        <Setter Property="Padding" Value="8,0"/>
         <Setter Property="CaretBrush" Value="{DynamicResource TextBrush}"/>
         <!-- ТЕКСТ ПО ЦЕНТРУ ПОЛЯ. У однострочных полей высота задана жёстко (34 почти везде), а
              содержимое по умолчанию прижимается к верху — со скруглением «Материала» это читалось
@@ -403,12 +425,20 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
+                    <!-- ⚠️ ОТСТУП — У РАМКИ, выравнивание содержимого НЕ ТРОГАЕМ.
+                         Так устроен штатный шаблон WPF, и отступать от него здесь нельзя. В первой
+                         версии этого шаблона отступ был задан полем (Margin) у ScrollViewer плюс
+                         VerticalAlignment по VerticalContentAlignment — и текст в полях уезжал вниз
+                         или пропадал из виду вовсе (жалобы Ильи по бете: «я нажал сформировать
+                         паспорт и текст в поле ввода вообще не видно», «в поиске всё ещё текст
+                         уехавший вниз»). Вертикальное положение текста TextBox считает сам, по
+                         своему VerticalContentAlignment, и ему для этого нужен ScrollViewer,
+                         растянутый на всю рамку. -->
                     <Border x:Name="Bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{DynamicResource ControlCorner}" SnapsToDevicePixels="True">
-                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
-                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                      Focusable="False"
+                            CornerRadius="{DynamicResource ControlCorner}" Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
                                       HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
                                       VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"/>
                     </Border>
@@ -429,6 +459,7 @@
         <Style.Triggers>
             <Trigger Property="AcceptsReturn" Value="True">
                 <Setter Property="VerticalContentAlignment" Value="Top"/>
+                <Setter Property="Padding" Value="8,6"/>
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -438,16 +469,19 @@
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="8,6"/>
+        <!-- Без вертикального отступа — по той же причине, что у TextBox выше. -->
+        <Setter Property="Padding" Value="8,0"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="PasswordBox">
+                    <!-- Отступ у рамки, выравнивание содержимого не трогаем — см. комментарий
+                         у TextBox выше: иначе текст уезжает вниз или пропадает. -->
                     <Border x:Name="Bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{DynamicResource ControlCorner}" SnapsToDevicePixels="True">
-                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
-                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                      Focusable="False"
+                            CornerRadius="{DynamicResource ControlCorner}" Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
                                       HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
                                       VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"/>
                     </Border>
@@ -1005,6 +1039,14 @@
              же, что были, — рабочая версия не меняется. -->
         <Setter Property="CornerRadius" Value="{DynamicResource CardCorner}"/>
         <Setter Property="Padding" Value="{DynamicResource CardPadding}"/>
+        <!-- ⚠️ ТЕКСТ ВНУТРИ КАРТОЧКИ ОБЯЗАН ОСТАВАТЬСЯ ЧЁТКИМ.
+             Любой Effect в WPF выключает субпиксельное сглаживание (ClearType) во ВСЁМ поддереве:
+             буквы начинают рисоваться серым сглаживанием и выглядят мыльными. Жалоба Ильи по бете
+             2.0.0.6: «в настройках во вкладке общее блок оформление будто бы размыт» — это ровно
+             оно, и заметно стало тогда, когда тень у «Материала» сделали видимой.
+             ClearTypeHint="Enabled" возвращает чёткость: фон карточки непрозрачный, значит
+             субпиксельное сглаживание по нему считается корректно. -->
+        <Setter Property="RenderOptions.ClearTypeHint" Value="Enabled"/>
         <Setter Property="Effect">
             <Setter.Value>
                 <!-- Тень мягкая и почти без смещения: карточка «приподнята», а не отбрасывает
@@ -1298,14 +1340,19 @@
     </Style>
 
 
-    <!-- ПОЛОСА-НАСОС: слева крутится рабочее колесо, справа по трубе идёт вода.
-         Просьба Ильи по стилизации полосы: «было бы круто типа гидрант качает воду, а не волна».
-         Бегущий блик и правда ничего не говорил — он одинаков у любого индикатора в любой
-         программе. Здесь полоса читается как участок напорной линии: колесо вращается, пока
-         программа работает, вода идёт косыми струями слева направо, заполненная часть — то, что
-         уже прокачано. Контора делает насосные станции, КНС и тепловые пункты — это их язык.
-         Анимации живут в шаблоне и заводятся от IsVisible: отдельного кода нет, значит нечему и
-         остаться включённым после того, как полоса скрылась. -->
+    <!-- ПОЛОСА ПОД ОБОРУДОВАНИЕ: что именно работает, видно по самой полосе.
+         Просьба Ильи 21.10.2026: «можно просто вентиль и что вода льётся из гидранта, качается,
+         будто качают как через ручной насос и тп, то есть разных загрузок можно» и отдельно «для
+         пожарных можно чтобы в оранжево-красный открывалось и заливалось и типа тушило пожар».
+         Что меняется — выбирает Tag, его ставит окно загрузки по мотиву шкафа (LoaderDialog):
+           pump  — вентиль крутится, по трубе идёт вода (насосная станция);
+           hand  — рычаг ручного насоса качает, вода идёт толчками (КНС);
+           heat  — труба греется, тепло пульсирует (тепловой пункт);
+           valve — вентиль медленно открывается (шкаф задвижки);
+           fire  — за водой видно пламя, и вода его ГАСИТ слева направо (пожарный шкаф).
+         Без Tag — ровная полоса с вентилем: так она выглядит в строке состояния и там, где шкаф не
+         опознан. Анимации заводятся от IsVisible и живут в шаблоне: отдельного кода на запуск и
+         остановку нет, значит нечему и остаться включённым после скрытия полосы. -->
     <Style x:Key="FlowProgressBar" TargetType="ProgressBar">
         <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
@@ -1320,63 +1367,189 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- НАСОС: улитка корпуса и рабочее колесо внутри. Колесо — отдельная
-                             фигура, потому что вращается только оно: корпус у настоящего насоса
-                             стоит на месте, и крутящийся целиком насос читался бы как «значок
-                             загрузки», а не как работа оборудования. -->
-                        <Grid Grid.Column="0" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center">
-                            <Ellipse Stroke="{TemplateBinding Foreground}" StrokeThickness="1.4"/>
-                            <Path x:Name="Impeller" Data="M7,2 L7,12 M2,7 L12,7 M3.5,3.5 L10.5,10.5 M10.5,3.5 L3.5,10.5"
-                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.1"
-                                  Stretch="Uniform" Margin="2.5" RenderTransformOrigin="0.5,0.5">
+                        <!-- ЗНАК СЛЕВА. Все фигуры нарисованы сразу, показывается одна: смена
+                             мотива — это смена Tag, без пересборки шаблона. -->
+                        <Grid Grid.Column="0" Width="18" Height="18" Margin="0,0,7,0" VerticalAlignment="Center">
+                            <Path x:Name="Wheel" Stretch="Uniform" Margin="1"
+                                  Data="M8,1 A7,7 0 1,1 7.9,1 Z M8,3 L8,13 M3,8 L13,8 M4.5,4.5 L11.5,11.5 M11.5,4.5 L4.5,11.5"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
+                                  RenderTransformOrigin="0.5,0.5">
                                 <Path.RenderTransform>
                                     <RotateTransform Angle="0"/>
                                 </Path.RenderTransform>
                             </Path>
+
+                            <Grid x:Name="HandPump" Visibility="Collapsed">
+                                <Path Data="M7,15 L7,6 M4,15 L10,15 M7,8 L12,10"
+                                      Stroke="{TemplateBinding Foreground}" StrokeThickness="1.4"
+                                      Stretch="Uniform" Margin="1"/>
+                                <Path x:Name="Lever" Data="M2,5 L11,3"
+                                      Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
+                                      Stretch="Uniform" Margin="1,1,1,9" RenderTransformOrigin="0.9,0.5">
+                                    <Path.RenderTransform>
+                                        <RotateTransform Angle="0"/>
+                                    </Path.RenderTransform>
+                                </Path>
+                            </Grid>
+
+                            <Path x:Name="Flame" Visibility="Collapsed" Stretch="Uniform" Margin="2"
+                                  Data="M8,1 C10,4 13,6 13,9.5 A5,5 0 0,1 3,9.5 C3,7 5,6 5.5,4 C6.5,5.5 8,6 8,6 C8,4.5 7,3 8,1 Z"
+                                  Fill="{TemplateBinding Foreground}" RenderTransformOrigin="0.5,1">
+                                <Path.RenderTransform>
+                                    <ScaleTransform ScaleY="1"/>
+                                </Path.RenderTransform>
+                            </Path>
                         </Grid>
 
-                        <!-- ТРУБА: фон — пустая линия, заливка — прокачанное, поверх идут косые
-                             струи. Скругление берётся у темы, как у остальных полей. -->
+                        <!-- ТРУБА. Снизу — пламя (только у пожарных), поверх него вода-заливка,
+                             поверх неё косые струи. Порядок важен: вода обязана ЗАКРЫВАТЬ пламя —
+                             именно так и читается «тушит». -->
                         <Border Grid.Column="1" Background="{TemplateBinding Background}"
                                 CornerRadius="{DynamicResource ControlCorner}" ClipToBounds="True">
                             <Grid>
                                 <Rectangle x:Name="PART_Track"/>
+
+                                <Canvas x:Name="Fire" Visibility="Collapsed" IsHitTestVisible="False"
+                                        Height="12" VerticalAlignment="Center" Opacity="0.85">
+                                    <Path Fill="{DynamicResource FireBrush}"
+                                          Data="M0,12 C2,8 4,7 3,3 C5,5 6,5 7,2 C8,6 10,7 9,12 Z
+                                                M14,12 C16,8 18,7 17,3 C19,5 20,5 21,2 C22,6 24,7 23,12 Z
+                                                M28,12 C30,8 32,7 31,3 C33,5 34,5 35,2 C36,6 38,7 37,12 Z
+                                                M42,12 C44,8 46,7 45,3 C47,5 48,5 49,2 C50,6 52,7 51,12 Z
+                                                M56,12 C58,8 60,7 59,3 C61,5 62,5 63,2 C64,6 66,7 65,12 Z
+                                                M70,12 C72,8 74,7 73,3 C75,5 76,5 77,2 C78,6 80,7 79,12 Z
+                                                M84,12 C86,8 88,7 87,3 C89,5 90,5 91,2 C92,6 94,7 93,12 Z
+                                                M98,12 C100,8 102,7 101,3 C103,5 104,5 105,2 C106,6 108,7 107,12 Z
+                                                M112,12 C114,8 116,7 115,3 C117,5 118,5 119,2 C120,6 122,7 121,12 Z
+                                                M126,12 C128,8 130,7 129,3 C131,5 132,5 133,2 C134,6 136,7 135,12 Z
+                                                M140,12 C142,8 144,7 143,3 C145,5 146,5 147,2 C148,6 150,7 149,12 Z
+                                                M154,12 C156,8 158,7 157,3 C159,5 160,5 161,2 C162,6 164,7 163,12 Z
+                                                M168,12 C170,8 172,7 171,3 C173,5 174,5 175,2 C176,6 178,7 177,12 Z
+                                                M182,12 C184,8 186,7 185,3 C187,5 188,5 189,2 C190,6 192,7 191,12 Z
+                                                M196,12 C198,8 200,7 199,3 C201,5 202,5 203,2 C204,6 206,7 205,12 Z
+                                                M210,12 C212,8 214,7 213,3 C215,5 216,5 217,2 C218,6 220,7 219,12 Z
+                                                M224,12 C226,8 228,7 227,3 C229,5 230,5 231,2 C232,6 234,7 233,12 Z
+                                                M238,12 C240,8 242,7 241,3 C243,5 244,5 245,2 C246,6 248,7 247,12 Z
+                                                M252,12 C254,8 256,7 255,3 C257,5 258,5 259,2 C260,6 262,7 261,12 Z
+                                                M266,12 C268,8 270,7 269,3 C271,5 272,5 273,2 C274,6 276,7 275,12 Z"/>
+                                </Canvas>
+
                                 <Rectangle x:Name="PART_Indicator" Fill="{TemplateBinding Foreground}"
-                                           HorizontalAlignment="Left" Opacity="0.85"/>
-                                <!-- Струи шире полосы и сдвигаются на свой шаг: за счёт этого
-                                     повтор не виден, а рисунок не «прыгает» при зацикливании. -->
-                                <!-- Струи высотой 12 и по центру трубы: полоса бывает 12 (строка
-                                     состояния) и 18 (окно загрузки), и рисунок обязан сидеть
-                                     одинаково в обеих. -->
+                                           HorizontalAlignment="Left" Opacity="0.9"/>
+
                                 <Canvas x:Name="Jets" IsHitTestVisible="False" ClipToBounds="True"
                                         Height="12" VerticalAlignment="Center">
                                     <Canvas.RenderTransform>
                                         <TranslateTransform X="0"/>
                                     </Canvas.RenderTransform>
-                                    <Path Data="M0,12 L6,0 M12,12 L18,0 M24,12 L30,0 M36,12 L42,0 M48,12 L54,0 M60,12 L66,0 M72,12 L78,0 M84,12 L90,0 M96,12 L102,0 M108,12 L114,0 M120,12 L126,0 M132,12 L138,0 M144,12 L150,0 M156,12 L162,0 M168,12 L174,0 M180,12 L186,0 M192,12 L198,0 M204,12 L210,0 M216,12 L222,0 M228,12 L234,0 M240,12 L246,0 M252,12 L258,0 M264,12 L270,0 M276,12 L282,0 M288,12 L294,0 M300,12 L306,0"
-                                          Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6" Opacity="0.38"/>
+                                    <Path Stroke="{TemplateBinding Foreground}" StrokeThickness="1.3" Opacity="0.3"
+                                          Data="M0,12 L6,0 M18,12 L24,0 M36,12 L42,0 M54,12 L60,0 M72,12 L78,0 M90,12 L96,0 M108,12 L114,0 M126,12 L132,0 M144,12 L150,0 M162,12 L168,0 M180,12 L186,0 M198,12 L204,0 M216,12 L222,0 M234,12 L240,0 M252,12 L258,0 M270,12 L276,0 M288,12 L294,0 M306,12 L312,0"/>
                                 </Canvas>
                             </Grid>
                         </Border>
                     </Grid>
+
                     <ControlTemplate.Triggers>
+                        <!-- Движение по умолчанию: вентиль крутится, вода идёт ровно. -->
                         <Trigger Property="IsVisible" Value="True">
                             <Trigger.EnterActions>
-                                <BeginStoryboard x:Name="PumpRun">
+                                <BeginStoryboard x:Name="FlowRun">
                                     <Storyboard RepeatBehavior="Forever">
-                                        <DoubleAnimation Storyboard.TargetName="Impeller"
+                                        <DoubleAnimation Storyboard.TargetName="Wheel"
                                                          Storyboard.TargetProperty="RenderTransform.Angle"
-                                                         From="0" To="360" Duration="0:0:1.1"/>
+                                                         From="0" To="360" Duration="0:0:1.4"/>
                                         <!-- Шаг струй — 12 пикселей: ровно период рисунка, поэтому
                                              на стыке цикла вода не дёргается. -->
                                         <DoubleAnimation Storyboard.TargetName="Jets"
                                                          Storyboard.TargetProperty="RenderTransform.X"
-                                                         From="-12" To="0" Duration="0:0:0.5"/>
+                                                         From="-18" To="0" Duration="0:0:0.7"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
-                                <StopStoryboard BeginStoryboardName="PumpRun"/>
+                                <StopStoryboard BeginStoryboardName="FlowRun"/>
+                            </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- КНС: ручной насос. Вода идёт ТОЛЧКАМИ — в такт рычагу, а не ровной
+                             струёй: именно это отличает «качают» от «течёт само». -->
+                        <Trigger Property="Tag" Value="hand">
+                            <Setter TargetName="Wheel" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="HandPump" Property="Visibility" Value="Visible"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="HandRun">
+                                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                        <DoubleAnimation Storyboard.TargetName="Lever"
+                                                         Storyboard.TargetProperty="RenderTransform.Angle"
+                                                         From="-18" To="18" Duration="0:0:0.75"/>
+                                        <DoubleAnimation Storyboard.TargetName="Jets"
+                                                         Storyboard.TargetProperty="RenderTransform.X"
+                                                         From="-18" To="0" Duration="0:0:0.75"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="HandRun"/>
+                            </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- Тепловой пункт: ничего не бежит, труба греется. -->
+                        <Trigger Property="Tag" Value="heat">
+                            <Setter TargetName="Jets" Property="Opacity" Value="0"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="HeatRun">
+                                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                        <DoubleAnimation Storyboard.TargetName="PART_Indicator"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         From="0.55" To="1" Duration="0:0:1.2"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="HeatRun"/>
+                            </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- Задвижка: вентиль открывают медленно, четвертями оборота — как руками. -->
+                        <Trigger Property="Tag" Value="valve">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="ValveRun">
+                                    <Storyboard RepeatBehavior="Forever">
+                                        <DoubleAnimation Storyboard.TargetName="Wheel"
+                                                         Storyboard.TargetProperty="RenderTransform.Angle"
+                                                         From="0" To="90" Duration="0:0:1.6"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="ValveRun"/>
+                            </Trigger.ExitActions>
+                        </Trigger>
+
+                        <!-- ПОЖАРНЫЙ ШКАФ: за водой горит, вода гасит. Пламя лежит ПОД заливкой и
+                             по мере роста процента скрывается ею слева направо — тушение видно
+                             само, без отдельной анимации «гашения». -->
+                        <Trigger Property="Tag" Value="fire">
+                            <Setter TargetName="Fire" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Wheel" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="Flame" Property="Visibility" Value="Visible"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard x:Name="FireRun">
+                                    <Storyboard RepeatBehavior="Forever">
+                                        <DoubleAnimation Storyboard.TargetName="Flame"
+                                                         Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                         From="0.82" To="1.1" Duration="0:0:0.45" AutoReverse="True"/>
+                                        <DoubleAnimation Storyboard.TargetName="Fire"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         From="0.65" To="1" Duration="0:0:0.35" AutoReverse="True"/>
+                                        <DoubleAnimation Storyboard.TargetName="Jets"
+                                                         Storyboard.TargetProperty="RenderTransform.X"
+                                                         From="-18" To="0" Duration="0:0:0.45"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="FireRun"/>
                             </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -1384,4 +1557,5 @@
             </Setter.Value>
         </Setter>
     </Style>
+
 </ResourceDictionary>

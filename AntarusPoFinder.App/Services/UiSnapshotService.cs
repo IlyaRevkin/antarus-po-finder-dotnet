@@ -163,6 +163,8 @@ public static class UiSnapshotService
             ("pump", "НГР-КПЧ SMH4", "SMH4"),
             ("sewage", "НГР-КНС SMH4", "SMH4"),
             ("heat", "ТГР SMH4", "SMH4"),
+            ("fire", "ПЖ-ПИ SMH4", "SMH4"),
+            ("valve", "ШУЗ задвижка", "SMH4"),
             ("plain", "ВЗУ непонятное", "SMH4"),
         };
 

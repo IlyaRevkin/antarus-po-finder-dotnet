@@ -193,6 +193,115 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>ТЕКСТ В ПОЛЕ ВВОДА ВИДЕН И НЕ УЕЗЖАЕТ.
+    ///
+    /// Поля ввода в этой программе почти везде с заданной высотой (32–38) — так они выстраиваются в
+    /// ряд с кнопками и выпадающими списками. Когда у полей появился собственный шаблон (ради
+    /// скругления из темы), отступ в нём задали полем ScrollViewer'а и выравниванием по
+    /// VerticalContentAlignment — и текст уехал: в окне паспорта пропал из виду совсем, в поиске
+    /// съехал к нижнему краю. Заметить это снимком страницы нельзя: пустое поле выглядит одинаково
+    /// и в исправном, и в сломанном виде.
+    ///
+    /// Поэтому проверяется НЕ картинка, а положение: где у заполненного поля реально оказалась
+    /// область текста. Она обязана целиком помещаться внутри рамки и стоять по центру — именно это
+    /// и ломалось.</summary>
+    [Theory]
+    [InlineData(30.0)]
+    [InlineData(32.0)]
+    [InlineData(34.0)]
+    [InlineData(38.0)]
+    public void Текст_в_поле_ввода_виден_целиком(double height)
+    {
+        Ui.Run(() =>
+        {
+            var box = new System.Windows.Controls.TextBox
+            {
+                Height = height,
+                Width = 220,
+                FontSize = 13,                       // кегль программы: от него зависит, влезет ли строка
+                Text = "НГР-КНС SMH5",
+            };
+
+            // Тема — светлая и явно: цвета берём те же, что у человека на экране, иначе проверка
+            // «есть ли тёмные точки» зависела бы от того, какую тему оставил предыдущий тест.
+            AntarusPoFinder.App.ThemeManager.Apply("light", AntarusPoFinder.App.ThemeManager.CurrentAccent);
+
+            // ⚠️ ИМЕННО StackPanel, а не рамка с точной высотой. Страницы программы собраны из
+            // StackPanel и строк Auto, а они меряют содержимое БЕСКОНЕЧНОЙ высотой — и беда
+            // проявляется только так: при точном измерении (Measure ровно на высоту поля) текст
+            // рисуется правильно даже со сломанным шаблоном. Два предыдущих захода теста прошли
+            // мимо ошибки ровно по этой причине.
+            var host = new System.Windows.Controls.StackPanel
+            {
+                Width = 240,
+                Background = System.Windows.Media.Brushes.White,
+            };
+            host.Children.Add(box);
+            host.Measure(new Size(240, double.PositiveInfinity));
+            host.Arrange(new Rect(0, 0, 240, host.DesiredSize.Height));
+            host.UpdateLayout();
+
+            // ⚠️ ПРОВЕРЯЕМ ПИКСЕЛИ, а не раскладку. Разбор 21.10.2026 показал, почему: при нехватке
+            // высоты раскладка остаётся «правильной» — строке выделяется вся доступная высота, и
+            // любое сравнение «выделено ≥ нужно» проходит. А текст при этом обрезан, и видно это
+            // только на картинке. Две проверки подряд (по границам и по желаемой высоте) эту беду
+            // пропустили, картинка — поймала.
+            // Рисуем ВЕСЬ контейнер, а не одно поле: обрезка приходит от раскладки родителя, и
+            // снимок отдельного поля её не покажет (на это уже попались — см. комментарий выше).
+            var panelHeight = (int)Math.Ceiling(host.DesiredSize.Height);
+            var bitmap = new RenderTargetBitmap(240, panelHeight, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(host);
+
+            var box_top = (int)Math.Round(box.TransformToAncestor(host).Transform(new Point(0, 0)).Y);
+            var pixelHeight = (int)Math.Ceiling(height);
+
+            var stride = 240 * 4;
+            var pixels = new byte[stride * panelHeight];
+            bitmap.CopyPixels(pixels, stride, 0);
+
+            // Строки картинки В ПРЕДЕЛАХ ПОЛЯ, где есть заметно тёмные точки, — это нарисованный текст.
+            var first = -1;
+            var last = -1;
+            for (var y = box_top; y < Math.Min(panelHeight, box_top + pixelHeight); y++)
+            {
+                var dark = 0;
+                for (var x = 0; x < 240; x++)
+                {
+                    var i = y * stride + x * 4;
+                    if (pixels[i] < 120 && pixels[i + 1] < 120 && pixels[i + 2] < 120) dark++;
+                }
+
+                if (dark < 3) continue;              // одиночные точки — это рамка и сглаживание
+                if (first < 0) first = y - box_top;
+                last = y - box_top;
+            }
+
+            Assert.True(first >= 0, $"в поле высотой {height} текста не видно вовсе");
+
+            var drawn = last - first + 1;
+            Assert.True(drawn >= 7,
+                $"в поле высотой {height} от строки осталась полоска в {drawn} пикселей — текст обрезан");
+
+            var centre = (first + last) / 2.0;
+            Assert.True(Math.Abs(centre - pixelHeight / 2.0) <= 2.5,
+                $"текст не по центру поля {height}: середина строки на {centre:F1} при центре {pixelHeight / 2.0:F1}");
+        });
+    }
+
+    /// <summary>Область текста внутри поля — визуальный потомок с именем TextBoxView; своего
+    /// публичного типа у неё нет, поэтому ищем по имени типа.</summary>
+    private static FrameworkElement? FindTextView(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child.GetType().Name == "TextBoxView" && child is FrameworkElement element) return element;
+            if (FindTextView(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
     /// <summary>БОКОВОЙ СПИСОК НАСТРОЕК ЗНАЕТ ПРО ВСЕ РАЗДЕЛЫ.
     ///
     /// В бете разделы настроек стоят столбиком слева, и этот столбик собирается по РУЧНОМУ списку

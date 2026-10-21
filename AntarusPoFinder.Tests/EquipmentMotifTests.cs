@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Domain;
+﻿using AntarusPoFinder.Core.Domain;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -27,10 +27,23 @@ public class EquipmentMotifTests
     [Theory]
     [InlineData("НГР", "КПЧ")]
     [InlineData("НГР", "2.0")]
-    [InlineData("ПЖ", "ПИ")]
-    public void Насосные_группы_и_пожарные_это_насосная_станция(string group, string subtype)
+    public void Насосные_группы_это_насосная_станция(string group, string subtype)
     {
         Assert.Equal(EquipmentMotif.PumpStation, EquipmentMotifResolver.For(group, subtype));
+    }
+
+    /// <summary>ПОЖАРНЫЕ ШКАФЫ — свой мотив, а не обычная насосная.
+    ///
+    /// Раньше «ПЖ» попадало в PumpStation: воду качают и те и другие. Просьба Ильи 21.10.2026 —
+    /// «для пожарных можно чтобы в оранжево-красный открывалось и заливалось и типа тушило пожар».
+    /// Различие нужно именно боковым зрением: перепутать пожарный шкаф с обычным дороже всего.</summary>
+    [Theory]
+    [InlineData("ПЖ", "ПИ")]
+    [InlineData("ПЖ", "")]
+    [InlineData("", "пожарный")]
+    public void Пожарные_шкафы_узнаются_отдельно(string group, string subtype)
+    {
+        Assert.Equal(EquipmentMotif.Fire, EquipmentMotifResolver.For(group, subtype));
     }
 
     [Theory]
@@ -60,6 +73,7 @@ public class EquipmentMotifTests
     [InlineData(EquipmentMotif.Sewage)]
     [InlineData(EquipmentMotif.HeatPoint)]
     [InlineData(EquipmentMotif.Valve)]
+    [InlineData(EquipmentMotif.Fire)]
     public void У_каждого_мотива_есть_подпись(EquipmentMotif motif)
     {
         Assert.NotEqual("", EquipmentMotifResolver.Caption(motif));
