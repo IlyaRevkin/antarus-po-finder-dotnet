@@ -172,6 +172,14 @@ public partial class LoaderDialog : Window
 
         if (_preparation is { } chosen) AppendLog(PlcPreparation.LogLine(chosen));
 
+        // КАКОЙ ФАЙЛ УХОДИТ В ПЛК — первой строкой журнала. Причину окирпичивания SMH5 искали
+        // дважды и дважды не там, потому что по журналу нельзя было сказать даже этого: виден был
+        // только результат. Вместе со строкой «План загрузки» (её присылает сам Loader, см.
+        // SegneticsLoaderBackend.DescribePlan) этого достаточно, чтобы сравнить заливку из Finder с
+        // ручной, не гадая.
+        if (!string.IsNullOrWhiteSpace(job.SourcePath))
+            AppendLog(AntarusPoFinder.Core.Loader.DeployArtifact.LogLine(job.SourcePath));
+
         // Взяли не тот Loader, что прописан в настройках (или настройки нет вовсе) — наладчик обязан
         // видеть, чем именно грузит. Раньше это была ошибка «Loader не найден»; теперь — строка в
         // журнале и рабочая загрузка встроенной копией.
@@ -511,9 +519,11 @@ public partial class LoaderDialog : Window
         MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
         MotifChip.SetResourceReference(BorderBrushProperty, brushKey);
         MotifLabel.SetResourceReference(ForegroundProperty, brushKey);
-        MotifIcon.Data = EquipmentMotifArt.Icon(motif);
-        MotifIcon.ToolTip = caption;
-        MotifIcon.Visibility = Visibility.Visible;
+        // Значок мотива рядом с полосой БОЛЬШЕ НЕ ПОКАЗЫВАЕТСЯ: у самой полосы теперь есть
+        // рабочее колесо насоса (стиль FlowProgressBar), и два разных кружка подряд читались как
+        // мусор. Мотив остаётся в трёх местах, и этого достаточно: подпись-чип в заголовке, схема
+        // объекта над полосой и цвет полосы.
+        MotifIcon.Visibility = Visibility.Collapsed;
 
         var scheme = EquipmentMotifArt.Scheme(motif);
         if (!scheme.IsEmpty())
@@ -523,54 +533,8 @@ public partial class LoaderDialog : Window
             MotifScheme.Visibility = Visibility.Visible;
         }
 
-        StartFlowAnimation(motif);
     }
 
-    /// <summary>Движение потока по полосе. У каждого объекта своё: напорная станция гонит воду
-    /// быстро, канализационная — медленно и тяжело, тепловой пункт не гонит ничего, а греет, и
-    /// потому пульсирует.
-    ///
-    /// Анимация вечная (RepeatBehavior.Forever) и останавливается вместе с закрытием окна — отдельно
-    /// гасить её не нужно: полоса живёт ровно столько, сколько идёт заливка.</summary>
-    private void StartFlowAnimation(EquipmentMotif motif)
-    {
-        FlowOverlay.Visibility = Visibility.Visible;
-        var seconds = EquipmentMotifArt.FlowSeconds(motif);
-
-        if (EquipmentMotifArt.Pulses(motif))
-        {
-            // Тепло: яркость «дышит» на месте. Нижняя граница не ноль — полностью гаснущая полоса
-            // читается как сбой, а не как пульс.
-            var pulse = new System.Windows.Media.Animation.DoubleAnimation(0.12, 0.42,
-                new Duration(TimeSpan.FromSeconds(seconds)))
-            {
-                AutoReverse = true,
-                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
-            };
-            FlowStripe.Width = double.NaN;                       // во всю ширину — греется целиком
-            FlowStripe.HorizontalAlignment = HorizontalAlignment.Stretch;
-            FlowStripe.BeginAnimation(OpacityProperty, pulse);
-            return;
-        }
-
-        // Остальные: светлая полоска бежит слева направо. Ширину берём у самой полосы, а не числом:
-        // окно растягивается, и пробег обязан совпадать с ней, иначе поток «дёргается» на краю.
-        FlowOverlay.SizeChanged += (_, _) => RestartFlowShift(seconds);
-        RestartFlowShift(seconds);
-    }
-
-    private void RestartFlowShift(double seconds)
-    {
-        var width = FlowOverlay.ActualWidth;
-        if (width <= 0) return;
-
-        var run = new System.Windows.Media.Animation.DoubleAnimation(-FlowStripe.Width, width,
-            new Duration(TimeSpan.FromSeconds(seconds)))
-        {
-            RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
-        };
-        FlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, run);
-    }
 
     private async Task<bool> PrepareConnectionAsync(CancellationToken cancellationToken)
     {

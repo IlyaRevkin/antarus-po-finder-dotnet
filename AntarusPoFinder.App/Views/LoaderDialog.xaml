@@ -97,31 +97,15 @@
                       StrokeThickness="1.8" StrokeLineJoin="Round" StrokeStartLineCap="Round"
                       StrokeEndLineCap="Round"/>
                 <Grid Grid.Column="1">
-                    <ProgressBar x:Name="Progress"
+                    <!-- ПОЛОСА-НАСОС (стиль FlowProgressBar): слева вращается рабочее колесо, по
+                         трубе идут струи, заполненная часть — прокачанное. Раньше здесь был свой
+                         бегущий блик поверх обычной полосы; он ничего не говорил («было бы круто
+                         типа гидрант качает воду, а не волна») и к тому же жил отдельной копией
+                         анимации, которую приходилось заводить и останавливать руками. Один стиль
+                         на окно загрузки и на строку состояния — одно движение в обоих местах. -->
+                    <ProgressBar x:Name="Progress" Style="{StaticResource FlowProgressBar}"
                                  Height="18" Minimum="0" Maximum="100" Value="0"
-                                 Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource BgInputBrush}"
-                                 BorderBrush="{DynamicResource BorderBrush2}"/>
-                    <!-- ПОТОК поверх полосы: у напорной станции бежит быстро, у канализационной
-                         медленно и тяжело, у теплового пункта не бежит вовсе, а пульсирует. Это то,
-                         что отличает объекты боковым зрением, когда читать подпись некогда.
-                         Полупрозрачный и тонкий намеренно: заливка идёт минуты, и мигалка во весь
-                         экран на четвёртом часу невыносима. IsHitTestVisible=False — чтобы слой не
-                         перехватывал мышь у полосы под ним. -->
-                    <Border x:Name="FlowOverlay" Height="18" Visibility="Collapsed"
-                            IsHitTestVisible="False" ClipToBounds="True">
-                        <Rectangle x:Name="FlowStripe" Width="64" HorizontalAlignment="Left" Opacity="0.5">
-                            <Rectangle.Fill>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                    <GradientStop Offset="0" Color="Transparent"/>
-                                    <GradientStop x:Name="FlowStop" Offset="0.5" Color="White"/>
-                                    <GradientStop Offset="1" Color="Transparent"/>
-                                </LinearGradientBrush>
-                            </Rectangle.Fill>
-                            <Rectangle.RenderTransform>
-                                <TranslateTransform x:Name="FlowShift" X="0"/>
-                            </Rectangle.RenderTransform>
-                        </Rectangle>
-                    </Border>
+                                 Foreground="{DynamicResource AccentBrush}"/>
                 </Grid>
             </Grid>
             <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PercentLabel"

@@ -1298,57 +1298,85 @@
     </Style>
 
 
-    <!-- ПОЛОСА С ПОТОКОМ — полоса прогресса, по которой бежит светлая волна.
-         Нужна в строке состояния: там идёт обход диска и поиск новых прошивок, а показывала это
-         ровно такая же серая полоска, как у любого индикатора («в нижней строке всё ещё нет
-         стилизации»). Волна говорит боковым зрением, что программа работает, а не висит.
-         Анимация живёт в шаблоне и заводится от IsVisible: отдельного кода на запуск/остановку нет,
-         значит нечему и забыться включённым после скрытия полосы. -->
+    <!-- ПОЛОСА-НАСОС: слева крутится рабочее колесо, справа по трубе идёт вода.
+         Просьба Ильи по стилизации полосы: «было бы круто типа гидрант качает воду, а не волна».
+         Бегущий блик и правда ничего не говорил — он одинаков у любого индикатора в любой
+         программе. Здесь полоса читается как участок напорной линии: колесо вращается, пока
+         программа работает, вода идёт косыми струями слева направо, заполненная часть — то, что
+         уже прокачано. Контора делает насосные станции, КНС и тепловые пункты — это их язык.
+         Анимации живут в шаблоне и заводятся от IsVisible: отдельного кода нет, значит нечему и
+         остаться включённым после того, как полоса скрылась. -->
     <Style x:Key="FlowProgressBar" TargetType="ProgressBar">
         <Setter Property="Background" Value="{DynamicResource BgInputBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="MinHeight" Value="10"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ProgressBar">
-                    <Border x:Name="Track" Background="{TemplateBinding Background}"
-                            CornerRadius="{DynamicResource ControlCorner}" ClipToBounds="True">
-                        <Grid>
-                            <Rectangle x:Name="PART_Track"/>
-                            <Rectangle x:Name="PART_Indicator" Fill="{TemplateBinding Foreground}"
-                                       HorizontalAlignment="Left"/>
-                            <Rectangle x:Name="Wave" Width="48" HorizontalAlignment="Left" Opacity="0.55"
-                                       IsHitTestVisible="False">
-                                <Rectangle.Fill>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                        <GradientStop Offset="0" Color="#00FFFFFF"/>
-                                        <GradientStop Offset="0.5" Color="#CCFFFFFF"/>
-                                        <GradientStop Offset="1" Color="#00FFFFFF"/>
-                                    </LinearGradientBrush>
-                                </Rectangle.Fill>
-                                <Rectangle.RenderTransform>
-                                    <TranslateTransform X="-48"/>
-                                </Rectangle.RenderTransform>
-                            </Rectangle>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- НАСОС: улитка корпуса и рабочее колесо внутри. Колесо — отдельная
+                             фигура, потому что вращается только оно: корпус у настоящего насоса
+                             стоит на месте, и крутящийся целиком насос читался бы как «значок
+                             загрузки», а не как работа оборудования. -->
+                        <Grid Grid.Column="0" Width="14" Height="14" Margin="0,0,5,0" VerticalAlignment="Center">
+                            <Ellipse Stroke="{TemplateBinding Foreground}" StrokeThickness="1.4"/>
+                            <Path x:Name="Impeller" Data="M7,2 L7,12 M2,7 L12,7 M3.5,3.5 L10.5,10.5 M10.5,3.5 L3.5,10.5"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.1"
+                                  Stretch="Uniform" Margin="2.5" RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <RotateTransform Angle="0"/>
+                                </Path.RenderTransform>
+                            </Path>
                         </Grid>
-                    </Border>
+
+                        <!-- ТРУБА: фон — пустая линия, заливка — прокачанное, поверх идут косые
+                             струи. Скругление берётся у темы, как у остальных полей. -->
+                        <Border Grid.Column="1" Background="{TemplateBinding Background}"
+                                CornerRadius="{DynamicResource ControlCorner}" ClipToBounds="True">
+                            <Grid>
+                                <Rectangle x:Name="PART_Track"/>
+                                <Rectangle x:Name="PART_Indicator" Fill="{TemplateBinding Foreground}"
+                                           HorizontalAlignment="Left" Opacity="0.85"/>
+                                <!-- Струи шире полосы и сдвигаются на свой шаг: за счёт этого
+                                     повтор не виден, а рисунок не «прыгает» при зацикливании. -->
+                                <!-- Струи высотой 12 и по центру трубы: полоса бывает 12 (строка
+                                     состояния) и 18 (окно загрузки), и рисунок обязан сидеть
+                                     одинаково в обеих. -->
+                                <Canvas x:Name="Jets" IsHitTestVisible="False" ClipToBounds="True"
+                                        Height="12" VerticalAlignment="Center">
+                                    <Canvas.RenderTransform>
+                                        <TranslateTransform X="0"/>
+                                    </Canvas.RenderTransform>
+                                    <Path Data="M0,12 L6,0 M12,12 L18,0 M24,12 L30,0 M36,12 L42,0 M48,12 L54,0 M60,12 L66,0 M72,12 L78,0 M84,12 L90,0 M96,12 L102,0 M108,12 L114,0 M120,12 L126,0 M132,12 L138,0 M144,12 L150,0 M156,12 L162,0 M168,12 L174,0 M180,12 L186,0 M192,12 L198,0 M204,12 L210,0 M216,12 L222,0 M228,12 L234,0 M240,12 L246,0 M252,12 L258,0 M264,12 L270,0 M276,12 L282,0 M288,12 L294,0 M300,12 L306,0"
+                                          Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6" Opacity="0.38"/>
+                                </Canvas>
+                            </Grid>
+                        </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsVisible" Value="True">
                             <Trigger.EnterActions>
-                                <BeginStoryboard x:Name="FlowRun">
+                                <BeginStoryboard x:Name="PumpRun">
                                     <Storyboard RepeatBehavior="Forever">
-                                        <!-- Пробег в 240 пикселей покрывает любую ширину, где эта
-                                             полоса встречается (90 в строке состояния, ~500 в окне
-                                             загрузки): волна уходит за правый край и появляется
-                                             слева, шов при этом не виден. -->
-                                        <DoubleAnimation Storyboard.TargetName="Wave"
+                                        <DoubleAnimation Storyboard.TargetName="Impeller"
+                                                         Storyboard.TargetProperty="RenderTransform.Angle"
+                                                         From="0" To="360" Duration="0:0:1.1"/>
+                                        <!-- Шаг струй — 12 пикселей: ровно период рисунка, поэтому
+                                             на стыке цикла вода не дёргается. -->
+                                        <DoubleAnimation Storyboard.TargetName="Jets"
                                                          Storyboard.TargetProperty="RenderTransform.X"
-                                                         From="-48" To="240" Duration="0:0:1.8"/>
+                                                         From="-12" To="0" Duration="0:0:0.5"/>
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
                             <Trigger.ExitActions>
-                                <StopStoryboard BeginStoryboardName="FlowRun"/>
+                                <StopStoryboard BeginStoryboardName="PumpRun"/>
                             </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
