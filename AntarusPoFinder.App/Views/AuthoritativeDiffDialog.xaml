@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.AuthoritativeDiffDialog"
+﻿<Window x:Class="AntarusPoFinder.App.Views.AuthoritativeDiffDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
@@ -19,7 +19,26 @@
         </StackPanel>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="CategoriesPanel"/>
+            <StackPanel>
+                <!-- ЧТО БУДЕТ СНЯТО У КОЛЛЕГ ВМЕСТЕ С ДАННЫМИ. Просьба Ильи: «при эталонной пусть
+                     будет опрос того, что затрётся у коллег, и чтобы это можно было настроить».
+                     Раздел появляется, только если такие удаления есть: пустая рамка на каждом
+                     подтверждении приучает не читать её вовсе. -->
+                <Border x:Name="WipeCard" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="УДАЛЁННЫЕ ПОДТИПЫ — СНЯТЬ У ВСЕХ" Style="{StaticResource MutedText}"
+                                   FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,8"
+                                   Text="Эти подтипы вы удалили у себя. Отмеченные будут сняты и у коллег. Снимите галочку с того, что остальным трогать не надо, — у них подтип останется, а у вас уже удалён."/>
+                        <StackPanel x:Name="WipeList" Margin="0,0,0,8"/>
+                        <CheckBox x:Name="WipeDataCheck" IsChecked="True"
+                                  Content="Удалять вместе с прошивками, параметрами и паспортами под ними"
+                                  ToolTip="Снято — у коллеги, под чьим подтипом лежат прошивки, подтип останется вместе с ними. Так работала программа до версии 1.75.5.0."/>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel x:Name="CategoriesPanel"/>
+            </StackPanel>
         </ScrollViewer>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">

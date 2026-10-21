@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -404,7 +404,10 @@ public partial class NetworkSyncView : UserControl
             return;
         }
 
-        var diffDialog = new AuthoritativeDiffDialog(diff!) { Owner = Application.Current.MainWindow };
+        // Список удалений, которые уедут вместе со снимком, — человек видит их и решает по каждому
+        // (просьба «пусть будет опрос того, что затрётся у коллег, и чтобы это можно было настроить»).
+        var tombstones = _services.Db.GetHierarchyTombstones();
+        var diffDialog = new AuthoritativeDiffDialog(diff!, tombstones) { Owner = Application.Current.MainWindow };
         diffDialog.ShowDialog();
         if (!diffDialog.Confirmed) return;
 
@@ -414,7 +417,8 @@ public partial class NetworkSyncView : UserControl
             var exportedBy = $"{_services.CurrentUserName} ({RolesConfig.RoleLabel(_services.Cfg.CurrentRole())})";
             ConfigExportResult result;
             using (_host.BeginSync("отправка эталонного справочника"))
-                result = await ConfigSyncService.ExportAsync(_services, root, exportedBy, authoritative: true);
+                result = await ConfigSyncService.ExportAsync(_services, root, exportedBy, authoritative: true,
+                    options: new ConfigSyncService.AuthoritativeOptions(diffDialog.WipeData, diffDialog.KeepTombstones));
 
             LastPushText.Text = $"Последняя отправка: {result.ExportedAt}";
             AppMessageBox.Show(

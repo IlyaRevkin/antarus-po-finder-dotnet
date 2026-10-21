@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Generic;
+using System.Linq;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
@@ -174,6 +175,74 @@ public class HierarchyTombstoneTests
         Assert.Equal(0, counts.SubtypesRemovedWithData);
         Assert.True(HasSubtype(m.DbB, "НГР", "только-у-B"));
         Assert.Contains(m.DbB.GetAllFwVersionsWithNames(includeArchived: true), v => v.Filename == "своя.psl");
+    }
+
+    /// <summary>ВЫБОР ЧЕЛОВЕКА УВАЖАЕТСЯ: снял галочку «вместе с данными» — у коллеги подтип
+    /// остаётся вместе с прошивками, как и до версии 1.75.5.0. Необратимая операция на чужих машинах
+    /// обязана иметь выключатель, а не быть «всегда так».</summary>
+    [Fact]
+    public void Без_галочки_вместе_с_данными_эталон_подтип_не_сносит()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var subtypeA = AddSubtype(m.DbA, GroupId(m.DbA, "НГР"), "2.0-тест");
+        ConfigSyncService.Export(m.SvcA, root, "profileA");
+        ConfigSyncService.Apply(m.SvcB, ConfigSyncService.ConfigPathFor(root), root);
+
+        var subtypeB = m.DbB.GetSubtypesForGroup(GroupId(m.DbB, "НГР")).First(s => s.Name == "2.0-тест");
+        var modification = m.DbB.GetAllModifications().First(x => x.ControllerName == "SMH4");
+        m.DbB.AddFwVersion(new FwVersionRecord
+        {
+            SubtypeId = subtypeB.Id!.Value,
+            ControllerId = modification.ControllerId,
+            HwVersion = modification.HwVersion,
+            SwVersion = 1,
+            DtStr = "20260101_0000",
+            VersionRaw = "9.9.9.3.20260101_0000",
+            Filename = "беречь.psl",
+            DiskPath = "",
+            Description = "данные, которые просили не трогать",
+            Status = "active",
+        });
+
+        m.DbA.DeleteEquipmentSubtype(subtypeA);
+
+        var snapshot = m.DbA.ExportHierarchyData();
+        snapshot.AuthoritativeWipeData = false;           // человек снял галочку в окне подтверждения
+
+        var counts = m.DbB.ImportHierarchyData(snapshot, authoritative: true);
+
+        Assert.Equal(0, counts.SubtypesRemovedWithData);
+        Assert.Equal(1, counts.SubtypesSkippedDelete);
+        Assert.True(HasSubtype(m.DbB, "НГР", "2.0-тест"));
+        Assert.Contains(m.DbB.GetAllFwVersionsWithNames(includeArchived: true), v => v.Filename == "беречь.psl");
+    }
+
+    /// <summary>Снятая галочка у КОНКРЕТНОГО подтипа означает «я удалил у себя, остальным навязывать
+    /// не буду»: надгробие в снимок не попадает, и у коллеги ничего не меняется.</summary>
+    [Fact]
+    public void Исключённое_удаление_не_уезжает_в_снимок()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var subtypeA = AddSubtype(m.DbA, GroupId(m.DbA, "НГР"), "2.0-тест");
+        var syncId = m.DbA.GetSubtypesForGroup(GroupId(m.DbA, "НГР")).First(s => s.Name == "2.0-тест").SyncId;
+        m.DbA.DeleteEquipmentSubtype(subtypeA);
+
+        ConfigSyncService.Export(m.SvcA, root, "profileA", authoritative: true,
+            options: new ConfigSyncService.AuthoritativeOptions(
+                WipeData: true,
+                KeepTombstones: new HashSet<string>(new[] { syncId })));
+
+        var (disk, error) = ConfigSyncService.ReadCurrentDiskHierarchyAsync(root).GetAwaiter().GetResult();
+        Assert.Null(error);
+
+        Assert.DoesNotContain(disk!.HierarchyTombstones ?? new List<ExportedTombstone>(),
+            t => t.SyncId == syncId);
     }
 
     /// <summary>Надгробие не запрещает завести подтип заново: у новой записи свой sync_id, и старое

@@ -710,9 +710,10 @@ public static class ConfigSyncService
     /// отправка «Отправить сейчас»/автоотправка), true только когда администратор явно подтвердил
     /// полную замену справочника у всех получателей — см. SharedConfigSnapshot.Authoritative и
     /// Database.ImportHierarchyData(authoritative) о том, что именно это меняет на приёме.</summary>
-    public static ConfigExportResult Export(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false)
+    public static ConfigExportResult Export(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false,
+        AuthoritativeOptions? options = null)
     {
-        var prepared = PrepareExport(services, root, exportedBy, authoritative);
+        var prepared = PrepareExport(services, root, exportedBy, authoritative, options);
         WriteExport(prepared);
         BumpRevisionMarkerCas(prepared.Root, exportedBy, changeDescriptions, authoritative);
         FinishExport(services, prepared);
@@ -721,9 +722,10 @@ public static class ConfigSyncService
 
     /// <summary>То же самое, но запись файла на сетевой диск (и обновление маркера ревизии) идёт в
     /// фоновом потоке — сбор данных из БД и отметка «отправлено» остаются на вызывающем потоке.</summary>
-    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false)
+    public static async Task<ConfigExportResult> ExportAsync(AppServices services, string root, string exportedBy, IEnumerable<string>? changeDescriptions = null, bool authoritative = false,
+        AuthoritativeOptions? options = null)
     {
-        var prepared = PrepareExport(services, root, exportedBy, authoritative);
+        var prepared = PrepareExport(services, root, exportedBy, authoritative, options);
         await Task.Run(() =>
         {
             WriteExport(prepared);
@@ -801,7 +803,23 @@ public static class ConfigSyncService
     private record PreparedExport(string Root, string ExportPath, byte[] Bytes, ConfigExportResult Result);
 
     /// <summary>БД-фаза экспорта: собрать снимок и зашифровать его в память.</summary>
-    private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy, bool authoritative = false)
+    /// <summary>ЧТО ИМЕННО СНИМАЕТ ЭТАЛОННЫЙ СНИМОК — решение человека, а не программы.
+    ///
+    /// Просьба Ильи: «при эталонной пусть будет опрос того, что затрётся у коллег, и чтобы это можно
+    /// было настроить». Операция необратима на ЧУЖИХ машинах, поэтому её условия задаются один раз,
+    /// перед отправкой, и едут вместе со снимком.</summary>
+    /// <param name="WipeData">Снимать удалённые подтипы вместе с их прошивками, параметрами,
+    /// паспортами и резервациями. Снято — подтип у коллеги с данными останется, как было до
+    /// 1.75.5.0.</param>
+    /// <param name="KeepTombstones">sync_id удалений, которые человек решил НЕ отправлять: он удалил
+    /// подтип у себя, но навязывать это остальным не хочет. Надгробие остаётся локальным.</param>
+    public sealed record AuthoritativeOptions(bool WipeData, IReadOnlySet<string> KeepTombstones)
+    {
+        public static AuthoritativeOptions Default => new(true, new HashSet<string>());
+    }
+
+    private static PreparedExport PrepareExport(AppServices services, string root, string exportedBy, bool authoritative = false,
+        AuthoritativeOptions? options = null)
     {
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
             throw new DirectoryNotFoundException("Сетевой диск недоступен.");
@@ -840,6 +858,19 @@ public static class ConfigSyncService
         }
 
         var hierarchy = services.Db.ExportHierarchyData();
+
+        // Условия эталонного снимка. У обычной отправки их нет вовсе: она ничего не сносит, и флаг
+        // в ней не значил бы ничего, кроме лишнего поля в файле.
+        if (authoritative)
+        {
+            var chosen = options ?? AuthoritativeOptions.Default;
+            hierarchy.AuthoritativeWipeData = chosen.WipeData;
+            if (chosen.KeepTombstones.Count > 0 && hierarchy.HierarchyTombstones is { } marks)
+                hierarchy.HierarchyTombstones = marks
+                    .Where(t => !chosen.KeepTombstones.Contains(t.SyncId))
+                    .ToList();
+        }
+
         var hierarchyNode = JsonSerializer.SerializeToNode(hierarchy)!.AsObject();
         foreach (var kv in hierarchyNode.ToList())
         {
@@ -1151,7 +1182,9 @@ public static class ConfigSyncService
         // диска сами. Так и было: 16 версий, выпущенных здесь, у коллеги висели в модерации (слепки
         // от 14.10.2026). Диск между ними работает заведомо — файлы-то они видят одни и те же, —
         // поэтому решение едет и там. Подробности и правила — ModerationOnDisk.
-        try { ModerationOnDisk.Write(services.Db, ids, author); }
+        // Корень передаём СВОЙ: путь в базе принадлежит машине, которая заливала прошивку
+        // (см. ModerationOnDisk — без приведения к своему корню канал молчал целиком).
+        try { ModerationOnDisk.Write(services.Db, ids, author, services.Cfg.RootPath()); }
         catch { /* нет прав на шаре или папка недоступна — не повод рушить модерацию */ }
 
         try

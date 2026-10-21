@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.Core.Data;
@@ -67,13 +67,50 @@ public class ModerationOnDiskTests
         Assert.True(InQueue(m.DbB));
 
         m.DbA.MarkFwVersionReleased(a.FwId);
-        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов");
+        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", m.Root.Path);
 
-        var absorbed = ModerationOnDisk.Absorb(m.DbB);
+        var absorbed = ModerationOnDisk.Absorb(m.DbB, m.Root.Path);
 
         Assert.Equal(1, absorbed.Released);
         Assert.False(InQueue(m.DbB), "решение, записанное на диск, обязано доехать без обмена конфигом");
         Assert.True(m.DbB.GetFwVersionById(b.FwId)!.Released);
+    }
+
+    /// <summary>У КОЛЛЕГИ ДИСК ПОДКЛЮЧЁН ПО-ДРУГОМУ — и канал обязан работать всё равно.
+    ///
+    /// Жалоба Ильи 21.10.2026: «у коллеги всё ещё много на модерации висит» — уже ПОСЛЕ того, как
+    /// канал через диск был сделан и выложен. Причина оказалась обидной: в fw_versions.disk_path
+    /// лежит путь ТОЙ машины, что заливала прошивку (у кого буква диска, у кого сетевой адрес), а
+    /// отметки читались и писались ровно по нему. На машине с другим подключением общей папки такой
+    /// путь не существует — Directory.Exists ложен, и канал молчал целиком: ни прочитать чужое, ни
+    /// выложить своё.
+    ///
+    /// Здесь это воспроизведено так же, как бывает в конторе: у второй машины в базе лежит путь с
+    /// чужим корнем («Z:\Software\…»), а общий диск подключён в другое место.</summary>
+    [Fact]
+    public void Решение_доезжает_даже_если_диск_подключён_в_другое_место()
+    {
+        using var m = new TwoMachines();
+        m.SetSharedRoot();
+        var root = m.Root.Path;
+
+        var a = SeedFirmware(m.DbA, m.HierA, root);
+        var b = SeedFirmware(m.DbB, m.HierB, root);
+
+        // Подменяем путь второй машины на «чужой» — такой, какого на этой машине нет.
+        var stored = m.DbB.GetFwVersionById(b.FwId)!.DiskPath;
+        var foreign = @"Z:\Software\Antarus Finder" + stored[(stored.IndexOf("ПО", StringComparison.Ordinal) - 1)..];
+        m.DbB.RepointFwVersionDiskPath(b.FwId, foreign);
+        Assert.False(Directory.Exists(foreign), "путь должен быть заведомо недоступен");
+
+        m.DbA.MarkFwVersionReleased(a.FwId);
+        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", root);
+
+        var absorbed = ModerationOnDisk.Absorb(m.DbB, root);
+
+        Assert.Equal(1, absorbed.Released);
+        Assert.False(InQueue(m.DbB),
+            "решение не доехало: путь из базы не привели к своему корню — именно из-за этого у коллеги и висела очередь");
     }
 
     /// <summary>Канал обязан работать ровно там, где не работает прежний: у двух машин РАЗНЫЕ sync_id
@@ -94,9 +131,9 @@ public class ModerationOnDiskTests
         Assert.NotEqual(syncA, syncB);
 
         m.DbA.MarkFwVersionReleased(a.FwId);
-        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов");
+        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", m.Root.Path);
 
-        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB).Released);
+        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB, m.Root.Path).Released);
     }
 
     /// <summary>Монотонность: «в очереди» на диске не снимает уже принятого здесь решения. Снимок мог
@@ -112,7 +149,7 @@ public class ModerationOnDiskTests
         m.DbA.MarkFwVersionReleased(a.FwId);
         ChangelogFile.TryMarkModeration(a.Folder, new FwModerationMark(false, false, "2026-10-01T00:00:00", "Петров"));
 
-        var absorbed = ModerationOnDisk.Absorb(m.DbA);
+        var absorbed = ModerationOnDisk.Absorb(m.DbA, m.Root.Path);
 
         Assert.Equal(0, absorbed.Released);
         Assert.True(m.DbA.GetFwVersionById(a.FwId)!.Released, "выпущенная версия обратно в очередь не возвращается");
@@ -132,7 +169,7 @@ public class ModerationOnDiskTests
         var before = File.ReadAllText(Path.Combine(a.Folder, ChangelogFile.FileName));
         Assert.DoesNotContain(ChangelogFile.ModerationPrefix, before);
 
-        var absorbed = ModerationOnDisk.Absorb(m.DbA);
+        var absorbed = ModerationOnDisk.Absorb(m.DbA, m.Root.Path);
 
         Assert.Equal(0, absorbed.Released);
         Assert.True(m.DbA.GetFwVersionById(a.FwId)!.Released);
@@ -151,9 +188,9 @@ public class ModerationOnDiskTests
         var b = SeedFirmware(m.DbB, m.HierB, root);
 
         m.DbA.ArchiveFwVersion(a.FwId);
-        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов");
+        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", m.Root.Path);
 
-        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB).Archived);
+        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB, m.Root.Path).Archived);
         Assert.False(InQueue(m.DbB));
     }
 
@@ -168,7 +205,7 @@ public class ModerationOnDiskTests
 
         var a = SeedFirmware(m.DbA, m.HierA, root);
         m.DbA.MarkFwVersionReleased(a.FwId);
-        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов");
+        ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", m.Root.Path);
 
         var back = ChangelogFile.TryRead(a.Folder)!;
 
@@ -211,8 +248,8 @@ public class ModerationOnDiskTests
         var a = SeedFirmware(m.DbA, m.HierA, root);
         Directory.Delete(a.Folder, recursive: true);
 
-        Assert.Equal(0, ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов"));
-        Assert.Equal(0, ModerationOnDisk.Absorb(m.DbA).Released);
+        Assert.Equal(0, ModerationOnDisk.Write(m.DbA, new[] { a.FwId }, "Иванов", m.Root.Path));
+        Assert.Equal(0, ModerationOnDisk.Absorb(m.DbA, m.Root.Path).Released);
     }
 
     /// <summary>⚠️ ТО, ЧЕГО НЕ ХВАТИЛО В 1.75.0.0.
@@ -236,10 +273,10 @@ public class ModerationOnDiskTests
         m.DbA.MarkFwVersionReleased(a.FwId);
         Assert.Null(ChangelogFile.TryRead(a.Folder)!.Moderation);
 
-        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов", m.Root.Path));
 
         Assert.True(ChangelogFile.TryRead(a.Folder)!.Moderation!.Released);
-        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB).Released);
+        Assert.Equal(1, ModerationOnDisk.Absorb(m.DbB, m.Root.Path).Released);
         Assert.False(InQueue(m.DbB));
     }
 
@@ -254,9 +291,9 @@ public class ModerationOnDiskTests
 
         var a = SeedFirmware(m.DbA, m.HierA, root);
         m.DbA.MarkFwVersionReleased(a.FwId);
-        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+        Assert.Equal(1, ModerationOnDisk.Publish(m.DbA, "Иванов", m.Root.Path));
 
-        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов", m.Root.Path));
     }
 
     /// <summary>Выкладка не ослабляет чужое решение: если на диске «выпущена», а здесь версия ещё и
@@ -272,7 +309,7 @@ public class ModerationOnDiskTests
         ChangelogFile.TryMarkModeration(a.Folder, new FwModerationMark(true, false, "2026-10-01T00:00:00", "Петров"));
         m.DbA.ArchiveFwVersion(a.FwId);
 
-        ModerationOnDisk.Publish(m.DbA, "Иванов");
+        ModerationOnDisk.Publish(m.DbA, "Иванов", m.Root.Path);
 
         var mark = ChangelogFile.TryRead(a.Folder)!.Moderation!;
         Assert.True(mark.Released, "чужое «выпущена» обязано остаться");
@@ -290,6 +327,6 @@ public class ModerationOnDiskTests
 
         SeedFirmware(m.DbA, m.HierA, root);
 
-        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов"));
+        Assert.Equal(0, ModerationOnDisk.Publish(m.DbA, "Иванов", m.Root.Path));
     }
 }

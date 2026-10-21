@@ -1826,12 +1826,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // модерации», а версии, выпущенные раньше, остались на диске без неё — и у коллеги
             // продолжили висеть в очереди («обращаю внимание модерации не подчинилась»).
             var published = await Task.Run(() => ModerationOnDisk.Publish(
-                _services.Db, $"{_services.CurrentUserName} ({RoleLabel})"));
+                _services.Db, $"{_services.CurrentUserName} ({RoleLabel})", root));
             if (published > 0)
                 ShowStatus($"Решения модерации выложены на диск: {published}", 6000,
                     NotificationCategory.FirmwareAndParams);
 
-            var absorbed = await Task.Run(() => ModerationOnDisk.Absorb(_services.Db));
+            var absorbed = await Task.Run(() => ModerationOnDisk.Absorb(_services.Db, root));
             if (absorbed.Released + absorbed.Archived > 0)
             {
                 var what = string.Join(", ", absorbed.Items.Take(3));

@@ -976,7 +976,7 @@ public partial class Database
                 // ⚠️ Снимаем только по НАДГРОБИЮ (явное удаление оператором), а не по простому
                 // отсутствию во входящем снимке: отсутствие бывает и у машины, которая про подтип
                 // просто ещё не знает, и тогда эталон сносил бы живые данные ни за что.
-                if (authoritative && SubtypeDeleted(syncId, null))
+                if (authoritative && (data.AuthoritativeWipeData ?? true) && SubtypeDeleted(syncId, null))
                 {
                     counts.SubtypesRemovedWithData++;
                     if (apply)

@@ -1,3 +1,6 @@
+﻿using System.Linq;
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,10 +22,47 @@ public partial class AuthoritativeDiffDialog : Window
     /// <summary>true — оператор нажал «Подтвердить и отправить», false — «Отмена» или закрытие окна.</summary>
     public bool Confirmed { get; private set; }
 
-    public AuthoritativeDiffDialog(AuthoritativeSyncDiff diff)
+    /// <summary>Удаления, которые человек решил НЕ навязывать остальным (sync_id подтипов).</summary>
+    public HashSet<string> KeepTombstones { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Снимать ли подтипы вместе с данными под ними.</summary>
+    public bool WipeData => WipeDataCheck.IsChecked == true;
+
+    private readonly List<(CheckBox Box, string SyncId)> _wipeBoxes = new();
+
+    public AuthoritativeDiffDialog(AuthoritativeSyncDiff diff,
+        IReadOnlyList<Database.HierarchyTombstone>? tombstones = null)
     {
         InitializeComponent();
         Build(diff);
+        BuildWipeList(tombstones);
+    }
+
+    /// <summary>СПИСОК ТОГО, ЧТО СНИМЕТСЯ У КОЛЛЕГ. Показывается только при наличии удалений: пустая
+    /// рамка на каждом подтверждении приучает не читать её вовсе, и тогда она не сработает там, где
+    /// нужна.</summary>
+    private void BuildWipeList(IReadOnlyList<Database.HierarchyTombstone>? tombstones)
+    {
+        var subtypes = (tombstones ?? Array.Empty<Database.HierarchyTombstone>())
+            .Where(t => string.Equals(t.Kind, Database.TombstoneSubtype, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (subtypes.Count == 0) return;
+
+        foreach (var mark in subtypes)
+        {
+            var label = string.IsNullOrWhiteSpace(mark.Label) ? mark.SyncId : mark.Label;
+            var when = string.IsNullOrWhiteSpace(mark.DeletedAt) ? "" : $"   (удалено {mark.DeletedAt})";
+            var box = new CheckBox
+            {
+                Content = label + when,
+                IsChecked = true,
+                Margin = new Thickness(0, 2, 0, 2),
+            };
+            WipeList.Children.Add(box);
+            _wipeBoxes.Add((box, mark.SyncId));
+        }
+
+        WipeCard.Visibility = Visibility.Visible;
     }
 
     private void Build(AuthoritativeSyncDiff diff)
@@ -71,8 +111,17 @@ public partial class AuthoritativeDiffDialog : Window
         Margin = new Thickness(0, 0, 0, 4),
     };
 
+    private void CollectChoices()
+    {
+        KeepTombstones.Clear();
+        foreach (var (box, syncId) in _wipeBoxes)
+            if (box.IsChecked != true)
+                KeepTombstones.Add(syncId);
+    }
+
     private void Confirm_Click(object sender, RoutedEventArgs e)
     {
+        CollectChoices();
         Confirmed = true;
         DialogResult = true;
         Close();

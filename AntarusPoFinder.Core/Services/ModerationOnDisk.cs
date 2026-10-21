@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -25,10 +25,20 @@ namespace AntarusPoFinder.Core.Services;
 /// встретиться они могут в любом сочетании, не отменяя друг друга.</summary>
 public static class ModerationOnDisk
 {
+    // ⚠️ ПУТЬ ИЗ БАЗЫ ПРИВОДИТСЯ К СВОЕМУ КОРНЮ (FirmwarePathLocalizer), а не используется как есть.
+    //
+    // В fw_versions.disk_path лежит путь ТОЙ машины, что заливала прошивку: у кого буква диска, у
+    // кого сетевой адрес. На машине с другим подключением диска Directory.Exists по такому пути
+    // ложен — и канал молчал целиком: отметки не писались и не читались.
+    //
+    // Из-за этого и держалась жалоба «у коллеги всё ещё много на модерации висит»: лекарство от
+    // расхождения очередей было написано, выложено и не работало ни у кого, кроме машины,
+    // заливавшей прошивку. Снаружи это выглядит как «модерация не синхронизируется», а на деле —
+    // как «папку не нашли».
     /// <summary>Записать решение в папку версии. Тихо ничего не делает, если папки нет или на шаре
     /// нет прав на запись: модерация — операция в базе, и ронять её из-за недоступного диска нельзя.
     /// Возвращает число версий, которым отметку реально проставили.</summary>
-    public static int Write(Database db, IEnumerable<int> versionIds, string author, DateTime? now = null)
+    public static int Write(Database db, IEnumerable<int> versionIds, string author, string localRoot, DateTime? now = null)
     {
         var stamp = (now ?? DateTime.Now).ToString("yyyy-MM-ddTHH:mm:ss");
         var written = 0;
@@ -36,8 +46,9 @@ public static class ModerationOnDisk
         {
             var row = db.GetFwVersionById(id);
             if (row is null || string.IsNullOrEmpty(row.DiskPath)) continue;
+            var dir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot);
             var mark = new FwModerationMark(row.Released, row.Archived, stamp, author ?? "");
-            if (ChangelogFile.TryMarkModeration(row.DiskPath, mark)) written++;
+            if (ChangelogFile.TryMarkModeration(dir, mark)) written++;
         }
         return written;
     }
@@ -56,7 +67,7 @@ public static class ModerationOnDisk
     ///
     /// Автор отметки здесь — не человек, а машина: решение принимали неизвестно когда и неизвестно
     /// кто, и подписывать им того, кто сейчас сидит за компьютером, было бы выдумкой.</summary>
-    public static int Publish(Database db, string author, DateTime? now = null, bool apply = true)
+    public static int Publish(Database db, string author, string localRoot, DateTime? now = null, bool apply = true)
     {
         var stamp = (now ?? DateTime.Now).ToString("yyyy-MM-ddTHH:mm:ss");
         var written = 0;
@@ -64,9 +75,11 @@ public static class ModerationOnDisk
         foreach (var row in db.GetAllFwVersionsWithNames(includeArchived: true))
         {
             if (!row.Released && !row.Archived) continue;          // решения ещё нет — выкладывать нечего
-            if (string.IsNullOrEmpty(row.DiskPath) || !Directory.Exists(row.DiskPath)) continue;
+            if (string.IsNullOrEmpty(row.DiskPath)) continue;
+            var dir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot);
+            if (!Directory.Exists(dir)) continue;
 
-            var onDisk = ChangelogFile.TryRead(row.DiskPath)?.Moderation;
+            var onDisk = ChangelogFile.TryRead(dir)?.Moderation;
             // На диске уже стоит не менее сильная отметка — трогать файл незачем: лишняя запись в
             // чужую папку на общей шаре и лишний повод для конфликта доступа.
             if (onDisk is not null
@@ -75,7 +88,7 @@ public static class ModerationOnDisk
 
             written++;
             if (!apply) continue;
-            ChangelogFile.TryMarkModeration(row.DiskPath, new FwModerationMark(
+            ChangelogFile.TryMarkModeration(dir, new FwModerationMark(
                 onDisk?.Released == true || row.Released,
                 onDisk?.Archived == true || row.Archived,
                 stamp, author ?? ""));
@@ -95,7 +108,7 @@ public static class ModerationOnDisk
     ///
     /// Отсутствие строки «Модерация:» в файле — это НЕ «в очереди», а «машина, писавшая файл, о
     /// модерации не знала»: старые CHANGELOG.md такой строки не содержат вовсе.</summary>
-    public static AbsorbResult Absorb(Database db, bool apply = true)
+    public static AbsorbResult Absorb(Database db, string localRoot, bool apply = true)
     {
         var items = new List<string>();
         var released = 0;
@@ -105,9 +118,11 @@ public static class ModerationOnDisk
         {
             if (row.Id is null || string.IsNullOrEmpty(row.DiskPath)) continue;
             if (row.Released && row.Archived) continue;            // выше уже некуда
-            if (!Directory.Exists(row.DiskPath)) continue;
 
-            var mark = ChangelogFile.TryRead(row.DiskPath)?.Moderation;
+            var dir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot);
+            if (!Directory.Exists(dir)) continue;
+
+            var mark = ChangelogFile.TryRead(dir)?.Moderation;
             if (mark is null) continue;
 
             var liftRelease = mark.Released && !row.Released;
