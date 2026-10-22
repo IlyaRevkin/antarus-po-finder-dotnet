@@ -153,7 +153,15 @@
             <Border x:Name="FailureHintBox" Style="{StaticResource CardBorder}" Margin="0,0,0,8"
                     Visibility="Collapsed"
                     BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1">
-                <TextBlock x:Name="FailureHintLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                <StackPanel>
+                    <TextBlock x:Name="FailureHintLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                    <!-- Действие прямо здесь, а не «сходите в настройки». По журналам заливок видно,
+                         как человек жмёт «Повторить» по пятнадцать раз подряд с одной и той же
+                         ошибкой: подсказка без кнопки читается как общие слова. -->
+                    <Button x:Name="SwitchConnectionBtn" Style="{StaticResource SecondaryButton}"
+                            HorizontalAlignment="Left" Margin="0,8,0,0" Visibility="Collapsed"
+                            Click="SwitchConnection_Click"/>
+                </StackPanel>
             </Border>
         </StackPanel>
 

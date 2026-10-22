@@ -396,7 +396,7 @@ public partial class LoaderDialog : Window
         catch (Exception ex)
         {
             AppendLog(ex.Message, LoaderLogLevel.Error);
-            ShowFailedState("Ошибка");
+            ShowFailedState("Ошибка", ex.Message);
             outcome = LoaderOutcome.Failed;
             outcomeMessage = ex.Message;
         }
@@ -687,7 +687,7 @@ public partial class LoaderDialog : Window
         }
         else
         {
-            ShowFailedState("Ошибка");
+            ShowFailedState("Ошибка", result.Message);
         }
     }
 
@@ -810,8 +810,17 @@ public partial class LoaderDialog : Window
     /// <summary>Провал показывается сразу с раскрытым журналом: разбираться без него всё равно
     /// невозможно, а лишний клик по «Подробности» в этот момент — издевательство. Вместе с журналом
     /// появляются «Повторить попытку» внизу и подсказка, что проверить руками.</summary>
-    private void ShowFailedState(string stage)
+    private void ShowFailedState(string stage, string? failure = null)
     {
+        // Считаем ОДИНАКОВЫЕ отказы подряд: по журналам заливок видно, как одну и ту же ошибку
+        // получают по пятнадцать раз, нажимая «Повторить». С третьего раза подсказка скажет об
+        // этом прямо (LoaderFailureHint).
+        var text = failure ?? "";
+        _sameFailureInARow = string.Equals(text, _lastFailure, StringComparison.Ordinal)
+            ? _sameFailureInARow + 1
+            : 1;
+        _lastFailure = text;
+
         Progress.IsIndeterminate = false;
         PercentLabel.Text = "";
         StageLabel.Text = stage;
@@ -820,33 +829,60 @@ public partial class LoaderDialog : Window
         ShowRetry();
     }
 
-    /// <summary>Кнопка повтора и подсказка по обвязке. Подсказка — не украшение: отказ Loader чаще
-    /// оказывался не программным, а в том, что к ПЛК разом подключены несколько шнурков (панель,
-    /// модем, USB) и Automation цепляется не за тот интерфейс — после снятия питания и повторного
-    /// запуска с одним USB та же прошивка уходила нормально. Для сборки LFS её не показываем:
-    /// контроллер там не участвует вовсе.</summary>
+    /// <summary>Кнопка повтора и подсказка по отказу.
+    ///
+    /// Подсказка — не украшение. Журналы заливок (LoaderDiagnostics) показали, что при отказе
+    /// подключения наладчик жмёт «Повторить» по пятнадцать раз подряд, получая одну и ту же ошибку:
+    /// прежняя подсказка была одна на все случаи и не отвечала на вопрос «что именно сейчас не
+    /// так». Теперь причина разбирается (LoaderFailureHint) и предлагается действие — вплоть до
+    /// переключения подключения прямо отсюда. Для сборки LFS подсказку не показываем: контроллер
+    /// там не участвует вовсе.</summary>
     private void ShowRetry()
     {
         RetryBtn.Visibility = _backend.IsAvailable ? Visibility.Visible : Visibility.Collapsed;
         if (_isBuild) return;
-        FailureHintLabel.Text =
-            "Если Loader не увидел ПЛК: оставьте подключённым только шнур загрузки — панель, модем и " +
-            "прочие кабели на время заливки лучше отсоединить, — снимите и подайте питание на " +
-            "контроллер и повторите. Режим подключения (USB/Ethernet, адрес, адаптер) проверяется в " +
-            "«Настройки → Лоадер».";
+
+        var mode = LoaderConnectionSettings.ParseMode(_cfg.LoaderConnectionMode());
+        var advice = LoaderFailureHint.For(_lastFailure, mode, _sameFailureInARow);
+
+        FailureHintLabel.Text = advice.Text;
+        _switchTo = advice.Remedy;
+        SwitchConnectionBtn.Content = LoaderFailureHint.ButtonCaption(advice.Remedy);
+        SwitchConnectionBtn.Visibility = advice.HasButton ? Visibility.Visible : Visibility.Collapsed;
         FailureHintBox.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Переключить подключение и сразу повторить. Два действия одной кнопкой намеренно:
+    /// разделённые, они означают «сходи в настройки, вернись и нажми повтор» — то есть ровно тот
+    /// путь, которым не ходят.</summary>
+    private void SwitchConnection_Click(object sender, RoutedEventArgs e)
+    {
+        var target = LoaderFailureHint.TargetMode(_switchTo);
+        _cfg.SetLoaderConnectionMode(LoaderConnectionSettings.ModeToConfig(target));
+        AppendLog($"Подключение переключено на {LoaderConnectionSettings.ModeCaption(target)} — пробуем снова.");
+
+        HideRetry();
+        Restart_Click(sender, e);
     }
 
     private void HideRetry()
     {
         RetryBtn.Visibility = Visibility.Collapsed;
         FailureHintBox.Visibility = Visibility.Collapsed;
+        SwitchConnectionBtn.Visibility = Visibility.Collapsed;
     }
+
+    /// <summary>Текст последнего отказа и сколько раз подряд он повторился. Повтор считается именно
+    /// по тексту: одна и та же ошибка подряд — признак, что человек жмёт кнопку, ничего не меняя,
+    /// и подсказке пора сказать об этом прямо.</summary>
+    private string? _lastFailure;
+    private int _sameFailureInARow;
+    private LoaderFailureHint.Remedy _switchTo = LoaderFailureHint.Remedy.None;
 
     private void FinishWithError(string message)
     {
         AppendLog(message, LoaderLogLevel.Error);
-        ShowFailedState("Ошибка");
+        ShowFailedState("Ошибка", message);
         SetRunning(false);
     }
 
