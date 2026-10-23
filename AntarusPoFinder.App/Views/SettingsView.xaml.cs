@@ -380,6 +380,23 @@ public partial class SettingsView : UserControl
         e.Handled = true;
     }
 
+    /// <summary>Открыть вкладку настроек по имени — ТОЛЬКО для самоснимка (UiSnapshotService).
+    /// Снаружи вкладки переключаются нажатием, а обход снимает страницы без нажатий; без этой
+    /// щёлочки «Настройки» всегда снимались бы на первой вкладке, и ни «Прошивки», ни «Модерация»
+    /// глазами перед релизом не проверялись бы вовсе.</summary>
+    public void ShowTabForSnapshot(string tab)
+    {
+        var button = tab switch
+        {
+            "firmware" => TabBtnFirmware,
+            "moderation" => TabBtnModeration,
+            "hierarchy" => TabBtnHierarchy,
+            "loader" => TabBtnLoader,
+            _ => TabBtnGeneral,
+        };
+        Tab_Click(button, new RoutedEventArgs());
+    }
+
     private void Tab_Click(object sender, RoutedEventArgs e)
     {
         foreach (var btn in AllTabButtons())

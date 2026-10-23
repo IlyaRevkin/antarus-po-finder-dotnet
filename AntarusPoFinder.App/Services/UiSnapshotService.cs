@@ -107,6 +107,16 @@ public static class UiSnapshotService
             }
         }
 
+        // ВКЛАДКИ НАСТРОЕК. Страница «Настройки» снимается на той вкладке, что открыта по умолчанию,
+        // — то есть «Общие». Всё остальное (ряд кнопок у «Прошивок», таблица модерации) до этого
+        // глазами перед релизом не проверялось ни разу, а именно там и ломалась вёрстка: кнопка
+        // «Теги…» наезжала на «Обновить», нижний ряд кнопок уезжал за край окна.
+        await SnapshotSettingsTabs(window, vm, dir, Note);
+
+        // КАРТОЧКА ПРОШИВКИ отдельно: на пустом или чужом профиле выдача может не дать ни одной
+        // карточки, а разделённая кнопка «Загрузить в ПЛК» видна только на ней.
+        await SnapshotFirmwareCard(dir, Note);
+
         // ОКНА, А НЕ ТОЛЬКО СТРАНИЦЫ. Окно загрузки в ПЛК — главный экран, на который смотрят
         // минутами, и именно на нём стилизация оборудования должна быть видна. В обход страниц оно
         // не попадает вовсе: это отдельное окно, открываемое по кнопке на карточке.
@@ -149,6 +159,98 @@ public static class UiSnapshotService
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    /// <summary>Вкладки «Настроек», которые иначе в обход не попадают (см. вызов выше).</summary>
+    private static async System.Threading.Tasks.Task SnapshotSettingsTabs(
+        Window window, MainWindowViewModel vm, string dir, Action<string> note)
+    {
+        try
+        {
+            vm.NavigateCommand.Execute("settings");
+            await Settle(window);
+            var settings = FindChild<Views.SettingsView>(window);
+            if (settings is null)
+            {
+                note("вкладки настроек: страница не найдена в дереве");
+                return;
+            }
+
+            foreach (var tab in new[] { "firmware", "moderation", "hierarchy", "loader" })
+            {
+                settings.ShowTabForSnapshot(tab);
+                await Settle(window);
+                Save(window, Path.Combine(dir, $"settings--{tab}.png"));
+                note($"настройки/{tab}: ok");
+            }
+        }
+        catch (Exception ex)
+        {
+            note($"вкладки настроек: ОШИБКА {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Карточка прошивки сама по себе: ряд кнопок с разделённой «Загрузить в ПЛК».
+    /// Собирается из придуманной записи — на диск и в базу не ходит.</summary>
+    private static async System.Threading.Tasks.Task SnapshotFirmwareCard(string dir, Action<string> note)
+    {
+        try
+        {
+            var card = new Views.FirmwareCard();
+            card.Configure(new Core.Services.HierarchyResult
+            {
+                Name = "НГР-КПЧ SMH4",
+                Controller = "SMH4",
+                EquipmentType = "НГР",
+                SubtypeName = "КПЧ",
+                VersionRaw = "2.1.0004.0002",
+                Description = "Две скважины, частотник, датчик давления",
+                Tags = "частотник;скважина",
+            }, new Views.FirmwareCardFlags
+            {
+                HasLfs = true,
+                HasPsl = true,
+                SupportsLoader = true,
+                LoaderConnected = true,
+                HasHmi = true,
+                ConnectionMode = "ethernet",
+                ConnectionHint = "адрес ПЛК: 192.168.1.10",
+            });
+
+            var host = new Window
+            {
+                Width = 720,
+                Height = 420,
+                WindowStyle = WindowStyle.None,
+                ShowInTaskbar = false,
+                Content = card,
+            };
+            host.SetResourceReference(Window.BackgroundProperty, "BgBrush");
+            host.Show();
+            await System.Threading.Tasks.Task.Delay(400);
+            host.UpdateLayout();
+            Save(host, Path.Combine(dir, "card--firmware.png"));
+            host.Close();
+            note("карточка прошивки: ok");
+        }
+        catch (Exception ex)
+        {
+            note($"карточка прошивки: ОШИБКА {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Первый потомок нужного типа в визуальном дереве. Нужен ровно затем, чтобы дотянуться
+    /// до страницы настроек и переключить её вкладку.</summary>
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) return hit;
+            if (FindChild<T>(child) is T deeper) return deeper;
+        }
+        return null;
     }
 
     /// <summary>Снимки окна загрузки для разных объектов: насосная, канализационная, тепловой пункт.
