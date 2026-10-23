@@ -563,8 +563,6 @@ public partial class LoaderDialog : Window
         // Метка выбирает ДВИЖЕНИЕ полосы: вентиль, ручной насос, нагрев или тушение пожара
         // (разбирается триггерами стиля FlowProgressBar).
         Progress.Tag = EquipmentMotifArt.BarTag(motif);
-        // Обводка, а не заливка: фигуры контурные (см. EquipmentMotifArt).
-        MotifIcon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
         MotifChip.SetResourceReference(BorderBrushProperty, brushKey);
         MotifLabel.SetResourceReference(ForegroundProperty, brushKey);
         // Значок мотива рядом с полосой БОЛЬШЕ НЕ ПОКАЗЫВАЕТСЯ: у самой полосы теперь есть
@@ -573,24 +571,16 @@ public partial class LoaderDialog : Window
         // объекта над полосой и цвет полосы.
         MotifIcon.Visibility = Visibility.Collapsed;
 
-        // Схема рисуется ДВУМЯ фигурами: тела заливкой, трубы линиями поверх. Одними линиями она
-        // читалась как проволочный чертёж (жалоба «стилизации мало, та что есть кривая»).
-        var line = EquipmentMotifArt.SchemeLine(motif);
-        if (!line.IsEmpty())
+        // Схема — два знака по краям трубы (см. EquipmentMotifArt.Scene). Знаки сплошные, рисуются
+        // заливкой: обводка по такому пути дала бы пустой силуэт.
+        var (from, to) = EquipmentMotifArt.Scene(motif);
+        if (from is not null && to is not null)
         {
-            MotifSchemeLine.Data = line;
-            MotifSchemeLine.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
-
-            var fill = EquipmentMotifArt.SchemeFill(motif);
-            if (!fill.IsEmpty())
-            {
-                MotifSchemeFill.Data = fill;
-                MotifSchemeFill.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
-                // Вода и теплообменник — подложка, они приглушены. Пламя — нет: бледный огонь
-                // выглядит как пятно, а он здесь главное, что должно броситься в глаза.
-                MotifSchemeFill.Opacity = motif == EquipmentMotif.Fire ? 0.9 : 0.3;
-            }
-
+            MotifSceneFrom.Data = from;
+            MotifSceneTo.Data = to;
+            MotifSceneFrom.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
+            MotifSceneTo.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
+            MotifPipe.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
             MotifScheme.Visibility = Visibility.Visible;
         }
     }

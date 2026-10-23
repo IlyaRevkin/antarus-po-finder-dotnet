@@ -69,27 +69,23 @@
                  минуты, и всё это время на экране должно быть видно, ЧТО шьётся, а не только
                  проценты. Значок и подпись рядом — чтобы прочитать можно было и прямо, не только
                  боковым зрением. Незнакомое оборудование выглядит ровно как раньше. -->
-            <!-- СХЕМА ОБЪЕКТА над полосой: что именно сейчас происходит — вода идёт из приёмника
-                 через насос в напор, стоки поднимаются из колодца, тепло ходит по кругу. Значка в
-                 24 пикселя для этого мало («стилизации мало»), а картинку линиями можно растянуть
-                 на любую ширину и покрасить кистью темы. Свёрнута, когда объект не опознан. -->
-            <!-- СХЕМА ОБЪЕКТА — две фигуры одна поверх другой: тела заливкой, трубы линиями
-                 (см. EquipmentMotifArt.SchemeFill/SchemeLine). Одними линиями это читалось как
-                 случайный проволочный чертёж — «стилизации мало, та что есть кривая».
-
-                 ⚠️ ОБЕ фигуры лежат в ОДНОМ Viewbox поверх Canvas размером 120×48 и рисуются БЕЗ
-                 собственного растягивания. Иначе каждая масштабируется по СВОИМ границам: вода
-                 уезжает вбок от резервуара, а крыльчатка повисает в стороне от насоса — ровно это
-                 и было на первом снимке новой схемы. -->
-            <Viewbox Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="MotifScheme"
-                     Visibility="Collapsed" Height="54" Margin="0,2,0,12"
-                     HorizontalAlignment="Left" Stretch="Uniform">
-                <Canvas Width="120" Height="48">
-                    <Path x:Name="MotifSchemeFill" Opacity="0.3"/>
-                    <Path x:Name="MotifSchemeLine" StrokeThickness="2.2" StrokeLineJoin="Round"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                </Canvas>
-            </Viewbox>
+            <!-- СХЕМА ОБЪЕКТА — два готовых знака и труба между ними.
+                 Рисовать схему путями в коде не вышло четыре раза подряд («стилизации мало», «та
+                 что есть кривая», «какой-то крест нарисован»), поэтому знаки взяты из Material
+                 Symbols (см. EquipmentMotifArt), а вся «графика» здесь — прямая труба со стрелкой.
+                 Каждый знак масштабируется в своём месте, поэтому пропорции не ломаются. -->
+            <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" x:Name="MotifScheme"
+                        Orientation="Horizontal" Visibility="Collapsed"
+                        VerticalAlignment="Center" Margin="0,2,0,12">
+                <Path x:Name="MotifSceneFrom" Width="34" Height="34" Stretch="Uniform"
+                      VerticalAlignment="Center"/>
+                <Path x:Name="MotifPipe" Width="72" Height="22" Stretch="Uniform" Margin="10,0"
+                      VerticalAlignment="Center" StrokeThickness="2" Opacity="0.75"
+                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M0,11 L60,11 M52,5 L60,11 L52,17"/>
+                <Path x:Name="MotifSceneTo" Width="34" Height="34" Stretch="Uniform"
+                      VerticalAlignment="Center"/>
+            </StackPanel>
 
             <Grid Grid.Row="1" Grid.Column="0">
                 <Grid.ColumnDefinitions>
