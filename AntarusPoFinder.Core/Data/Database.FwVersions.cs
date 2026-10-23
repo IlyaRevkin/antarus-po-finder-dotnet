@@ -840,7 +840,12 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@o", oldHmiPath);
             });
 
-    /// <summary>Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
+    /// <summary>ВЫКЛЮЧЕННЫЕ версии (status='disabled', см. FwStatus) считаются наравне с активными —
+    /// номер за ними остаётся занятым. Освобождает номер только ОТКАТ: это его прямой смысл
+    /// («следующая загрузка получит тот же SW заново»), а выключение всего лишь убирает версию из
+    /// выдачи, и выдать её номер кому-то ещё означало бы два разных файла под одним именем папки.
+    ///
+    /// Next free sw_version: MAX+1 across BOTH already-uploaded (active) fw_versions AND
     /// currently-open reservations (see Database.FwVersionReservations.cs) for this exact
     /// (subtype, controller, hw_version) combo. Including reservations here is what makes the live
     /// preview (before any reservation exists) never suggest a number someone else already locked in.
@@ -856,7 +861,7 @@ public partial class Database
         var result = ExecuteScalar($"""
             SELECT MAX(sw_version) FROM fw_versions
             WHERE subtype_id=@s AND controller_id=@c AND hw_version=@h AND is_opc=0
-            AND (status IS NULL OR status='active') AND {NotDeleted()}
+            AND (status IS NULL OR status<>'{Services.FwStatus.RolledBack}') AND {NotDeleted()}
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@s", subtypeId);
@@ -952,6 +957,86 @@ public partial class Database
         return true;
     }
 
+    /// <summary>ВЫКЛЮЧИТЬ версию — убрать её из выдачи, не объявляя ошибочной (см. FwStatus:
+    /// «залили не то случайно, раздвоили прошивку» и «сделали 3 копии под разные исполнения и их
+    /// можно включать-выключать»).
+    ///
+    /// Чем это не откат: номер SW не освобождается под следующую загрузку, папка на диске не
+    /// переименовывается, и выключить можно ЛЮБУЮ версию отдельно — откат же на практике требовал
+    /// пройти всю цепочку от последней к первой, иначе «включить новую версию с каким-то исполнением
+    /// и оставить только её не получится».
+    ///
+    /// manual_current снимается, как и при откате: выключенная версия не может считаться текущей
+    /// (FwHistoryStatus её вообще не рассматривает), а оставленная отметка молча ожила бы при
+    /// включении обратно. Откатанную версию выключать нечего — она и так не выдаётся, возвращаем
+    /// false, чтобы вызывающая сторона не сочла действие выполненным.</summary>
+    public bool DisableFwVersion(int fwVersionId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || Services.FwStatus.IsHidden(v.Status)) return false;
+
+        ExecuteNonQuery($"UPDATE fw_versions SET status='{Services.FwStatus.Disabled}', manual_current=0, status_changed_at=@t WHERE id=@id",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@t", NowIsoPrecise());
+                cmd.Parameters.AddWithValue("@id", fwVersionId);
+            });
+        return true;
+    }
+
+    /// <summary>ВКЛЮЧИТЬ выключенную версию обратно. Только для 'disabled': возврат откатанной — это
+    /// отдельное действие с отдельным предупреждением про папку «_ОТКАТАНО»
+    /// (<see cref="UnrollbackFwVersion"/>), и путать их в одной кнопке нельзя.</summary>
+    public bool EnableFwVersion(int fwVersionId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || !Services.FwStatus.IsDisabled(v.Status)) return false;
+
+        ExecuteNonQuery($"UPDATE fw_versions SET status='{Services.FwStatus.Active}', status_changed_at=@t WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@t", NowIsoPrecise());
+            cmd.Parameters.AddWithValue("@id", fwVersionId);
+        });
+        return true;
+    }
+
+    /// <summary>«Оставить в работе только эту версию» — включает указанную и выключает все остальные
+    /// живые версии ТОГО ЖЕ шкафа (подтип + контроллер), независимо от hw и исполнения. Ровно тот
+    /// случай, ради которого выключение и заводилось: под разные исполнения сделано несколько копий,
+    /// а на объект сейчас нужна одна конкретная.
+    ///
+    /// Откатанные не трогаем: откат — решение другого порядка («версии не должно было быть»), и
+    /// снимать его мимо кнопки «Вернуть в активные» эта операция не вправе. Возвращает, сколько
+    /// версий выключено; -1 — версии нет или она откатана (тогда не меняется ничего).</summary>
+    public int KeepOnlyFwVersionActive(int fwVersionId)
+    {
+        var v = GetFwVersionById(fwVersionId);
+        if (v is null || Services.FwStatus.IsRolledBack(v.Status)) return -1;
+
+        var affected = new List<int>();
+        using (var reader = ExecuteReader($"""
+            SELECT id FROM fw_versions
+            WHERE subtype_id=@s AND controller_id=@c AND id<>@id AND archived=0 AND {NotDeleted()}
+              AND (status IS NULL OR status='{Services.FwStatus.Active}')
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", v.SubtypeId);
+            cmd.Parameters.AddWithValue("@c", v.ControllerId);
+            cmd.Parameters.AddWithValue("@id", fwVersionId);
+        }))
+        {
+            while (reader.Read()) affected.Add(reader.GetInt32(0));
+        }
+
+        foreach (var id in affected) DisableFwVersion(id);
+        EnableFwVersion(fwVersionId);
+        // Выбранная версия должна стать текущей и на вид: иначе «оставил одну», а в истории текущей
+        // продолжает числиться выключенная соседка по hw-группе (метки считаются по живым версиям,
+        // но ручная отметка могла остаться на другой строке).
+        SetFwVersionManualCurrent(fwVersionId);
+        return affected.Count;
+    }
+
     /// <summary>Оператор вручную назначает ЭТУ версию «текущей» в её группе (подтип+контроллер+hw+
     /// ИСПОЛНЕНИЕ),
     /// в обход обычного правила «текущая = версия с максимальным sw_version» (см. FwHistoryStatus.
@@ -967,7 +1052,9 @@ public partial class Database
     public bool SetFwVersionManualCurrent(int fwVersionId)
     {
         var v = GetFwVersionById(fwVersionId);
-        if (v is null || v.Status == "rolled_back") return false;
+        // Выключенная — наравне с откатанной: «текущей» может быть только та версия, которая вообще
+        // выдаётся (см. FwStatus.IsHidden и FwHistoryStatus.Labels, где считают по живым).
+        if (v is null || Services.FwStatus.IsHidden(v.Status)) return false;
 
         ExecuteNonQuery("""
             UPDATE fw_versions SET manual_current=0

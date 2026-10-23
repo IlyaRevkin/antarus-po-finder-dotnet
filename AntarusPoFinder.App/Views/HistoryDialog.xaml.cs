@@ -25,7 +25,7 @@ public partial class HistoryDialog : Window
         /// <summary>Сколько раз версию выбирали в поиске по всем запросам вместе (Database.
         /// GetFwUsageTotal) — тот же счётчик, что на карточке результата.</summary>
         public int UsageTotal { get; init; }
-        public bool IsRolledBack => Record.Status == "rolled_back";
+        public bool IsRolledBack => FwStatus.IsHidden(Record.Status);
         /// <summary>Самая свежая живая версия — выделяется жирным в таблице.</summary>
         public bool IsCurrent { get; init; }
         public string StatusLabel { get; init; } = "";
@@ -135,7 +135,12 @@ public partial class HistoryDialog : Window
         ChangeCtrlBtn.IsEnabled = has;
         EditUsageBtn.IsEnabled = has;
         RollbackBtn.IsEnabled = has;
-        RollbackBtn.Content = _selectedRecord?.Status == "rolled_back" ? "Вернуть в активные" : "Откатить";
+        RollbackBtn.Content = FwStatus.IsRolledBack(_selectedRecord?.Status) ? "Вернуть в активные" : "Откатить";
+        // Выключение доступно у любой НЕ откатанной версии: откатанную сначала возвращают в активные,
+        // иначе две разные отметки «не выдаётся» накладывались бы друг на друга и снимать их пришлось
+        // бы вслепую в нужном порядке.
+        DisableBtn.IsEnabled = has && !FwStatus.IsRolledBack(_selectedRecord?.Status);
+        DisableBtn.Content = FwStatus.IsDisabled(_selectedRecord?.Status) ? "Включить" : "Выключить";
         DeleteBtn.IsEnabled = has;
     }
 
@@ -264,6 +269,42 @@ public partial class HistoryDialog : Window
         _services.Db.SetLocalFwUsageVersionTotal(id, n);
         Changed = true;
         Reload(selectVersionId: id);
+    }
+
+    /// <summary>Выключить версию / включить обратно — см. Core/Services/FwStatus.cs о том, чем это
+    /// отличается от отката. Состояние уезжает коллегам тем же узким каналом модерации, что и откат:
+    /// синхронизация статуса идёт по времени правки (status_changed_at), поэтому и включение обратно
+    /// доезжает и не отменяется устаревшим снимком соседней машины.</summary>
+    private void DisableToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecord is not { Id: int id } r) return;
+        if (FwStatus.IsRolledBack(r.Status)) return;
+
+        if (FwStatus.IsDisabled(r.Status))
+        {
+            if (!_services.Db.EnableFwVersion(id)) return;
+            ConfigSyncService.RecordAndPushModeration(_services, id, _services.CurrentUserName);
+            Changed = true;
+            _host.InvalidateSearchResults();
+            Reload(selectVersionId: id);
+            _host.ShowStatus($"Версия {r.VersionRaw} включена", category: NotificationCategory.FirmwareAndParams);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Выключить версию {r.VersionRaw}?\n\n" +
+            "Она перестанет показываться в поиске и выдаче, но останется в истории.\n" +
+            "Номер версии остаётся занятым, файлы на диске не трогаются — в отличие от отката.\n" +
+            "Включить обратно можно этой же кнопкой.",
+            "Выключение версии", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        if (!_services.Db.DisableFwVersion(id)) return;
+        ConfigSyncService.RecordAndPushModeration(_services, id, _services.CurrentUserName);
+        Changed = true;
+        _host.InvalidateSearchResults();
+        Reload(selectVersionId: id);
+        _host.ShowStatus($"Версия {r.VersionRaw} выключена", category: NotificationCategory.FirmwareAndParams);
     }
 
     private void RollbackToggle_Click(object sender, RoutedEventArgs e)

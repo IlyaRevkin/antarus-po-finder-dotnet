@@ -22,6 +22,11 @@ public static class FwHistoryStatus
     // называться на двух экранах по-разному. (В «Модерации прошивок» столбца статуса больше нет:
     // откатанные и заменённые туда не попадают вовсе, см. Database.GetUnreleasedFwVersionsWithNames.)
     public const string RolledBack = "Откатана";
+
+    /// <summary>Версия выключена вручную (status='disabled', см. FwStatus): она в порядке, просто
+    /// сейчас не выдаётся. Слово намеренно другое, не «Откатана»: откат означает «версии не должно
+    /// было быть», а выключение — «пока не нужна», и обратный ход у них разный.</summary>
+    public const string Disabled = "Выключена";
     public const string Current = "Текущая";
     public const string Superseded = "Заменена";
 
@@ -53,7 +58,10 @@ public static class FwHistoryStatus
     /// первая живая версия своей hw-группы по естественному порядку.</summary>
     public static List<string> Labels(IReadOnlyList<FwVersionRecord> newestFirst)
     {
-        var alive = newestFirst.Where(v => v.Status != "rolled_back").ToList();
+        // «Живые» — те, что вообще выдаются: ни откатанные, ни выключенные (FwStatus.IsHidden).
+        // Выключенная версия не может быть «текущей» и не заменяет соседей — иначе выключение одной
+        // копии под исполнение тянуло бы за собой подписи остальных.
+        var alive = newestFirst.Where(v => !FwStatus.IsHidden(v.Status)).ToList();
 
         // «Текущая» внутри каждой группы — обычно первая (самая свежая) живая версия этой группы,
         // но если оператор вручную отметил другую версию как текущую, используется она.
@@ -91,7 +99,8 @@ public static class FwHistoryStatus
         }
 
         return newestFirst.Select(v =>
-            v.Status == "rolled_back" ? RolledBack
+            FwStatus.IsRolledBack(v.Status) ? RolledBack
+            : FwStatus.IsDisabled(v.Status) ? Disabled
             : ReferenceEquals(v, newest) ? Current
             : newestPerGroup.TryGetValue(GroupKeyOf(v), out var groupNewest) && ReferenceEquals(v, groupNewest)
                 ? GroupLabel(v)

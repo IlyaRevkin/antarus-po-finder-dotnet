@@ -1500,13 +1500,19 @@
                 </Grid.ColumnDefinitions>
                 <TextBox Grid.Column="0" x:Name="FwFilterInput" Height="36" Margin="0,0,8,0"
                          ToolTip="Фильтр по группе / контроллеру / версии / тегу…" TextChanged="FwFilter_Changed"/>
-                <Button Grid.Column="1" Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshFirmware_Click"/>
-                <!-- Справочник тегов — здесь, рядом с прошивками, которым эти теги и вешают: «ту же
-                     вкладку теги можно сделать кнопкой в прошивка или иерархии где логичней». Сама
-                     панель при этом одна и та же, просто показывается окном (DetachedPanelWindow). -->
-                <Button x:Name="OpenTagsBtn" Grid.Column="1" Content="Теги…" Style="{StaticResource SecondaryButton}"
-                        Margin="0,0,96,0" Visibility="Collapsed" Click="OpenTags_Click"
-                        ToolTip="Справочник тегов и слов, которые не показываются, пока их не спросили"/>
+                <!-- Обе кнопки — в ОДНОЙ строке StackPanel, а не поверх друг друга в общей ячейке.
+                     Раньше «Теги…» отодвигались от «Обновить» отступом в 96 пикселей — ширина
+                     «Обновить» от темы и шрифта зависит и в 96 не укладывается, поэтому кнопки
+                     наезжали и нажатие по краю «Теги…» уходило в «Обновить».
+                     Справочник тегов стоит здесь, рядом с прошивками, которым эти теги и вешают:
+                     «ту же вкладку теги можно сделать кнопкой в прошивка или иерархии где логичней».
+                     Панель при этом одна и та же, просто показывается окном (DetachedPanelWindow). -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="OpenTagsBtn" Content="Теги…" Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0" Visibility="Collapsed" Click="OpenTags_Click"
+                            ToolTip="Справочник тегов и слов, которые не показываются, пока их не спросили"/>
+                    <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshFirmware_Click"/>
+                </StackPanel>
             </Grid>
             <Grid Grid.Row="2" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
@@ -1552,24 +1558,40 @@
                             <DataTrigger Binding="{Binding IsRolledBack}" Value="True">
                                 <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
                             </DataTrigger>
+                            <DataTrigger Binding="{Binding IsDisabled}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource RolledBackBrush}"/>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </DataGrid.RowStyle>
             </DataGrid>
-            <StackPanel Grid.Row="5" Orientation="Horizontal">
-                <Button Content="Открыть файл" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenFirmwareFile_Click"
+            <!-- WrapPanel, а не StackPanel: кнопок здесь уже девять, и в одну строку они влезают
+                 только на широком мониторе — на обычном последние просто уезжали за край окна.
+                 Перенос на вторую строку честнее обрезания. Отступ снизу у каждой — чтобы строки
+                 кнопок не слипались. -->
+            <WrapPanel Grid.Row="5">
+                <Button Content="Открыть файл" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="OpenFirmwareFile_Click"
                         ToolTip="Открыть сам файл прошивки — то же, что двойной клик по строке. Если файл определить не удалось, откроется папка версии."/>
-                <Button Content="Редактировать" Margin="0,0,8,0" Click="EditFirmware_Click"/>
-                <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="DuplicateFirmware_Click"/>
-                <Button x:Name="SetCurrentFirmwareBtn" Content="Сделать текущей" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SetCurrentFirmware_Click"
+                <Button Content="Редактировать" Margin="0,0,8,6" Click="EditFirmware_Click"/>
+                <Button Content="Дублировать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="DuplicateFirmware_Click"/>
+                <Button x:Name="SetCurrentFirmwareBtn" Content="Сделать текущей" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="SetCurrentFirmware_Click"
                         ToolTip="Отметить эту версию текущей для её шкафа (подтип+контроллер+HW), в обход обычного правила «текущая = версия с максимальным SW». Например, когда более новую версию забраковали и вернулись к этой, не откатывая её формально."/>
-                <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RollbackFirmware_Click"
+                <Button x:Name="RollbackFirmwareBtn" Content="Откатить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="RollbackFirmware_Click"
                         ToolTip="Пометить эту версию как откатанную. Следующая загрузка для того же шкафа/подтипа/контроллера получит тот же SW-номер заново. Файлы на диске не удаляются."/>
-                <Button x:Name="UnrollbackFirmwareBtn" Content="Вернуть в активные" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="UnrollbackFirmware_Click"
+                <Button x:Name="UnrollbackFirmwareBtn" Content="Вернуть в активные" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="UnrollbackFirmware_Click"
                         ToolTip="Снять отметку «Откатана» — версия снова участвует в вычислении текущей/заменённой. Папку на диске (с маркером «_ОТКАТАНО» в имени) это не переименует обратно."/>
-                <Button x:Name="DeleteFirmwareBtn" Content="Удалить прошивку" Style="{StaticResource SecondaryButton}" Click="DeleteFirmware_Click"
+                <!-- ВЫКЛЮЧЕНИЕ — не откат. Откат говорит «версии не должно было быть»: освобождает
+                     SW-номер и метит папку «_ОТКАТАНО». Выключение говорит «сейчас не выдавать»:
+                     залили лишнее, раздвоили прошивку, либо из нескольких копий под разные
+                     исполнения в работе нужна одна. Одна кнопка на оба направления — как в истории
+                     версий, подпись меняет UpdateFirmwareActionState. -->
+                <Button x:Name="DisableFirmwareBtn" Content="Выключить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="DisableFirmware_Click"
+                        ToolTip="Убрать версию из выдачи, не объявляя её ошибочной: SW-номер остаётся занятым, папка на диске не переименовывается, включить обратно можно этой же кнопкой."/>
+                <Button x:Name="KeepOnlyFirmwareBtn" Content="Оставить только эту" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Click="KeepOnlyFirmware_Click"
+                        ToolTip="Включить эту версию и выключить все остальные версии того же шкафа (подтип+контроллер), включая копии под другие исполнения. Откатанные не трогаются."/>
+                <Button x:Name="DeleteFirmwareBtn" Content="Удалить прошивку" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Click="DeleteFirmware_Click"
                         ToolTip="Безвозвратно удалить запись и файлы на диске (папку версии). В отличие от «Откатить» — не оставляет истории."/>
-            </StackPanel>
+            </WrapPanel>
         </Grid>
 
         <!-- ═══════════════════════════ РЕЗЕРВЫ НОМЕРОВ ═══════════════════════════ -->

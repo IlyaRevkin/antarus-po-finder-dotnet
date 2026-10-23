@@ -76,7 +76,11 @@ public partial class SettingsView : UserControl
         public string VersionRaw => Record.VersionRaw;
         public string Tags => Record.Tags;
         public string DateOnly => Record.UploadDate.Length >= 10 ? Record.UploadDate[..10] : Record.UploadDate;
-        public bool IsRolledBack => Record.Status == "rolled_back";
+        public bool IsRolledBack => FwStatus.IsRolledBack(Record.Status);
+        /// <summary>Выключенная строка притушена так же, как откатанная: обе не выдаются. Разделяет
+        /// их столбец «Статус» («Откатана» / «Выключена») — цвет лишь говорит «эта в работе не
+        /// участвует».</summary>
+        public bool IsDisabled => FwStatus.IsDisabled(Record.Status);
         /// <summary>Вычисленный статус («Текущая»/«Заменена»/«Откатана» — см. FwHistoryStatus), как в
         /// Истории версий, а не сырое поле status (которое знает только active/rolled_back и потому
         /// показывало «Активна» у ВСЕХ незаменённых версий разом — жалоба «5 версий одного шкафа, у
@@ -3712,7 +3716,7 @@ public partial class SettingsView : UserControl
         // таблице значились «Текущая»/«Заменена»/«Откатана» — фильтр не совпадал ни с одной строкой на
         // экране и выглядел неработающим. «Текущая» покрывает и «Текущая (HW n)» — см. StatusCategory.
         Fill(FwStatusFilterCombo, "Статус: все",
-            new[] { FwHistoryStatus.Current, FwHistoryStatus.Superseded, FwHistoryStatus.RolledBack });
+            new[] { FwHistoryStatus.Current, FwHistoryStatus.Superseded, FwHistoryStatus.RolledBack, FwHistoryStatus.Disabled });
         Fill(FwTagFilterCombo, "Тег: все", _fwVersionsData.SelectMany(v => TagString.Parse(v.Tags)));
     }
 
@@ -3785,7 +3789,9 @@ public partial class SettingsView : UserControl
     private string LabelFor(FwVersionRecord v) =>
         v.Id is int id && _fwStatusLabels.TryGetValue(id, out var label)
             ? label
-            : (v.Status == "rolled_back" ? FwHistoryStatus.RolledBack : FwHistoryStatus.Current);
+            : FwStatus.IsRolledBack(v.Status) ? FwHistoryStatus.RolledBack
+            : FwStatus.IsDisabled(v.Status) ? FwHistoryStatus.Disabled
+            : FwHistoryStatus.Current;
 
     /// <summary>Схлопывает «Текущая (HW n)» и «Текущая (исполнение «…»)» до «Текущая», чтобы одна
     /// опция фильтра ловила их все. Остальные метки возвращаются как есть.</summary>
@@ -3893,10 +3899,14 @@ public partial class SettingsView : UserControl
             SetCurrentFirmwareBtn.IsEnabled = false;
             RollbackFirmwareBtn.IsEnabled = false;
             UnrollbackFirmwareBtn.IsEnabled = false;
+            DisableFirmwareBtn.IsEnabled = false;
+            DisableFirmwareBtn.Content = "Выключить";
+            KeepOnlyFirmwareBtn.IsEnabled = false;
             return;
         }
 
-        var isRolledBack = v.Status == "rolled_back";
+        var isRolledBack = FwStatus.IsRolledBack(v.Status);
+        var isDisabled = FwStatus.IsDisabled(v.Status);
         var label = v.Id is int id && _fwStatusLabels.TryGetValue(id, out var l) ? l : "";
         // Любая разновидность «Текущей» — и общая, и по HW, и по исполнению (FwHistoryStatus.IsCurrent):
         // версия, уже актуальная в своей группе, повторной отметки не требует.
@@ -3904,7 +3914,14 @@ public partial class SettingsView : UserControl
 
         RollbackFirmwareBtn.IsEnabled = !isRolledBack;
         UnrollbackFirmwareBtn.IsEnabled = isRolledBack;
-        SetCurrentFirmwareBtn.IsEnabled = !isRolledBack && !isCurrent;
+        SetCurrentFirmwareBtn.IsEnabled = !isRolledBack && !isDisabled && !isCurrent;
+
+        // Выключение и откат — разные вещи (см. FwStatus), поэтому у откатанной версии кнопка
+        // выключения недоступна: её сначала возвращают в активные, а уже потом решают, выдавать её
+        // или нет. Подпись переключается, чтобы одна кнопка работала в обе стороны.
+        DisableFirmwareBtn.IsEnabled = !isRolledBack;
+        DisableFirmwareBtn.Content = isDisabled ? "Включить" : "Выключить";
+        KeepOnlyFirmwareBtn.IsEnabled = !isRolledBack;
     }
 
     private void EditFirmware_Click(object sender, RoutedEventArgs e)
@@ -4005,6 +4022,83 @@ public partial class SettingsView : UserControl
         _services.Db.SetFwVersionManualCurrent(v.Id!.Value);
         _host.PushCatalogChange($"Отмечена текущей версия {v.VersionRaw}",
             v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
+        LoadFirmwareTab();
+    }
+
+    /// <summary>Выключить версию или включить её обратно — одна кнопка в обе стороны (см.
+    /// FwStatus: «во-вторых отключение, опять же залили не то случайно раздвоили прошивку»).
+    /// В отличие от отката SW-номер остаётся занятым, папка на диске не переименовывается, и
+    /// выключать можно любую версию по отдельности, не трогая соседние по цепочке.</summary>
+    private void DisableFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        if (FwStatus.IsRolledBack(v.Status))
+        {
+            AppMessageBox.Show("Версия откатана. Сначала верните её в активные, потом решайте, выдавать её или нет.",
+                "Выключение версии", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (FwStatus.IsDisabled(v.Status))
+        {
+            if (!_services.Db.EnableFwVersion(v.Id!.Value)) return;
+            _host.PushCatalogChange($"Включена версия {v.VersionRaw}",
+                v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
+            _host.InvalidateSearchResults();
+            _host.ShowStatus($"Версия включена: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+            LoadFirmwareTab();
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Выключить версию {v.VersionRaw}?\n\n" +
+            "Версия перестанет показываться в поиске и выдаче, но останется в истории.\n" +
+            "SW-номер за ней сохраняется, файлы и папка на диске не трогаются.\n" +
+            "Включить обратно можно этой же кнопкой.",
+            "Выключение версии", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        if (!_services.Db.DisableFwVersion(v.Id!.Value)) return;
+        _host.PushCatalogChange($"Выключена версия {v.VersionRaw}",
+            v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
+        _host.InvalidateSearchResults();
+        _host.ShowStatus($"Версия выключена: {v.VersionRaw}", category: NotificationCategory.FirmwareAndParams);
+        LoadFirmwareTab();
+    }
+
+    /// <summary>«Оставить только эту» — третий случай из заказанных: «намеренно сделали 3 копии
+    /// прошивки под разные исполнения и их можно включать и выключать… включить новую версию с
+    /// каким-то исполнением и оставить только её». Включает выбранную и выключает все остальные
+    /// живые версии того же шкафа; откатанные не трогает (см. Database.KeepOnlyFwVersionActive).</summary>
+    private void KeepOnlyFirmware_Click(object sender, RoutedEventArgs e)
+    {
+        var v = GetSelectedFwVersion();
+        if (v is null) return;
+        if (FwStatus.IsRolledBack(v.Status))
+        {
+            AppMessageBox.Show("Версия откатана — сначала верните её в активные.",
+                "Оставить только эту", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var reply = AppMessageBox.Show(
+            $"Оставить в работе только версию {v.VersionRaw}?\n\n" +
+            $"Все остальные версии шкафа «{v.SubtypeName} / {v.CtrlName}» будут выключены — включая копии " +
+            "под другие исполнения и под другое железо.\nОткатанные версии не затрагиваются.\n" +
+            "Любую из выключенных можно вернуть кнопкой «Включить».",
+            "Оставить только эту", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (reply != MessageBoxResult.Yes) return;
+
+        var disabled = _services.Db.KeepOnlyFwVersionActive(v.Id!.Value);
+        if (disabled < 0) return;
+        _host.PushCatalogChange($"Оставлена в работе версия {v.VersionRaw}",
+            v.Id?.ToString() ?? "", NotificationCategory.FirmwareAndParams);
+        _host.InvalidateSearchResults();
+        _host.ShowStatus(disabled == 0
+                ? $"Версия {v.VersionRaw} и так была единственной выдаваемой"
+                : $"Оставлена только {v.VersionRaw}, выключено версий: {disabled}",
+            category: NotificationCategory.FirmwareAndParams);
         LoadFirmwareTab();
     }
 
