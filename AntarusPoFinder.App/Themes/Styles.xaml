@@ -199,6 +199,62 @@
         <Setter Property="MinHeight" Value="30"/>
     </Style>
 
+    <!-- РАЗДЕЛЁННАЯ КНОПКА: ОДНА кнопка, у которой правый край — область со стрелкой.
+         Было две отдельные кнопки рядом — «криво, должна быть единая кнопка и в ней область
+         со стрелочкой для выбора». Поэтому рамка, заливка и скругление ровно одни: они у
+         ОБОЛОЧКИ (SplitButtonShell), а внутри лежат две прозрачные половины и волосяная черта
+         между ними. Подсветка — у той половины, над которой мышь: иначе непонятно, что нажмёшь.
+
+         Скругление берётся из темы (ButtonCorner) и применяется к оболочке; половины обрезаются
+         по ней через ClipToBounds, а не считают себе углы сами — вычислить «левые углы такие,
+         правые нулевые» из ресурса темы в XAML нечем, и в теме с другим радиусом такая кнопка
+         немедленно разъехалась бы. -->
+    <Style x:Key="SplitButtonShell" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource ButtonSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ButtonSoftBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="{DynamicResource ButtonSoftBorderThickness}"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource ButtonCorner}"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!-- Половина разделённой кнопки: своей рамки и своей заливки в покое у неё нет — всё от
+         оболочки. При наведении половина заливается акцентом, и текст на нём обязан быть
+         TextOnAccentBrush (в светлой теме про это забывают регулярно). -->
+    <Style x:Key="SplitButtonPart" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource ButtonSoftTextBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="14,8"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Правая половина — только стрелка, поэтому узкая и без боковых отступов текста. -->
+    <Style x:Key="SplitButtonArrow" TargetType="Button" BasedOn="{StaticResource SplitButtonPart}">
+        <Setter Property="Padding" Value="0,8"/>
+        <Setter Property="MinWidth" Value="30"/>
+        <Setter Property="FontSize" Value="10"/>
+    </Style>
+
     <!-- Danger button (delete actions) -->
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
@@ -1395,30 +1451,26 @@
                             <Grid>
                                 <Rectangle x:Name="PART_Track"/>
 
-                                <Canvas x:Name="Fire" Visibility="Collapsed" IsHitTestVisible="False"
-                                        Height="12" VerticalAlignment="Center" Opacity="0.85">
-                                    <Path Fill="{DynamicResource FireBrush}"
-                                          Data="M0,12 C2,8 4,7 3,3 C5,5 6,5 7,2 C8,6 10,7 9,12 Z
-                                                M14,12 C16,8 18,7 17,3 C19,5 20,5 21,2 C22,6 24,7 23,12 Z
-                                                M28,12 C30,8 32,7 31,3 C33,5 34,5 35,2 C36,6 38,7 37,12 Z
-                                                M42,12 C44,8 46,7 45,3 C47,5 48,5 49,2 C50,6 52,7 51,12 Z
-                                                M56,12 C58,8 60,7 59,3 C61,5 62,5 63,2 C64,6 66,7 65,12 Z
-                                                M70,12 C72,8 74,7 73,3 C75,5 76,5 77,2 C78,6 80,7 79,12 Z
-                                                M84,12 C86,8 88,7 87,3 C89,5 90,5 91,2 C92,6 94,7 93,12 Z
-                                                M98,12 C100,8 102,7 101,3 C103,5 104,5 105,2 C106,6 108,7 107,12 Z
-                                                M112,12 C114,8 116,7 115,3 C117,5 118,5 119,2 C120,6 122,7 121,12 Z
-                                                M126,12 C128,8 130,7 129,3 C131,5 132,5 133,2 C134,6 136,7 135,12 Z
-                                                M140,12 C142,8 144,7 143,3 C145,5 146,5 147,2 C148,6 150,7 149,12 Z
-                                                M154,12 C156,8 158,7 157,3 C159,5 160,5 161,2 C162,6 164,7 163,12 Z
-                                                M168,12 C170,8 172,7 171,3 C173,5 174,5 175,2 C176,6 178,7 177,12 Z
-                                                M182,12 C184,8 186,7 185,3 C187,5 188,5 189,2 C190,6 192,7 191,12 Z
-                                                M196,12 C198,8 200,7 199,3 C201,5 202,5 203,2 C204,6 206,7 205,12 Z
-                                                M210,12 C212,8 214,7 213,3 C215,5 216,5 217,2 C218,6 220,7 219,12 Z
-                                                M224,12 C226,8 228,7 227,3 C229,5 230,5 231,2 C232,6 234,7 233,12 Z
-                                                M238,12 C240,8 242,7 241,3 C243,5 244,5 245,2 C246,6 248,7 247,12 Z
-                                                M252,12 C254,8 256,7 255,3 C257,5 258,5 259,2 C260,6 262,7 261,12 Z
-                                                M266,12 C268,8 270,7 269,3 C271,5 272,5 273,2 C274,6 276,7 275,12 Z"/>
-                                </Canvas>
+                                <!-- ОГОНЬКИ В САМОЙ ТРУБЕ. Рисуются ТЕМ ЖЕ знаком пламени, что
+                                     и везде (Material Symbols), размноженным плиткой: прежние
+                                     самодельные язычки из кривых были тем самым «кривая
+                                     стилизация». Плитка, а не два десятка путей руками, — чтобы
+                                     огоньки сами покрывали трубу любой длины.
+                                     Лежат ПОД водой: вода непрозрачна, поэтому впереди неё пламя
+                                     видно, позади — нет. Это и есть «от гидранта бежит вода и
+                                     тушит огонёчки». -->
+                                <Rectangle x:Name="Fire" Visibility="Collapsed" IsHitTestVisible="False"
+                                           Height="13" VerticalAlignment="Center" Opacity="0.95">
+                                    <Rectangle.Fill>
+                                        <DrawingBrush TileMode="Tile" Stretch="Uniform"
+                                                      Viewport="0,0,16,13" ViewportUnits="Absolute">
+                                            <DrawingBrush.Drawing>
+                                                <GeometryDrawing Brush="{DynamicResource FireBrush}"
+                                                                 Geometry="{DynamicResource Icon.FlameSymbol}"/>
+                                            </DrawingBrush.Drawing>
+                                        </DrawingBrush>
+                                    </Rectangle.Fill>
+                                </Rectangle>
 
                                 <!-- Вода: заливка цветом мотива с лёгким переходом сверху вниз.
                                      Плоский прямоугольник читался как полоска краски, а не как
@@ -1501,7 +1553,7 @@
                         <!-- Тепловой пункт: ничего не бежит, труба греется. -->
                         <Trigger Property="Tag" Value="heat">
                             <Setter TargetName="Jets" Property="Opacity" Value="0"/>
-                            <Setter TargetName="Glyph" Property="Data" Value="{DynamicResource Icon.HeatSymbol}"/>
+                            <Setter TargetName="Glyph" Property="Data" Value="{DynamicResource Icon.HeaterSymbol}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard x:Name="HeatRun">
                                     <Storyboard RepeatBehavior="Forever" AutoReverse="True">
@@ -1538,8 +1590,10 @@
                              само, без отдельной анимации «гашения». -->
                         <Trigger Property="Tag" Value="fire">
                             <Setter TargetName="Fire" Property="Visibility" Value="Visible"/>
-                            <Setter TargetName="Glyph" Property="Data" Value="{DynamicResource Icon.FlameSymbol}"/>
-                            <Setter TargetName="Glyph" Property="Fill" Value="{DynamicResource FireBrush}"/>
+                            <!-- Слева ИСТОЧНИК ВОДЫ — гидрант. Пламя здесь было бы вторым огнём:
+                                 огонь, тушащий огонь. Сам пожарный шкаф обозначает огонёк — но на
+                                 КАРТОЧКЕ, а не тут. -->
+                            <Setter TargetName="Glyph" Property="Data" Value="{DynamicResource Icon.HydrantSymbol}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard x:Name="FireRun">
                                     <Storyboard RepeatBehavior="Forever">

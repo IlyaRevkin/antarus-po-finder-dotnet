@@ -630,38 +630,65 @@ public partial class FirmwareCard : UserControl
     /// что в Настройки → Лоадер; соседние карточки подхватывают её сразу через ShowConnectionMode.</summary>
     private UIElement WithConnectionSplit(Button loadBtn, FirmwareCardFlags flags)
     {
+        // Левая половина — та же кнопка, что и была, но теперь БЕЗ своей рамки и заливки: и то и
+        // другое принадлежит оболочке, иначе внутри одной кнопки видны две (ровно то, за что эту
+        // кнопку и забраковали: «должна быть единая кнопка и в ней область с стрелочкой»).
+        loadBtn.Style = (Style)FindResource("SplitButtonPart");
         loadBtn.Margin = new Thickness(0);
 
         var arrow = new Button
         {
             Content = "\u25BE",
-            Style = (Style)FindResource("SecondaryButton"),
-            Margin = new Thickness(2, 0, 0, 0),
-            Padding = new Thickness(0),
-            MinWidth = 34,
+            Style = (Style)FindResource("SplitButtonArrow"),
         };
 
-        var grid = new Grid { Margin = new Thickness(0, 0, 8, 8) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // Волосяная черта между половинами — единственное, что их разделяет внутри общей рамки.
+        var divider = new Border
+        {
+            Width = 1,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        divider.SetResourceReference(Border.BackgroundProperty, "ButtonSoftBorderBrush");
+
+        var inner = new Grid();
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        inner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(loadBtn, 0);
-        Grid.SetColumn(arrow, 1);
-        grid.Children.Add(loadBtn);
-        grid.Children.Add(arrow);
+        Grid.SetColumn(divider, 1);
+        Grid.SetColumn(arrow, 2);
+        inner.Children.Add(loadBtn);
+        inner.Children.Add(divider);
+        inner.Children.Add(arrow);
+
+        var shell = new Border
+        {
+            Style = (Style)FindResource("SplitButtonShell"),
+            Margin = new Thickness(0, 0, 8, 8),
+            Child = inner,
+        };
 
         _connectionArrow = arrow;
         _connectionHint = flags.ConnectionHint;
         ShowConnectionMode(flags.ConnectionMode);
 
+        // ⚠️ ВТОРОЙ ЩЕЛЧОК ПО СТРЕЛКЕ ЗАКРЫВАЕТ СПИСОК. Само по себе это не работает: список
+        // закрывается сам при щелчке мимо него (StaysOpen=false), и закрытие происходит РАНЬШЕ,
+        // чем Click у стрелки, — к моменту обработчика список уже закрыт, и он открывал его
+        // заново. Со стороны «жму второй раз, а он разворачивается опять». Поэтому помним момент
+        // закрытия и не открываем список, если его только что закрыли этим же щелчком.
+        ConnectionPopup.Closed += (_, _) => _connectionClosedAt = DateTime.UtcNow;
         arrow.Click += (_, _) =>
         {
+            if ((DateTime.UtcNow - _connectionClosedAt).TotalMilliseconds < 250) return;
             BuildConnectionMenu();
-            ConnectionPopup.PlacementTarget = arrow;
+            ConnectionPopup.PlacementTarget = shell;
             ConnectionPopup.IsOpen = true;
         };
-        return grid;
+        return shell;
     }
 
+    private DateTime _connectionClosedAt = DateTime.MinValue;
     private Button? _connectionArrow;
     private string _connectionHint = "";
     private string _connectionMode = "";

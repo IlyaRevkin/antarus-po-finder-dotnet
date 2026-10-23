@@ -562,6 +562,13 @@ public partial class LoaderDialog : Window
             motif == EquipmentMotif.Fire ? "AccentBrush" : brushKey);
         // Метка выбирает ДВИЖЕНИЕ полосы: вентиль, ручной насос, нагрев или тушение пожара
         // (разбирается триггерами стиля FlowProgressBar).
+        // Метка выбирает ДВИЖЕНИЕ полосы: у пожарного шкафа вода бежит от гидранта и гасит
+        // огоньки в трубе, у насосной идёт ровным потоком, у КНС — толчками, у задвижки
+        // поворачивается вентиль (разбирается триггерами стиля FlowProgressBar).
+        //
+        // Отдельной картинки над полосой больше нет. Была схема «знак → стрелка → знак», и она не
+        // объясняла ничего: «не понимаю, зачем рисунок со стрелочкой сверху». Весь рассказ про
+        // объект теперь в самой полосе, а знак объекта — на карточке.
         Progress.Tag = EquipmentMotifArt.BarTag(motif);
         MotifChip.SetResourceReference(BorderBrushProperty, brushKey);
         MotifLabel.SetResourceReference(ForegroundProperty, brushKey);
@@ -571,20 +578,7 @@ public partial class LoaderDialog : Window
         // объекта над полосой и цвет полосы.
         MotifIcon.Visibility = Visibility.Collapsed;
 
-        // Схема — два знака по краям трубы (см. EquipmentMotifArt.Scene). Знаки сплошные, рисуются
-        // заливкой: обводка по такому пути дала бы пустой силуэт.
-        var (from, to) = EquipmentMotifArt.Scene(motif);
-        if (from is not null && to is not null)
-        {
-            MotifSceneFrom.Data = from;
-            MotifSceneTo.Data = to;
-            MotifSceneFrom.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
-            MotifSceneTo.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, brushKey);
-            MotifPipe.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, brushKey);
-            MotifScheme.Visibility = Visibility.Visible;
-        }
     }
-
 
     private async Task<bool> PrepareConnectionAsync(CancellationToken cancellationToken)
     {
