@@ -307,7 +307,19 @@ public partial class FirmwareCard : UserControl
             loadBtn.ToolTip = flags.LoaderConnected
                 ? "Загрузить найденный LFS или собрать и загрузить PSL через Segnetics Loader"
                 : "Segnetics Loader Automation не найден; при нажатии будет показана причина";
-            ActionsPanel.Children.Add(WithConnectionSplit(loadBtn, flags));
+            // ⚠️ РАЗДЕЛЁННАЯ КНОПКА — ТОЛЬКО В БЕТЕ. Правило простое: всё, что мы переделываем
+            // в 2.0, живёт в бете и никуда не уезжает само; в рабочей версии меняется только то,
+            // что названо ошибкой. Обе сборки идут из одного дерева, поэтому единственный способ
+            // это удержать — явная проверка, а не память.
+            if (AppIdentity.IsBeta)
+            {
+                ActionsPanel.Children.Add(WithConnectionSplit(loadBtn, flags));
+            }
+            else
+            {
+                ActionsPanel.Children.Add(loadBtn);
+                ActionsPanel.Children.Add(MakeConnectionModeBox(flags));
+            }
         }
         else
         {
@@ -688,6 +700,61 @@ public partial class FirmwareCard : UserControl
         return shell;
     }
 
+    /// <summary>ПРЕЖНИЙ выбор подключения — отдельный список рядом с кнопкой. Остаётся рабочей
+    /// версии: разделённая кнопка — переделка 2.0 и живёт в бете.</summary>
+    private ComboBox MakeConnectionModeBox(FirmwareCardFlags flags)
+    {
+        var box = new ComboBox
+        {
+            Margin = new Thickness(0, 0, 8, 8),
+            MinWidth = 118,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        foreach (var (value, caption) in ConnectionModeOptions)
+            box.Items.Add(new ConnectionOption(value, caption));
+
+        SelectConnectionMode(box, flags.ConnectionMode);
+
+        var tip = "Как эта машина подключается к контроллеру. Выбор запоминается и переносится в " +
+                  "настройки самого Segnetics Loader перед заливкой.";
+        if (!string.IsNullOrEmpty(flags.ConnectionHint)) tip += "\n" + flags.ConnectionHint;
+        box.ToolTip = tip;
+
+        // Подписка ПОСЛЕ выставления значения: SelectionChanged срабатывает и на программное
+        // заполнение, а Configure зовётся дважды на карточку (отрисовка + досмотр диска).
+        box.SelectionChanged += (_, _) =>
+        {
+            if (_connectionFilling) return;
+            if (box.SelectedItem is ConnectionOption option)
+                ConnectionModeChangeRequested?.Invoke(this, option.Value);
+        };
+        _connectionBox = box;
+        return box;
+    }
+
+    private ComboBox? _connectionBox;
+    private bool _connectionFilling;
+
+    private void SelectConnectionMode(ComboBox box, string? mode)
+    {
+        var current = (mode ?? "").Trim().ToLowerInvariant();
+        _connectionFilling = true;
+        try
+        {
+            box.SelectedItem = box.Items.Cast<ConnectionOption>().FirstOrDefault(o => o.Value == current)
+                               ?? box.Items.Cast<ConnectionOption>().First();
+        }
+        finally
+        {
+            _connectionFilling = false;
+        }
+    }
+
+    private sealed record ConnectionOption(string Value, string Caption)
+    {
+        public override string ToString() => Caption;
+    }
+
     private DateTime _connectionClosedAt = DateTime.MinValue;
     private Button? _connectionArrow;
     private string _connectionHint = "";
@@ -733,6 +800,8 @@ public partial class FirmwareCard : UserControl
     public void ShowConnectionMode(string mode)
     {
         _connectionMode = (mode ?? "").Trim().ToLowerInvariant();
+        // В рабочей версии способ показывает прежний список, в бете — стрелка разделённой кнопки.
+        if (_connectionBox is not null) SelectConnectionMode(_connectionBox, mode);
         if (_connectionArrow is null) return;
 
         var caption = ConnectionModeOptions.FirstOrDefault(o => o.Value == _connectionMode).Caption

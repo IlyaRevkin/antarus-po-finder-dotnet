@@ -139,6 +139,8 @@ public partial class HistoryDialog : Window
         // Выключение доступно у любой НЕ откатанной версии: откатанную сначала возвращают в активные,
         // иначе две разные отметки «не выдаётся» накладывались бы друг на друга и снимать их пришлось
         // бы вслепую в нужном порядке.
+        // ⚠️ Выключение версии — переделка 2.0, в рабочей версии кнопки нет вовсе.
+        DisableBtn.Visibility = Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
         DisableBtn.IsEnabled = has && !FwStatus.IsRolledBack(_selectedRecord?.Status);
         DisableBtn.Content = FwStatus.IsDisabled(_selectedRecord?.Status) ? "Включить" : "Выключить";
         DeleteBtn.IsEnabled = has;

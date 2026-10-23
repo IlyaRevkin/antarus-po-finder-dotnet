@@ -27,7 +27,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
-    <Version>1.75.8.1</Version>
+    <Version>1.75.9.0</Version>
   </PropertyGroup>
 
   <!-- БЕТА — ОТДЕЛЬНОЕ ПРИЛОЖЕНИЕ, А НЕ РЕЖИМ.

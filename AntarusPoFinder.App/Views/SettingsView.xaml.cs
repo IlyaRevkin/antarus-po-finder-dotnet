@@ -3910,6 +3910,15 @@ public partial class SettingsView : UserControl
     /// откатить или (если она не текущая) сделать текущей.</summary>
     private void UpdateFirmwareActionState()
     {
+        // ⚠️ ВЫКЛЮЧЕНИЕ ВЕРСИЙ — ТОЛЬКО В БЕТЕ (тот же довод, что и в FirmwareCard): в рабочей
+        // версии у прошивки по-прежнему есть лишь откат. Видимость ставится ДО проверки выбора:
+        // без выбранной строки метод выходит раньше, и кнопки оставались на экране.
+        // Роль здесь на тех же правах, что и у кнопок отката (UpdateRollbackAccess): правка
+        // состояния прошивки — дело администратора.
+        var allowed = Core.Domain.AppIdentity.IsBeta && _services.Cfg.CurrentRole() == "administrator";
+        DisableFirmwareBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
+        KeepOnlyFirmwareBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
+
         var v = FwGrid.SelectedItem is FwRow row ? row.Record : null;
         if (v is null)
         {
