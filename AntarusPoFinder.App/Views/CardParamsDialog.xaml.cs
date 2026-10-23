@@ -98,7 +98,10 @@ public partial class CardParamsDialog : Window
         // его старая дата изменения перенеслась бы на копию — тогда автоочистка папки осмотра (по
         // возрасту файла) снесла бы его почти сразу после переноса. Хелпер ставит дату «сейчас».
         InspectionDrop.CopyInto(proto, full, System.DateTime.Now);
-        AppMessageBox.Show($"Скопировано в протокол: {item.File.Filename}", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+        // Не модальное окно с «ОК»: переносить файлы в протокол приходится подряд, и подтверждение
+        // уже случившегося не должно требовать отдельного нажатия (см. FlashNote). Плашка уходит
+        // сама — по щелчку в любом месте, при уходе фокуса с окна, при его сдвиге или по времени.
+        FlashNote.Show(this, $"Скопировано в протокол: {item.File.Filename}");
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

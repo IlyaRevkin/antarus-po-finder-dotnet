@@ -307,8 +307,7 @@ public partial class FirmwareCard : UserControl
             loadBtn.ToolTip = flags.LoaderConnected
                 ? "Загрузить найденный LFS или собрать и загрузить PSL через Segnetics Loader"
                 : "Segnetics Loader Automation не найден; при нажатии будет показана причина";
-            ActionsPanel.Children.Add(loadBtn);
-            ActionsPanel.Children.Add(MakeConnectionModeBox(flags));
+            ActionsPanel.Children.Add(WithConnectionSplit(loadBtn, flags));
         }
         else
         {
@@ -617,68 +616,107 @@ public partial class FirmwareCard : UserControl
 
     // ── Кнопки/меню ───────────────────────────────────────────────────────
 
-    /// <summary>Выбор «чем подключены к ПЛК» рядом с кнопкой загрузки. Наладчик меняет его от шкафа к
-    /// шкафу (в одном переходник USB, в другом сеть), поэтому список стоит здесь же, а не только в
-    /// Настройки → Лоадер: туда он всё равно попадает — это одна и та же настройка машины.
+    /// <summary>«Загрузить в ПЛК» + выбор подключения ОДНОЙ кнопкой: слева широкая половина —
+    /// само действие, справа узкая со стрелкой — какой сейчас выбран способ (USB / Ethernet / как в
+    /// Loader) и смена его на месте. Так и просили: «кнопка будет разделена 80% просто загрузить в
+    /// плк и 20% стрелочка где при нажатии выпадающий список с выбором источника».
     ///
-    /// Список короткий и без подписи: подпись «Подключение» рядом с тремя понятными словами занимала
-    /// бы ширину карточки, а смысл виден из самих пунктов и подсказки.</summary>
-    private ComboBox MakeConnectionModeBox(FirmwareCardFlags flags)
+    /// До этого рядом стоял обычный ComboBox шириной в треть карточки — он выглядел полем ввода, а
+    /// не продолжением кнопки, и занимал место в ряду, где кнопок и так много. Соотношение держит
+    /// Grid (звёздная колонка + фиксированные 34 пикселя): подписи у кнопки разной длины в разных
+    /// темах, и прибивать ширину обеих половин числом нельзя.
+    ///
+    /// Настройка машинная и общая для всех карточек (ConfigService.LoaderConnectionMode) — та же,
+    /// что в Настройки → Лоадер; соседние карточки подхватывают её сразу через ShowConnectionMode.</summary>
+    private UIElement WithConnectionSplit(Button loadBtn, FirmwareCardFlags flags)
     {
-        var box = new ComboBox
+        loadBtn.Margin = new Thickness(0);
+
+        var arrow = new Button
         {
-            Margin = new Thickness(0, 0, 8, 8),
-            MinWidth = 118,
-            VerticalContentAlignment = VerticalAlignment.Center,
+            Content = "\u25BE",
+            Style = (Style)FindResource("SecondaryButton"),
+            Margin = new Thickness(2, 0, 0, 0),
+            Padding = new Thickness(0),
+            MinWidth = 34,
         };
-        foreach (var (value, caption) in ConnectionModeOptions) box.Items.Add(new ConnectionOption(value, caption));
 
-        SelectConnectionMode(box, flags.ConnectionMode);
+        var grid = new Grid { Margin = new Thickness(0, 0, 8, 8) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(loadBtn, 0);
+        Grid.SetColumn(arrow, 1);
+        grid.Children.Add(loadBtn);
+        grid.Children.Add(arrow);
 
-        var tip = "Как эта машина подключается к контроллеру. Выбор запоминается и переносится в " +
-                  "настройки самого Segnetics Loader перед заливкой.";
-        if (!string.IsNullOrEmpty(flags.ConnectionHint)) tip += "\n" + flags.ConnectionHint;
-        box.ToolTip = tip;
+        _connectionArrow = arrow;
+        _connectionHint = flags.ConnectionHint;
+        ShowConnectionMode(flags.ConnectionMode);
 
-        // Подписка ПОСЛЕ выставления текущего значения: SelectionChanged срабатывает и на
-        // программное заполнение, а Configure зовётся дважды на карточку (первая отрисовка + досмотр
-        // диска) — иначе каждый досмотр «сохранял» бы выбор, которого наладчик не делал.
-        box.SelectionChanged += (_, _) =>
+        arrow.Click += (_, _) =>
         {
-            if (_connectionFilling) return;
-            if (box.SelectedItem is ConnectionOption option)
-                ConnectionModeChangeRequested?.Invoke(this, option.Value);
+            BuildConnectionMenu();
+            ConnectionPopup.PlacementTarget = arrow;
+            ConnectionPopup.IsOpen = true;
         };
-        _connectionBox = box;
-        return box;
+        return grid;
     }
 
-    private ComboBox? _connectionBox;
-    private bool _connectionFilling;
+    private Button? _connectionArrow;
+    private string _connectionHint = "";
+    private string _connectionMode = "";
+
+    /// <summary>Пункты выбора строятся при каждом открытии: текущий способ помечается галочкой, и
+    /// пересобрать список дешевле, чем хранить ссылки на три кнопки и синхронизировать пометки.</summary>
+    private void BuildConnectionMenu()
+    {
+        ConnectionPanel.Children.Clear();
+        foreach (var (value, caption) in ConnectionModeOptions)
+        {
+            var chosen = value == _connectionMode;
+            var item = new Button
+            {
+                Content = (chosen ? "\u2713  " : "     ") + caption,
+                Style = (Style)FindResource("SecondaryButton"),
+                Margin = new Thickness(0, 0, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            var mode = value;
+            item.Click += (_, _) =>
+            {
+                ConnectionPopup.IsOpen = false;
+                // Показываем выбор немедленно, не дожидаясь, пока выдачу перестроят: сохранение идёт
+                // наверх (SearchView.SaveConnectionMode) и возвращается сюда же через
+                // ShowConnectionMode для ВСЕХ карточек — настройка одна на машину.
+                ShowConnectionMode(mode);
+                ConnectionModeChangeRequested?.Invoke(this, mode);
+            };
+            ConnectionPanel.Children.Add(item);
+        }
+    }
 
     /// <summary>Показать текущий способ подключения, не сохраняя его. Настройка одна на машину, а
-    /// карточек на экране много: без этого списки соседних карточек показывали бы старое значение,
-    /// пока выдачу не перестроят, — два разных ответа на один вопрос на одном экране.</summary>
+    /// карточек на экране много: без этого соседние карточки показывали бы старое значение, пока
+    /// выдачу не перестроят, — два разных ответа на один вопрос на одном экране.
+    ///
+    /// Сам способ виден в подсказке стрелки и галочкой в списке: писать его на кнопке целиком
+    /// («Загрузить в ПЛК — Ethernet») значит растянуть основную кнопку ряда вдвое ради того, что
+    /// меняют раз в день.</summary>
     public void ShowConnectionMode(string mode)
     {
-        if (_connectionBox is null) return;
-        SelectConnectionMode(_connectionBox, mode);
+        _connectionMode = (mode ?? "").Trim().ToLowerInvariant();
+        if (_connectionArrow is null) return;
+
+        var caption = ConnectionModeOptions.FirstOrDefault(o => o.Value == _connectionMode).Caption
+                      ?? ConnectionModeOptions[0].Caption;
+        var tip = $"Подключение к ПЛК: {caption}. Нажмите, чтобы сменить." + NEWLINE +
+                  "Выбор запоминается и переносится в настройки самого Segnetics Loader перед заливкой.";
+        if (!string.IsNullOrEmpty(_connectionHint)) tip += NEWLINE + _connectionHint;
+        _connectionArrow.ToolTip = tip;
     }
 
-    private void SelectConnectionMode(ComboBox box, string? mode)
-    {
-        var current = (mode ?? "").Trim().ToLowerInvariant();
-        _connectionFilling = true;
-        try
-        {
-            box.SelectedItem = box.Items.Cast<ConnectionOption>().FirstOrDefault(o => o.Value == current)
-                               ?? box.Items.Cast<ConnectionOption>().First();
-        }
-        finally
-        {
-            _connectionFilling = false;
-        }
-    }
+    private const string NEWLINE = "\n";
 
     private static readonly (string Value, string Caption)[] ConnectionModeOptions =
     {
@@ -686,11 +724,6 @@ public partial class FirmwareCard : UserControl
         ("usb", "USB"),
         ("ethernet", "Ethernet"),
     };
-
-    private sealed record ConnectionOption(string Value, string Caption)
-    {
-        public override string ToString() => Caption;
-    }
 
     private Button MakeActionButton(string text, RoutedEventHandler onClick)
     {

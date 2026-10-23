@@ -128,6 +128,19 @@
                     <StackPanel x:Name="MorePanel" MinWidth="230"/>
                 </Border>
             </Popup>
+
+            <!-- Способ подключения к ПЛК — теперь не отдельный выпадающий список рядом с кнопкой, а
+                 правая (узкая) половина самой кнопки загрузки: «кнопка будет разделена 80% просто
+                 загрузить в плк и 20% стрелочка где при нажатии выпадающий список с выбором
+                 источника». Список лежит здесь же, чтобы поверхность была той же непрозрачной
+                 (в «Стекле» сквозь карточку иначе виден рабочий стол). -->
+            <Popup x:Name="ConnectionPopup" StaysOpen="False" AllowsTransparency="True"
+                   Placement="Bottom" HorizontalOffset="0" VerticalOffset="2">
+                <Border Background="{DynamicResource PopupBgBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="6">
+                    <StackPanel x:Name="ConnectionPanel" MinWidth="190"/>
+                </Border>
+            </Popup>
         </StackPanel>
     </Border>
 </UserControl>
