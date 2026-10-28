@@ -169,6 +169,28 @@
                                           DisplayMemberPath="Label" SelectionChanged="ThemeCombo_Changed"/>
                             </StackPanel>
 
+                            <!-- Ползунок виден только при выбранном «Стекле»: в светлой и тёмной теме
+                                 прозрачных поверхностей нет вовсе, и ручка, которая ничего не делает,
+                                 вызывает ровно один вопрос — «а почему не работает». Показывает и прячет
+                                 его ShowGlassOpacity по текущей теме. -->
+                            <StackPanel x:Name="GlassOpacityPanel" Visibility="Collapsed" Margin="0,0,0,14">
+                                <TextBlock Text="ПРОЗРАЧНОСТЬ СТЕКЛА" Style="{StaticResource MutedText}"
+                                           FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBlock Text="Насколько сквозят панели, карточки и поля. Левее — больше видно то, что за окном; правее — матовое стекло почти без просвета."
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Slider x:Name="GlassOpacitySlider" Width="260" VerticalAlignment="Center"
+                                            Minimum="40" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            ToolTip="Непрозрачность поверхностей в теме «Стекло»"
+                                            ValueChanged="GlassOpacity_Changed"/>
+                                    <TextBlock x:Name="GlassOpacityValue" VerticalAlignment="Center" Margin="10,0,0,0"
+                                               Style="{StaticResource MutedText}"/>
+                                    <Button Content="Как в теме" Style="{StaticResource SecondaryButton}"
+                                            Margin="12,0,0,0" Padding="10,2" Click="GlassOpacityReset_Click"
+                                            ToolTip="Вернуть прозрачность, с которой тема нарисована"/>
+                                </StackPanel>
+                            </StackPanel>
+
                             <TextBlock Text="ЦВЕТ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Text="Цвет кнопок и выделения. Работает и в светлой, и в тёмной теме — при переключении сохраняется."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>

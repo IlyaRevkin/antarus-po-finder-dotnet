@@ -1545,6 +1545,47 @@ public partial class SettingsView : UserControl
 
         ThemeCombo.ItemsSource = themes;
         ThemeCombo.SelectedItem = themes.FirstOrDefault(t => t.Id == _services.Cfg.Theme()) ?? themes[0];
+        ShowGlassOpacity();
+    }
+
+    /// <summary>Показать ползунок прозрачности, если выбрана тема со стеклом, и увести его с глаз,
+    /// если нет. Значение при этом не сбрасывается: вернувшись на «Стекло», человек находит своё.</summary>
+    private void ShowGlassOpacity()
+    {
+        var glass = ThemeCatalog.Resolve(_services.Cfg.Theme()).Backdrop;
+        GlassOpacityPanel.Visibility = glass ? Visibility.Visible : Visibility.Collapsed;
+        if (!glass) return;
+
+        var saved = _services.Cfg.GlassOpacity();
+        var percent = saved > 0 ? GlassSurface.Clamp(saved) : GlassSurface.Default;
+        // Под флагом: присваивание Value поднимает ValueChanged, и без него открытие страницы
+        // пересобирало бы тему заново на каждом заходе в настройки.
+        _loadingGlass = true;
+        try { GlassOpacitySlider.Value = percent; }
+        finally { _loadingGlass = false; }
+        GlassOpacityValue.Text = percent + " %";
+    }
+
+    private bool _loadingGlass;
+
+    private void GlassOpacity_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_loadingGeneral || _loadingGlass) return;
+        var percent = GlassSurface.Clamp((int)Math.Round(e.NewValue));
+        GlassOpacityValue.Text = percent + " %";
+        _services.Cfg.SetGlassOpacity(percent);
+        ThemeManager.GlassOpacity = percent;
+        // Применяем тему целиком, а не подменяем кисти руками: пересчёт поверхностей живёт в одном
+        // месте (ThemeManager.Apply), и вторая его копия здесь разошлась бы с первой при первой же правке.
+        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+    }
+
+    private void GlassOpacityReset_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetGlassOpacity(GlassSurface.Default);
+        ThemeManager.GlassOpacity = GlassSurface.Default;
+        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+        ShowGlassOpacity();
     }
 
     private void ThemeCombo_Changed(object sender, SelectionChangedEventArgs e)
@@ -1554,6 +1595,7 @@ public partial class SettingsView : UserControl
 
         _services.Cfg.SetTheme(theme.Id);
         ThemeManager.Apply(theme.Id, ThemeManager.CurrentAccent);
+        ShowGlassOpacity();
         // Образец цвета перерисовываем по той же причине, что и у тумблера: оттенок под курсором и
         // подсветка строки считаются с оглядкой на тему.
         ShowAccent(AccentPalette.NormalizeStored(_services.Cfg.Accent()));

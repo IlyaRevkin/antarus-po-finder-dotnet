@@ -241,6 +241,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         CurrentAccent = AccentPalette.NormalizeStored(_services.Cfg.Accent());
 
         ApplyRole(CurrentRole);
+        // Прозрачность стекла ставится ДО первого Apply: иначе окно на долю секунды показалось бы
+        // с заводской альфой и перерисовалось — мигание на запуске, которое видно и раздражает.
+        var glass = _services.Cfg.GlassOpacity();
+        if (glass > 0) ThemeManager.GlassOpacity = GlassSurface.Clamp(glass);
         ThemeManager.Apply(CurrentTheme, CurrentAccent);
         ReloadSidebarApps();
         Navigate(FirstAllowedPageId(CurrentRole));

@@ -13,6 +13,12 @@ public static class ThemeManager
     /// страницы, цвет — только за акцент.</summary>
     public static string CurrentAccent { get; private set; } = AccentPalette.DefaultHex;
 
+    /// <summary>Насколько просвечивают поверхности темы «Стекло» (см. GlassSurface). Живёт здесь, а
+    /// не читается из конфига прямо в Apply: тему применяет и самоснимок, и тесты, которым конфиг
+    /// пользователя не нужен вовсе. Значение ставит тот, кто знает про настройки, — главное окно при
+    /// запуске и страница настроек при движении ползунка.</summary>
+    public static int GlassOpacity { get; set; } = GlassSurface.Default;
+
     public static void Apply(string themeName) => Apply(themeName, CurrentAccent);
 
     public static void Apply(string themeName, string accentId)
@@ -74,6 +80,23 @@ public static class ThemeManager
             res.Remove("NavActiveBrush");
             res.Remove("ButtonSoftTextBrush");
             res.Remove("NavActiveTextBrush");
+        }
+
+        // Прозрачность поверхностей — поверх словаря темы, тем же приёмом, что и акцент: ключ в
+        // ресурсах приложения перекрывает значение темы, а Remove возвращает тему к себе самой.
+        // Поэтому у тем без стекла ползунок не оставляет следов — на этом уже обжигались «залипшие»
+        // мягкие поверхности после переключения темы.
+        if (theme.Backdrop)
+        {
+            foreach (var key in GlassSurface.Keys)
+            {
+                if (dict[key] is SolidColorBrush brush)
+                    res[key] = GlassSurface.Surface(brush.Color, GlassOpacity, GlassSurface.HasSpecular(key));
+            }
+        }
+        else
+        {
+            foreach (var key in GlassSurface.Keys) res.Remove(key);
         }
 
         foreach (Window window in Application.Current.Windows)
