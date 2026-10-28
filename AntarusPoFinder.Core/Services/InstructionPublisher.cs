@@ -360,6 +360,12 @@ public sealed class InstructionPublisher : IInstructionPublisher, IInstructionUn
         {
             var inside = LabelLinkBuilder.RelativeTo(folderPath, file);
             if (inside is null) continue;
+            // Прежние редакции и служебная метка хозяина папки на хостинг не едут: первое — архив,
+            // который по ссылке с наклейки открывать нечего и незачем, второе — вообще не документ
+            // (см. InstructionStorage.PreviousFolderName и InstructionOwnership).
+            if (InstructionOwnership.IsMarker(file)
+                || inside.Replace('\\', '/').StartsWith(InstructionStorage.PreviousFolderName + "/",
+                    StringComparison.OrdinalIgnoreCase)) continue;
             var key = _settings.KeyFor(relative + "/" + AsPublishedName(inside.Replace('\\', '/')));
             if (PublishFileInsideFolder(file, key, warnings) is null) failed++;
         }
