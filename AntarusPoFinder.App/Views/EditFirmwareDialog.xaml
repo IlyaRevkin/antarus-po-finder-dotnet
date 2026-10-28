@@ -1,4 +1,4 @@
-<Window x:Class="AntarusPoFinder.App.Views.EditFirmwareDialog"
+﻿<Window x:Class="AntarusPoFinder.App.Views.EditFirmwareDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:AntarusPoFinder.App.Views"
@@ -122,6 +122,10 @@
                          (папки «Карта ВВ»/«Карта Modbus» общие у контроллера), а у инструкции есть
                          куда вернуться после удаления: заглушка «в разработке». -->
                     <ColumnDefinition Width="Auto"/>
+                    <!-- Седьмая — «Положить ещё версиям»: инструкция описывает шкаф, а не сборку
+                         программы, и исправленная редакция касается всех версий сразу. Видна только
+                         в бете (см. EditFirmwareDialog.ConfigureInstructionScope). -->
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -176,6 +180,10 @@
                         ToolTip="Удалить инструкцию: убрать документ с диска и с хостинга, вернуть на его место заглушку «Инструкция в разработке». Действует сразу, отменить нельзя.">
                     <Path Data="{StaticResource Icon.Trash}" Stretch="Uniform" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
                 </Button>
+                <Button Grid.Row="2" Grid.Column="6" x:Name="InstructionsScopeBtn" Style="{StaticResource SecondaryButton}"
+                        Margin="6,0,0,4" Padding="8,0" Height="30" Visibility="Collapsed" Content="Ещё версиям…"
+                        Click="InstructionsScope_Click"
+                        ToolTip="Положить этот же документ другим версиям этого шкафа: список версий с галочками и готовые наборы «только эта», «эта и более ранние», «все версии шкафа»."/>
 
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="HMI-проект:" VerticalAlignment="Center" TextWrapping="Wrap"
                            ToolTip="Файл или папка проекта HMI — ляжет в папку HMI контроллера как «{версия}_hmi»."/>

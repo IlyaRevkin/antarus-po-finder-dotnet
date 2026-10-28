@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using AntarusPoFinder.App;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.App.Views;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using Xunit;
 
@@ -515,6 +516,96 @@ public class ViewsRenderTests
             Assert.Equal(AntarusPoFinder.Core.Domain.FwBugSeverity.Major, dialog.Severity);
 
             dialog.Close();
+        });
+    }
+
+    // ── Окно «кому положить эту инструкцию» ───────────────────────────────────
+    //
+    // Единственное окно в этом файле, и попало оно сюда не случайно: иконка у него задана длинным
+    // абсолютным pack-адресом, а не коротким «/Assets/icon.ico», как у остальных диалогов, — значит
+    // в тестовом процессе оно строится (почему остальные нет — см. примечание в конце файла).
+    // Проверяется прежде всего УМОЛЧАНИЕ: «применить ко всем более ранним» при открытии снято.
+    // Замена идёт по общему диску, отменить её нечем, и переписать десяток версий одним кликом
+    // должно быть осознанным действием.
+
+    private static List<InstructionTarget> ScopeTargets()
+    {
+        FwVersionRecord V(int id, int sw) => new()
+        {
+            Id = id, SwVersion = sw, HwVersion = 1, VersionRaw = $"2.1.0001.{sw:0000}",
+        };
+        return new List<InstructionTarget>
+        {
+            new(V(3, 3), "2.1.0001.0003", IsSelf: true, IsEarlier: false, HasInstruction: true),
+            new(V(2, 2), "2.1.0001.0002", IsSelf: false, IsEarlier: true, HasInstruction: true),
+            new(V(1, 1), "2.1.0001.0001", IsSelf: false, IsEarlier: true, HasInstruction: false),
+        };
+    }
+
+    private static List<CheckBox> ScopeRows(InstructionScopeDialog dialog) =>
+        ((StackPanel)dialog.FindName("ChecksPanel")!).Children.OfType<CheckBox>().ToList();
+
+    [Fact]
+    public void InstructionScopeDialog_ПоУмолчаниюОтмеченаТолькоПравимаяВерсия()
+    {
+        Ui.Run(() =>
+        {
+            var dialog = new InstructionScopeDialog(ScopeTargets(), @"C:\tmp\инструкция.pdf", "НГР 2.0 / SMH5");
+            Render(dialog);
+
+            Assert.False(((CheckBox)dialog.FindName("EarlierCheck")!).IsChecked);
+
+            var rows = ScopeRows(dialog);
+            Assert.Equal(3, rows.Count);
+            Assert.True(rows[0].IsChecked);
+            // Своя версия заблокирована: документ ей кладёт обычное сохранение модерации, и снять её
+            // здесь значило бы обещать отмену, которой не будет.
+            Assert.False(rows[0].IsEnabled);
+            Assert.False(rows[1].IsChecked);
+            Assert.False(rows[2].IsChecked);
+
+            dialog.Close();
+        });
+    }
+
+    [Fact]
+    public void InstructionScopeDialog_ГалочкаБолееРаннихРаботаетВОбеСтороны()
+    {
+        Ui.Run(() =>
+        {
+            var dialog = new InstructionScopeDialog(ScopeTargets(), @"C:\tmp\инструкция.pdf", "НГР 2.0 / SMH5");
+            var earlier = (CheckBox)dialog.FindName("EarlierCheck")!;
+
+            earlier.IsChecked = true;
+            Assert.All(ScopeRows(dialog), row => Assert.True(row.IsChecked));
+
+            // Снятая галочка возвращает набор к «только эта» — иначе она работала бы в одну сторону,
+            // и снять её было бы нечем, кроме как щёлкать по версиям поштучно.
+            earlier.IsChecked = false;
+            var rows = ScopeRows(dialog);
+            Assert.True(rows[0].IsChecked);
+            Assert.False(rows[1].IsChecked);
+            Assert.False(rows[2].IsChecked);
+
+            dialog.Close();
+        });
+    }
+
+    [Fact]
+    public void InstructionScopeDialog_ВНаборУходятТолькоЧужиеВерсии()
+    {
+        Ui.Run(() =>
+        {
+            var dialog = new InstructionScopeDialog(ScopeTargets(), @"C:\tmp\инструкция.pdf", "НГР 2.0 / SMH5");
+            ((CheckBox)dialog.FindName("EarlierCheck")!).IsChecked = true;
+
+            // Через CollectSelection, а не нажатием кнопки: обработчик кнопки задаёт DialogResult, а
+            // его можно задавать только у окна, показанного как диалог, — тест упал бы на этой
+            // строке, ничего не проверив.
+            dialog.CollectSelection();
+
+            // Правимая версия в набор не уходит: её документ кладёт обычное сохранение модерации.
+            Assert.Equal(new int?[] { 2, 1 }, dialog.Selected.Select(v => v.Id).ToArray());
         });
     }
 
