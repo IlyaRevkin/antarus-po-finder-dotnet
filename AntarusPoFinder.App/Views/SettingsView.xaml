@@ -1683,8 +1683,14 @@
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <!-- Кнопки «Сохранить» нет: список сохраняется сразу — после «Добавить», после «Удалить»
                  и по окончании правки строки в таблице (см. SettingsView.SaveApps). -->
+            <!-- Перетаскивание включается только в бете (SettingsView.EnableQuickAppsDragDrop):
+                 переделки вида в рабочую версию не едут. Обработчики висят всегда — они первым делом
+                 смотрят на AllowDrop и в рабочей версии молча расходятся. -->
             <DataGrid Grid.Row="1" x:Name="AppsGrid" AutoGenerateColumns="False" IsReadOnly="False" MinHeight="100" Margin="0,0,0,10"
                       RowEditEnding="AppsGrid_RowEditEnding"
+                      Drop="AppsGrid_Drop" DragOver="AppsGrid_DragOver"
+                      PreviewMouseLeftButtonDown="AppsGrid_PreviewMouseLeftButtonDown"
+                      PreviewMouseMove="AppsGrid_PreviewMouseMove"
                       ToolTip="Двойной клик по ячейке — переименовать ярлык или поправить путь. Изменения сохраняются сразу.">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Название" Binding="{Binding Name, Mode=TwoWay}" Width="200"/>
@@ -1696,6 +1702,9 @@
                         ToolTip="Выбрать программу — появится в списке и сохранится сразу"/>
                 <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteApp_Click"
                         ToolTip="Убрать выбранный ярлык из списка"/>
+                <TextBlock x:Name="QuickAppsDragHint" Visibility="Collapsed" VerticalAlignment="Center"
+                           Margin="16,0,0,0" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           Text="Программу или папку можно просто перетащить сюда из проводника, а строки — таскать между собой: порядок в списке и есть порядок на экране."/>
             </StackPanel>
 
             <TextBlock Grid.Row="3" Text="ГДЕ ПОКАЗЫВАТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>

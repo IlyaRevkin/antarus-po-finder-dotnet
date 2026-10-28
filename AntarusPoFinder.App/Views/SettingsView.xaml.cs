@@ -4441,6 +4441,98 @@ public partial class SettingsView : UserControl
         QuickAppsModeSidebarRadio.Checked += QuickAppsMode_Changed;
         QuickAppsModeTopRadio.Checked += QuickAppsMode_Changed;
         QuickAppsModeTopLabeledRadio.Checked += QuickAppsMode_Changed;
+
+        EnableQuickAppsDragDrop();
+    }
+
+    /// <summary>Перетаскивание в «Быстрый доступ» — переделка вида, а значит только бета. Код общий
+    /// (бета и рабочая версия отличаются константой сборки), поэтому развилка стоит здесь, явно:
+    /// в рабочей версии список остаётся прежним — «Добавить», «Удалить» и правка в таблице.</summary>
+    private void EnableQuickAppsDragDrop()
+    {
+        AppsGrid.AllowDrop = AppIdentity.IsBeta;
+        QuickAppsDragHint.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private Point _appDragStart;
+    private AppRow? _appDragRow;
+
+    /// <summary>Строка, на которой стоит курсор. Идём вверх по дереву от того, во что ткнули: клик
+    /// попадает в ячейку, в текст внутри неё или в саму строку — а знать нам надо строку.</summary>
+    private static DataGridRow? RowUnder(DependencyObject? source)
+    {
+        while (source is not null and not DataGridRow)
+            source = VisualTreeHelper.GetParent(source);
+        return source as DataGridRow;
+    }
+
+    private void AppsGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop) return;
+        _appDragStart = e.GetPosition(null);
+        _appDragRow = RowUnder(e.OriginalSource as DependencyObject)?.Item as AppRow;
+    }
+
+    /// <summary>Перенос начинается только после заметного движения с зажатой кнопкой — иначе обычный
+    /// клик по ячейке (а строки здесь ещё и правят прямо в таблице) превращался бы в перетаскивание,
+    /// и отредактировать название стало бы нельзя.</summary>
+    private void AppsGrid_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop || _appDragRow is null) return;
+        if (e.LeftButton != MouseButtonState.Pressed) { _appDragRow = null; return; }
+
+        var now = e.GetPosition(null);
+        if (Math.Abs(now.X - _appDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(now.Y - _appDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        // В DataObject кладём метку, а не саму строку: WPF тащит данные через COM, и объект страницы
+        // туда класть незачем — кто переносится, мы и так помним в поле.
+        DragDrop.DoDragDrop(AppsGrid, new DataObject(QuickAppRowFormat, QuickAppRowFormat), DragDropEffects.Move);
+    }
+
+    private const string QuickAppRowFormat = "AntarusQuickAppRow";
+
+    private void AppsGrid_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = !AppsGrid.AllowDrop ? DragDropEffects.None
+            : e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy
+            : e.Data.GetDataPresent(QuickAppRowFormat) && _appDragRow is not null ? DragDropEffects.Move
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void AppsGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop) return;
+        if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
+
+        // Перенос строки внутри списка.
+        if (e.Data.GetDataPresent(QuickAppRowFormat) && _appDragRow is not null)
+        {
+            var target = RowUnder(e.OriginalSource as DependencyObject)?.Item as AppRow;
+            var from = apps.IndexOf(_appDragRow);
+            // Бросили мимо строк (ниже последней) — значит в конец: иначе перенос в самый низ
+            // требовал бы попасть ровно в последнюю строку, а это неудобно именно тем, кому нужно.
+            var to = target is null ? apps.Count - 1 : apps.IndexOf(target);
+            _appDragRow = null;
+            if (from < 0 || to < 0 || from == to) return;
+            QuickAppOrder.Move(apps, from, to);
+            SaveApps("Порядок быстрого доступа сохранён");
+            return;
+        }
+
+        // Притащили файлы или папки из проводника.
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped) return;
+        var added = 0;
+        foreach (var path in QuickAppOrder.Acceptable(dropped))
+        {
+            apps.Add(new AppRow { Name = QuickAppOrder.NameFor(path), Path = path });
+            added++;
+        }
+        if (added == 0) return;
+        SaveApps(added == 1
+            ? $"Добавлено в быстрый доступ: {apps[^1].Name}"
+            : $"Добавлено в быстрый доступ: {added}");
     }
 
     private void QuickAppsMode_Changed(object sender, RoutedEventArgs e)
