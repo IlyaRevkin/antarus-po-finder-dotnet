@@ -870,6 +870,22 @@ public class ConfigService
     /// <summary>Делиться ли ручным весом выдачи с другими машинами (см.
     /// Defaults["fw_weight_shared"] и Database.FwUsage.cs ExportFwUsage). Per-machine — в
     /// ConfigSyncService.SkipSettingsKeys, каждая машина решает за свой вес.</summary>
+    /// <summary>САМАЯ СТАРАЯ ВЕРСИЯ, КОТОРОЙ ОБЩИЙ КОНФИГ ЕЩЁ ДОВЕРЯЕТ. Пусто — доверяем любой.
+    ///
+    /// Задаётся администратором один раз и уезжает всем (ключа нет в SkipSettingsKeys — см.
+    /// ConfigSyncService). Смысл ровно один: почти каждая живучая беда этого года приходила от
+    /// машины со старой версией — воскресший подтип, вечная модерация, возвращающийся тег. Чинилось
+    /// это в новой версии, а разъезжалось со старой, и так по кругу.
+    ///
+    /// Что происходит с теми, кто ниже: их правки НЕ ПРИМЕНЯЮТСЯ при приёме (но и не теряются у них
+    /// самих), а на их собственной машине при запуске встаёт окно с просьбой обновиться. Окно
+    /// увидят, разумеется, только те, у кого версия уже содержит эту проверку: программу прошлого
+    /// года научить показывать его задним числом нельзя, и поэтому вторая половина решения — список
+    /// подключений, по которому видно поимённо, кого осталось пнуть.</summary>
+    public string MinAppVersion() => Get("min_app_version");
+
+    public void SetMinAppVersion(string version) => Set("min_app_version", version.Trim());
+
     public bool FwWeightShared() => Get("fw_weight_shared").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetFwWeightShared(bool value) => Set("fw_weight_shared", value ? "true" : "false");
 

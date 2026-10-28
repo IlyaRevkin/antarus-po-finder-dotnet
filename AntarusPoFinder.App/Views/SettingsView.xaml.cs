@@ -413,6 +413,7 @@ public partial class SettingsView : UserControl
         HostingTab.Visibility = Visibility.Collapsed;
         EmailTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
+        ConnectionsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
         LoaderTab.Visibility = Visibility.Collapsed;
         ConnectionTab.Visibility = Visibility.Collapsed;
@@ -435,6 +436,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnHosting) { HostingTab.Visibility = Visibility.Visible; ShowServicePage(HostingTab, "hosting"); }
         else if (sender == TabBtnEmail) { EmailTab.Visibility = Visibility.Visible; LoadEmailTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
+        else if (sender == TabBtnConnections) { ConnectionsTab.Visibility = Visibility.Visible; LoadConnectionsTab(); }
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
     }
 
@@ -477,6 +479,10 @@ public partial class SettingsView : UserControl
 
         TabBtnHierarchy.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // Список подключений — переделка 2.0 и инструмент администратора: в рабочей версии вкладки
+        // нет вовсе, иначе наладчик получил бы экран, на котором ему нечего решать.
+        TabBtnConnections.Visibility =
+            isAdmin && Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
         TabBtnUsers.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // «Чистка диска» переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то
         // есть чужую работу. Была единственной администраторской СТРАНИЦЕЙ (RolesConfig.RoleAccess) —
@@ -3842,6 +3848,102 @@ public partial class SettingsView : UserControl
                 (v.GroupName + v.SubtypeName + v.CtrlName + v.VersionRaw + v.Tags + v.Status).ToUpperInvariant().Contains(filter));
 
         PopulateFirmwareTable(rows.ToList());
+    }
+
+    // ── Подключения ───────────────────────────────────────────────────────
+
+    /// <summary>Строка списка подключений. Состояние считается здесь, а не хранится: минимальная
+    /// версия меняется в этом же окне, и запомненный ответ разошёлся бы с ней в ту же секунду.</summary>
+    private sealed class ConnectionRow
+    {
+        public string MachineName { get; init; } = "";
+        public string UserName { get; init; } = "";
+        public string AppVersion { get; init; } = "";
+        public string Channel { get; init; } = "";
+        public string LastSeen { get; init; } = "";
+        public string State { get; init; } = "";
+        public bool Outdated { get; init; }
+        public string OriginId { get; init; } = "";
+    }
+
+    private void LoadConnectionsTab()
+    {
+        MinVersionInput.Text = _services.Cfg.MinAppVersion();
+
+        var minimum = _services.Cfg.MinAppVersion();
+        var ownOrigin = _services.Db.UsageOriginId();
+        ConnectionsGrid.ItemsSource =
+            _services.Db
+                .GetParticipants()
+                .Select(p =>
+                {
+                    var trusted = Core.Services.VersionGate.IsTrusted(p.AppVersion, minimum);
+                    return new ConnectionRow
+                    {
+                        MachineName = p.MachineName.Length > 0 ? p.MachineName : "(не представилась)",
+                        UserName = p.UserName,
+                        AppVersion = p.AppVersion.Length > 0 ? p.AppVersion : "неизвестна",
+                        Channel = p.Channel,
+                        LastSeen = p.LastSeenAt.Length >= 16 ? p.LastSeenAt[..16].Replace('T', ' ') : p.LastSeenAt,
+                        Outdated = !trusted,
+                        OriginId = p.OriginId,
+                        State =
+                            p.OriginId == ownOrigin ? "это эта машина"
+                            : trusted ? "в обмене"
+                            : "правки не принимаются — нужна " + minimum,
+                    };
+                })
+                .ToList();
+    }
+
+    private void RefreshConnections_Click(object sender, RoutedEventArgs e) => LoadConnectionsTab();
+
+    private void SaveMinVersion_Click(object sender, RoutedEventArgs e)
+    {
+        var text = MinVersionInput.Text.Trim();
+        if (text.Length > 0 && Core.Services.VersionGate.Parse(text) is null)
+        {
+            AppMessageBox.Show("Версия пишется числами через точку: 1.75.9 или 2.0.2.1.",
+                "Минимальная версия", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Запретить самому себе участвовать в обмене — это способ остаться без синхронизации и не
+        // понять почему. Проверка стоит до записи, потому что настройка уезжает всем сразу.
+        if (text.Length > 0 && !Core.Services.VersionGate.IsTrusted(AppUpdateService.CurrentVersionText, text))
+        {
+            AppMessageBox.Show(
+                "Эта версия сама ниже указанной — после сохранения обмен отрезало бы и у вас." + Environment.NewLine +
+                "Сначала обновитесь, потом поднимайте планку.",
+                "Минимальная версия", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _services.Cfg.SetMinAppVersion(text);
+        _host.PushCatalogChange(text.Length > 0 ? $"Минимальная версия для обмена: {text}" : "Ограничение по версии снято",
+            "min_app_version", NotificationCategory.Sync);
+        _host.ShowStatus(text.Length > 0
+                ? $"Минимальная версия: {text}. Машины ниже неё в обмене не участвуют."
+                : "Ограничение по версии снято.",
+            category: NotificationCategory.Sync);
+        LoadConnectionsTab();
+    }
+
+    private void ClearMinVersion_Click(object sender, RoutedEventArgs e)
+    {
+        MinVersionInput.Text = "";
+        SaveMinVersion_Click(sender, e);
+    }
+
+    private void ForgetConnection_Click(object sender, RoutedEventArgs e)
+    {
+        if (ConnectionsGrid.SelectedItem is not ConnectionRow row)
+        {
+            AppMessageBox.Show("Выберите машину в списке.", "Подключения", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _services.Db.ForgetParticipant(row.OriginId);
+        LoadConnectionsTab();
     }
 
     private void RefreshFirmware_Click(object sender, RoutedEventArgs e) => LoadFirmwareTab();

@@ -54,6 +54,30 @@ public partial class MainWindow : Window
         // приложения (см. AppUpdateService.CurrentVersionText), так что оба места не могут разойтись.
         SidebarVersionText.Text = $"v{AppUpdateService.CurrentVersionText}";
 
+        // Отметиться в общем списке подключений: кто эта машина, под кем работают, какая версия и
+        // какой канал. Отсюда же берётся подпись снимка конфига — по ней остальные решают, доверять
+        // ли нашим правкам (см. Database.SyncParticipants, VersionGate).
+        //
+        // Делается на старте, а не только при обмене: машина, которая месяц не синхронизировалась,
+        // должна быть видна в списке именно как отставшая, а не отсутствовать вовсе.
+        try
+        {
+            services.Db.SetSetting(Core.Data.Database.OwnAppVersionKey, AppUpdateService.CurrentVersionText);
+            services.Db.RecordOwnParticipation(
+                Environment.MachineName,
+                services.CurrentUserName,
+                AppUpdateService.CurrentVersionText,
+                Core.Domain.AppIdentity.IsBeta ? "бета" : "рабочая");
+        }
+        catch
+        {
+            // Список подключений — удобство, а не условие работы: не записалось, значит не
+            // записалось, программа открывается дальше.
+        }
+
+        // Версия ниже той, которой общий конфиг ещё доверяет: сказать об этом сразу и прямо.
+        Loaded += (_, _) => WarnIfOutdated();
+
         // Настройки значком в нижней строке — переделка 2.0 («настройки можно значком рядом с
         // уведомлениями сделать чтобы не занимало лишнее место»). В стабильной программе значка нет
         // и кнопка остаётся в «Дополнительно»: обе сборки идут из одного дерева, и переставлять
@@ -96,6 +120,39 @@ public partial class MainWindow : Window
     /// 160 мс и 12 пикселей — сознательно мало. Это рабочий инструмент: наладчик переключает экраны
     /// десятки раз за смену, и анимация, которую приходится ЖДАТЬ, раздражает ровно с третьего
     /// раза. Движение должно быть заметно краем глаза и закончиться раньше, чем его осознают.</summary>
+    /// <summary>Окно «обновитесь», когда версия ниже минимальной.
+    ///
+    /// Показывается один раз за запуск и не блокирует работу: человек посреди смены у шкафа не
+    /// должен оказаться запертым. Запрещается другое — обмен конфигом: его правки всё равно не
+    /// примут на той стороне (см. карантин в Database.ConfigExchange), и честнее сказать об этом
+    /// здесь, чем дать ему полдня считать, что он делится работой.</summary>
+    private void WarnIfOutdated()
+    {
+        // Только бета: окно — новое поведение, а рабочая версия по правилу владельца получает
+        // лишь исправления. Подпись своей версии она ставит и так, поэтому в списке подключений
+        // видна наравне с остальными.
+        if (!Core.Domain.AppIdentity.IsBeta) return;
+
+        try
+        {
+            var minimum = _services.Cfg.MinAppVersion();
+            if (Core.Services.VersionGate.IsTrusted(AppUpdateService.CurrentVersionText, minimum)) return;
+
+            AppMessageBox.Show(
+                "Эта версия устарела и больше не участвует в обмене." + Environment.NewLine + Environment.NewLine +
+                Core.Services.VersionGate.Explain(AppUpdateService.CurrentVersionText, minimum) +
+                Environment.NewLine + Environment.NewLine +
+                "Ваши правки сейчас НЕ доезжают до коллег, а их правки не применяются у вас: так убирают " +
+                "ошибки, которые расходились именно между старой и новой версией." + Environment.NewLine + Environment.NewLine +
+                "Обновитесь: Настройки → Общие → Обновление приложения.",
+                "Требуется обновление", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch
+        {
+            // Предупреждение не должно мешать запуску ни при каких обстоятельствах.
+        }
+    }
+
     private void AnimatePageChange()
     {
         var duration = new Duration(TimeSpan.FromMilliseconds(160));

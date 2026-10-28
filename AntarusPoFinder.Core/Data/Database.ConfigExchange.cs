@@ -239,6 +239,24 @@ public partial class Database
             })
             .ToList();
 
+        // Подпись ЭТОГО снимка: кто собрал и на какой версии. По ней принимающая сторона решает,
+        // доверять ли правкам (см. VersionGate) — именно отправителю, а не списку участников:
+        // участников в снимке много, а собрал его один.
+        data.SenderOriginId = UsageOriginId();
+        data.SenderVersion = GetSetting(OwnAppVersionKey);
+
+        // Подписи машин — рядом со статистикой и по тем же правилам: пересылаем и чужие, иначе
+        // выгрузивший только себя стёр бы в снимке остальных. Нужно затем, что беду, которую
+        // приносит старая версия, нельзя починить, пока не видно, у кого она осталась.
+        data.Participants =
+            GetParticipants()
+                .Select(p => new ExportedParticipant
+                {
+                    OriginId = p.OriginId, MachineName = p.MachineName, UserName = p.UserName,
+                    AppVersion = p.AppVersion, Channel = p.Channel, LastSeenAt = p.LastSeenAt,
+                })
+                .ToList();
+
         // Явные переписывания hw модификаций (см. ExportedHwRewrite / Database.HwRewriteLog.cs) —
         // журнал последних операций, чтобы приёмник проиграл ещё не применённое как переименование,
         // а не завёл дубликаты из-за смены version_raw.
@@ -658,6 +676,47 @@ public partial class Database
     private ImportCounts ImportHierarchyDataCore(HierarchyExportData data, bool apply, bool authoritative = false)
     {
         var counts = new ImportCounts();
+
+        // ⚠️ КАРАНТИН СНИМКА ОТ УСТАРЕВШЕЙ МАШИНЫ.
+        //
+        // Почти каждая живучая беда этого года приезжала со старой версии: удалённый подтип
+        // воскресал, прошивки висели в модерации вечно, снятый тег возвращался. Чинилось это в
+        // новой версии — и разъезжалось обратно с той машины, где осталась старая, и так по кругу,
+        // пока обе в обмене.
+        //
+        // Поэтому снимок, собранный версией ниже минимальной (ConfigService.MinAppVersion), не
+        // применяется ВООБЩЕ: не по строкам, не частично — целиком. Частичный приём здесь был бы
+        // худшим из вариантов: половина правок доезжает, половина нет, и расхождение становится
+        // необъяснимым. Сам отправитель при этом ничего не теряет — у него его правки остаются.
+        //
+        // Подписи у снимка нет вовсе (старая версия её не умеет) — это и есть тот самый случай,
+        // ради которого правило вводилось, см. VersionGate.IsTrusted.
+        //
+        // ⚠️ ТОЛЬКО В БЕТЕ. Правило владельца: в рабочей версии меняются ТОЛЬКО ошибки, а отказ
+        // принимать чужой снимок — это новое поведение, пусть и ради борьбы с ошибками. Рабочие
+        // машины снимок принимают как раньше; подпись они при этом ставят (см. экспорт выше), и
+        // благодаря ей бета видит, у кого какая версия, не меняя ничего у них.
+        var minimum = Domain.AppIdentity.IsBeta ? GetSetting("min_app_version") : "";
+        if (!Services.VersionGate.IsTrusted(data.SenderVersion, minimum))
+        {
+            counts.QuarantinedSender = string.IsNullOrWhiteSpace(data.SenderVersion) ? "неизвестной версии" : data.SenderVersion;
+            if (apply && !string.IsNullOrWhiteSpace(data.SenderOriginId))
+            {
+                // Отметить машину в списке подключений, чтобы было видно, кого пинать: отказ без
+                // имени — это загадка, а не сообщение.
+                MergeParticipants(new[]
+                {
+                    new SyncParticipant
+                    {
+                        OriginId = data.SenderOriginId!,
+                        AppVersion = data.SenderVersion ?? "",
+                        LastSeenAt = NowIsoPrecise(),
+                    },
+                });
+                SetParticipantBlocked(data.SenderOriginId!, true);
+            }
+            return counts;
+        }
         // Captured ONCE per import pass, not per-row — every row that successfully reconciles in
         // THIS pass (inserted, updated, or confirmed-already-matching) shares the same watermark,
         // representing "as of this sync, both sides are known to agree on this row". See
@@ -1461,6 +1520,13 @@ public partial class Database
         // ── Статистика выборов прошивки (Database.FwUsage.cs). Намеренно НЕ учитывается в counts:
         //    она меняется от каждого поиска коллеги, и попади она в TotalChanges — плашка «Поступили
         //    изменения» дёргала бы оператора целыми днями по поводу, который его не касается.
+        if (apply && data.Participants is not null)
+            MergeParticipants(data.Participants.Select(p => new SyncParticipant
+            {
+                OriginId = p.OriginId, MachineName = p.MachineName, UserName = p.UserName,
+                AppVersion = p.AppVersion, Channel = p.Channel, LastSeenAt = p.LastSeenAt,
+            }));
+
         if (apply && data.FwUsage is not null)
             ImportFwUsage(data.FwUsage.Select(u => new SharedFwUsageRow(u.Origin, u.QueryKey, u.SubtypeSyncId,
                 u.ControllerSyncId, u.VersionRaw, u.Uses, u.LastUsedAt, u.Weight)), UsageOriginId());

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -15,21 +15,35 @@ namespace AntarusPoFinder.Core.Data;
 public partial class Database
 {
     /// <summary>Запомнить результат проверки одного объекта.</summary>
-    public void SaveHostingCheck(string objectKey, bool present, string url)
+    public void SaveHostingCheck(string objectKey, bool present, string url, string? fingerprint = null)
     {
         if (string.IsNullOrWhiteSpace(objectKey)) return;
 
         ExecuteNonQuery("""
-            INSERT INTO hosting_checks(object_key, present, url, checked_at)
-            VALUES(@k, @p, @u, @t)
-            ON CONFLICT(object_key) DO UPDATE SET present = @p, url = @u, checked_at = @t
+            INSERT INTO hosting_checks(object_key, present, url, checked_at, fingerprint)
+            VALUES(@k, @p, @u, @t, @f)
+            ON CONFLICT(object_key) DO UPDATE SET present = @p, url = @u, checked_at = @t,
+                -- Пустой отпечаток не затирает известный: проверка «лежит ли» ничего не знает о
+                -- содержимом, и её ответ не должен стирать то, что записала выкладка.
+                fingerprint = CASE WHEN @f = '' THEN hosting_checks.fingerprint ELSE @f END
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@k", objectKey);
             cmd.Parameters.AddWithValue("@p", present ? 1 : 0);
             cmd.Parameters.AddWithValue("@u", url ?? "");
             cmd.Parameters.AddWithValue("@t", NowIso());
+            cmd.Parameters.AddWithValue("@f", fingerprint ?? "");
         });
+    }
+
+    /// <summary>Отпечаток того, что мы в прошлый раз ВЫЛОЖИЛИ по этому ключу. Пусто — не знаем
+    /// (старая запись или только проверка присутствия), и тогда выкладывать надо заново: лучше
+    /// лишняя отправка, чем наклейка, открывающая документ с ошибкой.</summary>
+    public string GetHostingFingerprint(string objectKey)
+    {
+        using var reader = ExecuteReader("SELECT fingerprint FROM hosting_checks WHERE object_key = @k",
+            cmd => cmd.Parameters.AddWithValue("@k", objectKey));
+        return reader.Read() ? reader.GetString(0) : "";
     }
 
     /// <summary>Все наблюдения разом. Выдача поиска перебирает карточки пачкой, и ходить в базу на

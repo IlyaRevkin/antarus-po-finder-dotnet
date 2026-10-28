@@ -302,6 +302,32 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// moderating a version and switching tabs, without needing a dedicated changed-event. Also
     /// notifies the administrator specifically (not just a passive badge) the moment the count goes
     /// up — i.e. a new firmware actually started needing moderation, not just "some still do".</summary>
+    /// <summary>Счётчик на пункте «Баги прошивок» — сколько их ОТКРЫТО, а не сколько непрочитано.
+    ///
+    /// У «Тикетов» рядом счётчик считает непрочитанное: туда ходят читать переписку. У багов
+    /// прошивок смысл другой — это очередь работы программиста, и ему важно «сколько висит», а не
+    /// «сколько нового с моего последнего захода». Жалоба была ровно про отсутствие цифры:
+    /// «счётчик тикетов по багам прошивок не показывает, сколько активных в левой панели».
+    ///
+    /// Закрытые не считаем, взятые в работу — считаем: пока баг не закрыт, он занимает место в
+    /// очереди, и прятать его из счётчика значило бы показывать меньше работы, чем есть.</summary>
+    private void RefreshFwBugsBadge()
+    {
+        var item = NavItems.FirstOrDefault(n => n.PageId == "fwbugs");
+        if (item is null) return;
+        try
+        {
+            item.BadgeCount = _services.Db
+                .GetTickets()
+                .Count(t => t.Type == Core.Domain.TicketType.FwBug
+                            && !string.Equals(t.Status, Core.Domain.TicketStatus.Closed, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            // Счётчик — удобство: не посчитался, значит пункт просто без цифры.
+        }
+    }
+
     private void RefreshModerationBadge()
     {
         var item = NavItems.FirstOrDefault(n => n.PageId == "newversions");
@@ -465,6 +491,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeen) > 0);
 
             item.BadgeCount = unseen;
+            RefreshFwBugsBadge();
             RecomputeSectionBadges();
 
             if (notify && _lastUnseenTickets.HasValue && unseen > _lastUnseenTickets.Value && unseen > 0)

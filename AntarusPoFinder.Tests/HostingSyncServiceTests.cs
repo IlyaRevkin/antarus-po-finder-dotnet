@@ -35,6 +35,10 @@ public class HostingSyncServiceTests
         public FakeStorage(params string[] presentKeys) =>
             _present = new HashSet<string>(presentKeys, StringComparer.Ordinal);
 
+        /// <summary>Сколько весит объект в «бакете». Нет записи — размер неизвестен, как у
+        /// старой строки, которую никто не проверял.</summary>
+        public Dictionary<string, long> Sizes { get; } = new(StringComparer.Ordinal);
+
         public List<string> Heads { get; } = new();
         public List<string> Puts { get; } = new();
 
@@ -44,10 +48,18 @@ public class HostingSyncServiceTests
             if (request.Method == HttpMethod.Head)
             {
                 Heads.Add(path);
-                return Task.FromResult(new HttpResponseMessage(
-                    _present.Any(k => path.EndsWith(k, StringComparison.Ordinal))
-                        ? HttpStatusCode.OK
-                        : HttpStatusCode.NotFound));
+                var key = _present.FirstOrDefault(k => path.EndsWith(k, StringComparison.Ordinal));
+                if (key is null) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+                // Настоящий S3 отвечает на HEAD размером объекта, и именно по нему выкладка
+                // понимает, та ли редакция лежит наверху. Заглушка обязана это воспроизводить:
+                // без длины «уже выложено» означало бы «ноль байт», то есть битый объект.
+                var found = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(Array.Empty<byte>()),
+                };
+                found.Content.Headers.ContentLength = Sizes.TryGetValue(key, out var size) ? size : 0;
+                return Task.FromResult(found);
             }
 
             Puts.Add(path);
@@ -204,6 +216,11 @@ public class HostingSyncServiceTests
         SeedVersion(db, root, "1.0.0005.0002", "инструкция_1.0.0005.0002.pdf");
 
         var storage = new FakeStorage("/instrukciya_1.0.0005.0001.pdf");
+        // Наверху лежит РОВНО ТО ЖЕ: тот же размер, что и на диске. Только в этом случае пропуск
+        // честен — «объект есть» само по себе ещё не значит «та же редакция».
+        storage.Sizes["/instrukciya_1.0.0005.0001.pdf"] =
+            new System.IO.FileInfo(System.IO.Directory.GetFiles(root.Path, "инструкция_1.0.0005.0001.pdf",
+                System.IO.SearchOption.AllDirectories)[0]).Length;
         var service = Service(db, storage);
         var items = await service.CheckAsync(Settings(), service.Plan(Settings(), root.Path));
 
@@ -214,6 +231,30 @@ public class HostingSyncServiceTests
         Assert.Equal(0, result.Failed);
         var put = Assert.Single(storage.Puts);
         Assert.EndsWith("/instrukciya_1.0.0005.0002.pdf", put, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Исправленный_документ_уезжает_заново_даже_в_режиме_догнать()
+    {
+        // Жалоба, ради которой это написано: в инструкции нашли ошибку, перезалили исправленную —
+        // а QR на наклейке продолжал открывать прежнюю. Режим «догнать недостающее» пропускал её,
+        // потому что объект в бакете ЕСТЬ. Теперь сравнивается размер: другая редакция — другой
+        // размер, и документ уходит заново по тому же адресу, чтобы наклейка осталась рабочей.
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        using var root = new TempRoot();
+        SeedVersion(db, root, "1.0.0005.0001", "инструкция_1.0.0005.0001.pdf");
+
+        var storage = new FakeStorage("/instrukciya_1.0.0005.0001.pdf");
+        storage.Sizes["/instrukciya_1.0.0005.0001.pdf"] = 1; // наверху прежняя, заметно короче
+        var service = Service(db, storage);
+        var items = await service.CheckAsync(Settings(), service.Plan(Settings(), root.Path));
+
+        var result = service.Publish(Settings(), root.Path, items, onlyMissing: true);
+
+        Assert.Equal(1, result.Published);
+        Assert.Equal(0, result.Skipped);
+        Assert.Contains(result.Messages, m => m.Contains("изменился", StringComparison.Ordinal));
     }
 
     [Fact]

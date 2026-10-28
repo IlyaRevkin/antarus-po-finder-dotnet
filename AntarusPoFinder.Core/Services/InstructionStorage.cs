@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using AntarusPoFinder.Core.Infrastructure;
 
@@ -80,12 +80,98 @@ public static class InstructionStorage
                 Directory.CreateDirectory(targetFolder);
                 var dest = Path.Combine(targetFolder, name);
                 if (!PathsEqual(SafeFullPath(sourcePath) ?? sourcePath, SafeFullPath(dest) ?? dest))
+                {
+                    ArchivePrevious(dest, sourcePath);
                     File.Copy(sourcePath, dest, overwrite: true);
+                }
                 return dest;
             }
         }
         return FileSystemHelpers.CopyFileOrFolderShallow(sourcePath, targetFolder);
     }
+
+    /// <summary>Папка, в которую уезжает прежняя редакция инструкции. То же слово, что у таблиц
+    /// параметров: человек, однажды понявший, что это значит, не должен разгадывать заново.</summary>
+    public const string PreviousFolderName = "Прежние редакции";
+
+    /// <summary>Убрать прежнюю инструкцию в архив, прежде чем на её место ляжет новая.
+    ///
+    /// До этого перезаливка делала <c>File.Copy(overwrite: true)</c>, то есть прошлая редакция
+    /// исчезала молча и безвозвратно. А инструкция — документ, который правят: «добавили пункт про
+    /// насос» и «переписали половину» выглядят одинаково, пока не с чем сравнить, и ответить
+    /// «а что было в прошлой версии» было нечем.
+    ///
+    /// Имя получает слепок времени (<c>инструкция_2.1.0004_20261028-0915.pdf</c>), потому что
+    /// редакций бывает несколько в день, и «.bak» на второй перезаливке затирал бы сам себя —
+    /// ровно та же беда, от которой уходим.
+    ///
+    /// Байт-в-байт тот же файл не архивируется: повторная загрузка того же документа — обычное
+    /// дело (переложили из другой папки), и плодить от неё копии значит засорять папку так, что в
+    /// ней перестают искать.</summary>
+    private static void ArchivePrevious(string dest, string sourcePath)
+    {
+        try
+        {
+            if (!File.Exists(dest)) return;
+
+            var existing = new FileInfo(dest);
+            var incoming = new FileInfo(sourcePath);
+            if (incoming.Exists && existing.Length == incoming.Length && SameBytes(dest, sourcePath)) return;
+
+            var folder = Path.Combine(Path.GetDirectoryName(dest) ?? "", PreviousFolderName);
+            Directory.CreateDirectory(folder);
+
+            var stamp = existing.LastWriteTime.ToString("yyyyMMdd-HHmm", System.Globalization.CultureInfo.InvariantCulture);
+            var archived = Path.Combine(folder,
+                $"{Path.GetFileNameWithoutExtension(dest)}_{stamp}{Path.GetExtension(dest)}");
+
+            // Две редакции в одну минуту — редкость, но не невозможность: даём второй свой суффикс
+            // вместо того, чтобы затереть первую (ради чего всё и затевалось).
+            var attempt = 1;
+            while (File.Exists(archived))
+            {
+                archived = Path.Combine(folder,
+                    $"{Path.GetFileNameWithoutExtension(dest)}_{stamp}-{++attempt}{Path.GetExtension(dest)}");
+            }
+
+            File.Move(dest, archived);
+        }
+        catch (Exception)
+        {
+            // Не вышло убрать в архив — пусть лучше встанет новая инструкция, чем загрузка
+            // свалится на полпути. Потеря прежней редакции неприятна, отсутствие новой хуже.
+        }
+    }
+
+    /// <summary>Тот же ли это файл. Сравнение по содержимому, а не по дате: документ, перенесённый
+    /// между папками, меняет дату и остаётся тем же самым.</summary>
+    private static bool SameBytes(string a, string b)
+    {
+        try
+        {
+            using var left = File.OpenRead(a);
+            using var right = File.OpenRead(b);
+            var bufferLeft = new byte[CompareBuffer];
+            var bufferRight = new byte[CompareBuffer];
+            int read;
+            while ((read = left.Read(bufferLeft, 0, bufferLeft.Length)) > 0)
+            {
+                var mirrored = right.Read(bufferRight, 0, read);
+                if (mirrored != read) return false;
+                for (var i = 0; i < read; i++)
+                {
+                    if (bufferLeft[i] != bufferRight[i]) return false;
+                }
+            }
+            return right.Read(bufferRight, 0, 1) == 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private const int CompareBuffer = 64 * 1024;
 
     private static string? SafeFullPath(string path)
     {

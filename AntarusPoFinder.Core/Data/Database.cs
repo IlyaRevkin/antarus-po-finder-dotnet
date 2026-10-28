@@ -375,11 +375,17 @@ public partial class Database : IDisposable
              -- это наблюдение конкретной машины в конкретный момент, а не решение, которое надо
              -- распространять. Ключ объекта уже латинский (TranslitMap) и в S3 регистрозависим,
              -- поэтому обычное двоичное сравнение здесь и правильное.
+             -- `fingerprint` — размер и время правки файла, который мы ТУДА ОТПРАВИЛИ. Без него
+             -- «догнать недостающее» решало по одному лишь факту присутствия: объект в бакете есть,
+             -- значит пропускаем. Исправленная инструкция (ту же версию перезалили без ошибки) под
+             -- это правило попадала целиком, и QR на наклейке продолжал открывать документ с
+             -- ошибкой — ровно того и боялись.
              CREATE TABLE IF NOT EXISTS hosting_checks (
-                 object_key TEXT PRIMARY KEY,
-                 present    INTEGER NOT NULL DEFAULT 0,
-                 url        TEXT NOT NULL DEFAULT '',
-                 checked_at TEXT NOT NULL DEFAULT ''
+                 object_key  TEXT PRIMARY KEY,
+                 present     INTEGER NOT NULL DEFAULT 0,
+                 url         TEXT NOT NULL DEFAULT '',
+                 checked_at  TEXT NOT NULL DEFAULT '',
+                 fingerprint TEXT NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS fw_version_reservations (
@@ -582,6 +588,20 @@ public partial class Database : IDisposable
              -- считать одно и то же заново на каждой синхронизации. Прошивка адресуется переносимой
              -- тройкой (подтип+модель контроллера по sync_id, version_raw) — локальные id прошивок на
              -- разных машинах разные. См. Database.FwUsage.cs.
+             -- КТО РАБОТАЕТ С ОБЩИМ КОНФИГОМ И НА КАКОЙ ВЕРСИИ (см. Database.SyncParticipants.cs).
+             -- Почти каждая живучая беда этого года приходила от машины со старой версией, и узнать,
+             -- у кого она осталась, было неоткуда: общий конфиг безличен. Теперь каждая машина
+             -- подписывает свой вклад, и список видно на экране «Подключения».
+             CREATE TABLE IF NOT EXISTS sync_participants (
+                 origin_id    TEXT PRIMARY KEY,
+                 machine_name TEXT NOT NULL DEFAULT '',
+                 user_name    TEXT NOT NULL DEFAULT '',
+                 app_version  TEXT NOT NULL DEFAULT '',
+                 channel      TEXT NOT NULL DEFAULT '',
+                 last_seen_at TEXT NOT NULL DEFAULT '',
+                 blocked      INTEGER NOT NULL DEFAULT 0
+             );
+
              CREATE TABLE IF NOT EXISTS fw_usage_shared (
                  origin             TEXT    NOT NULL,
                  query_key          TEXT    NOT NULL,
@@ -940,6 +960,10 @@ public partial class Database : IDisposable
         // переиспользование status: status остаётся строго active/rolled_back, эта отметка — ортогональна
         // ему и не мешает существующим WHERE (status IS NULL OR status='active') фильтрам.
         AddColumnsIfMissing("fw_versions", ("manual_current", "INTEGER NOT NULL DEFAULT 0"));
+
+        // Отпечаток выложенного файла (см. CREATE TABLE выше): у установленных копий таблица уже
+        // есть, и CREATE TABLE IF NOT EXISTS её не трогает.
+        AddColumnsIfMissing("hosting_checks", ("fingerprint", "TEXT NOT NULL DEFAULT ''"));
 
         if (!hadReleasedColumn)
             Exec("UPDATE fw_versions SET released = CASE WHEN TRIM(tags) <> '' THEN 1 ELSE 0 END");

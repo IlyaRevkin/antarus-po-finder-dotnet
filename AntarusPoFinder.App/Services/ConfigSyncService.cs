@@ -59,6 +59,11 @@ public static class ConfigSyncService
         "controller_models", "controller_modifications", "param_manufacturers", "tags",
         "allowed_extensions", "allowed_extensions_hmi", "allowed_extensions_schematic", "fw_version_reservations", "fw_versions", "param_files", "app_users",
         "flat_list_state", "schema_version", "authoritative",
+        // Подпись снимка и список подключений (см. Database.SyncParticipants): это служебные поля
+        // конверта, а НЕ настройки. Забыть их здесь — значит, что каждая синхронизация считает
+        // чужую версию «изменившейся настройкой»: баннер «поступили изменения» загорается на
+        // пустом месте, а узкая отправка прошивки перестаёт быть узкой. Ровно это и поймали тесты.
+        "sender_origin_id", "sender_version", "participants",
         // Признак «снимок умеет sync_id/тумбстоуны у файлов параметров» (см.
         // HierarchyExportData.ParamFilesHaveSync) — скалярный bool в корне файла, как authoritative
         // выше, поэтому проверки «это не массив/объект» мало и имя обязано быть здесь.
@@ -145,6 +150,11 @@ public static class ConfigSyncService
     /// сервер отрезает машины со старой версией и потому решается на каждой машине отдельно.</summary>
     private static readonly HashSet<string> SkipSettingsKeys = new()
     {
+        // Своя версия и свой идентификатор установки — местные по определению: уехав в общий
+        // конфиг, они сделали бы все машины одной (та же причина, что у fw_usage_origin_id).
+        // Политика "min_app_version" здесь СОЗНАТЕЛЬНО отсутствует — она общая и должна доезжать
+        // до всех, в этом её смысл.
+        Core.Data.Database.OwnAppVersionKey,
         // Функция третьего диска убрана (инструкции теперь только на первом диске + хостинг), но его
         // ключи third_disk_path/third_disk_shortcuts/instruction_duplicate_on_first_disk остаются в
         // списке пропуска: если у кого-то на старом клиенте они ещё лежат в базе, пусть не уезжают в

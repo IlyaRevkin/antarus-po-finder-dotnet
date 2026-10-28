@@ -439,8 +439,33 @@ public class ExportedTombstone
     [JsonPropertyName("deleted_at")] public string DeletedAt { get; set; } = "";
 }
 
+/// <summary>Подпись машины под своим вкладом: кто прислал, под кем работали и на какой версии.
+///
+/// Нужна затем, что чинить беду, которую приносит старая версия, бесполезно, пока не видно, у кого
+/// она осталась. Едет рядом со статистикой выборов и по тем же правилам: машина пересылает и чужие
+/// подписи тоже, иначе выгрузивший только себя стёр бы в снимке остальных.</summary>
+public class ExportedParticipant
+{
+    [JsonPropertyName("origin_id")] public string OriginId { get; set; } = "";
+    [JsonPropertyName("machine_name")] public string MachineName { get; set; } = "";
+    [JsonPropertyName("user_name")] public string UserName { get; set; } = "";
+    [JsonPropertyName("app_version")] public string AppVersion { get; set; } = "";
+    [JsonPropertyName("channel")] public string Channel { get; set; } = "";
+    [JsonPropertyName("last_seen_at")] public string LastSeenAt { get; set; } = "";
+}
+
 public class HierarchyExportData
 {
+    /// <summary>Кто собрал ЭТОТ снимок и на какой версии. Пусто у снимка со старой версии
+    /// программы — и это означает «не знаем», а не «нулевая версия»: см. VersionGate.</summary>
+    [JsonPropertyName("sender_origin_id")] public string? SenderOriginId { get; set; }
+
+    [JsonPropertyName("sender_version")] public string? SenderVersion { get; set; }
+
+    /// <summary>Кто и на какой версии работает с этим конфигом. Пусто у снимка, собранного старой
+    /// версией программы — это «источник о них не знает», а не «никого нет».</summary>
+    [JsonPropertyName("participants")] public List<ExportedParticipant>? Participants { get; set; }
+
     [JsonPropertyName("equipment_groups")] public List<ExportedGroup> EquipmentGroups { get; set; } = new();
     [JsonPropertyName("equipment_subtypes")] public List<ExportedSubType> EquipmentSubtypes { get; set; } = new();
     [JsonPropertyName("controller_models")] public List<ExportedController> ControllerModels { get; set; } = new();
@@ -590,6 +615,11 @@ public class ExportedFlatListState
 /// summary dialogs and the config-update banner's "Подробно" breakdown.</summary>
 public class ImportCounts
 {
+    /// <summary>Снимок не применялся целиком: его собрала машина с версией ниже минимальной
+    /// (см. ConfigService.MinAppVersion и VersionGate). Строка — версия отправителя, чтобы
+    /// сообщение называло причину, а не просто «изменений нет».</summary>
+    public string? QuarantinedSender { get; set; }
+
     public int GroupsAdded { get; set; }
     public int GroupsUpdated { get; set; }
     /// <summary>Тип шкафа, удалённый на выгружавшей машине — зеркалится так же, как подтипы и

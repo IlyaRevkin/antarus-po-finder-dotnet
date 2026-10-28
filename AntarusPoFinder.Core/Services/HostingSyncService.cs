@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -49,6 +49,12 @@ public sealed record HostingItem(
     public HostingState State { get; init; } = HostingState.Unknown;
     public string? Error { get; init; }
     public long? Size { get; init; }
+
+    /// <summary>Сколько весит объект В БАКЕТЕ, по ответу проверки присутствия. Отдельно от
+    /// <see cref="Size"/> потому, что сравнивать надо именно эти два числа: диск против хостинга.
+    /// Исправленная инструкция почти всегда меняет размер, и это самый дешёвый способ увидеть, что
+    /// наверху лежит прошлая редакция.</summary>
+    public long? RemoteSize { get; init; }
     public DateTime? CheckedAt { get; init; }
 
     /// <summary>Другие версии, у которых ЭТОТ ЖЕ документ и, стало быть, тот же адрес на хостинге, —
@@ -258,6 +264,7 @@ public sealed class HostingSyncService
                 },
                 Error = presence.Ok ? null : presence.Error,
                 Size = presence.Length ?? item.Size,
+                RemoteSize = presence.Length,
                 CheckedAt = DateTime.Now,
             });
         }
@@ -329,16 +336,36 @@ public sealed class HostingSyncService
             foreach (var m in redraw) messages.Add($"{item.VersionRaw}: {m}");
             if (refreshed) messages.Add($"{item.VersionRaw}: заглушка перерисована по новому макету");
 
-            // Уже лежащая в бакете и не изменившаяся заглушка второй раз не отправляется; изменившаяся —
-            // отправляется всегда, иначе правка макета так и не доехала бы до хостинга.
-            if (onlyMissing && item.State == HostingState.Published && !refreshed) { skipped++; continue; }
+            // ⚠️ «Лежит в бакете» НЕ значит «лежит то же самое».
+            //
+            // Инструкцию перезаливают, когда в ней нашли ошибку: версия прошивки та же, имя файла
+            // то же, адрес тот же — и наклейка с QR продолжает работать, в этом и смысл. Но раньше
+            // режим «догнать недостающее» решал по одному лишь присутствию объекта и такой документ
+            // пропускал: на диске исправленный, в бакете прежний, с ошибкой. Теперь сравниваем
+            // отпечаток того, что мы отправляли, с тем, что лежит на диске сейчас.
+            //
+            // Неизвестный отпечаток (старая запись, или объект лишь проверяли на присутствие)
+            // считается несовпадением: лишняя отправка стоит секунды, а наклейка, открывающая
+            // документ с ошибкой, стоит ремонта не по той инструкции.
+            var fingerprint = FingerprintOf(item.SourcePath);
+            var staleCopy = IsStale(item, fingerprint);
+            if (onlyMissing && item.State == HostingState.Published && !refreshed && !staleCopy) { skipped++; continue; }
+            if (staleCopy && item.State == HostingState.Published)
+                messages.Add($"{item.VersionRaw}: документ изменился — отправляем заново");
 
             var warnings = new List<string>();
             var url = publisher.Publish(item.SourcePath, item.SourcePath, diskRoot, warnings);
             foreach (var w in warnings) messages.Add($"{item.VersionRaw}: {w}");
 
-            if (url is null) failed++;
-            else published++;
+            if (url is null)
+            {
+                failed++;
+            }
+            else
+            {
+                published++;
+                _db.SaveHostingCheck(item.ObjectKey, present: true, url, fingerprint);
+            }
         }
 
         progress?.Report(new HostingProgress(done, list.Count, "готово"));
@@ -460,5 +487,46 @@ public sealed class HostingSyncService
         if (string.IsNullOrEmpty(path)) return null;
         try { return File.Exists(path) ? new FileInfo(path).Length : null; }
         catch (Exception) { return null; }
+    }
+
+    /// <summary>Лежит ли наверху ПРОШЛАЯ редакция документа.
+    ///
+    /// Два независимых признака, и оба дешёвые:
+    /// 1) размер на диске не сошёлся с размером в бакете — исправленная инструкция почти всегда
+    ///    весит иначе, и это видно из той же проверки присутствия, без единого лишнего запроса;
+    /// 2) отпечаток расходится с тем, что мы сами отправляли в прошлый раз, — ловит правку, не
+    ///    изменившую размер.
+    ///
+    /// Чего здесь СОЗНАТЕЛЬНО нет: «не знаем — значит устарело». Такое правило при первом же
+    /// проходе перезалило бы всю библиотеку целиком, потому что отпечатков у старых записей нет
+    /// ни одного. Незнание — не повод для работы на час.
+    /// </summary>
+    private bool IsStale(HostingItem item, string fingerprint)
+    {
+        var localSize = SizeOf(item.SourcePath);
+        if (localSize is long local && item.RemoteSize is long remote && local != remote) return true;
+
+        var remembered = _db.GetHostingFingerprint(item.ObjectKey);
+        return remembered.Length > 0 && fingerprint.Length > 0 && remembered != fingerprint;
+    }
+
+    /// <summary>Чем один файл отличается от другого, не читая его целиком: размер и время правки.
+    ///
+    /// Хеш был бы точнее, но инструкции бывают по десятку мегабайт, а проход «догнать недостающее»
+    /// идёт по всей библиотеке — читать всё ради сравнения значило бы менять одну редкую ошибку на
+    /// ежедневные минуты ожидания. Размер и дата ловят ровно тот случай, ради которого всё
+    /// затевалось: документ перезалили.</summary>
+    private static string FingerprintOf(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists) return "";
+            return $"{file.Length}:{file.LastWriteTimeUtc.Ticks}";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
     }
 }

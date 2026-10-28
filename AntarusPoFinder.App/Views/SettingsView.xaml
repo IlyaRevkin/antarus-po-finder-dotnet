@@ -83,6 +83,13 @@
             <Button x:Name="TabBtnUsers" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
                 <TextBlock Text="Пользователи" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- КТО НА СВЯЗИ И НА КАКОЙ ВЕРСИИ. Почти каждая живучая беда этого года приезжала с
+                 машины со старой версией, и узнать, у кого она осталась, было неоткуда: общий
+                 конфиг безличен. Вкладка только в бете и только администратору. -->
+            <Button x:Name="TabBtnConnections" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0"
+                    Visibility="Collapsed" Click="Tab_Click">
+                <TextBlock Text="Подключения" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <!-- «Чистка диска» была отдельным пунктом бокового меню и переехала сюда намеренно:
                  это разовая уборка общего диска, а не рабочий экран. Вкладка последняя в полосе и
                  видна только администратору (ApplyRoleVisibility) — ровно как раньше пункт меню. -->
@@ -1681,6 +1688,60 @@
         </Grid>
 
         <!-- ═══════════════════════════ ПОЛЬЗОВАТЕЛИ (собственный AD-ростер) ═══════════════════════════ -->
+        <!-- ═══════════════════════ ПОДКЛЮЧЕНИЯ ═══════════════════════ -->
+        <Grid x:Name="ConnectionsTab" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                       Text="Машины, которые обмениваются общим конфигом: кто, под кем работают, какая версия и когда их видели в последний раз. Список нужен затем, что старая версия у коллеги возвращает уже исправленные ошибки — удалённый подтип, вечную модерацию, снятый тег, — и до сих пор было неоткуда узнать, у кого она осталась."/>
+
+            <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="Минимальная версия для обмена" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Снимок, собранный версией ниже этой, не применяется целиком — ни по строкам, ни частично. У самого отправителя его правки при этом остаются. Пусто — принимаем всех."/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="MinVersionInput" Width="140" Height="34" Margin="0,0,8,0"
+                                 ToolTip="Например: 1.75.9. Пусто — ограничения нет."/>
+                        <Button Content="Сохранить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="SaveMinVersion_Click"/>
+                        <Button Content="Снять ограничение" Style="{StaticResource SecondaryButton}" Click="ClearMinVersion_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <DataGrid Grid.Row="2" x:Name="ConnectionsGrid" AutoGenerateColumns="False" MinHeight="120" Margin="0,0,0,10"
+                      Style="{StaticResource RoomyDataGrid}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Компьютер" Binding="{Binding MachineName}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Пользователь" Binding="{Binding UserName}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Версия" Binding="{Binding AppVersion}" Width="Auto" MinWidth="90" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Канал" Binding="{Binding Channel}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Последний раз" Binding="{Binding LastSeen}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
+                </DataGrid.Columns>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Outdated}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+            </DataGrid>
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal">
+                <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshConnections_Click"/>
+                <Button Content="Забыть машину" Style="{StaticResource SecondaryButton}" Click="ForgetConnection_Click"
+                        ToolTip="Убрать строку из списка. Машина появится снова при ближайшей своей синхронизации — это уборка списка, а не запрет."/>
+            </StackPanel>
+        </Grid>
+
         <Grid x:Name="UsersTab" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>

@@ -274,6 +274,21 @@ public partial class NetworkSyncView : UserControl
             skipNote += $"\n\nПринято заново после удаления: {result.Counts.FwVersionsSkippedTombstone}\n" +
                         "Это версии с номером, который здесь когда-то удаляли.";
 
+        // Снимок, который не приняли ЦЕЛИКОМ: его собрала машина с версией ниже минимальной.
+        // Это не «изменений нет», и молчать об этом нельзя — иначе человек неделю считает, что
+        // делится работой, а она никуда не едет.
+        if (!string.IsNullOrEmpty(result.Counts.QuarantinedSender))
+        {
+            AppMessageBox.Show(
+                "Снимок НЕ ПРИНЯТ: его собрала машина с устаревшей версией (" +
+                result.Counts.QuarantinedSender + ")." + Environment.NewLine + Environment.NewLine +
+                "Так убирают ошибки, которые расходились между старой и новой версией: пока та " +
+                "машина не обновится, её правки здесь не применяются." + Environment.NewLine + Environment.NewLine +
+                "Кто именно отстал — видно в списке подключений (Настройки → Подключения).",
+                "Синхронизация остановлена", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         AppMessageBox.Show(
             $"Экспорт от: {result.ExportedAt} ({result.ExportedBy})\n\n" +
             $"Настроек применено: {result.SettingsApplied}\n" +

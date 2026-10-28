@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -430,13 +430,7 @@ public partial class Database
     {
         var sql = $"""
             SELECT fv.*, eg.name AS group_name, es.name AS subtype_name, cm.name AS ctrl_name
-            FROM fw_versions fv
-            JOIN equipment_subtypes es ON fv.subtype_id   = es.id
-            JOIN equipment_groups   eg ON es.group_id     = eg.id
-            JOIN controller_models  cm ON fv.controller_id = cm.id
-            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0 AND {NotDeleted("fv")}
-              AND {NotConfig("fv")}
-              AND {NotSuperseded("fv")}
+            {UnreleasedFromWhere()}
             ORDER BY fv.upload_date DESC
             """;
 
@@ -566,12 +560,32 @@ public partial class Database
     /// <summary>Ровно то, что покажет GetUnreleasedFwVersionsWithNames — счётчик на бейдже сайдбара и
     /// на вкладке Настроек обязан совпадать со списком, иначе «Модерация (7)» открывается и показывает
     /// три строки.</summary>
+    /// <summary>ЧТО ТАКОЕ «ВЕРСИЯ НА МОДЕРАЦИИ» — одно определение на счётчик и на список.
+    ///
+    /// Раньше их было два, и они расходились ровно в одном месте: список джойнил подтип, группу и
+    /// контроллер (INNER JOIN), а счётчик считал по одной таблице. Прошивка, у которой подтипа или
+    /// контроллера на этой машине нет — потому что подтип удалили, а версия осталась, — попадала в
+    /// счётчик и НЕ попадала в список. Со стороны это и есть жалоба «в модерации не реальное
+    /// значение: у кого-то 2–3, а у меня 20+»: цифра на вкладке считала сирот, которых на экране
+    /// никогда не было, и чем дольше машина жила, тем сильнее цифра врала.
+    ///
+    /// Цифра, которой не соответствует ни одна строка на экране, хуже отсутствующей: по ней
+    /// принимают решение «иди разгребай», а разгребать нечего.</summary>
+    private string UnreleasedFromWhere() =>
+        $"""
+        FROM fw_versions fv
+        JOIN equipment_subtypes es ON fv.subtype_id   = es.id
+        JOIN equipment_groups   eg ON es.group_id     = eg.id
+        JOIN controller_models  cm ON fv.controller_id = cm.id
+        WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
+          AND {NotDeleted("fv")} AND {NotConfig("fv")} AND {NotSuperseded("fv")}
+        """;
+
     public int GetUnreleasedFwVersionsCount()
     {
         var result = ExecuteScalar($"""
-            SELECT COUNT(*) FROM fw_versions fv
-            WHERE fv.archived = 0 AND (fv.status IS NULL OR fv.status = 'active') AND fv.released = 0
-              AND {NotDeleted("fv")} AND {NotConfig("fv")} AND {NotSuperseded("fv")}
+            SELECT COUNT(*)
+            {UnreleasedFromWhere()}
             """);
         return result is long l ? (int)l : 0;
     }
