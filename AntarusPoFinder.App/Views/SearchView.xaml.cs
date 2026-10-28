@@ -60,6 +60,25 @@ public partial class SearchView : UserControl
         // ПОСЛЕ присваивания _services: обработчик Checked тут же попробует сохранить значение.
         ShowAllVersionsCheck.IsChecked = _services.Cfg.SearchShowAllVersions();
         RefreshAllVersionsBanner();
+        PlaceSearchHowChecks();
+    }
+
+    /// <summary>Где живут «Точный поиск» и «Показывать все версии»: в бете — внутри панели фильтров,
+    /// в рабочей версии — там же, где и были, в строке переключателя режимов.
+    ///
+    /// Переделки вида едут только бетой — таков уговор: в основной версии меняются баги, а не
+    /// привычки. Код при этом общий (бета и рабочая отличаются одной константой сборки), поэтому
+    /// развилка нужна здесь, а не двумя ветками репозитория, которые неизбежно разъедутся.
+    ///
+    /// Элементы именно ПЕРЕНОСЯТСЯ, а не дублируются: две копии галочки — это два состояния, из
+    /// которых код читает одно, и расхождение проявилось бы уже у пользователя.</summary>
+    private void PlaceSearchHowChecks()
+    {
+        if (AppIdentity.IsBeta) return;
+        SearchHowPanel.Children.Clear();
+        LegacyHowHost.Children.Add(ExactWordCheck);
+        LegacyHowHost.Children.Add(ShowAllVersionsCheck);
+        SearchHowPanel.Visibility = Visibility.Collapsed;
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -320,9 +339,13 @@ public partial class SearchView : UserControl
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private const string FirmwareFiltersHint =
-        "С пустым запросом покажет всё, что подходит под фильтры. Поиск по тегу — прямо в строке поиска (с «Точное совпадение слова» найдёт ровно нужный шкаф).";
+        "С пустым запросом покажет всё, что подходит под фильтры. Поиск по тегу — прямо в строке поиска (с «Точным поиском» найдёт ровно нужный шкаф).";
     private const string SchemaFiltersHint =
         "Показывать только файлы выбранных форматов. Ничего не отмечено — показываются все.";
+    // В параметрах и таблицах справочных фильтров нет, но «Точный поиск» работает и там — ради него
+    // панель теперь открывается во всех режимах, и подсказка обязана объяснить, почему она почти пустая.
+    private const string ParamsFiltersHint =
+        "В этом режиме фильтров по справочникам нет — отбор идёт по запросу. «Точный поиск» работает и здесь.";
 
     /// <summary>У каждого режима поиска свой набор фильтров: у прошивок — справочники, у схем —
     /// расширение файла, у параметров фильтров нет вовсе (и кнопка «Фильтры» там не показывается, а
@@ -333,8 +356,17 @@ public partial class SearchView : UserControl
         var mode = CurrentMode;
         FirmwareFiltersPanel.Visibility = mode == SearchMode.Firmware ? Visibility.Visible : Visibility.Collapsed;
         SchemaFiltersPanel.Visibility = mode == SearchMode.Schemas ? Visibility.Visible : Visibility.Collapsed;
-        FiltersHint.Text = mode == SearchMode.Schemas ? SchemaFiltersHint : FirmwareFiltersHint;
-        if (mode is SearchMode.Params or SearchMode.ParamTables) FiltersPanel.Visibility = Visibility.Collapsed;
+        // Схлопывать по шкафам нечего нигде, кроме прошивок: в остальных режимах галочку прячем, а
+        // не оставляем висеть галочкой, которая ничего не делает.
+        ShowAllVersionsCheck.Visibility = mode == SearchMode.Firmware ? Visibility.Visible : Visibility.Collapsed;
+        if (!AppIdentity.IsBeta && mode is SearchMode.Params or SearchMode.ParamTables)
+            FiltersPanel.Visibility = Visibility.Collapsed;
+        FiltersHint.Text = mode switch
+        {
+            SearchMode.Schemas => SchemaFiltersHint,
+            SearchMode.Params or SearchMode.ParamTables => ParamsFiltersHint,
+            _ => FirmwareFiltersHint,
+        };
         UpdateFiltersButton();
     }
 
@@ -407,6 +439,12 @@ public partial class SearchView : UserControl
             foreach (var combo in new[] { FilterGroupCombo, FilterSubtypeCombo, FilterControllerCombo, FilterLaunchCombo })
                 if (combo.Items.Count > 0) combo.SelectedIndex = 0;
             foreach (var (check, _) in _schemaExtChecks) check.IsChecked = false;
+            // «Точный поиск» теперь живёт в этой же панели, значит «Сбросить» обязан снимать и его:
+            // кнопка, которая убирает не всё, что человек видит рядом с ней, хуже отсутствующей.
+            ExactWordCheck.IsChecked = false;
+            // А вот «Показывать все версии» тут НЕ трогаем: она запоминается на машине и включается
+            // насовсем, под свою работу (модерация), а не на один запрос. Выключать её есть чем —
+            // кнопкой на самой полосе-предупреждении, которая и так висит, пока режим включён.
         }
         finally { _fillingFilters = false; }
         ReloadSubtypeFilter();
@@ -426,22 +464,36 @@ public partial class SearchView : UserControl
         };
     }
 
-    /// <summary>Кнопка показывает состояние фильтров ТОГО режима, который сейчас выбран, и вовсе
-    /// исчезает в «Параметрах», где фильтров нет: кнопка, которая открывает пустую панель, — это ровно
-    /// то, на что жаловался оператор («фильтры в схемах же не работают»).</summary>
+    /// <summary>Кнопка показывает состояние фильтров ТОГО режима, который сейчас выбран.
+    ///
+    /// Раньше в «Параметрах» она пряталась: фильтров по справочникам там нет, а кнопка, открывающая
+    /// пустую панель, — ровно то, на что жаловался оператор («фильтры в схемах же не работают»).
+    /// Теперь в панели живут ещё и «Точный поиск» с «Показывать все версии», и точный поиск работает
+    /// во всех режимах, — прятать кнопку стало нельзя, иначе в параметрах галочку было бы не достать.
+    ///
+    /// Точка «●» считается и по галочкам тоже: настройка, убранная под кнопку, обязана быть видна
+    /// снаружи. Без этого «Показывать все версии» однажды уже осталась включённой незаметно, и выдача
+    /// месяцами показывала заменённые версии — ради того случая и появилась полоса-предупреждение.</summary>
     private void UpdateFiltersButton()
     {
         if (FiltersToggle is null) return;
         var mode = CurrentMode;
-        if (mode is SearchMode.Params or SearchMode.ParamTables)
+        // В рабочей версии галочки остались снаружи, значит за кнопкой в «Параметрах» по-прежнему
+        // пусто — и она, как и раньше, прячется.
+        if (!AppIdentity.IsBeta && mode is SearchMode.Params or SearchMode.ParamTables)
         {
             FiltersToggle.Visibility = Visibility.Collapsed;
             return;
         }
         FiltersToggle.Visibility = Visibility.Visible;
-        var active = mode == SearchMode.Schemas
-            ? _schemaExtChecks.Any(c => c.Check.IsChecked == true)
-            : !ActiveFilters().IsEmpty;
+        var how = ExactWordCheck.IsChecked == true
+            || (mode == SearchMode.Firmware && ShowAllVersionsCheck.IsChecked == true);
+        var active = how || mode switch
+        {
+            SearchMode.Schemas => _schemaExtChecks.Any(c => c.Check.IsChecked == true),
+            SearchMode.Params or SearchMode.ParamTables => false,
+            _ => !ActiveFilters().IsEmpty,
+        };
         FiltersToggle.Content = FiltersVisible ? "Фильтры ▴" : active ? "Фильтры ▾ ●" : "Фильтры ▾";
     }
 
