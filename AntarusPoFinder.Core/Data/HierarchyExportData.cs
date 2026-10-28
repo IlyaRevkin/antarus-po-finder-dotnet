@@ -319,6 +319,10 @@ public class ExportedParamTableRow
     [JsonPropertyName("description")] public string Description { get; set; } = "";
     [JsonPropertyName("applicability")] public string Applicability { get; set; } = "";
     [JsonPropertyName("applies_when")] public string AppliesWhen { get; set; } = "";
+
+    /// <summary>Назначение строки — «для наладки»/«для сервиса» (ParamRowPurpose). Поле младше
+    /// остальных: в снимке от старой машины его нет вовсе, и читается это как «не размечено».</summary>
+    [JsonPropertyName("purpose")] public string Purpose { get; set; } = "";
     [JsonPropertyName("extra")] public string Extra { get; set; } = "";
 }
 

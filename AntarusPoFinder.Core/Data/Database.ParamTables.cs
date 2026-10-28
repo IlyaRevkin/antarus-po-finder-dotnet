@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.Core.Data;
 
@@ -615,7 +616,7 @@ public partial class Database
         var result = new List<ParamTableRow>();
         using var reader = ExecuteReader("""
             SELECT id, revision_id, sort_order, kind, group_name, code, title, value, value_state,
-                   factory, unit, description, applicability, applies_when, extra
+                   factory, unit, description, applicability, applies_when, purpose, extra
             FROM param_table_rows WHERE revision_id=@r ORDER BY sort_order, id
             """, cmd => cmd.Parameters.AddWithValue("@r", revisionId));
         while (reader.Read())
@@ -635,6 +636,7 @@ public partial class Database
                 Description = GetString(reader, "description"),
                 Applicability = GetString(reader, "applicability"),
                 AppliesWhen = GetString(reader, "applies_when"),
+                Purpose = GetString(reader, "purpose"),
                 Extra = GetString(reader, "extra"),
             });
         return result;
@@ -685,8 +687,8 @@ public partial class Database
                 ExecuteNonQuery("""
                     INSERT INTO param_table_rows
                         (revision_id, sort_order, kind, group_name, code, title, value, value_state,
-                         factory, unit, description, applicability, applies_when, extra)
-                    VALUES(@r, @so, @k, @g, @c, @t, @v, @vs, @f, @un, @d, @ap, @aw, @e)
+                         factory, unit, description, applicability, applies_when, purpose, extra)
+                    VALUES(@r, @so, @k, @g, @c, @t, @v, @vs, @f, @un, @d, @ap, @aw, @pu, @e)
                     """, cmd =>
                 {
                     cmd.Parameters.AddWithValue("@r", id);
@@ -702,6 +704,10 @@ public partial class Database
                     cmd.Parameters.AddWithValue("@d", current.Description);
                     cmd.Parameters.AddWithValue("@ap", current.Applicability);
                     cmd.Parameters.AddWithValue("@aw", current.AppliesWhen);
+                    // Назначение пишется ТОЛЬКО через ParamPurposes.Normalize: порядок токенов и
+                    // регистр иначе уехали бы в базу как есть и всплыли в разборе изменений
+                    // «правкой» строки, которую никто не правил.
+                    cmd.Parameters.AddWithValue("@pu", ParamPurposes.Normalize(current.Purpose));
                     cmd.Parameters.AddWithValue("@e", current.Extra);
                 });
             }
