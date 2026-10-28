@@ -839,9 +839,7 @@ public partial class HostingView : UserControl
     private void CopyToClipboard(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
-        if (Services.ClipboardSafe.TrySetText(text))
-            _host.ShowStatus("Скопировано", category: NotificationCategory.General);
-        else
+        if (!Services.ClipboardSafe.TrySetTextWithNote(text, this, _host, "Скопировано"))
             AppendLog("Буфер обмена занят другим приложением, скопировать не удалось.");
     }
 

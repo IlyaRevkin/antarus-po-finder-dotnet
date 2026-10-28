@@ -521,8 +521,7 @@ public partial class InstructionLabelWindow : Window
         if (string.IsNullOrEmpty(_qrContent)) return;
         // Буфер обмена может быть занят другим приложением — ClipboardSafe повторит попытку, а
         // молчаливый отказ здесь не повод показывать окно ошибки.
-        if (Services.ClipboardSafe.TrySetText(_qrContent))
-            _host.ShowStatus("Ссылка скопирована");
+        Services.ClipboardSafe.TrySetTextWithNote(_qrContent, this, _host, "Ссылка скопирована");
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

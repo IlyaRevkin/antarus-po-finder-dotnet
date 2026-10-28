@@ -49,4 +49,23 @@ public static class ClipboardSafe
         }
         return false;
     }
+
+    /// <summary>То же самое, но об удаче сообщает само. Тикет: «убрать всплывающее „скопировано…“» —
+    /// ShowStatus не только пишет в строку состояния, он ещё и кладёт запись в колокольчик, а
+    /// копировать номер версии приходится десятками раз за смену, и счётчик уведомлений набивался
+    /// одним и тем же словом.
+    ///
+    /// ⚠️ Тихая плашка — переделка вида, поэтому только в бете: в рабочей версии сообщение остаётся
+    /// прежним. Отказ буфера сюда не попадает — о нём вызывающий отчитывается сам, по-своему (где-то
+    /// это строка состояния, где-то журнал на странице).</summary>
+    /// <returns>true — текст в буфере.</returns>
+    public static bool TrySetTextWithNote(string? text, DependencyObject anchor, IAppHost host, string done)
+    {
+        if (!TrySetText(text)) return false;
+
+        var owner = Window.GetWindow(anchor);
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta && owner is not null) FlashNote.Show(owner, done);
+        else host.ShowStatus(done);
+        return true;
+    }
 }
