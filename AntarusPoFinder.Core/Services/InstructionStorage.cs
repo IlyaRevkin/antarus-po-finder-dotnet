@@ -117,7 +117,31 @@ public static class InstructionStorage
             var existing = new FileInfo(dest);
             var incoming = new FileInfo(sourcePath);
             if (incoming.Exists && existing.Length == incoming.Length && SameBytes(dest, sourcePath)) return;
+        }
+        catch (Exception)
+        {
+            // Сравнить не вышло (шара моргнула) — архивируем: лишняя копия в «Прежних редакциях»
+            // дешевле потерянной редакции.
+        }
 
+        ArchiveDocument(dest);
+    }
+
+    /// <summary>Убрать документ в «Прежние редакции» — тот же переезд, что при перезаливке, но без
+    /// оглядки на новый файл. Нужен отдельно, потому что повод бывает и другой: номер версии пошёл
+    /// по второму кругу, и в папке лежит инструкция от прежней жизни этого номера
+    /// (<see cref="InstructionOwnership"/>).
+    ///
+    /// Возвращает путь, куда переехал документ, или null — переезжать было нечего либо не вышло.
+    /// Не бросает по тем же соображениям, что и <see cref="ArchivePrevious"/>: архив — страховка, а
+    /// не повод уронить загрузку.</summary>
+    public static string? ArchiveDocument(string dest)
+    {
+        try
+        {
+            if (!File.Exists(dest)) return null;
+
+            var existing = new FileInfo(dest);
             var folder = Path.Combine(Path.GetDirectoryName(dest) ?? "", PreviousFolderName);
             Directory.CreateDirectory(folder);
 
@@ -135,11 +159,13 @@ public static class InstructionStorage
             }
 
             File.Move(dest, archived);
+            return archived;
         }
         catch (Exception)
         {
             // Не вышло убрать в архив — пусть лучше встанет новая инструкция, чем загрузка
             // свалится на полпути. Потеря прежней редакции неприятна, отсутствие новой хуже.
+            return null;
         }
     }
 

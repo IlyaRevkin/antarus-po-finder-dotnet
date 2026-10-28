@@ -60,7 +60,8 @@ public static class DocFileResolver
     /// клалась (папка ведь не пустая), а под QR уходила ссылка на служебный файл Windows — с ней
     /// наклейку и наклеили на шкаф. См. <see cref="JunkFiles"/>.</summary>
     public static bool IsNotADocument(string path) =>
-        IsShortcut(path) || InstructionStub.IsStub(path) || JunkFiles.IsJunk(path);
+        IsShortcut(path) || InstructionStub.IsStub(path) || JunkFiles.IsJunk(path)
+        || InstructionOwnership.IsMarker(path);
 
     /// <summary>Недоступный файл (шара отвалилась между обходом и сравнением) считается самым старым —
     /// сравнение не должно падать из-за одного пути.</summary>

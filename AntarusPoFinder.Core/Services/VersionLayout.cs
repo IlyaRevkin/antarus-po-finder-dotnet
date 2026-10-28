@@ -283,8 +283,11 @@ public static class VersionLayout
     {
         try
         {
+            // Метка хозяина папки «Инструкция» (InstructionOwnership) здесь — ровно тот же случай,
+            // что Thumbs.db: служебный файл, от которого пустая папка версии становилась бы
+            // «непустой», и версия переставала бы показывать инструкцию контроллера.
             return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
-                .Any(f => !DocFileResolver.IsShortcut(f) && !JunkFiles.IsJunk(f));
+                .Any(f => !DocFileResolver.IsShortcut(f) && !JunkFiles.IsJunk(f) && !InstructionOwnership.IsMarker(f));
         }
         catch (Exception) { return false; }
     }

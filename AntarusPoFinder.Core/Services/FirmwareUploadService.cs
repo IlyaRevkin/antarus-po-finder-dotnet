@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -268,6 +268,14 @@ public class FirmwareUploadPlan
 
     public string DestinationFolder { get; init; } = "";
 
+    /// <summary>Папка версии на диске УЖЕ ЕСТЬ, а записи о такой версии в базе НЕТ — то есть номер
+    /// пошёл по второму кругу: «мы тут сталкивались с пропаданием прошивок, по новой загружали и
+    /// нумерация по новой начиналась» (Илья). Разница между этим случаем и обычной перезаливкой той
+    /// же версии видна ТОЛЬКО здесь, в фазе планирования, и только из базы: на диске оба случая
+    /// выглядят одинаково — та же папка, тот же номер. Дисковая фаза сама ответить не может, поэтому
+    /// ответ едет к ней планом (см. InstructionOwnership.Claim).</summary>
+    public bool FolderOutlivedItsVersion { get; init; }
+
     /// <summary>Версия заводится по новой раскладке: пять своих папок, прошивка внутри «Прошивка»
     /// (см. FirmwareUploadRequest.NewDiskLayout).</summary>
     public bool NewLayout { get; init; }
@@ -340,6 +348,12 @@ public class FirmwareUploadCopyResult
     public string HmiStored { get; init; } = "";
     public List<string> Warnings { get; init; } = new();
     public string? IoErrorMessage { get; init; }
+
+    /// <summary>Что сделали с инструкцией, оставшейся в папке от прежней жизни этого номера версии
+    /// (см. InstructionOwnership). null — ничего не делали, обычный исход. Едет сюда, а не правится
+    /// на месте, потому что дисковая фаза в базу не ходит: ссылку прежней версии на уехавший в архив
+    /// документ переставляет фаза записи (см. Register).</summary>
+    public InstructionClaim? InstructionClaim { get; init; }
 }
 
 /// <summary>Result of PSL/KINCO controller autodetection — see FirmwareUploadService.AutodetectFromPsl/
@@ -514,6 +528,12 @@ public static class FirmwareUploadService
                 $"Папка {fwv.Raw} уже существует.\nПерезаписать?"));
         }
 
+        // Папка есть, а записи о такой версии нет — номер пошёл по второму кругу (см.
+        // FirmwareUploadPlan.FolderOutlivedItsVersion). Спрашиваем здесь, пока мы в фазе БД: дисковая
+        // фаза в базу не ходит и этого различия уже не увидит.
+        var folderOutlived = Directory.Exists(dstFolder)
+                             && db.GetFwVersionsSharingFiles(dstFolder, fwv.Raw).Count == 0;
+
         // Автор заводится здесь, а не после копирования: это последнее обращение к БД перед долгой
         // дисковой фазой, и после него CopyFiles можно спокойно уносить в фоновый поток.
         var user = db.GetOrCreateUser(request.AuthorUserName, request.AuthorUserName);
@@ -567,6 +587,7 @@ public static class FirmwareUploadService
             MainFileInFolder = mainRelative ?? "",
             ExtraFilesInFolder = ExtraFilesToCopy(request.SourcePath, mainRelative, request.SourceFolderFiles),
             DestinationFolder = dstFolder,
+            FolderOutlivedItsVersion = folderOutlived,
             NewLayout = request.NewDiskLayout,
             ControllerFolder = ctrlFolder,
             AuthorId = user.Id,
@@ -689,6 +710,15 @@ public static class FirmwareUploadService
             try { ioMapStored = FileSystemHelpers.CopyFileOrFolderShallow(request.IoMapSourcePath, plan.IoMapFolder); }
             catch (Exception ex) { warnings.Add($"Карта ВВ: {ex.Message}"); }
         }
+        // Чья инструкция уже лежит в папке этой версии — разбираем ДО того, как положим свою.
+        // Только в бете: правило разбирается с редким и неочевидным случаем (номер версии пошёл по
+        // второму кругу), трогает документ на общем диске, и обкатать его надо на бете, а не сразу
+        // на всех рабочих машинах. В рабочей версии всё идёт ровно как раньше.
+        InstructionClaim? claim = null;
+        if (AppIdentity.IsBeta)
+            claim = InstructionOwnership.Claim(plan.DestinationFolder, plan.InstructionsFolder,
+                plan.Version.Raw, plan.FolderOutlivedItsVersion, warnings);
+
         string instrStored = "";
         if (!string.IsNullOrEmpty(request.InstructionsSourcePath))
         {
@@ -757,6 +787,7 @@ public static class FirmwareUploadService
             ModbusMapStored = modbusStored,
             HmiStored = hmiStored,
             Warnings = warnings,
+            InstructionClaim = claim,
         };
     }
 
@@ -771,6 +802,18 @@ public static class FirmwareUploadService
         var mod = request.Modification!;
         var warnings = new List<string>(copy.Warnings);
         var inheritedHmiFrom = "";
+
+        // Инструкция прежней жизни этого номера уехала в архив (см. InstructionOwnership). Прежняя
+        // версия, если её запись в базе ещё жива, смотрит на СТАРЫЙ путь — переставляем ссылку, иначе
+        // «старая не должна же исчезать» нарушилось бы не на диске, так в карточке: документ лежит, а
+        // кнопка «Инструкция» у той версии перестала бы что-либо открывать.
+        if (copy.InstructionClaim is { ArchivedFrom: { } from, ArchivedTo: { } to })
+        {
+            var moved = db.RepointInstructionPath(from, to);
+            if (moved > 0)
+                warnings.Add($"Ссылка на прежнюю инструкцию переставлена на архивную копию " +
+                             $"(записей: {moved}).");
+        }
 
         // Теги посчитаны в первой фазе (см. FirmwareUploadPlan.Tags) — их уже записала в
         // CHANGELOG.md дисковая фаза, и запись в БД обязана совпадать с тем, что лежит на диске.
