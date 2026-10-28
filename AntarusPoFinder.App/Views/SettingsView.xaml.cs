@@ -1570,7 +1570,13 @@ public partial class SettingsView : UserControl
 
     private void GlassOpacity_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_loadingGeneral || _loadingGlass) return;
+        // IsInitialized — не перестраховка, а починка падения. Разметка задаёт ползунку Minimum=40,
+        // и WPF тут же подтягивает значение с нуля до сорока, то есть ValueChanged срабатывает ПОСРЕДИ
+        // InitializeComponent — раньше, чем конструктор успел присвоить _services. Страница настроек
+        // от этого падала целиком, с NullReferenceException на ровном месте; поймали тесты отрисовки
+        // (ViewsRenderTests), а не глаза. Ровно та гонка инициализации XAML, ради которой живое
+        // открытие окна перед релизом и обязательно.
+        if (!IsInitialized || _loadingGeneral || _loadingGlass) return;
         var percent = GlassSurface.Clamp((int)Math.Round(e.NewValue));
         GlassOpacityValue.Text = percent + " %";
         _services.Cfg.SetGlassOpacity(percent);
