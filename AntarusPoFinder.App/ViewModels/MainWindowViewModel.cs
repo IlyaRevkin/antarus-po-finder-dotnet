@@ -409,6 +409,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _ = LoaderDiagnostics.FlushAsync(ConfigService.AppData,
             _services.Cfg.DiagnosticsDropUrl(), _services.Cfg.DiagnosticsDropCode());
 
+        // ТИКЕТЫ — тем же каналом и по той же причине (см. Core/Services/TicketAutoDrop): жалоба
+        // нужна тому, кто чинит программу, а он вне конторской сети, и ждать, пока кто-нибудь
+        // вспомнит про кнопку «Выгрузить…», значит не узнать о поломке вовсе. Тоже ДО проверки
+        // бакета: ключей от S3 на машине может не быть, а тикет завести могут как раз на ней.
+        // Ошибку не показываем — фоновая работа обязана быть не слышна, очередь повторит сама.
+        _ = TicketAutoDrop.FlushAsync(ConfigService.AppData,
+            _services.Cfg.DiagnosticsDropUrl(), _services.Cfg.DiagnosticsDropCode());
+
         var storage = new S3TicketStorage(_services.Cfg.S3());
         // Ключей нет или выкладка выключена — ШТАТНОЕ состояние (см. S3Settings.CanPublish):
         // молча ничего не делаем, ровно как выкладка инструкций.

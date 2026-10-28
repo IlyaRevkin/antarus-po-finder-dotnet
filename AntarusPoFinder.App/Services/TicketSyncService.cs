@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Services;
 
@@ -90,6 +91,8 @@ public static class TicketSyncService
         var (filename, payload) = BuildCreateEvent(ticket);
         services.Db.EnqueueTicketOutbox(filename, payload);
 
+        NoteForAutoDrop(services, ticket, TicketAutoDrop.Event.Created);
+
         var root = services.Cfg.RootPath();
         if (!string.IsNullOrEmpty(root))
         {
@@ -97,6 +100,29 @@ public static class TicketSyncService
             catch { /* диск сейчас недоступен — событие ждёт в очереди */ }
         }
         return ticket;
+    }
+
+    /// <summary>Положить событие тикета в очередь автовыгрузки (см. Core/Services/TicketAutoDrop).
+    ///
+    /// Одной точкой на всех, кто меняет тикеты, по той же причине, по которой одной точкой заведено
+    /// само создание: второй заводчик неизбежно забыл бы про очередь, и его тикет остался бы виден
+    /// только у него.
+    ///
+    /// <b>Развилка по бете.</b> Автовыгрузка — новая функциональность, а новое едет сначала в бете
+    /// (образец — SearchView.PlaceSearchHowChecks). В рабочей версии всё остаётся как было: тикеты
+    /// ездят сетевым диском и бакетом, а наружу уходят кнопкой «Выгрузить…». Проверяется константа
+    /// сборки, а не настройка: настройку можно случайно привезти с чужой машины общим конфигом.</summary>
+    public static void NoteForAutoDrop(AppServices services, Ticket ticket, string eventType, string? comment = null)
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        try
+        {
+            TicketAutoDrop.Enqueue(ConfigService.AppData, TicketAutoDrop.EntryFor(
+                ticket, eventType, Environment.MachineName, services.CurrentUserName,
+                services.Cfg.CurrentRole(), AppUpdateService.CurrentVersionText, comment));
+        }
+        catch { /* очередь автовыгрузки не имеет права помешать работе с тикетом */ }
     }
 
     private static string FileNameFor(TicketEvent ev) =>

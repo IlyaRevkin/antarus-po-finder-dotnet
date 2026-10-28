@@ -582,12 +582,25 @@ ApplyScopeHint();
 
     private void SetStatus_Click(object sender, RoutedEventArgs e)
     {
-        if (!IsAdmin) return;
         if (TicketsGrid.SelectedItem is not TicketRow row) return;
         if ((sender as Button)?.Tag is not string newStatus) return;
 
+        // Право на смену статуса спрашивается у ОДНОГО правила — TicketVisibility.CanModerate, того
+        // же, по которому кнопки показываются (UpdateActionButtons). Здесь стояло «только
+        // администратор», и из-за расхождения программист и наладчик видели живые кнопки «Взять в
+        // работу» / «Закрыть» на багах прошивок, а нажатие не делало НИЧЕГО и ничего не говорило:
+        // тикет оставался открытым, человек считал, что отметил его. Молчаливый отказ — худший из
+        // возможных: он неотличим от сломанной синхронизации.
+        if (!TicketVisibility.CanModerate(row.Ticket, _services.Cfg.CurrentRole(), _services.CurrentUserName)) return;
+
         var at = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fff");
         _services.Db.ApplyTicketStatusIfNewer(row.Ticket.Id, newStatus, at);
+        // Запись в очередь автовыгрузки идёт по УЖЕ НОВОМУ состоянию: сам row.Ticket в памяти
+        // остался со старым статусом, и отправить его значило бы отправить то, что только что
+        // перестало быть правдой.
+        row.Ticket.Status = newStatus;
+        row.Ticket.UpdatedAt = at;
+        TicketSyncService.NoteForAutoDrop(_services, row.Ticket, TicketAutoDrop.Event.Status);
 
         var (filename, payload) = TicketSyncService.BuildStatusEvent(row.Ticket.Id, newStatus, _services.CurrentUserName, _services.Cfg.CurrentRole(), at);
         _services.Db.EnqueueTicketOutbox(filename, payload);
