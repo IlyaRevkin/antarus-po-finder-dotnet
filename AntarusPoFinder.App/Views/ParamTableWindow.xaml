@@ -127,9 +127,21 @@
                           SelectionChanged="Document_Changed"/>
 
                 <TextBlock Grid.Column="3" Text="Показать строки:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <ComboBox Grid.Column="4" x:Name="ApplicabilityCombo" Width="200" Height="28"
-                          SelectionChanged="Applicability_Changed"
-                          ToolTip="Строки без пометки годятся всем аппаратам и показываются всегда"/>
+                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                    <ComboBox x:Name="ApplicabilityCombo" Width="200" Height="28"
+                              SelectionChanged="Applicability_Changed"
+                              ToolTip="Строки без пометки годятся всем аппаратам и показываются всегда"/>
+                    <!-- Отбор по НАЗНАЧЕНИЮ — «для наладки» (прогнать алгоритм) и «для сервиса»
+                         (подогнать под установленный двигатель). Рядом с отбором по аппарату и
+                         таким же списком: два разных по виду отбора в одном ряду читались бы как
+                         разные по смыслу. Показывается только в бете — это новая функциональность
+                         (ставится из кода по AppIdentity.IsBeta, см. ParamTableWindow). -->
+                    <ComboBox x:Name="PurposeCombo" Width="170" Height="28" Margin="8,0,0,0"
+                              Visibility="Collapsed" SelectionChanged="Purpose_Changed"
+                              ToolTip="Что показывать: всё, только нужное для наладки или только сервисное. Неразмеченные строки видны при любом отборе"/>
+                    <TextBlock x:Name="PurposeHint" Style="{StaticResource MutedText}"
+                               VerticalAlignment="Center" Margin="8,0,0,0" Visibility="Collapsed"/>
+                </StackPanel>
 
                 <StackPanel Grid.Column="6" Orientation="Horizontal">
                     <!-- ПУСТАЯ ТАБЛИЦА С НУЛЯ — путь, которого раньше не было вовсе: документ умел
@@ -332,6 +344,13 @@
                              каждой строки стартовать с пустоты. Ширина задана с запасом — у
                              изменённой строки пометка ЖИРНАЯ, а ширину по содержимому столбец
                              меряет обычным начертанием. -->
+                        <!-- Назначение строки словом. Колонка появляется только тогда, когда в
+                             документе ЕСТЬ разметка: у накопленных таблиц она пустая, и пустой
+                             столбец отъедал бы ширину у названия параметра — ровно та же причина,
+                             по которой так же ведут себя «Заводское» и «Изменение». -->
+                        <DataGridTextColumn x:Name="PurposeColumn" Header="Назначение" Binding="{Binding PurposeLabel}"
+                                            Width="Auto" MinWidth="96" Visibility="Collapsed"
+                                            ElementStyle="{StaticResource ParamCellText}"/>
                         <DataGridTextColumn x:Name="ChangeColumn" Header="Изменение" Binding="{Binding ChangeMark}" Width="Auto" MinWidth="104"
                                             Visibility="Collapsed"
                                             ElementStyle="{StaticResource ParamCellText}"/>

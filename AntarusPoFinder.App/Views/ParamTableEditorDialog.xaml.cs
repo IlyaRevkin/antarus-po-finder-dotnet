@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -30,6 +30,23 @@ public partial class ParamTableEditorDialog : Window
         ("Уточнить по ПЛК", ParamValueState.Ask),
         ("Снимается по месту", ParamValueState.OnSite),
     };
+
+    /// <summary>Назначение строки для показа в ячейке. Список, а не две галочки: галочки заняли бы
+    /// две колонки там, где смысл один («на каком этапе это выставляют»), а сочетание «и то и то»
+    /// всё равно пришлось бы объяснять словами.</summary>
+    private static readonly (string Label, string Purpose)[] Purposes =
+    {
+        ("—", ""),
+        ("Наладка", ParamRowPurpose.Commissioning),
+        ("Сервис", ParamRowPurpose.Service),
+        ("Наладка и сервис", ParamRowPurpose.Commissioning + "," + ParamRowPurpose.Service),
+    };
+
+    private static string PurposeLabelOf(string? purpose)
+    {
+        var normalized = ParamPurposes.Normalize(purpose);
+        return Purposes.FirstOrDefault(p => p.Purpose == normalized).Label ?? Purposes[0].Label;
+    }
 
     public sealed class RowVm
     {
@@ -68,6 +85,13 @@ public partial class ParamTableEditorDialog : Window
 
         public string StateLabel { get; set; } = States[0].Label;
 
+        public IReadOnlyList<string> PurposeChoices => Purposes.Select(p => p.Label).ToList();
+
+        /// <summary>Назначение строки подписью из <see cref="Purposes"/>. Подписью, а не токеном:
+        /// ячейка сетки показывает то, что в ней выбрано, и токен «commissioning» человек читал бы
+        /// глазами прямо в таблице.</summary>
+        public string PurposeLabel { get; set; } = Purposes[0].Label;
+
         public ParamTableRow ToRow() => new()
         {
             GroupName = GroupName,
@@ -80,6 +104,7 @@ public partial class ParamTableEditorDialog : Window
             Description = Description,
             Applicability = Applicability,
             AppliesWhen = AppliesWhen,
+            Purpose = Purposes.FirstOrDefault(p => p.Label == PurposeLabel).Purpose ?? "",
             // Своё содержимое строки собирается заново из ячеек. Значения столбцов, которых в этом
             // окне не показывали (снятые), при этом теряются намеренно: сохранение заводит НОВУЮ
             // редакцию, и тащить в неё то, чего человек не видел, значит записать за него.
@@ -108,6 +133,7 @@ public partial class ParamTableEditorDialog : Window
                 Applicability = row.Applicability,
                 AppliesWhen = row.AppliesWhen,
                 StateLabel = States.First(s => s.State == ParamValueState.Normalize(row.ValueState)).Label,
+                PurposeLabel = PurposeLabelOf(row.Purpose),
             };
 
             var stored = ParamRowExtra.Parse(row.Extra);
@@ -143,6 +169,14 @@ public partial class ParamTableEditorDialog : Window
         RowsGrid.ItemsSource = _rows;
         foreach (var choice in TextFileEncoding.Choices) EncodingCombo.Items.Add(choice);
         EncodingCombo.SelectedIndex = 0;
+        // Назначение строки — только в бете: рабочая версия 1.75 обязана выглядеть как выглядела.
+        // Столбец в базе при этом есть всегда, и уже проставленная бетой разметка через правку
+        // в рабочей версии не теряется — ToRow() берёт её из той же ячейки.
+        if (AppIdentity.IsBeta)
+        {
+            PurposeColumn.Visibility = Visibility.Visible;
+            GuessPurposeBtn.Visibility = Visibility.Visible;
+        }
     }
 
     /// <summary>Свои столбцы документа — колонками справа от встроенных. В коде, а не в XAML, по
@@ -215,6 +249,10 @@ public partial class ParamTableEditorDialog : Window
         var preview = ParamTableEditing.Preview(_bytes, _fileName, choice);
         _sourceText = preview.Text;
         if (NameInput.Text.Trim().Length == 0) NameInput.Text = preview.SuggestedName;
+        // Разметка «наладка/сервис» переживает перечитывание: в исходном txt её нет и разбор её
+        // не придумает, а терять руками проставленное молча нельзя (ParamPurposes.CarryOver
+        // сопоставляет строки тем же ключом, что и разбор изменений).
+        ParamPurposes.CarryOver(_rows.Select(r => r.ToRow()).ToList(), preview.Rows);
         Fill(preview.Rows);
 
         WarningsText.Text = string.Join("\n", preview.Warnings);
@@ -265,6 +303,30 @@ public partial class ParamTableEditorDialog : Window
         if (at < 0 || to < 0 || to >= _rows.Count) return;
         _rows.Move(at, to);
         RowsGrid.SelectedIndex = to;
+    }
+
+    /// <summary>Разметить строки по их же содержимому. Заполняет ТОЛЬКО пустые назначения: кнопку
+    /// жмут на полуразмеченной таблице, и переписать ручную разметку регулярками значит обесценить
+    /// уже сделанную работу. Сколько строк осталось человеку — говорим числом, иначе он решит, что
+    /// кнопка разметила всё.</summary>
+    private void GuessPurpose_Click(object sender, RoutedEventArgs e)
+    {
+        RowsGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
+        var rows = _rows.Select(r => r.ToRow()).ToList();
+        var marked = ParamPurposes.GuessAll(rows);
+        for (var i = 0; i < rows.Count; i++)
+            _rows[i].PurposeLabel = PurposeLabelOf(rows[i].Purpose);
+        // RowVm об изменениях не извещает (обычная модель строки этого окна), поэтому сетку
+        // перерисовываем сами — иначе разметка появилась бы только после прокрутки.
+        RowsGrid.Items.Refresh();
+
+        var left = rows.Count(r => r.Kind != ParamRowKind.Note && ParamPurposes.Normalize(r.Purpose).Length == 0);
+        AppMessageBox.Show(
+            marked == 0
+                ? "Угадать ничего не удалось — назначения проставляются в столбце «Назначение» вручную."
+                : $"Размечено строк: {marked}. Осталось без назначения: {left} — их видно при любом отборе, но наладчику они ничего не подсказывают.",
+            "Назначение строк", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

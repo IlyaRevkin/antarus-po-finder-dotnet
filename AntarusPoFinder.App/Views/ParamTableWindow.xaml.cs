@@ -89,6 +89,10 @@ public partial class ParamTableWindow : Window
         public string Change { get; init; } = "";
 
         public string ChangeMark { get; init; } = "";
+
+        /// <summary>Назначение строки словом: «наладка», «сервис», «наладка · сервис». Пусто —
+        /// не размечена, и такая строка видна при любом отборе (см. ParamPurposes.Filter).</summary>
+        public string PurposeLabel { get; init; } = "";
     }
 
     private sealed class RevisionVm
@@ -157,6 +161,16 @@ public partial class ParamTableWindow : Window
             var hint = "Правка таблицы — у программиста и администратора. Здесь можно смотреть и отбирать строки по аппарату.";
             EditBtn.ToolTip = hint;
             ImportBtn.ToolTip = hint;
+        }
+
+        // Отбор по назначению (наладка/сервис) — только в бете: это новая функциональность, а
+        // рабочая версия 1.75 обязана выглядеть как выглядела. Данные при этом пишутся и ездят в
+        // конфиге всегда — вернуть показ можно будет одной правкой этой развилки.
+        if (AppIdentity.IsBeta)
+        {
+            PurposeCombo.Visibility = Visibility.Visible;
+            PurposeCombo.ItemsSource = ParamPurposes.Options();
+            PurposeCombo.SelectedIndex = 0;
         }
 
         _focusCode = (focusCode ?? "").Trim();
@@ -260,12 +274,25 @@ public partial class ParamTableWindow : Window
 
     private void Applicability_Changed(object sender, SelectionChangedEventArgs e) => ShowRows();
 
+    private void Purpose_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        // WPF поднимает SelectionChanged ПОСРЕДИ InitializeComponent — раньше, чем присвоены поля
+        // окна. Без этой проверки первый же показ таблицы падал бы на ещё пустом _services.
+        if (!IsInitialized) return;
+        ShowRows();
+    }
+
     private void ShowRows()
     {
         if (RowsGrid is null) return;
 
         var shown = ParamTableEditing.FilterByApplicability(_rows, ApplicabilityCombo.SelectedItem as string);
+        // Второй отбор — по назначению. В рабочей версии список скрыт и ничего не выбрано, а
+        // ParamPurposes.Filter без выбора отдаёт всё как есть: отдельной развилки здесь не нужно.
+        var purposeOption = PurposeCombo?.SelectedItem as string;
+        shown = ParamPurposes.Filter(shown, purposeOption);
         var ordered = ParamTableEditing.Ordered(shown, _services.Db.GetParamGroupOrder());
+        ShowPurposeHint(purposeOption);
         ShowOwnColumns();
 
         // Применимость и условие — не поля строки, а ПОДЗАГОЛОВКИ блока: так они записаны в
@@ -289,6 +316,7 @@ public partial class ParamTableWindow : Window
                 ValueDisplay = row.Kind == ParamRowKind.Note ? "" : row.ValueDisplay,
                 Factory = row.Factory,
                 IsNote = row.Kind == ParamRowKind.Note,
+                PurposeLabel = ParamPurposes.Label(row.Purpose),
                 Change = change,
                 ChangeMark = change switch
                 {
@@ -306,6 +334,11 @@ public partial class ParamTableWindow : Window
         // встроенные. Гасим Visibility, а не удаляем колонку: удаление сбило бы счёт _builtInColumns,
         // по которому ShowOwnColumns отличает свои столбцы от встроенных.
         FactoryColumn.Visibility = ParamTableView.NeedsFactory(ordered) ? Visibility.Visible : Visibility.Collapsed;
+        // Колонка назначения — по факту разметки и только в бете: у накопленных таблиц разметка
+        // пустая, и пустой столбец отнимал бы ширину у названия параметра.
+        PurposeColumn.Visibility = AppIdentity.IsBeta && ordered.Any(r => ParamPurposes.Label(r.Purpose).Length > 0)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         ChangeColumn.Visibility = ParamTableView.NeedsChange(_diff, ordered) ? Visibility.Visible : Visibility.Collapsed;
 
         // Разделы таблицы — группировкой представления, а не своими строками-врезками в списке:
@@ -321,6 +354,19 @@ public partial class ParamTableWindow : Window
         RowsGrid.ItemsSource = view;
 
         FocusFoundRow(shownRows);
+    }
+
+    /// <summary>Сказать, сколько строк документа ещё не размечено. Молчать об этом нельзя:
+    /// человек, выбравший «для сервиса» и увидевший почти всю таблицу, решит, что отбор сломан, —
+    /// а на деле неразмеченные строки показываются намеренно, чтобы на объекте ничего не пропало.</summary>
+    private void ShowPurposeHint(string? option)
+    {
+        if (PurposeHint is null) return;
+
+        var unmarked = ParamPurposes.Unmarked(_rows);
+        var show = AppIdentity.IsBeta && ParamPurposes.TokenOf(option).Length > 0 && unmarked > 0;
+        PurposeHint.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        PurposeHint.Text = show ? $"без разметки: {unmarked} — показаны тоже" : "";
     }
 
     /// <summary>Подмотать таблицу к строке, из-за которой документ нашёлся поиском, и выделить её.
