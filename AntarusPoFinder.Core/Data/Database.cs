@@ -688,6 +688,32 @@ public partial class Database : IDisposable
                  repeats    INTEGER NOT NULL DEFAULT 1,
                  is_read    INTEGER NOT NULL DEFAULT 0
              );
+
+             -- QR-коды прошивок: по строке на версию, чтобы наклейку можно было показать и
+             -- напечатать, когда сетевого диска под рукой нет (см. FirmwareQrCodes и
+             -- Database.FwQrCodes.cs — там же разобрано, ПОЧЕМУ хранится ссылка с отпечатком, а не
+             -- готовая картинка).
+             --
+             -- Ключ — id записи прошивки, и связь с ON DELETE CASCADE здесь не украшение: удалили
+             -- версию — её QR обязан исчезнуть вместе с ней, и полагаться на то, что каждое место
+             -- удаления про это вспомнит, нельзя (PRAGMA foreign_keys=ON стоит в конструкторе).
+             -- sync_id рядом — только для журналов и разбора «а что это была за версия»: сам по себе
+             -- ключом он быть не может, у старых записей он пустой.
+             CREATE TABLE IF NOT EXISTS fw_qr_codes (
+                 fw_version_id INTEGER PRIMARY KEY REFERENCES fw_versions(id) ON DELETE CASCADE,
+                 sync_id       TEXT NOT NULL DEFAULT '',
+                 payload       TEXT NOT NULL DEFAULT '',
+                 kind          TEXT NOT NULL DEFAULT '',
+                 hole          TEXT NOT NULL DEFAULT '',
+                 -- Путь к документу, ИЗ КОТОРОГО собрана ссылка. Он не всегда равен
+                 -- instructions_path версии: открытое окно наклейки видит живой диск и строит ссылку
+                 -- на настоящий файл (папка «Инструкция» → конкретный .pdf), а фоновый проход диска
+                 -- не трогает и берёт то, что записано у версии. Без этой колонки проход затирал бы
+                 -- точную ссылку своей приблизительной на каждом тике.
+                 source_path   TEXT NOT NULL DEFAULT '',
+                 fingerprint   TEXT NOT NULL DEFAULT '',
+                 built_at      TEXT NOT NULL DEFAULT ''
+             );
              """);
 
         // Порядок важен: EnsureColumnsExist сначала — индексы строятся по колонкам, которых на старой

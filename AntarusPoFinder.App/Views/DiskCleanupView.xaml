@@ -8,14 +8,69 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"
+        <!-- ⚠️ ЛОКАЛЬНЫЕ КОПИИ — ТОЛЬКО В БЕТЕ (включается из кода, см. DiskCleanupView).
+             Блок стоит ПЕРВЫМ, но к остальной странице отношения не имеет и намеренно отделён
+             карточкой: ниже — чистка ОБЩЕГО диска (чужая работа, два шага, подтверждение по
+             строке), здесь — политика уборки СВОЕГО кэша, которая потом отрабатывает сама и молча.
+             Путать их нельзя, поэтому ни одной общей кнопки у них нет. -->
+        <Border x:Name="LocalCacheBlock" Grid.Row="0" Style="{StaticResource CardBorder}"
+                Margin="0,0,0,16" Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock Text="ЛОКАЛЬНЫЕ КОПИИ ПРОШИВОК" Style="{StaticResource MutedText}"
+                           FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                           Text="Копии нужны, чтобы прошивки находились, когда сетевой диск недоступен — поэтому они никуда не деваются. Здесь настраивается только то, как часто и насколько глубоко их подчищать. Уборка идёт сама и молча. Она НИКОГДА не трогает самую свежую копию каждой прошивки и копии, закреплённые вручную."/>
+
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="200"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Частота уборки" VerticalAlignment="Center"
+                               Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="CleanupModeCombo" Height="32" Margin="0,0,0,6"
+                              SelectionChanged="CleanupPolicy_Changed"
+                              ToolTip="«Не чистить» — копии не удаляются вовсе, кэш растёт, пока хватает места на диске."/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Держать копии, дней" VerticalAlignment="Center"
+                               Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="CleanupKeepDaysInput" Height="32" Margin="0,0,0,6"
+                             TextChanged="CleanupPolicy_Changed"
+                             ToolTip="Копию, которой столько дней не пользовались, можно убрать. 0 — по возрасту не убирать."/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Потолок объёма, ГБ" VerticalAlignment="Center"
+                               Margin="0,0,10,0" Foreground="{DynamicResource TextBrush}"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="CleanupMaxGbInput" Height="32"
+                             TextChanged="CleanupPolicy_Changed"
+                             ToolTip="Когда кэш перерастает этот размер, убираются самые давно не нужные копии. 0 — по объёму не убирать."/>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Почистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                            Click="CleanLocalNow_Click"
+                            ToolTip="Применить настроенные правила прямо сейчас, не дожидаясь срока"/>
+                    <TextBlock x:Name="LocalCacheStateText" VerticalAlignment="Center"
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"
                    Text="Ищет файлы, не подходящие под раскладку диска: прошивки с неправильным именем, документы и проекты не в своей папке, служебный мусор. Ничего не делается без вашей отметки. Расширения из белых списков (Настройки → Иерархия) и файлы, на которые ссылается база, мусором не считаются никогда, а всё незнакомое показывается без предложенного действия — решаете вы."/>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="ScanButton" Content="Проверить диск" Width="150" Margin="0,0,8,0" Click="Scan_Click"/>
             <Button x:Name="ApplyButton" Content="Применить отмеченное" Width="180" Margin="0,0,8,0"
                     IsEnabled="False" Click="Apply_Click"/>
@@ -26,7 +81,7 @@
             <Button Content="Сохранить отчёт в файл" Style="{StaticResource SecondaryButton}" Click="SaveReport_Click"/>
         </StackPanel>
 
-        <DataGrid Grid.Row="2" x:Name="FindingsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+        <DataGrid Grid.Row="3" x:Name="FindingsGrid" AutoGenerateColumns="False" IsReadOnly="True"
                   Style="{StaticResource RoomyDataGrid}"
                   MouseDoubleClick="FindingsGrid_MouseDoubleClick">
             <DataGrid.Columns>
@@ -78,7 +133,7 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <TextBlock Grid.Row="3" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}"
+        <TextBlock Grid.Row="4" x:Name="SummaryText" TextWrapping="Wrap" Style="{StaticResource MutedText}"
                    Margin="0,10,0,0"
                    Text="Нажмите «Проверить диск». Обход сетевой папки занимает минуты — окно при этом остаётся рабочим."/>
     </Grid>

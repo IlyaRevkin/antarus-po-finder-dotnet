@@ -42,7 +42,8 @@ public partial class InstructionLabelWindow : Window
     /// уж тем более читать полузаполненную форму.</summary>
     private bool _filling;
 
-    public InstructionLabelWindow(AppServices services, IAppHost host, string title, string subtitle, string? instructionFile)
+    public InstructionLabelWindow(AppServices services, IAppHost host, string title, string subtitle,
+        string? instructionFile, int fwVersionId = 0, string instructionRecordPath = "")
     {
         InitializeComponent();
         _services = services;
@@ -51,7 +52,7 @@ public partial class InstructionLabelWindow : Window
         _subtitle = subtitle;
         _layout = LabelLayout.FromConfig(services.Cfg);
 
-        var (content, explanation) = ResolveQrContent(services, instructionFile);
+        var (content, explanation) = ResolveQrContent(services, instructionFile, fwVersionId, instructionRecordPath);
         _qrContent = content;
 
         HeaderText.Text = $"{title}\n{subtitle}".Trim();
@@ -388,30 +389,69 @@ public partial class InstructionLabelWindow : Window
 
     /// <summary>Что зашить в QR и как это объяснить человеку. Ссылка считается от корня диска
     /// прошивок: относительный путь файла инструкции надо брать от него, иначе адрес соберётся с
-    /// чужим хвостом.</summary>
-    private static (string Content, string Explanation) ResolveQrContent(AppServices services, string? file)
+    /// чужим хвостом.
+    ///
+    /// <b>Сборку содержимого делает ядро</b> (<see cref="FirmwareQrCodes.Build"/>) — здесь остаётся
+    /// только объяснение словами. Раньше правило «сначала веб-ссылка, иначе сетевой путь» жило
+    /// прямо тут; теперь по нему же заполняется таблица сохранённых кодов, и две реализации одного
+    /// правила разошлись бы ровно в том месте, где наклейка из базы перестала бы совпадать с
+    /// наклейкой с живого диска.
+    ///
+    /// <b>⚠️ Сохранённый код — только бета.</b> При <see cref="AppIdentity.IsBeta"/> и известном
+    /// номере версии содержимое проходит через <see cref="FirmwareQrSweep.Ensure"/>: ответ тот же,
+    /// но попутно обновляется строка в <c>fw_qr_codes</c>, а если диска под рукой нет (резолвер
+    /// документа вернул пусто), берётся посчитанное заранее. В рабочей версии всё ровно как было.</summary>
+    private static (string Content, string Explanation) ResolveQrContent(AppServices services, string? file,
+        int fwVersionId, string instructionRecordPath)
     {
-        if (string.IsNullOrWhiteSpace(file))
-            return ("", "Файл инструкции не найден — печатать нечего.");
-
         var baseUrl = services.Cfg.InstructionBaseUrl();
         var root = services.Cfg.RootPath();
+        var translit = services.Cfg.Translit();
 
         // Ссылка обязана совпасть с тем, что реально ляжет на хостинг, причём в двух местах сразу:
         // справочник написаний тот же (см. TranslitMap), и расширение — тоже итоговое. Инструкция в
         // формате Word уезжает туда собранным PDF (см. InstructionPublisher), и наклейка, ведущая на
         // .docx, вела бы в пустоту — при том что напечатана и наклеена она обычно раньше, чем кто-то
-        // это заметит.
-        var published = InstructionPublisher.AsPublishedName(file);
-        if (LabelLinkBuilder.BuildUrl(baseUrl, root, published, services.Cfg.Translit()) is { } url)
-            return (url, $"В QR: {url}");
+        // это заметит. Обе тонкости живут внутри FirmwareQrCodes.Build.
+        var useLedger = AppIdentity.IsBeta && fwVersionId > 0;
+        var payload = useLedger
+            ? FirmwareQrSweep.Ensure(services.Db, fwVersionId, syncId: "", sourcePath: file ?? "",
+                instructionPath: instructionRecordPath, options: QrOptions(services), toUnc: ToUnc)
+            : FirmwareQrCodes.Build(
+                new FirmwareQrCodes.Inputs(file ?? "", instructionRecordPath, baseUrl, root, translit.Signature),
+                translit, ToUnc);
 
-        var unc = NetworkPathHelper.TryResolveUnc(file) ?? file;
-        var why = string.IsNullOrWhiteSpace(baseUrl)
-            ? "Веб-адрес диска инструкций не задан (Настройки → Печать), поэтому в QR — сетевой путь: с компьютера откроется, с телефона нет."
-            : "Файл лежит вне настроенного диска инструкций, поэтому в QR — сетевой путь, а не ссылка.";
-        return (unc, $"{why}\nВ QR: {unc}");
+        if (payload.HasContent)
+        {
+            if (payload.Kind == FirmwareQrCodes.PayloadKind.Url) return (payload.Content, $"В QR: {payload.Content}");
+
+            var why = string.IsNullOrWhiteSpace(baseUrl)
+                ? "Веб-адрес диска инструкций не задан (Настройки → Печать), поэтому в QR — сетевой путь: с компьютера откроется, с телефона нет."
+                : "Файл лежит вне настроенного диска инструкций, поэтому в QR — сетевой путь, а не ссылка.";
+            return (payload.Content, $"{why}\nВ QR: {payload.Content}");
+        }
+
+        // ⚠️ ТОЛЬКО БЕТА. Сюда попадают, когда построить ссылку не из чего ПРЯМО СЕЙЧАС: документа
+        // не нашли (диск отвалился) и у версии не записан путь. Последнее, что мы про эту версию
+        // знали, всё равно лежит в базе — и это ровно то, ради чего таблица заведена.
+        if (useLedger && FirmwareQrSweep.LastKnown(services.Db, fwVersionId) is { Length: > 0 } last)
+            return (last, "Сетевой диск сейчас недоступен — показан сохранённый код этой версии.\n"
+                          + $"В QR: {last}");
+
+        return ("", "Файл инструкции не найден — печатать нечего.");
     }
+
+    /// <summary>Настройки, от которых зависит ссылка, одной записью — чтобы окно и фоновый проход
+    /// собирали её из ОДНИХ И ТЕХ ЖЕ значений (см. FirmwareQrSweep.Options).</summary>
+    internal static FirmwareQrSweep.Options QrOptions(AppServices services) => new(
+        services.Cfg.InstructionBaseUrl(),
+        services.Cfg.RootPath(),
+        services.Cfg.Translit(),
+        LabelLayout.FromConfig(services.Cfg).EffectiveHoleText());
+
+    /// <summary>Локальный путь → сетевой. Ядру этот перевод передаётся функцией: он завязан на
+    /// Windows-API подключённых дисков и живёт в приложении.</summary>
+    private static string ToUnc(string path) => NetworkPathHelper.TryResolveUnc(path) ?? path;
 
     private void Print_Click(object sender, RoutedEventArgs e)
     {
@@ -529,9 +569,11 @@ public partial class InstructionLabelWindow : Window
     /// <summary>Открыть окно для конкретной прошивки. Файл инструкции ищется тем же резолвером, что и
     /// пункты «открыть/печать инструкции» на карточке — QR обязан вести на тот же документ.</summary>
     public static void ShowFor(Window? owner, AppServices services, IAppHost host,
-        string title, string subtitle, string? instructionFile)
+        string title, string subtitle, string? instructionFile, int fwVersionId = 0,
+        string instructionRecordPath = "")
     {
-        var dlg = new InstructionLabelWindow(services, host, title, subtitle, instructionFile) { Owner = owner };
+        var dlg = new InstructionLabelWindow(services, host, title, subtitle, instructionFile,
+            fwVersionId, instructionRecordPath) { Owner = owner };
         dlg.ShowDialog();
     }
 }

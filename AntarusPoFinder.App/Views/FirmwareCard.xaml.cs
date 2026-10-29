@@ -31,6 +31,13 @@ public sealed record FirmwareCardFlags
     public bool HasInstructions { get; init; }
     public bool HasModbus { get; init; }
 
+    /// <summary>⚠️ ТОЛЬКО БЕТА. У этой версии есть сохранённый QR-код (таблица <c>fw_qr_codes</c>, см.
+    /// FirmwareQrCodes). В отличие от трёх признаков выше, этот берётся из БАЗЫ, а не обходом диска, —
+    /// и именно в этом его смысл: когда сетевой диск отвалился, обход не находит ничего, и кнопка
+    /// «QR инструкции» исчезала с карточки целиком. Ссылка же от доступности диска не зависит: её
+    /// посчитали заранее, и напечатать наклейку можно хоть на объекте без сети.</summary>
+    public bool HasStoredQr { get; init; }
+
     /// <summary>У инструкции есть исходный документ Word (.docx/.doc) — можно предложить «Редактировать
     /// инструкцию». Считается тем же обходом, что и HasInstructions (см. SearchView.ResolveInstruction).</summary>
     public bool HasInstructionDocx { get; init; }
@@ -385,7 +392,11 @@ public partial class FirmwareCard : UserControl
         // Кнопка есть и когда инструкция ещё не написана, а в папке лежит только заглушка: ссылка
         // указывает на тот же файл, которым документ станет позже, поэтому напечатанная сегодня
         // наклейка не устареет (см. FirmwareCardFlags.HasInstructionStub).
-        if (flags.HasInstructions || flags.HasInstructionStub)
+        //
+        // ⚠️ HasStoredQr — ТОЛЬКО БЕТА (см. его доку): сохранённый код даёт кнопке право на жизнь
+        // даже когда обход диска не нашёл ничего, потому что диска сейчас нет. Раньше в этом
+        // случае кнопка просто пропадала — вместе с единственным способом напечатать наклейку.
+        if (flags.HasInstructions || flags.HasInstructionStub || flags.HasStoredQr)
         {
             var qrBtn = MakeActionButton("QR инструкции",
                 (_, _) => InstructionLabelRequested?.Invoke(this, EventArgs.Empty));

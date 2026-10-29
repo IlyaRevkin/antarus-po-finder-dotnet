@@ -30,6 +30,20 @@ public sealed class TranslitMap
     public IReadOnlyDictionary<string, string> Overrides => _overrides;
     public int Count => _overrides.Count;
 
+    /// <summary>Устойчивая подпись содержимого справочника — для отпечатков, по которым решают, не
+    /// пора ли пересчитать производные от него данные (см. <see cref="FirmwareQrCodes.Fingerprint"/>:
+    /// переименовали «Инструкция» → «manual», и все сохранённые ссылки обязаны перестроиться).
+    ///
+    /// Считается от ПАР, а не от исходного JSON: тот же справочник, пересохранённый с другим
+    /// порядком ключей или отступами, — это тот же справочник, и гонять из-за него перестройку
+    /// незачем. Порядок фиксируется сортировкой, регистр ключа не важен ровно так же, как и при
+    /// поиске перевода.</summary>
+    public string Signature => _overrides.Count == 0
+        ? ""
+        : string.Join(";", _overrides
+            .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(p => p.Key.ToLowerInvariant() + "=" + p.Value));
+
     /// <summary>Разбор сохранённого справочника. Битый JSON — пустой справочник, а не исключение:
     /// испорченная настройка не должна валить выкладку целиком, автоперевод отработает и без неё.</summary>
     public static TranslitMap Parse(string? json)
