@@ -557,6 +557,46 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>Страница тикетов в бете показывает СПИСОК, а не ряд кнопок: «Подробнее»,
+    /// «Обновить» и «Выгрузить…» с неё убраны (первые две стали автоматическими, третья переехала
+    /// в «Ещё»), а оставшиеся действия подняты НАД таблицей — иначе в невысоком окне они уезжали за
+    /// нижний край, о чём и была жалоба.
+    ///
+    /// Проверяется в обеих сборках: в рабочей версии страница обязана остаться прежней, и «заодно
+    /// убралось и там» — ровно та ошибка, которую руками никто не заметит.</summary>
+    [Fact]
+    public void TicketsView_BetaHidesManualButtonsAndLiftsActions()
+    {
+        Ui.Run(() =>
+        {
+            var services = Services();
+            var page = new TicketsView(services, new MainWindowViewModel(services));
+            Render(page);
+
+            var beta = AntarusPoFinder.Core.Domain.AppIdentity.IsBeta;
+            var expected = beta ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var name in new[] { "DetailBtn", "RefreshBtn", "ExportBtn" })
+            {
+                var button = page.FindName(name) as System.Windows.Controls.Button;
+                Assert.NotNull(button);
+                Assert.Equal(expected, button!.Visibility);
+            }
+
+            // «Выгрузить…» не исчезла — она в «Ещё»: автовыгрузка возит записи тикетов, но НЕ
+            // вложения, и собрать архив вместе с ними больше нечем.
+            var more = page.FindName("MoreBtn") as System.Windows.Controls.Button;
+            Assert.NotNull(more);
+            Assert.Equal(beta ? Visibility.Visible : Visibility.Collapsed, more!.Visibility);
+
+            // Где живёт ряд действий: в бете — в полосе над таблицей, в рабочей версии — под ней.
+            var actions = page.FindName("ActionsRow") as System.Windows.FrameworkElement;
+            var host = page.FindName("TopActionsHost") as System.Windows.Controls.Panel;
+            Assert.NotNull(actions);
+            Assert.NotNull(host);
+            Assert.Equal(beta, host!.Children.Contains(actions));
+        });
+    }
+
     // ── Окно «кому положить эту инструкцию» ───────────────────────────────────
     //
     // Единственное окно в этом файле, и попало оно сюда не случайно: иконка у него задана длинным
