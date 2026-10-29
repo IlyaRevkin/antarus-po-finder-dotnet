@@ -80,7 +80,7 @@ public static class InstructionOwnership
             var path = Path.Combine(folder, MarkerFileName);
             if (!File.Exists(path)) return null;
 
-            string? key = null, version = null, stamped = null;
+            string? key = null, version = null, stamped = null, linked = null;
             foreach (var line in File.ReadAllLines(path, Encoding.UTF8))
             {
                 var split = line.IndexOf('=');
@@ -90,15 +90,18 @@ public static class InstructionOwnership
                 if (string.Equals(name, "owner", StringComparison.OrdinalIgnoreCase)) key = value;
                 else if (string.Equals(name, "version", StringComparison.OrdinalIgnoreCase)) version = value;
                 else if (string.Equals(name, "stamped", StringComparison.OrdinalIgnoreCase)) stamped = value;
+                else if (string.Equals(name, "linked", StringComparison.OrdinalIgnoreCase)) linked = value;
             }
-            return string.IsNullOrWhiteSpace(key) ? null : new InstructionOwner(key!, version ?? "", stamped ?? "");
+            return string.IsNullOrWhiteSpace(key)
+                ? null
+                : new InstructionOwner(key!, version ?? "", stamped ?? "", linked ?? "");
         }
         catch (Exception) { return null; }
     }
 
     /// <summary>Поставить метку. Не бросает: метка — подспорье следующей загрузке, и ронять из-за неё
     /// копирование инструкции незачем.</summary>
-    public static void Mark(string? folder, string ownerKey, string versionRaw)
+    public static void Mark(string? folder, string ownerKey, string versionRaw, string linkedTo = "")
     {
         if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(ownerKey)) return;
         try
@@ -116,11 +119,31 @@ public static class InstructionOwnership
                 .Append("owner=").AppendLine(ownerKey)
                 .Append("version=").AppendLine(versionRaw ?? "")
                 .Append("stamped=").AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))
+                .Append("linked=").AppendLine(linkedTo ?? "")
                 .ToString();
             File.WriteAllText(path, text, Encoding.UTF8);
             File.SetAttributes(path, FileAttributes.Hidden);
         }
         catch (Exception) { /* метка необязательна, см. summary */ }
+    }
+
+    /// <summary>Записать, что документ ИЗ ЭТОЙ папки уже привязан к другой версии
+    /// (<see cref="OrphanInstructions"/>): версия, которой папка принадлежала, пропала или была
+    /// перезалита с новой датой, и её инструкцию перенесли вперёд.
+    ///
+    /// Отметка живёт НА ДИСКЕ, а не в базе, и это осознанно: диск общий, а база у каждого своя.
+    /// Запиши мы решение только у себя — у коллеги тот же документ продолжал бы всплывать как
+    /// потерянный, и каждый разбирал бы одно и то же заново. Ровно тот же довод, по которому решение
+    /// модерации едет строкой в CHANGELOG.md (см. ModerationOnDisk).
+    ///
+    /// Сам документ при этом ОСТАЁТСЯ на месте — он копируется, а не переезжает. Если потерянная
+    /// версия когда-нибудь найдётся (восстановили из резервной копии, вернули папку), её инструкция
+    /// лежит ровно там, где лежала, и ничего искать не придётся.</summary>
+    public static void MarkLinked(string? folder, string linkedToVersionRaw)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return;
+        var existing = Read(folder);
+        Mark(folder, existing?.Key ?? NewOwnerKey(), existing?.VersionRaw ?? "", linkedToVersionRaw);
     }
 
     /// <summary>Папка — СОБСТВЕННАЯ папка документов этой версии, а не общая папка контроллера. Только
@@ -215,8 +238,10 @@ public static class InstructionOwnership
 
 /// <summary>Кто хозяин папки «Инструкция» версии. <paramref name="Key"/> — случайный ключ жизни
 /// номера, <paramref name="VersionRaw"/> — строка версии, которой папка принадлежала,
-/// <paramref name="Stamped"/> — когда пометили (только для человека, читающего файл глазами).</summary>
-public sealed record InstructionOwner(string Key, string VersionRaw, string Stamped);
+/// <paramref name="Stamped"/> — когда пометили (только для человека, читающего файл глазами),
+/// <paramref name="LinkedTo"/> — версия, которой документ из этой папки уже отдали, когда её хозяин
+/// пропал (пусто у обычной папки; см. <see cref="InstructionOwnership.MarkLinked"/>).</summary>
+public sealed record InstructionOwner(string Key, string VersionRaw, string Stamped, string LinkedTo = "");
 
 /// <summary>Что сделали с документом прежней жизни номера. Все поля null — ничего не делали (и это
 /// обычный исход).</summary>
