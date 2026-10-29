@@ -159,6 +159,9 @@ public partial class TicketDetailDialog : Window
         // (TicketSyncService). CurrentAdLogin у входа аварийным администратором пуст, и реплика
         // тогда подписывалась прочерком, хотя рядом в шапке стояло имя.
         _services.Db.AddTicketComment(_ticket.Id, _services.CurrentUserName, _services.Cfg.CurrentRole(), text);
+        // Реплика уезжает тем же молчаливым каналом, что и сам тикет: обсуждение без ответа той
+        // стороны — это половина разговора, и ради неё человек не должен вспоминать про выгрузку.
+        TicketSyncService.NoteForAutoDrop(_services, _ticket, Core.Services.TicketAutoDrop.Event.Comment, text);
         NewCommentInput.Clear();
         ReloadComments();
     }

@@ -30,9 +30,14 @@ public static class InstructionDocResolver
     /// <summary>storedPath — путь, записанный к версии в БД (файл или папка, может уже не существовать);
     /// sharedFolder — общая папка «Инструкция» рядом с папкой контроллера (каноническая папка конвертации).
     /// Папкой инструкции считается общая папка, если она есть, — именно в ней лежат docx и его pdf.</summary>
-    /// <param name="excludeSubfolder">Подпапка, которую не считать частью документа — «Прежние
-    /// редакции» паспорта шкафа (см. DocFileResolver.Resolve). null — вся папка целиком, как было.</param>
-    public static InstructionDoc Resolve(string? storedPath, string? sharedFolder, string? excludeSubfolder = null)
+    /// <param name="excludeSubfolder">Подпапка, которую не считать частью документа. По умолчанию —
+    /// «Прежние редакции» (<see cref="InstructionStorage.PreviousFolderName"/>), и это НЕ косметика:
+    /// туда уезжает прежняя редакция при перезаливке, и считайся она документом наравне с остальными
+    /// — «самым свежим файлом в папке» рано или поздно оказался бы архив, а карточка и QR показывали
+    /// бы исправленной инструкции ту самую редакцию с ошибкой, ради замены которой всё и делалось.
+    /// Пустая строка — вся папка целиком.</param>
+    public static InstructionDoc Resolve(string? storedPath, string? sharedFolder,
+        string? excludeSubfolder = InstructionStorage.PreviousFolderName)
     {
         var newest = DocFileResolver.Resolve(storedPath, sharedFolder, excludeSubfolder);
         var folder = FolderOf(newest, storedPath, sharedFolder);

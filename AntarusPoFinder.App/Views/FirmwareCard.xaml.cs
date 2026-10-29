@@ -364,6 +364,10 @@ public partial class FirmwareCard : UserControl
                 ? "Наклейка со ссылкой на инструкцию: предпросмотр, настройка макета и печать"
                 : "Инструкция ещё в разработке, но ссылка уже постоянная: наклейку можно печатать — "
                   + "когда документ допишут, тот же QR откроет его";
+            // ⚠️ ЗНАЧОК ВМЕСТО ПОДПИСИ — ТОЛЬКО В БЕТЕ. Просьба наладчиков: «QR показывать значком,
+            // а не подписью» — ряд действий короче, а сам QR узнаётся с одного взгляда. Это правка
+            // вида, не ошибка, поэтому в рабочей версии кнопка остаётся со своим текстом.
+            if (AppIdentity.IsBeta) MakeIconOnly(qrBtn, "Icon.QrCode");
             ActionsPanel.Children.Add(qrBtn);
         }
 
@@ -831,6 +835,36 @@ public partial class FirmwareCard : UserControl
         };
         btn.Click += onClick;
         return btn;
+    }
+
+    /// <summary>Меняет подпись кнопки на значок, оставляя прежний текст доступным: он уходит в
+    /// AutomationProperties.Name (его читают экранный диктор и самоснимок, которому кнопки нужно
+    /// опознавать по имени) и в подсказку, если своей у кнопки ещё нет. Кисть значка привязана к
+    /// Foreground самой кнопки, а не задана цветом: иначе при наведении и в тёмной теме знак остался
+    /// бы прежнего цвета, а подпись рядом сменила бы свой.</summary>
+    private void MakeIconOnly(Button btn, string iconKey)
+    {
+        var caption = btn.Content as string;
+        var glyph = new System.Windows.Shapes.Path
+        {
+            Data = (System.Windows.Media.Geometry)FindResource(iconKey),
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            Width = 15,
+            Height = 15,
+        };
+        glyph.SetBinding(System.Windows.Shapes.Shape.FillProperty, new System.Windows.Data.Binding(nameof(Control.Foreground))
+        {
+            RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor)
+            {
+                AncestorType = typeof(Button),
+            },
+        });
+        btn.Content = glyph;
+        if (!string.IsNullOrEmpty(caption))
+        {
+            System.Windows.Automation.AutomationProperties.SetName(btn, caption);
+            btn.ToolTip ??= caption;
+        }
     }
 
     private void AddMenuHeader(string text)

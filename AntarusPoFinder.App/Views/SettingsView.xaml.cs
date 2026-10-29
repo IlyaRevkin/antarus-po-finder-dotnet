@@ -1545,6 +1545,53 @@ public partial class SettingsView : UserControl
 
         ThemeCombo.ItemsSource = themes;
         ThemeCombo.SelectedItem = themes.FirstOrDefault(t => t.Id == _services.Cfg.Theme()) ?? themes[0];
+        ShowGlassOpacity();
+    }
+
+    /// <summary>Показать ползунок прозрачности, если выбрана тема со стеклом, и увести его с глаз,
+    /// если нет. Значение при этом не сбрасывается: вернувшись на «Стекло», человек находит своё.</summary>
+    private void ShowGlassOpacity()
+    {
+        var glass = ThemeCatalog.Resolve(_services.Cfg.Theme()).Backdrop;
+        GlassOpacityPanel.Visibility = glass ? Visibility.Visible : Visibility.Collapsed;
+        if (!glass) return;
+
+        var saved = _services.Cfg.GlassOpacity();
+        var percent = saved > 0 ? GlassSurface.Clamp(saved) : GlassSurface.Default;
+        // Под флагом: присваивание Value поднимает ValueChanged, и без него открытие страницы
+        // пересобирало бы тему заново на каждом заходе в настройки.
+        _loadingGlass = true;
+        try { GlassOpacitySlider.Value = percent; }
+        finally { _loadingGlass = false; }
+        GlassOpacityValue.Text = percent + " %";
+    }
+
+    private bool _loadingGlass;
+
+    private void GlassOpacity_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // IsInitialized — не перестраховка, а починка падения. Разметка задаёт ползунку Minimum=40,
+        // и WPF тут же подтягивает значение с нуля до сорока, то есть ValueChanged срабатывает ПОСРЕДИ
+        // InitializeComponent — раньше, чем конструктор успел присвоить _services. Страница настроек
+        // от этого падала целиком, с NullReferenceException на ровном месте; поймали тесты отрисовки
+        // (ViewsRenderTests), а не глаза. Ровно та гонка инициализации XAML, ради которой живое
+        // открытие окна перед релизом и обязательно.
+        if (!IsInitialized || _loadingGeneral || _loadingGlass) return;
+        var percent = GlassSurface.Clamp((int)Math.Round(e.NewValue));
+        GlassOpacityValue.Text = percent + " %";
+        _services.Cfg.SetGlassOpacity(percent);
+        ThemeManager.GlassOpacity = percent;
+        // Применяем тему целиком, а не подменяем кисти руками: пересчёт поверхностей живёт в одном
+        // месте (ThemeManager.Apply), и вторая его копия здесь разошлась бы с первой при первой же правке.
+        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+    }
+
+    private void GlassOpacityReset_Click(object sender, RoutedEventArgs e)
+    {
+        _services.Cfg.SetGlassOpacity(GlassSurface.Default);
+        ThemeManager.GlassOpacity = GlassSurface.Default;
+        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+        ShowGlassOpacity();
     }
 
     private void ThemeCombo_Changed(object sender, SelectionChangedEventArgs e)
@@ -1554,6 +1601,7 @@ public partial class SettingsView : UserControl
 
         _services.Cfg.SetTheme(theme.Id);
         ThemeManager.Apply(theme.Id, ThemeManager.CurrentAccent);
+        ShowGlassOpacity();
         // Образец цвета перерисовываем по той же причине, что и у тумблера: оттенок под курсором и
         // подсветка строки считаются с оглядкой на тему.
         ShowAccent(AccentPalette.NormalizeStored(_services.Cfg.Accent()));
@@ -4399,6 +4447,98 @@ public partial class SettingsView : UserControl
         QuickAppsModeSidebarRadio.Checked += QuickAppsMode_Changed;
         QuickAppsModeTopRadio.Checked += QuickAppsMode_Changed;
         QuickAppsModeTopLabeledRadio.Checked += QuickAppsMode_Changed;
+
+        EnableQuickAppsDragDrop();
+    }
+
+    /// <summary>Перетаскивание в «Быстрый доступ» — переделка вида, а значит только бета. Код общий
+    /// (бета и рабочая версия отличаются константой сборки), поэтому развилка стоит здесь, явно:
+    /// в рабочей версии список остаётся прежним — «Добавить», «Удалить» и правка в таблице.</summary>
+    private void EnableQuickAppsDragDrop()
+    {
+        AppsGrid.AllowDrop = AppIdentity.IsBeta;
+        QuickAppsDragHint.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private Point _appDragStart;
+    private AppRow? _appDragRow;
+
+    /// <summary>Строка, на которой стоит курсор. Идём вверх по дереву от того, во что ткнули: клик
+    /// попадает в ячейку, в текст внутри неё или в саму строку — а знать нам надо строку.</summary>
+    private static DataGridRow? RowUnder(DependencyObject? source)
+    {
+        while (source is not null and not DataGridRow)
+            source = VisualTreeHelper.GetParent(source);
+        return source as DataGridRow;
+    }
+
+    private void AppsGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop) return;
+        _appDragStart = e.GetPosition(null);
+        _appDragRow = RowUnder(e.OriginalSource as DependencyObject)?.Item as AppRow;
+    }
+
+    /// <summary>Перенос начинается только после заметного движения с зажатой кнопкой — иначе обычный
+    /// клик по ячейке (а строки здесь ещё и правят прямо в таблице) превращался бы в перетаскивание,
+    /// и отредактировать название стало бы нельзя.</summary>
+    private void AppsGrid_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop || _appDragRow is null) return;
+        if (e.LeftButton != MouseButtonState.Pressed) { _appDragRow = null; return; }
+
+        var now = e.GetPosition(null);
+        if (Math.Abs(now.X - _appDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(now.Y - _appDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        // В DataObject кладём метку, а не саму строку: WPF тащит данные через COM, и объект страницы
+        // туда класть незачем — кто переносится, мы и так помним в поле.
+        DragDrop.DoDragDrop(AppsGrid, new DataObject(QuickAppRowFormat, QuickAppRowFormat), DragDropEffects.Move);
+    }
+
+    private const string QuickAppRowFormat = "AntarusQuickAppRow";
+
+    private void AppsGrid_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = !AppsGrid.AllowDrop ? DragDropEffects.None
+            : e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy
+            : e.Data.GetDataPresent(QuickAppRowFormat) && _appDragRow is not null ? DragDropEffects.Move
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void AppsGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (!AppsGrid.AllowDrop) return;
+        if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
+
+        // Перенос строки внутри списка.
+        if (e.Data.GetDataPresent(QuickAppRowFormat) && _appDragRow is not null)
+        {
+            var target = RowUnder(e.OriginalSource as DependencyObject)?.Item as AppRow;
+            var from = apps.IndexOf(_appDragRow);
+            // Бросили мимо строк (ниже последней) — значит в конец: иначе перенос в самый низ
+            // требовал бы попасть ровно в последнюю строку, а это неудобно именно тем, кому нужно.
+            var to = target is null ? apps.Count - 1 : apps.IndexOf(target);
+            _appDragRow = null;
+            if (from < 0 || to < 0 || from == to) return;
+            QuickAppOrder.Move(apps, from, to);
+            SaveApps("Порядок быстрого доступа сохранён");
+            return;
+        }
+
+        // Притащили файлы или папки из проводника.
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped) return;
+        var added = 0;
+        foreach (var path in QuickAppOrder.Acceptable(dropped))
+        {
+            apps.Add(new AppRow { Name = QuickAppOrder.NameFor(path), Path = path });
+            added++;
+        }
+        if (added == 0) return;
+        SaveApps(added == 1
+            ? $"Добавлено в быстрый доступ: {apps[^1].Name}"
+            : $"Добавлено в быстрый доступ: {added}");
     }
 
     private void QuickAppsMode_Changed(object sender, RoutedEventArgs e)

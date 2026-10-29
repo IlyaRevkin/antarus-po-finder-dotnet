@@ -241,6 +241,10 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         CurrentAccent = AccentPalette.NormalizeStored(_services.Cfg.Accent());
 
         ApplyRole(CurrentRole);
+        // Прозрачность стекла ставится ДО первого Apply: иначе окно на долю секунды показалось бы
+        // с заводской альфой и перерисовалось — мигание на запуске, которое видно и раздражает.
+        var glass = _services.Cfg.GlassOpacity();
+        if (glass > 0) ThemeManager.GlassOpacity = GlassSurface.Clamp(glass);
         ThemeManager.Apply(CurrentTheme, CurrentAccent);
         ReloadSidebarApps();
         Navigate(FirstAllowedPageId(CurrentRole));
@@ -407,6 +411,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // файлов, и выход из этого метода по «бакет не настроен» не должен её отменять.
         // Ошибку не показываем: это фоновая мелочь, человек её не просил и чинить ему нечего.
         _ = LoaderDiagnostics.FlushAsync(ConfigService.AppData,
+            _services.Cfg.DiagnosticsDropUrl(), _services.Cfg.DiagnosticsDropCode());
+
+        // ТИКЕТЫ — тем же каналом и по той же причине (см. Core/Services/TicketAutoDrop): жалоба
+        // нужна тому, кто чинит программу, а он вне конторской сети, и ждать, пока кто-нибудь
+        // вспомнит про кнопку «Выгрузить…», значит не узнать о поломке вовсе. Тоже ДО проверки
+        // бакета: ключей от S3 на машине может не быть, а тикет завести могут как раз на ней.
+        // Ошибку не показываем — фоновая работа обязана быть не слышна, очередь повторит сама.
+        _ = TicketAutoDrop.FlushAsync(ConfigService.AppData,
             _services.Cfg.DiagnosticsDropUrl(), _services.Cfg.DiagnosticsDropCode());
 
         var storage = new S3TicketStorage(_services.Cfg.S3());

@@ -201,6 +201,25 @@ public partial class Database
         });
     }
 
+    /// <summary>Переставить ссылку на инструкцию с одного пути на другой у ВСЕХ записей, которые на
+    /// него смотрели. Повод ровно один: документ уехал в «Прежние редакции», потому что номер версии
+    /// пошёл по второму кругу (см. InstructionOwnership). Прежняя версия при этом никуда не делась —
+    /// и её карточка обязана по-прежнему открывать её инструкцию, а не пустоту.
+    ///
+    /// Сравнение строкой, без приведения к форме нашего диска: у коллеги путь записан в форме его
+    /// буквы диска, и переставлять ЕГО ссылку мы не вправе — он увидит это обменом конфига и
+    /// поправит у себя сам, когда архив доедет до него вместе с диском. Возвращает число
+    /// переставленных записей.</summary>
+    public int RepointInstructionPath(string fromPath, string toPath)
+    {
+        if (string.IsNullOrWhiteSpace(fromPath) || string.IsNullOrWhiteSpace(toPath)) return 0;
+        return ExecuteNonQuery("UPDATE fw_versions SET instructions_path=@to WHERE instructions_path=@from", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@to", toPath);
+            cmd.Parameters.AddWithValue("@from", fromPath);
+        });
+    }
+
     /// <summary>Названия группы/подтипа/контроллера для версии — нужны, чтобы построить пути общих
     /// папок контроллера (Карта ВВ, Инструкция, HMI…) там, где на руках только сама запись версии
     /// (например EditFirmwareDialog, открытый из поиска, где join'а с именами не было).</summary>

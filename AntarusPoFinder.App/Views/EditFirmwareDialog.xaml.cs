@@ -68,6 +68,13 @@ public partial class EditFirmwareDialog : Window
     /// показать это пользователю.</summary>
     public FirmwareAttachmentsResult? AttachmentsResult { get; private set; }
 
+    /// <summary>Версии, которым человек велел положить ту же инструкцию (окно
+    /// <see cref="InstructionScopeDialog"/>), и что из этого вышло. Набор живёт до сохранения:
+    /// раздача идёт на общий диск и на хостинг, и делать её по нажатию «Ещё версиям…» значило бы
+    /// применять необратимое до того, как человек нажал «Сохранить».</summary>
+    private List<FwVersionRecord> _instructionScope = new();
+    public InstructionBroadcastResult? BroadcastResult { get; private set; }
+
     /// <summary>Что изменилось в списке ДОП. МАТЕРИАЛОВ версии (см. FirmwareExtraFilesService) — по
     /// той же причине, что и AttachmentsResult: копирование файлов и правка записей делаются прямо
     /// здесь, вызывающему остаётся показать итог. Null — блок не показывался или ничего не меняли.</summary>
@@ -199,6 +206,9 @@ public partial class EditFirmwareDialog : Window
                 // Модератору отбирать нечего: положить правильный документ поверх неправильного он
                 // по-прежнему может, имя у него каноническое (см. InstructionNaming).
                 InstructionsDeleteBtn.IsEnabled = IsAdministrator;
+                // Раздача инструкции нескольким версиям — новая возможность, и пока она только в
+                // бете: в рабочей версии ряд кнопок у инструкции остаётся прежним.
+                if (AppIdentity.IsBeta) InstructionsScopeBtn.Visibility = Visibility.Visible;
                 if (!IsAdministrator)
                     InstructionsDeleteBtn.ToolTip = "Удалять инструкцию может только администратор. " +
                         "Заменить её можно, выбрав правильный документ в поле слева.";
@@ -941,6 +951,49 @@ public partial class EditFirmwareDialog : Window
     /// Действует сразу, а не по «Сохранить»: диалог можно закрыть крестиком, и обещать возможность
     /// передумать там, где её нет, нельзя. Поэтому и подтверждение показывает целиком, что именно
     /// исчезнет, — план считается до вопроса (см. <see cref="InstructionRemoval.Plan"/>).</summary>
+    /// <summary>«Ещё версиям…» — выбрать, кому, кроме этой версии, положить тот же документ.
+    /// Само копирование здесь НЕ происходит: окно только собирает набор, а кладётся документ при
+    /// сохранении, вместе с остальными доп. файлами и в том же фоновом потоке (см.
+    /// <see cref="Save_Click"/>). Иначе необратимая работа по общему диску делалась бы до того, как
+    /// человек согласился сохранить правку, и «Отмена» переставала бы что-либо отменять.</summary>
+    private void InstructionsScope_Click(object sender, RoutedEventArgs e)
+    {
+        var source = InstructionsInput.Text.Trim();
+        if (source.Length == 0 || (!File.Exists(source) && !Directory.Exists(source)))
+        {
+            AppMessageBox.Show("Сначала выберите документ в поле «Инструкция» — раздавать нечего.",
+                "Инструкция другим версиям", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var targets = InstructionBroadcast.Targets(_db, _record, _services.Cfg.RootPath());
+        if (targets.Count <= 1)
+        {
+            AppMessageBox.Show("У этого шкафа других версий нет.",
+                "Инструкция другим версиям", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dlg = new InstructionScopeDialog(targets, source, _title) { Owner = this };
+        if (dlg.ShowDialog() != true) return;
+
+        _instructionScope = dlg.Selected;
+        InstructionsScopeBtn.Content = _instructionScope.Count > 0
+            ? $"Ещё версиям: {_instructionScope.Count}"
+            : "Ещё версиям…";
+    }
+
+    /// <summary>Разложить выбранный документ по отмеченным версиям. Зовётся из фонового потока
+    /// сохранения — ходит на сетевой диск и на хостинг ровно так же, как обычная догрузка
+    /// вложений.</summary>
+    private void ApplyInstructionScope(string sourcePath)
+    {
+        if (_instructionScope.Count == 0 || string.IsNullOrWhiteSpace(sourcePath)) return;
+        var result = InstructionBroadcast.Apply(_db, _services.Cfg.RootPath(), sourcePath,
+            _instructionScope, _services.Publisher());
+        if (result.Applied.Count > 0 || result.Warnings.Count > 0) BroadcastResult = result;
+    }
+
     private void InstructionsDelete_Click(object sender, RoutedEventArgs e)
     {
         if (_record.Id is null || _names is null) return;
@@ -1125,8 +1178,17 @@ public partial class EditFirmwareDialog : Window
         var attachments = BuildAttachmentsRequest();
         if (attachments is not null)
         {
+            var scopeSource = InstructionsInput.Text.Trim();
             using (_host?.BeginBusy("Прикладываем файлы…"))
-                await Task.Run(() => ApplyAttachments(attachments));
+                await Task.Run(() =>
+                {
+                    ApplyAttachments(attachments);
+                    // После ApplyAttachments, а не до: та кладёт документ САМОЙ версии. Раздача берёт
+                    // исходный файл, выбранный человеком, поэтому порядок на результат не влияет —
+                    // но отчёт идёт сверху вниз «сначала эта версия, потом остальные», как человек об
+                    // этом и думает.
+                    ApplyInstructionScope(scopeSource);
+                });
         }
 
         ApplyExtraFiles();
@@ -1156,6 +1218,7 @@ public partial class EditFirmwareDialog : Window
     public static void ReportChanges(EditFirmwareDialog dlg, IAppHost host)
     {
         ReportAttachments(dlg.AttachmentsResult, host);
+        ReportBroadcast(dlg.BroadcastResult, host);
         ReportExtraFiles(dlg, host);
         ReportSubtypes(dlg.SubtypeLinkResult, host);
         ReportConfigs(dlg, host);
@@ -1267,6 +1330,24 @@ public partial class EditFirmwareDialog : Window
     /// <summary>Общая для всех четырёх мест, откуда открывается этот диалог, реакция на догрузку
     /// доп. файлов: что реально доложено — в статус, что не получилось — отдельным окном (иначе
     /// проблема с одним файлом молча растворилась бы в тосте про теги).</summary>
+    /// <summary>Итог раздачи инструкции соседним версиям. Отдельно от ReportAttachments: там речь об
+    /// ЭТОЙ версии, а здесь — о чужих папках на общем диске, и смешивать их в одну строку значит
+    /// прятать вторую за первой.</summary>
+    public static void ReportBroadcast(InstructionBroadcastResult? result, IAppHost host)
+    {
+        if (result is null) return;
+        if (result.Applied.Count > 0)
+        {
+            var replaced = result.Replaced.Count > 0 ? $" (с заменой прежней: {result.Replaced.Count})" : "";
+            host.ShowStatus($"Инструкция положена ещё версиям: {string.Join(", ", result.Applied)}{replaced}",
+                category: NotificationCategory.FirmwareAndParams);
+        }
+        if (result.Warnings.Count > 0)
+            AppMessageBox.Show("Не всем версиям получилось положить инструкцию:\n" +
+                               string.Join("\n", result.Warnings),
+                "Инструкция другим версиям", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
     public static void ReportAttachments(FirmwareAttachmentsResult? result, IAppHost host)
     {
         if (result is null) return;

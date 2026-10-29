@@ -907,6 +907,23 @@ public class ConfigService
     public bool SearchShowAllVersions() => Get("search_show_all_versions").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetSearchShowAllVersions(bool value) => Set("search_show_all_versions", value ? "true" : "false");
 
+    /// <summary>Насколько просвечивают поверхности в теме «Стекло», в процентах непрозрачности.
+    ///
+    /// Личная настройка, как тема и цвет: за одним и тем же стеклом один видит глубину, другой —
+    /// мешанину, и спорить тут не о чем. Пустое или испорченное значение — это «как нарисовано в
+    /// теме»: настройка оформления не имеет права мешать программе открыться.
+    ///
+    /// Границы проверяются ЗДЕСЬ, а не только у ползунка: значение может приехать из файла конфига,
+    /// который правили руками.</summary>
+    public int GlassOpacity()
+    {
+        var raw = Get("glass_opacity");
+        if (!int.TryParse(raw, out var percent)) return 0;
+        return percent;
+    }
+
+    public void SetGlassOpacity(int percent) => Set("glass_opacity", percent.ToString(CultureInfo.InvariantCulture));
+
     // ── Куда уезжают журналы заливок ─────────────────────────────────────────
     //
     // Журнал каждой заливки уходит сам, без участия человека (LoaderDiagnostics): причину
