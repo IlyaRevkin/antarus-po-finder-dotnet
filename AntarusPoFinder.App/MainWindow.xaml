@@ -221,7 +221,14 @@
                             <StackPanel Orientation="Vertical" Margin="0,0,16,0" Width="56">
                                 <Button Style="{StaticResource QuickAppBubbleButton}" HorizontalAlignment="Center"
                                         Command="{Binding LaunchCommand}" ToolTip="{Binding Name}">
+                                    <!-- Значок программы приходит из её exe размером 32×32 (см.
+                                         QuickAppItem.ExtractIcon) и показывается меньше, да ещё и в
+                                         масштабе экрана: 22 точки вёрстки на 125 % — это 27.5
+                                         настоящих. Сжатие по умолчанию у WPF линейное, и значок на
+                                         нём заметно замыливается. HighQuality — тот же пересчёт,
+                                         что и у остальных картинок в программе. -->
                                     <Image Source="{Binding IconSource}" Width="22" Height="22"
+                                           RenderOptions.BitmapScalingMode="HighQuality"
                                            Visibility="{Binding IconSource, Converter={StaticResource NullToVis}}"/>
                                 </Button>
                                 <TextBlock Text="{Binding Name}" Style="{StaticResource MutedText}" FontSize="10"
@@ -626,7 +633,9 @@
                                                     Margin="0,0,0,2" HorizontalAlignment="Stretch"
                                                     Command="{Binding LaunchCommand}">
                                                 <StackPanel Orientation="Horizontal">
+                                                    <!-- Тот же значок 32×32, сжатый ещё сильнее, — см. список сверху. -->
                                                     <Image Source="{Binding IconSource}" Width="16" Height="16" Margin="0,0,8,0"
+                                                           RenderOptions.BitmapScalingMode="HighQuality"
                                                            Visibility="{Binding IconSource, Converter={StaticResource NullToVis}}"/>
                                                     <TextBlock Text="{Binding Name}"/>
                                                 </StackPanel>

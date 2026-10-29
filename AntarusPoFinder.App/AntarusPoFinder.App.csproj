@@ -26,6 +26,16 @@
          WinForms coexist fine in the same net8.0-windows project. -->
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <!-- Свой манифест вместо стандартного из apphost: нужен ТОЛЬКО ради режима DPI (см. сам файл).
+         Без него процесс оказывался System-DPI-aware, и на экране с другим масштабом Windows
+         растягивала уже нарисованное окно — «мыльные окна». -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFAC010 — совет анализатора WinForms: «убери DPI из манифеста, задай ApplicationHighDpiMode».
+         Здесь он неуместен. Это WPF-приложение; WinForms подключён ради одного значка в трее, и
+         ApplicationConfiguration.Initialize(), через который только и применяется
+         ApplicationHighDpiMode, у нас не вызывается ВООБЩЕ. Настройка ушла бы в runtimeconfig.json
+         и не сделала бы ничего, а манифест работает всегда и до запуска кода. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
     <Version>1.75.11.0</Version>
   </PropertyGroup>

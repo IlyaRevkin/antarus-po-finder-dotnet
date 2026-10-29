@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="AntarusPoFinder.App"/>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <!-- Как и раньше: обычные права. Приложение ничего не ставит в систему. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- БЕЗ ЭТОГО СПИСКА WINDOWS СЧИТАЕТ ПРОГРАММУ НАПИСАННОЙ ДО VISTA и включает ей режим
+       совместимости: окно рисуется в старом масштабе и растягивается системой. Перечислены все
+       поддерживаемые версии, как в стандартном шаблоне. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}" /><!-- Vista -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}" /><!-- 7 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" /><!-- 8 -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}" /><!-- 8.1 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" /><!-- 10 и 11 -->
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- ПОЧЕМУ ЭТО ВООБЩЕ ЗДЕСЬ: «некоторые окна мыльные».
+           Манифеста у программы не было вовсе, и режим DPI выбирался сам собой — замер на машине
+           Ильи (экран 125 %) показывал GetProcessDpiAwareness = 1, то есть PROCESS_SYSTEM_DPI_AWARE.
+           System-aware значит «я знаю ровно один масштаб — тот, что был при входе в систему». Как
+           только реальный масштаб отличается (второй монитор с другим масштабом, подключённый
+           проектор, изменение масштаба без перезахода, удалённый рабочий стол), Windows берёт уже
+           нарисованное окно и РАСТЯГИВАЕТ картинку. Это и есть мыло, и видно его не везде сразу, а
+           на тех окнах, которые в этот момент оказались на «неродном» экране.
+
+           PerMonitorV2 — единственный режим, где окно пересчитывает вёрстку само при переезде между
+           экранами и при смене масштаба на лету; WPF это умеет из коробки, вмешательства в код не
+           требуется. dpiAware оставлен для Windows 8.1 и старше, где атрибута dpiAwareness ещё нет:
+           там будет прежнее System-aware поведение, то есть не хуже, чем было. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
