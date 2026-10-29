@@ -22,7 +22,10 @@
         <StackPanel Grid.Row="1" Margin="0,0,0,12">
             <StackPanel x:Name="TabsRow" Orientation="Horizontal" Margin="0,0,0,8">
                 <Button x:Name="TabBtnApp" Style="{StaticResource NavButton}" Tag="Active" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
-                    <TextBlock Text="Программа" Style="{StaticResource NavButtonContentText}"/>
+                    <!-- Число незакрытых прямо на вкладке — симметрично вкладке багов прошивок:
+                         иначе «сколько ещё чинить» видно только у одной из двух, и вторая читается
+                         как пустая. -->
+                    <TextBlock x:Name="TabAppText" Text="Программа" Style="{StaticResource NavButtonContentText}"/>
                 </Button>
                 <Button x:Name="TabBtnFwBugs" Style="{StaticResource NavButton}" Padding="16,8" Click="Tab_Click">
                     <TextBlock x:Name="TabFwBugsText" Text="Баги прошивок" Style="{StaticResource NavButtonContentText}"/>
@@ -79,10 +82,18 @@
              Галка снята при каждом открытии программы: «по умолчанию скрыты» — это про умолчание, а
              не про запомненный выбор. Число рядом обязательно: без него «скрыты» читается как
              «потерялись». -->
-        <CheckBox Grid.Row="3" x:Name="ShowAutoReportsCheck" Margin="0,0,0,8"
-                  Content="Показывать автоматические отчёты о сбоях"
-                  Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
-                  ToolTip="Отчёты, которые программа заводит сама при падении. Живые предложения и баги от людей видно и без них."/>
+        <!-- Закрытые тикеты по умолчанию убраны с глаз (только бета): в выгрузке на 29.10.2026 из
+             55 тикетов закрыто 40, и пятнадцать живых тем были размазаны между ними. Число рядом
+             обязательно — «скрыты» без числа читается как «потерялись». -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,8">
+            <CheckBox x:Name="ShowAutoReportsCheck" Margin="0,0,20,0"
+                      Content="Показывать автоматические отчёты о сбоях"
+                      Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
+                      ToolTip="Отчёты, которые программа заводит сама при падении. Живые предложения и баги от людей видно и без них."/>
+            <CheckBox x:Name="ShowClosedCheck" Content="Показывать закрытые"
+                      Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
+                      ToolTip="Закрытые тикеты никуда не делись — они просто не мешают смотреть, что ещё чинить."/>
+        </StackPanel>
 
         <DataGrid Grid.Row="4" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
                   VirtualizingPanel.ScrollUnit="Pixel"
