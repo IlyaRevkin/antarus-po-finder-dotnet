@@ -61,6 +61,7 @@ public partial class SearchView : UserControl
         ShowAllVersionsCheck.IsChecked = _services.Cfg.SearchShowAllVersions();
         RefreshAllVersionsBanner();
         PlaceSearchHowChecks();
+        HideParamFilesMode();
     }
 
     /// <summary>Где живут «Точный поиск» и «Показывать все версии»: в бете — внутри панели фильтров,
@@ -72,6 +73,28 @@ public partial class SearchView : UserControl
     ///
     /// Элементы именно ПЕРЕНОСЯТСЯ, а не дублируются: две копии галочки — это два состояния, из
     /// которых код читает одно, и расхождение проявилось бы уже у пользователя.</summary>
+    /// <summary>Убрать пилюлю «Параметры ПЧ/УПП» из переключателя режимов.
+    ///
+    /// Режимов было два на одно и то же: «Параметры ПЧ/УПП» искали .par-файлы — проприетарные
+    /// выгрузки конфигуратора, которые открывают программой вендора, — а «Таблицы параметров»
+    /// ищут задание на настройку, которое читают глазами и по которому работают на объекте.
+    /// Илья: «у нас же теперь только таблица». Пилюля, за которой нет работы, в ряду из четырёх
+    /// кнопок стоит дороже, чем кажется: по ней промахиваются и получают пустую выдачу.
+    ///
+    /// Режим НЕ удалён из кода, спрятана только кнопка: поиск по файлам параметров остаётся рабочим
+    /// (его зовёт переход из карточки), и выкидывать его вместе с разбором, тестами и данными
+    /// означало бы ломать то, что ещё лежит у людей на дисках. Исчезает ручка, а не механизм.
+    ///
+    /// Только бета — это переделка вида.</summary>
+    private void HideParamFilesMode()
+    {
+        if (!AppIdentity.IsBeta) return;
+        ParamsModeRadio.Visibility = Visibility.Collapsed;
+        // Режим мог остаться выбранным с прошлого запуска — тогда человек увидел бы выдачу режима,
+        // кнопки которого на экране нет.
+        if (ParamsModeRadio.IsChecked == true) FwModeRadio.IsChecked = true;
+    }
+
     private void PlaceSearchHowChecks()
     {
         if (AppIdentity.IsBeta) return;
@@ -596,9 +619,14 @@ public partial class SearchView : UserControl
     private void AnimateModeThumb()
     {
         if (ModeThumbTransform is null) return;
-        var index = SchemasModeRadio?.IsChecked == true ? 3
-            : ParamTablesModeRadio?.IsChecked == true ? 2
-            : ParamsModeRadio?.IsChecked == true ? 1 : 0;
+        // Считаем по ВИДИМЫМ сегментам, а не по жёстким номерам: в бете пилюля «Параметры ПЧ/УПП»
+        // спрятана (см. HideParamFilesMode), и подложка с номером «2» уехала бы на место, где
+        // ничего нет.
+        var segments = new[] { FwModeRadio, ParamsModeRadio, ParamTablesModeRadio, SchemasModeRadio }
+            .Where(r => r is not null && r.Visibility == Visibility.Visible)
+            .ToList();
+        var index = segments.FindIndex(r => r.IsChecked == true);
+        if (index < 0) index = 0;
         ModeThumbTransform.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(index * ModeSegmentWidth, TimeSpan.FromSeconds(0.15)));
     }

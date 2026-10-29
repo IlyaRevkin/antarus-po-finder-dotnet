@@ -1591,16 +1591,16 @@ public partial class SettingsView : UserControl
         GlassOpacityValue.Text = percent + " %";
         _services.Cfg.SetGlassOpacity(percent);
         ThemeManager.GlassOpacity = percent;
-        // Применяем тему целиком, а не подменяем кисти руками: пересчёт поверхностей живёт в одном
-        // месте (ThemeManager.Apply), и вторая его копия здесь разошлась бы с первой при первой же правке.
-        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+        // Только поверхности, без перекладывания темы целиком: Apply переставляет размытие у каждого
+        // окна, и на каждом движении ручки это читалось как моргание.
+        ThemeManager.RefreshGlass();
     }
 
     private void GlassOpacityReset_Click(object sender, RoutedEventArgs e)
     {
         _services.Cfg.SetGlassOpacity(GlassSurface.Default);
         ThemeManager.GlassOpacity = GlassSurface.Default;
-        ThemeManager.Apply(ThemeManager.Current, ThemeManager.CurrentAccent);
+        ThemeManager.RefreshGlass();
         ShowGlassOpacity();
     }
 
