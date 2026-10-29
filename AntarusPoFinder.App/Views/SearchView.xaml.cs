@@ -815,7 +815,8 @@ public partial class SearchView : UserControl
             card.ExtraFilesRequested += (s, _) => OpenExtraFiles(((FirmwareCard)s!).Result);
             card.HistoryRequested += (s, _) => ShowHistory(((FirmwareCard)s!).Result);
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
-            card.TagsEditRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
+            card.TagsEditRequested += (s, _) => EditFwTags(((FirmwareCard)s!).Result);
+            card.ModerationRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             card.FwBugRequested += (s, _) => ReportFwBug(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
@@ -1915,6 +1916,29 @@ public partial class SearchView : UserControl
     {
         if (Directory.Exists(file.DiskPath)) TryOpen(file.DiskPath);
         else AppMessageBox.Show($"Папка не найдена:\n{file.DiskPath}", "Параметры", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    /// <summary>Кнопка «Теги» на карточке — короткий редактор, правящий ТОЛЬКО теги (см.
+    /// EditFwTagsDialog). Запись читается ЗДЕСЬ, прямо перед открытием, а не берётся из result:
+    /// выдача поиска может быть построена давно, а в теги с тех пор мог прилететь обмен с диска.
+    ///
+    /// Соседний EditTags ниже открывает полное окно модерации — пункт «Модерация прошивки» в «Ещё».
+    /// Два метода, а не один с флагом: это разные окна с разными правилами записи, и склеивать их
+    /// значит рано или поздно открыть не то.</summary>
+    private void EditFwTags(HierarchyResult result)
+    {
+        var v = _services.Db.GetFwVersionById(result.FwVersionId);
+        if (v is null)
+        {
+            AppMessageBox.Show("Версия не найдена в базе.", "Теги", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var dlg = new EditFwTagsDialog(_services.Db, v, $"{result.Name} {result.VersionRaw}".Trim())
+        { Owner = Window.GetWindow(this) };
+        if (dlg.ShowDialog() != true) return;
+
+        EditFwTagsDialog.Apply(dlg, _services, _host, v.Id!.Value);
+        PerformSearch();
     }
 
     private void EditTags(HierarchyResult result)

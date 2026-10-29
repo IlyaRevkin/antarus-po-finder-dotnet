@@ -1,0 +1,46 @@
+<Window x:Class="AntarusPoFinder.App.Views.EditFwTagsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:AntarusPoFinder.App.Views"
+        Icon="pack://application:,,,/AntarusPoFinder.App;component/Assets/icon.ico"
+        Title="Теги прошивки"
+        Width="560" SizeToContent="Height"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <StackPanel Margin="16">
+        <TextBlock x:Name="TitleLabel" Style="{StaticResource SubtitleText}" Margin="0,0,0,2" TextWrapping="Wrap"/>
+        <!-- Короткий редактор правит ТОЛЬКО теги. Говорим это вслух прямо в окне: человек, привыкший
+             к окну модерации, иначе будет искать здесь описание и типы пуска и решит, что их потеряли. -->
+        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Правятся только теги. Описание, типы пуска, подтипы и доп. файлы — в окне модерации («Ещё» → «Модерация прошивки»); это окно их не трогает."/>
+
+        <TextBlock Text="Теги этой прошивки:" Margin="0,0,0,4"/>
+        <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,4"/>
+        <!-- Та же подсказка, что в модерации прошивок и у файлов параметров (Core/Services/TagPattern.cs):
+             пул тегов общий, значит и подстановка работает одинаково. -->
+        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,14"
+                   Text="Звёздочка в теге — подстановка любой части названия: тег «…ПЖ-ПП-2-(*-*А)-АВР-FD-Ст» находится и по «(9-14А)», и по «(20-25А)»."/>
+
+        <!-- Готовый список уже заведённых тегов. Подсказки внутри бабл-редактора появляются только
+             когда начали печатать, а чаще всего нужный тег — точное название шкафа, которое никто не
+             помнит наизусть: его ищут глазами. Отсюда отдельный список с полем отбора. -->
+        <TextBlock Text="Выбрать из уже заведённых:" Margin="0,0,0,4"/>
+        <TextBox x:Name="FilterInput" Margin="0,0,0,6" TextChanged="Filter_TextChanged"
+                 ToolTip="Отбор по части названия тега"/>
+        <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" CornerRadius="4" Padding="8">
+            <ScrollViewer x:Name="PoolScroll" MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <WrapPanel x:Name="PoolPanel"/>
+                    <TextBlock x:Name="PoolEmptyLabel" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                               Visibility="Collapsed"
+                               Text="Подходящих тегов нет — наберите новый в поле «+ тег» выше."/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}" Width="100" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button Content="Сохранить" Width="100" Click="Save_Click" IsDefault="True"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
