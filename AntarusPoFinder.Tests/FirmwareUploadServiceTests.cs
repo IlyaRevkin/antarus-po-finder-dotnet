@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -736,6 +736,51 @@ public class FirmwareUploadServiceTests : IDisposable
         finally { File.Delete(src); }
     }
 
+    /// <summary>Автор версии хранится ИМЕНЕМ, а не только ссылкой на локальную таблицу users:
+    /// строки users в общем конфиге не ездят, и у коллеги author_id не значил бы ничего (тикет
+    /// «автор прошивки — поле и показ в карточке/истории»).</summary>
+    [Fact]
+    public void Upload_RemembersAuthorName()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.AuthorUserName = "Иванов И.И.";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            var stored = _db.GetFwVersionById(result.FwVersionId)!;
+            Assert.Equal("Иванов И.И.", stored.AuthorName);
+            Assert.NotNull(stored.AuthorId);
+        }
+        finally { File.Delete(src); }
+    }
+
+    /// <summary>Исходное имя файла обязано пережить загрузку: на диск он ложится переименованным в
+    /// номер версии, и, кроме этого столбца, прежнее название взять потом неоткуда (тикет «исходное
+    /// название прошивки сохранять и показывать»).</summary>
+    [Fact]
+    public void Upload_RemembersSourceFileName()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(src, group, subtype, mod));
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            var stored = _db.GetFwVersionById(result.FwVersionId)!;
+            Assert.Equal(Path.GetFileName(src), stored.SourceName);
+            // Имя на диске — это НОМЕР версии, а не исходное название: если они совпали, столбец
+            // ничего не добавил бы и тест ничего бы не проверял.
+            Assert.NotEqual(stored.SourceName, stored.Filename);
+        }
+        finally { File.Delete(src); }
+    }
+
     [Fact]
     public void Upload_NoLaunchTypes_ReturnsValidationFailed()
     {
@@ -748,8 +793,19 @@ public class FirmwareUploadServiceTests : IDisposable
 
             var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
 
-            Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
-            Assert.Equal("Выберите хотя бы один тип пуска.", result.Errors.Single());
+            // В бете тип пуска необязателен (FirmwareUploadService.LaunchTypeRequired), и версия
+            // заводится без него; в рабочей версии правило прежнее. Тест проверяет ровно ту сборку,
+            // в которой запущен, — иначе прогон с -c Beta падал бы на осознанном послаблении.
+            if (FirmwareUploadService.LaunchTypeRequired)
+            {
+                Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
+                Assert.Equal("Выберите хотя бы один тип пуска.", result.Errors.Single());
+            }
+            else
+            {
+                Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+                Assert.Empty(result.Record!.LaunchTypes);
+            }
         }
         finally { File.Delete(src); }
     }

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace AntarusPoFinder.Core.Domain;
 
@@ -15,6 +15,12 @@ public class FwVersionRecord
     public string DtStr { get; set; } = "";
     public string VersionRaw { get; set; } = "";
     public string Filename { get; set; } = "";
+
+    /// <summary>Имя файла, каким его принесли на загрузку (столбец fw_versions.source_name). На диск
+    /// файл ложится переименованным в номер версии, поэтому исходное название больше взять неоткуда —
+    /// а именно по нему прошивку опознаёт тот, кто её собрал. Пусто у версий, загруженных до
+    /// появления столбца.</summary>
+    public string SourceName { get; set; } = "";
     public string DiskPath { get; set; } = "";
     public string LocalPath { get; set; } = "";
     public string Description { get; set; } = "";
@@ -47,6 +53,12 @@ public class FwVersionRecord
     public string UploadDate { get; set; } = "";
     public string Tags { get; set; } = "";
     public int? AuthorId { get; set; }
+
+    /// <summary>Имя того, кто загрузил прошивку (столбец fw_versions.author_name). Дублирует
+    /// AuthorId строкой намеренно: таблица users локальна для машины, и по id у коллеги автора не
+    /// найти — та же причина, по которой журнал модерации возит автора текстом. Пусто у версий,
+    /// заведённых до появления столбца.</summary>
+    public string AuthorName { get; set; } = "";
     public string Status { get; set; } = "active";
     public bool Released { get; set; }
     /// <summary>Оператор вручную закрепил эту версию «текущей» в её hw-группе (подтип+контроллер+hw),

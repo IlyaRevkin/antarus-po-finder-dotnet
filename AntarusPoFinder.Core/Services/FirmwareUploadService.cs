@@ -60,6 +60,11 @@ public class FirmwareUploadRequest
     /// DateTime.Now. Учитывается только вместе с <see cref="IncludeDateInVersion"/>.</summary>
     public DateTime? VersionDate { get; set; }
 
+    /// <summary>Буква при номере ПО («0001А») или пусто. Отдельным полем, а не частью номера: сам
+    /// номер остаётся целым числом, на котором держатся выдача следующего номера, сортировка и
+    /// освобождение номера при откате — см. FwVersionNumber.SwSuffix.</summary>
+    public string SwSuffix { get; set; } = "";
+
     /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
     /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
     /// версия этой группы. Полезно, когда сама программа ПЛК не менялась, а обновился только
@@ -310,6 +315,11 @@ public class FirmwareUploadPlan
 
     public int? AuthorId { get; init; }
 
+    /// <summary>Имя автора строкой — то, что ляжет в fw_versions.author_name и уедет к коллегам
+    /// (см. столбец в Database.cs). AuthorId рядом остаётся: по нему автор связан с локальной
+    /// таблицей users, но за пределы этой машины такая ссылка не выходит.</summary>
+    public string AuthorName { get; init; } = "";
+
     /// <summary>HMI-проект прошлой версии этого же шкафа — подставляется, когда новая версия
     /// загружается без панели (ПЛК и HMI обновляются независимо, см.
     /// Database.GetLatestHmiForFirmware). Пусто — панели у шкафа ещё не было вовсе.</summary>
@@ -392,6 +402,28 @@ public static class FirmwareUploadService
         return Register(db, hierarchy, plan, copy, shortcuts);
     }
 
+    /// <summary>Под каким именем файл принесли на загрузку — ровно то, что увидит человек в карточке
+    /// (столбец fw_versions.source_name). На диск он ляжет переименованным в номер версии, поэтому
+    /// запомнить имя можно только здесь.
+    ///
+    /// У папки-проекта берётся имя ГЛАВНОГО файла, если оператор его указал, и имя самой папки, если
+    /// нет: в обоих случаях это та строка, по которой сборку узнаёт её автор, а «имя папки» у проекта
+    /// из SMLogix как раз и есть название прошивки.</summary>
+    private static string SourceDisplayName(FirmwareUploadRequest request, FirmwareUploadPlan plan)
+    {
+        var source = request.SourcePath ?? "";
+        if (string.IsNullOrEmpty(source)) return "";
+        if (!plan.SourceIsDirectory) return Path.GetFileName(source);
+        return string.IsNullOrEmpty(plan.MainFileInFolder)
+            ? Path.GetFileName(source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : Path.GetFileName(plan.MainFileInFolder);
+    }
+
+    /// <summary>Обязателен ли тип пуска при заведении версии. Одно место на всю программу: форма
+    /// загрузки по этому же свойству решает, рисовать ли звёздочку у заголовка «ТИП ПУСКА», —
+    /// иначе подпись и проверка разъехались бы при следующей правке.</summary>
+    public static bool LaunchTypeRequired => !AppIdentity.IsBeta;
+
     /// <summary>Фаза 1 (БД + проверки): валидация формы, номер версии, куда всё ляжет. Возвращает
     /// либо план, либо готовый отказ/запрос подтверждения — тогда план null. Копирования здесь нет,
     /// то есть до подтверждений на диск ничего не пишется, как и раньше.</summary>
@@ -405,7 +437,11 @@ public static class FirmwareUploadService
             return (null, FirmwareUploadResult.ValidationFailure("Укажите тип шкафа, подтип и контроллер."));
 
         var launchTypes = request.LaunchTypes ?? new List<string>();
-        if (launchTypes.Count == 0)
+        // ⚠️ НЕОБЯЗАТЕЛЬНЫЙ ТИП ПУСКА — ТОЛЬКО В БЕТЕ. Просьба наладчиков: при заведении версии тип
+        // пуска знают не всегда, а форма не пускала дальше. Это послабление правила заведения, а не
+        // исправление ошибки, поэтому рабочая версия продолжает требовать хотя бы одну галочку —
+        // там по типу пуска ищут, и молча заведённая версия без него просто не нашлась бы.
+        if (launchTypes.Count == 0 && LaunchTypeRequired)
             return (null, FirmwareUploadResult.ValidationFailure("Выберите хотя бы один тип пуска."));
 
         var desc = (request.Description ?? "").Trim();
@@ -490,7 +526,7 @@ public static class FirmwareUploadService
                     ?? db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                     ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
         else if (request.KeepSwVersion && OpcFields.SwVersionChoiceApplies(isOpc))
         {
@@ -500,13 +536,13 @@ public static class FirmwareUploadService
             var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution);
             swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
         else
         {
             swInt = db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
 
         // Заявка и заводской SN попадают в ИМЯ папки ОПЦ-версии (этап 5): ОПЦ заводят под конкретный
@@ -591,6 +627,7 @@ public static class FirmwareUploadService
             NewLayout = request.NewDiskLayout,
             ControllerFolder = ctrlFolder,
             AuthorId = user.Id,
+            AuthorName = user.Name,
             InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
             InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
             InheritedHmiFromVersion = inheritedHmi?.VersionRaw ?? "",
@@ -831,6 +868,7 @@ public static class FirmwareUploadService
             DtStr = plan.Version.DtStr,
             VersionRaw = plan.Version.Raw,
             Filename = copy.DestinationFilename,
+            SourceName = SourceDisplayName(request, plan),
             DiskPath = plan.DestinationFolder,
             Description = plan.Description,
             Changelog = plan.Description,
@@ -846,6 +884,7 @@ public static class FirmwareUploadService
             RequestNum = plan.RequestNum,
             CabinetSn = plan.CabinetSn,
             AuthorId = plan.AuthorId,
+            AuthorName = plan.AuthorName,
             Status = "active",
             Tags = TagString.Join(tags),
         };

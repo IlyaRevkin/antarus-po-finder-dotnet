@@ -278,6 +278,27 @@ public partial class FirmwareCard : UserControl
         // с тем, что реально копируется, ему нельзя.
         SoftwareNameLabel.Text = $"{result.Name} {versionText}".Trim();
 
+        // ⚠️ ИСХОДНОЕ ИМЯ ФАЙЛА — ПОКАЗЫВАЕТСЯ ТОЛЬКО В БЕТЕ. Само имя запоминается в обеих
+        // сборках (столбец source_name заполняется при загрузке), но лишняя строка на карточке —
+        // переделка вида, а не исправление: в рабочей версии карточка остаётся прежней.
+        var sourceName = result.SourceName ?? "";
+        bool showSource = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(sourceName);
+        SourceNameLabel.Visibility = showSource ? Visibility.Visible : Visibility.Collapsed;
+        if (showSource)
+        {
+            SourceNameLabel.Text = $"Исходное название: {sourceName}";
+            SourceNameLabel.ToolTip = "Имя файла, под которым прошивку принесли на загрузку. На диске "
+                + "файл лежит переименованным в номер версии.";
+        }
+
+        // ⚠️ АВТОР — ТОЖЕ ТОЛЬКО В БЕТЕ, и по той же причине, что исходное имя: записывается в обеих
+        // сборках, показывается в одной. Вопрос «к кому идти с этой прошивкой» до сих пор решался
+        // перепиской, хотя ответ лежал в базе.
+        var author = result.AuthorName ?? "";
+        bool showAuthor = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(author);
+        AuthorLabel.Visibility = showAuthor ? Visibility.Visible : Visibility.Collapsed;
+        if (showAuthor) AuthorLabel.Text = $"Автор: {author}";
+
         ShowFilesLine(result, flags);
 
         ActionsPanel.Children.Clear();
@@ -371,6 +392,19 @@ public partial class FirmwareCard : UserControl
             ActionsPanel.Children.Add(qrBtn);
         }
 
+        // ⚠️ ОТДЕЛЬНАЯ КНОПКА «ТЕГИ» — ТОЛЬКО В БЕТЕ. Тикет: теги правят чаще всего остального, а
+        // лежали они за «Ещё» → «Модерация прошивки» — два нажатия и чужое по смыслу название.
+        // Окно то же самое: заводить второй редактор тегов рядом с существующим нельзя, иначе
+        // правки из разных мест начнут затирать друг друга. Поэтому в бете пункт из «Ещё» убран
+        // (см. ниже) — одна точка входа, просто вынесенная наружу. Это перестановка кнопок, не
+        // ошибка, так что рабочая версия остаётся как была.
+        if (flags.CanEditTags && AppIdentity.IsBeta)
+        {
+            var tagsBtn = MakeActionButton("Теги", (_, _) => TagsEditRequested?.Invoke(this, EventArgs.Empty));
+            tagsBtn.ToolTip = "Теги, описание, типы пуска, подтипы шкафов, доп. файлы — окно модерации этой прошивки";
+            ActionsPanel.Children.Add(tagsBtn);
+        }
+
         // ── Меню «Ещё»: всё остальное, по разделам ────────────────────────
         AddMenuHeader("Файлы версии");
         AddMenuItem("Открыть папку с файлами", () => OpenFolderRequested?.Invoke(this, EventArgs.Empty));
@@ -428,7 +462,7 @@ public partial class FirmwareCard : UserControl
         AddMenuItem("История версий", () => HistoryRequested?.Invoke(this, EventArgs.Empty));
         // То же имя, что у страницы сайдбара и её кнопки: обе точки открывают ОДНО окно
         // (EditFirmwareDialog), и два разных названия у одного окна оператора только путали.
-        if (flags.CanEditTags)
+        if (flags.CanEditTags && !AppIdentity.IsBeta)
             AddMenuItem("Модерация прошивки", () => TagsEditRequested?.Invoke(this, EventArgs.Empty),
                 "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
 
