@@ -65,7 +65,7 @@
                      статус ездят и по сетевому диску, и через хранилище на хостинге, а вложения —
                      только по диску (TicketStorageSync возит запись, не файлы). Человек, приложивший
                      скриншот, обязан знать, что тот, кто чинит, увидит его не сам собой. -->
-                <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                <TextBlock x:Name="AttachmentsNoteText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
                            Text="Тикет и его статус синхронизируются между машинами и с хранилищем на хостинге. Вложения остаются на сетевом диске конторы — чтобы их увидел тот, кто вне сети, отправьте архив кнопкой «Выгрузить…»."/>
                 <Button Content="Создать тикет" HorizontalAlignment="Left" Click="CreateTicket_Click"/>
             </StackPanel>
@@ -85,19 +85,38 @@
         <!-- Закрытые тикеты по умолчанию убраны с глаз (только бета): в выгрузке на 29.10.2026 из
              55 тикетов закрыто 40, и пятнадцать живых тем были размазаны между ними. Число рядом
              обязательно — «скрыты» без числа читается как «потерялись». -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,8">
-            <CheckBox x:Name="ShowAutoReportsCheck" Margin="0,0,20,0"
-                      Content="Показывать автоматические отчёты о сбоях"
-                      Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
-                      ToolTip="Отчёты, которые программа заводит сама при падении. Живые предложения и баги от людей видно и без них."/>
-            <CheckBox x:Name="ShowClosedCheck" Content="Показывать закрытые"
-                      Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
-                      ToolTip="Закрытые тикеты никуда не делись — они просто не мешают смотреть, что ещё чинить."/>
-        </StackPanel>
+        <!-- Строка над таблицей: слева отборы, справа — место, куда бета переносит действия над
+             выбранным тикетом (см. TicketsView.ApplyBetaLayout). Действия обязаны быть НАД списком,
+             а не под ним: список растягивается на всё оставшееся место, и в невысоком окне ряд
+             кнопок под ним уезжал за нижний край — дословная жалоба Ильи «чтобы кнопки были видны
+             сразу». -->
+        <Grid Grid.Row="3" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <CheckBox x:Name="ShowAutoReportsCheck" Margin="0,0,20,0"
+                          Content="Показывать автоматические отчёты о сбоях"
+                          Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
+                          ToolTip="Отчёты, которые программа заводит сама при падении. Живые предложения и баги от людей видно и без них."/>
+                <CheckBox x:Name="ShowClosedCheck" Content="Показывать закрытые"
+                          Checked="ShowAutoReports_Changed" Unchecked="ShowAutoReports_Changed"
+                          ToolTip="Закрытые тикеты никуда не делись — они просто не мешают смотреть, что ещё чинить."/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" x:Name="TopActionsHost" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Редкое — под одной пилюлей, как вкладки «Ещё» в Настройках. Видна только в бете. -->
+                <Button x:Name="MoreBtn" Style="{StaticResource NavButton}" Padding="12,6" Margin="8,0,0,0"
+                        Visibility="Collapsed" Click="More_Click">
+                    <TextBlock Text="Ещё ▾" Style="{StaticResource NavButtonContentText}"/>
+                </Button>
+            </StackPanel>
+        </Grid>
 
         <DataGrid Grid.Row="4" x:Name="TicketsGrid" AutoGenerateColumns="False" Margin="0,0,0,10"
                   VirtualizingPanel.ScrollUnit="Pixel"
-                  IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick">
+                  IsReadOnly="True" SelectionChanged="TicketsGrid_SelectionChanged" MouseDoubleClick="TicketsGrid_MouseDoubleClick"
+                  PreviewKeyDown="TicketsGrid_PreviewKeyDown">
             <!-- Цвет задаётся ЯЧЕЙКЕ, а не строке, и это не прихоть: общеприложенческий стиль
                  DataGridCell задаёт Foreground явно (см. Styles.xaml), а явное значение всегда бьёт
                  наследование от строки. Цвет на DataGridRow просто не доходил до текста — список
@@ -161,10 +180,12 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <StackPanel Grid.Row="5" Orientation="Horizontal">
-            <Button Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"
+        <!-- Ряд действий. В бете он уезжает наверх, в TopActionsHost, а «Подробнее», «Обновить» и
+             «Выгрузить…» из него пропадают — см. ApplyBetaLayout. В рабочей версии всё как было. -->
+        <StackPanel Grid.Row="5" x:Name="ActionsRow" Orientation="Horizontal">
+            <Button x:Name="DetailBtn" Content="Подробнее" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ShowDetail_Click"
                     ToolTip="Полный текст тикета и вложения — то же, что двойной клик по строке"/>
-            <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"
+            <Button x:Name="RefreshBtn" Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Refresh_Click"
                     ToolTip="Перечитать список — тикеты с других машин приезжают синхронизацией"/>
             <Button x:Name="ExportBtn" Content="Выгрузить…" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ExportTickets_Click"
                     ToolTip="Сложить тикеты вместе с вложениями в один архив — унести флешкой, отправить почтой или загрузить на страницу приёма"/>

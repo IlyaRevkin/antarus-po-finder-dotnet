@@ -101,7 +101,80 @@ public partial class TicketsView : UserControl
         TicketTypeCombo.SelectedIndex = 0;
 
         ApplyTab();
+        ApplyBetaLayout();
         Loaded += (_, _) => Activate();
+    }
+
+    /// <summary>Бета: страница — это СПИСОК, а не ряд кнопок под ним. Тикет Ильи дословно:
+    /// «в окне тикетов сделать скрол таблицы тикетов а не окна, чтобы кнопки подробнее обновить
+    /// выгрузить были видны сразу. а лучше еще убрать кнопку подробнее так как двойным кликом можно
+    /// открыть тикет. убрать кнопки выгрузить и обновить. сделать это автоматическими».
+    ///
+    /// Что делается:
+    /// • «Подробнее» убрана — тикет открывается двойным щелчком, а с клавиатуры Enter'ом по
+    ///   выделенной строке (см. TicketsGrid_PreviewKeyDown). Без замены с клавиатуры удаление
+    ///   кнопки отрезало бы от тикетов тех, кто работает без мыши.
+    /// • «Обновить» убрана — список и так перечитывается при каждом открытии страницы (Activate:
+    ///   FlushOutbox + PullNewEvents + обмен с хранилищем) и по приходу изменений извне
+    ///   (MainWindowViewModel зовёт RefreshIfActive/ReloadRows). Кнопка повторяла то, что и так
+    ///   происходит само.
+    /// • «Выгрузить…» ПЕРЕЕХАЛА в «Ещё», а не исчезла: автовыгрузка (TicketAutoDrop) возит только
+    ///   сами записи тикетов, вложения наружу не едут вовсе — они бывают по сотне мегабайт, а
+    ///   страница приёма ограничена по размеру. Архив «тикеты вместе с вложениями» собрать больше
+    ///   нечем, поэтому молча выкинуть кнопку нельзя; но и в первом ряду ей не место — нужна она
+    ///   считанные разы в месяц.
+    /// • Оставшиеся действия («Взять в работу», «Закрыть», «Переоткрыть») уезжают НАД таблицей:
+    ///   таблица занимает всё оставшееся место и прокручивается сама, а ряд под ней в невысоком
+    ///   окне уходил за нижний край — о чём жалоба и была.
+    ///
+    /// Только бета: рабочая версия обязана остаться прежней (образец — SearchView.HideParamFilesMode).</summary>
+    private void ApplyBetaLayout()
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        DetailBtn.Visibility = Visibility.Collapsed;
+        RefreshBtn.Visibility = Visibility.Collapsed;
+        ExportBtn.Visibility = Visibility.Collapsed;   // живёт в «Ещё», см. More_Click
+        MoreBtn.Visibility = Visibility.Visible;
+
+        // Ряд действий переносится из последней строки Grid'а в полосу над таблицей. Именно
+        // переносится, а не дублируется: видимостью кнопок в нём управляет UpdateActionButtons, и
+        // второй экземпляр пришлось бы держать в согласии с первым.
+        if (ActionsRow.Parent is Grid grid)
+        {
+            grid.Children.Remove(ActionsRow);
+            ActionsRow.VerticalAlignment = VerticalAlignment.Center;
+            TopActionsHost.Children.Insert(0, ActionsRow);
+        }
+
+        // Подсказка про вложения звала «кнопкой Выгрузить…» — теперь она в «Ещё», и звать надо
+        // туда: совет, ведущий к кнопке, которой на виду нет, хуже отсутствия совета.
+        AttachmentsNoteText.Text =
+            "Тикет и его статус синхронизируются между машинами и с хранилищем на хостинге сами. " +
+            "Вложения остаются на сетевом диске конторы — чтобы их увидел тот, кто вне сети, отправьте архив: «Ещё» → «Выгрузить…».";
+    }
+
+    /// <summary>Редкие действия страницы под одной пилюлей — как «Ещё» во вкладках Настроек
+    /// (SettingsView.MoreTabs_Click).</summary>
+    private void More_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+
+        var menu = new ContextMenu
+        {
+            PlacementTarget = MoreBtn,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
+        var export = new MenuItem
+        {
+            Header = "Выгрузить…",
+            ToolTip = "Сложить тикеты вместе с вложениями в один архив — унести флешкой, отправить почтой или загрузить " +
+                      "на страницу приёма. Сами тикеты уезжают и без этого, автоматически; вложения — нет.",
+            IsEnabled = ExportBtn.IsEnabled,
+        };
+        export.Click += (_, _) => ExportTickets_Click(ExportBtn, new RoutedEventArgs());
+        menu.Items.Add(export);
+        menu.IsOpen = true;
     }
 
     private record TicketTypeOption(string Id, string Label);
@@ -579,6 +652,24 @@ ApplyScopeHint();
 
     private void ShowDetail_Click(object sender, RoutedEventArgs e) => OpenDetailForSelected();
     private void TicketsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenDetailForSelected();
+
+    /// <summary>Enter на выделенной строке открывает тикет — замена кнопке «Подробнее», которой в
+    /// бете больше нет. Иначе единственным входом в тикет остался бы двойной щелчок, то есть мышь:
+    /// список, по которому ходят стрелками, оказался бы без входа вовсе.
+    ///
+    /// Preview — намеренно: собственная обработка Enter в DataGrid переводит выделение на строку
+    /// ниже, и до нас событие дошло бы уже съеденным. В рабочей версии поведение прежнее — там
+    /// кнопка на месте, а менять привычное нажатие без нужды незачем.</summary>
+    private void TicketsGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (!AppIdentity.IsBeta) return;
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        if (TicketsGrid.SelectedItem is not TicketRow) return;
+
+        e.Handled = true;
+        OpenDetailForSelected();
+    }
 
     private void OpenDetailForSelected()
     {

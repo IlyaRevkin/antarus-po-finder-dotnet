@@ -176,14 +176,16 @@
                             <StackPanel x:Name="GlassOpacityPanel" Visibility="Collapsed" Margin="0,0,0,14">
                                 <TextBlock Text="ПРОЗРАЧНОСТЬ СТЕКЛА" Style="{StaticResource MutedText}"
                                            FontWeight="SemiBold" Margin="0,0,0,6"/>
-                                <TextBlock Text="Насколько сквозят панели, карточки и поля. Левее — больше видно то, что за окном; правее — матовое стекло почти без просвета."
+                                <TextBlock Text="Насколько сквозят панели, карточки и поля. Слева — глухие поверхности, как в обычной тёмной теме; справа — максимум прозрачности."
                                            Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                                 <StackPanel Orientation="Horizontal">
-                                    <Slider x:Name="GlassOpacitySlider" Width="260" VerticalAlignment="Center"
-                                            Minimum="40" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                    <TextBlock Text="нет" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource MutedText}"/>
+                                    <Slider x:Name="GlassOpacitySlider" Width="240" VerticalAlignment="Center"
+                                            Minimum="0" Maximum="100" TickFrequency="10" IsSnapToTickEnabled="True"
                                             ToolTip="Непрозрачность поверхностей в теме «Стекло»"
                                             ValueChanged="GlassOpacity_Changed"/>
-                                    <TextBlock x:Name="GlassOpacityValue" VerticalAlignment="Center" Margin="10,0,0,0"
+                                    <TextBlock Text="максимум" VerticalAlignment="Center" Margin="8,0,0,0" Style="{StaticResource MutedText}"/>
+                                    <TextBlock x:Name="GlassOpacityValue" VerticalAlignment="Center" Margin="12,0,0,0"
                                                Style="{StaticResource MutedText}"/>
                                     <Button Content="Как в теме" Style="{StaticResource SecondaryButton}"
                                             Margin="12,0,0,0" Padding="10,2" Click="GlassOpacityReset_Click"
@@ -1709,6 +1711,16 @@
                         ToolTip="Выбрать программу — появится в списке и сохранится сразу"/>
                 <Button Content="Удалить" Style="{StaticResource SecondaryButton}" Click="DeleteApp_Click"
                         ToolTip="Убрать выбранный ярлык из списка"/>
+                <!-- Кнопки порядка, а не только перетаскивание. Таблица здесь правится прямо в
+                     ячейках, и мышь в ней занята выделением и правкой: тащить строку получается не
+                     с первого раза, а у человека это читается как «порядок менять нельзя». Кнопки
+                     работают всегда и с клавиатуры тоже. -->
+                <Button x:Name="MoveAppUpButton" Content="Выше" Style="{StaticResource SecondaryButton}"
+                        Margin="16,0,0,0" Click="MoveAppUp_Click"
+                        ToolTip="Передвинуть выбранный ярлык вверх — порядок в списке и есть порядок на экране"/>
+                <Button x:Name="MoveAppDownButton" Content="Ниже" Style="{StaticResource SecondaryButton}"
+                        Margin="6,0,0,0" Click="MoveAppDown_Click"
+                        ToolTip="Передвинуть выбранный ярлык вниз"/>
                 <TextBlock x:Name="QuickAppsDragHint" Visibility="Collapsed" VerticalAlignment="Center"
                            Margin="16,0,0,0" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                            Text="Программу или папку можно просто перетащить сюда из проводника, а строки — таскать между собой: порядок в списке и есть порядок на экране."/>

@@ -55,10 +55,12 @@ public partial class ParamsView : UserControl
         {
             UploadCard.Visibility = Visibility.Collapsed;
             TablesCard.Visibility = Visibility.Visible;
-            // Список файлов остаётся, но перестаёт быть главным на экране и называется тем, что он
-            // есть: прежний, файловый порядок. Убрать его совсем нельзя — .par по-прежнему нужен
-            // наладчику, чтобы залить настройки в сам частотник конфигуратором вендора.
-            FilesCardTitle.Text = "ФАЙЛЫ ПАРАМЕТРОВ — ПРЕЖНИЙ ПОРЯДОК";
+            // Карточки файлов в бете нет совсем. Раньше она оставалась «прежним порядком» на тот
+            // случай, если .par понадобится вынести наружу, — но сам по себе список файлов на
+            // экране означал, что порядка два, и человек честно спрашивал, который из них нынешний.
+            // Теперь ответ один: параметры — это таблица, а файл собирается по требованию кнопкой
+            // «Выгрузить в папку…» и живёт ровно столько, сколько нужно, чтобы его донести.
+            FilesCard.Visibility = Visibility.Collapsed;
             Loaded += (_, _) => ReloadTables();
             return;
         }
@@ -672,6 +674,51 @@ public partial class ParamsView : UserControl
     /// записи на каждый привязанный подтип шкафа, и открывшись «по строке», документ размножился бы
     /// по числу подтипов, а копии разошлись бы при первой же правке (см. Domain/ParamTable.cs).
     /// Поэтому окну передаются путь и имя, а не row.Id.</summary>
+    /// <summary>Собрать файл с выбранной таблицей и положить в указанную папку.
+    ///
+    /// Файл здесь — средство переноса, а не хранения: его отдают коллеге, кладут на флешку,
+    /// вкладывают в письмо. Поэтому ничего не записывается в базу, путь не запоминается, и
+    /// выгрузка не делает таблицу «файловой» обратно.
+    ///
+    /// Формат — CSV, разделитель «точка с запятой», UTF-8 с BOM (почему именно так —
+    /// Core/Services/ParamTableExport).</summary>
+    private void ExportTable_Click(object sender, RoutedEventArgs e)
+    {
+        if (TablesGrid.SelectedItem is not ParamTableRow row || row.Source.Id is null)
+        {
+            _host.ShowStatus("Выберите таблицу, которую нужно выгрузить");
+            return;
+        }
+
+        var revisions = _services.Db.GetParamTableRevisions(row.Source.Id.Value);
+        var current = revisions.FirstOrDefault();
+        if (current?.Id is null)
+        {
+            _host.ShowStatus("У этой таблицы ещё нет ни одной сохранённой ревизии");
+            return;
+        }
+
+        var picker = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Куда положить файл с таблицей",
+            Multiselect = false,
+        };
+        if (picker.ShowDialog() != true) return;
+
+        try
+        {
+            var rows = _services.Db.GetParamTableRows(current.Id.Value);
+            var path = ParamTableExport.Write(picker.FolderName, row.Source, rows);
+            _host.ShowStatus($"Таблица выгружена: {path}");
+        }
+        catch (Exception ex)
+        {
+            // Чужая папка, флешка вынута, нет прав — всё это житейское, и падать тут не на чем.
+            AppMessageBox.Show($"Не удалось выгрузить таблицу.{Environment.NewLine}{ex.Message}",
+                "Выгрузка таблицы", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void ParamTable_Click(object sender, RoutedEventArgs e)
     {
         if (FilesGrid.SelectedItem is not ParamFileRow row)

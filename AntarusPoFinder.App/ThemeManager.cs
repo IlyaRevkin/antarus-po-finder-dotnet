@@ -21,6 +21,24 @@ public static class ThemeManager
 
     public static void Apply(string themeName) => Apply(themeName, CurrentAccent);
 
+    /// <summary>Пересчитать ТОЛЬКО поверхности стекла под текущее значение ползунка.
+    ///
+    /// Отдельно от <see cref="Apply"/> потому, что тот перекладывает словарь темы, пересчитывает
+    /// акцент и переставляет размытие у каждого окна. На каждое движение ручки это читается как
+    /// моргание всем окном — ровно то, что названо кривой регулировкой. Здесь меняются четыре
+    /// кисти в ресурсах приложения, а разметка подхватывает их сама: она ссылается на них через
+    /// DynamicResource.</summary>
+    public static void RefreshGlass(ResourceDictionary? themeDictionary = null)
+    {
+        var dict = themeDictionary ?? Application.Current.Resources.MergedDictionaries[0];
+        var res = Application.Current.Resources;
+        foreach (var key in GlassSurface.Keys)
+        {
+            if (dict[key] is SolidColorBrush brush)
+                res[key] = GlassSurface.Surface(brush.Color, GlassOpacity, GlassSurface.HasSpecular(key));
+        }
+    }
+
     public static void Apply(string themeName, string accentId)
     {
         Current = themeName;
@@ -86,18 +104,8 @@ public static class ThemeManager
         // ресурсах приложения перекрывает значение темы, а Remove возвращает тему к себе самой.
         // Поэтому у тем без стекла ползунок не оставляет следов — на этом уже обжигались «залипшие»
         // мягкие поверхности после переключения темы.
-        if (theme.Backdrop)
-        {
-            foreach (var key in GlassSurface.Keys)
-            {
-                if (dict[key] is SolidColorBrush brush)
-                    res[key] = GlassSurface.Surface(brush.Color, GlassOpacity, GlassSurface.HasSpecular(key));
-            }
-        }
-        else
-        {
-            foreach (var key in GlassSurface.Keys) res.Remove(key);
-        }
+        if (theme.Backdrop) RefreshGlass(dict);
+        else foreach (var key in GlassSurface.Keys) res.Remove(key);
 
         foreach (Window window in Application.Current.Windows)
         {
