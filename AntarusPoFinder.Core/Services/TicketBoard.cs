@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -74,4 +74,37 @@ public static class TicketBoard
         .ThenBy(t => FwBugSeverity.SortOrder(t.Severity))
         .ThenByDescending(t => DateTime.TryParse(t.CreatedAt, out var dt) ? dt : DateTime.MinValue)
         .ToList();
+
+    /// <summary>Каким цветом строка в списке. Возвращается ИМЯ КИСТИ темы, а не цвет: в приложении
+    /// пять тем, и число здесь означало бы, что в «Стекле» список выглядит мусором.
+    ///
+    /// Два правила, и оба про одно — чтобы по списку было видно, за что браться:
+    ///
+    /// <b>Закрытый тикет гасится в серый</b> (просьба Ильи: «сделай их по цвету мб серые чтобы можно
+    /// было понимать что закрыто что нет»). До этого закрытый красился как обычный текст и в списке
+    /// был неотличим от живого — а их в выгрузке 40 из 55. Столбец «Статус» эту разницу, конечно,
+    /// показывал, но читать его приходилось построчно; цвет видно всем списком сразу.
+    ///
+    /// <b>Живой тикет красится по сути беды</b>: предложение — зелёным, баг прошивки — по
+    /// критичности (красный/оранжевый/жёлтый), прочий баг — красным. У бага прошивки цвет именно по
+    /// критичности, иначе все три уровня выглядели бы одинаково красными и шкала не значила бы ничего.
+    ///
+    /// Закрытый проверяется ПЕРВЫМ: красная строка о решённой беде — ложная тревога, а от неё
+    /// цветные списки и перестают читать.</summary>
+    public static string RowBrushKey(Ticket ticket, bool muteClosed = true)
+    {
+        if (ticket is null) return "TextBrush";
+        if (!IsActive(ticket)) return muteClosed ? "TextMutedBrush" : "TextBrush";
+        if (ticket.Type == TicketType.Suggestion) return "SuccessBrush";
+        if (ticket.Type == TicketType.FwBug)
+            return ticket.Severity switch
+            {
+                FwBugSeverity.Critical => "ErrorBrush",
+                FwBugSeverity.Major => "WarningBrush",
+                FwBugSeverity.Minor => "CautionBrush",
+                _ => "ErrorBrush",
+            };
+        if (ticket.Type == TicketType.Bug) return "ErrorBrush";
+        return "TextBrush";
+    }
 }

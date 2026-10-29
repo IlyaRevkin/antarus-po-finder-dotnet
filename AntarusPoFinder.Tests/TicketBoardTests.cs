@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Domain;
@@ -175,5 +175,55 @@ public class TicketBoardTests
         };
 
         Assert.Equal("2026-01-01T10:00:00", TicketBoard.Order(all)[0].CreatedAt);
+    }
+
+    // ── Цвет строки ──────────────────────────────────────────────────────────
+
+    /// <summary>Закрытый тикет в списке гасится в серый, живой красится по сути беды.
+    ///
+    /// Просьба Ильи дословно: «сделай их по цвету мб серые чтобы можно было понимать что закрыто что
+    /// нет». В выгрузке закрытых 40 из 55 — без цвета живые темы тонут среди сделанных, а столбец
+    /// «Статус» приходится читать построчно.</summary>
+    [Fact]
+    public void Закрытый_тикет_серый_независимо_от_типа_и_критичности()
+    {
+        foreach (var type in new[] { TicketType.Bug, TicketType.Suggestion, TicketType.FwBug })
+        {
+            var closed = new Ticket
+            {
+                Type = type,
+                Severity = FwBugSeverity.Critical,
+                Status = TicketStatus.Closed,
+            };
+            Assert.Equal("TextMutedBrush", TicketBoard.RowBrushKey(closed));
+        }
+    }
+
+    [Fact]
+    public void В_рабочей_версии_закрытый_выглядит_как_прежде()
+    {
+        // Приглушение — переделка вида, а вид меняется только в бете. Развилку задаёт вызывающий
+        // (TicketsView передаёт AppIdentity.IsBeta), здесь проверяется, что отключаемость вообще есть.
+        var closed = new Ticket { Type = TicketType.Bug, Status = TicketStatus.Closed };
+        Assert.Equal("TextBrush", TicketBoard.RowBrushKey(closed, muteClosed: false));
+    }
+
+    [Theory]
+    [InlineData(FwBugSeverity.Critical, "ErrorBrush")]
+    [InlineData(FwBugSeverity.Major, "WarningBrush")]
+    [InlineData(FwBugSeverity.Minor, "CautionBrush")]
+    public void У_живого_бага_прошивки_цвет_по_критичности(string severity, string expected)
+    {
+        var ticket = new Ticket { Type = TicketType.FwBug, Severity = severity, Status = TicketStatus.Open };
+        Assert.Equal(expected, TicketBoard.RowBrushKey(ticket));
+    }
+
+    [Fact]
+    public void Живое_предложение_зелёное_а_живой_баг_красный()
+    {
+        Assert.Equal("SuccessBrush", TicketBoard.RowBrushKey(
+            new Ticket { Type = TicketType.Suggestion, Status = TicketStatus.Open }));
+        Assert.Equal("ErrorBrush", TicketBoard.RowBrushKey(
+            new Ticket { Type = TicketType.Bug, Status = TicketStatus.InProgress }));
     }
 }

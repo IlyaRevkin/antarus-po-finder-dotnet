@@ -121,6 +121,11 @@
                         <DataTrigger Binding="{Binding RowBrushKey}" Value="SuccessBrush">
                             <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                         </DataTrigger>
+                        <!-- Закрытый тикет гасится в серый: по списку должно быть видно, что сделано,
+                             а что ещё нет, не вчитываясь в столбец «Статус» построчно. -->
+                        <DataTrigger Binding="{Binding RowBrushKey}" Value="TextMutedBrush">
+                            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+                        </DataTrigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}"/>

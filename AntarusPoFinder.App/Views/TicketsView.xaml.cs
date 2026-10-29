@@ -35,24 +35,10 @@ public partial class TicketsView : UserControl
         /// У бага прошивки цвет берётся ПО КРИТИЧНОСТИ, а не по типу: иначе все три уровня выглядели бы
         /// одинаково красными и шкала не значила бы ничего. Закрытый тикет не красится вовсе: красная строка
         /// о решённой беде — ложная тревога, а именно от неё цветовые списки и перестают читать.</summary>
-        public string RowBrushKey
-        {
-            get
-            {
-                if (Ticket.Status == TicketStatus.Closed) return "TextBrush";
-                if (Ticket.Type == TicketType.Suggestion) return "SuccessBrush";
-                if (Ticket.Type == TicketType.FwBug)
-                    return Ticket.Severity switch
-                    {
-                        FwBugSeverity.Critical => "ErrorBrush",
-                        FwBugSeverity.Major => "WarningBrush",
-                        FwBugSeverity.Minor => "CautionBrush",
-                        _ => "ErrorBrush",
-                    };
-                if (Ticket.Type == TicketType.Bug) return "ErrorBrush";
-                return "TextBrush";
-            }
-        }
+        /// <summary>Правило живёт в Core (TicketBoard.RowBrushKey), а не здесь: его проверяют тесты,
+        /// а приватный класс страницы им не виден. Приглушение закрытых — переделка вида, поэтому
+        /// только в бете; в рабочей версии закрытый тикет выглядит как прежде.</summary>
+        public string RowBrushKey => TicketBoard.RowBrushKey(Ticket, muteClosed: AppIdentity.IsBeta);
         public string Text => Ticket.Text;
         public string StatusLabel => TicketStatus.Label(Ticket.Status);
         /// <summary>По чему столбец «Статус» на самом деле сортируется — см. TicketStatus.SortOrder.</summary>
