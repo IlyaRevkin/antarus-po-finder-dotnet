@@ -1,4 +1,4 @@
-<UserControl x:Class="AntarusPoFinder.App.Views.DiskCleanupView"
+﻿<UserControl x:Class="AntarusPoFinder.App.Views.DiskCleanupView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Отступов и заголовка здесь нет намеренно: страница живёт вкладкой Настроек, у которой уже
@@ -61,6 +61,12 @@
                     <Button Content="Почистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                             Click="CleanLocalNow_Click"
                             ToolTip="Применить настроенные правила прямо сейчас, не дожидаясь срока"/>
+                    <!-- Сводка по самой базе, а не по локальным копиям: тикет «оптимизация базы
+                         прошивок… много откатанных и не все рабочие» начинается с того, чтобы
+                         увидеть числа. Откат и выключение показаны порознь — это разные вещи
+                         (откат освобождает номер ПО, выключение нет). -->
+                    <TextBlock x:Name="BaseInventoryText" VerticalAlignment="Center"
+                               Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                     <TextBlock x:Name="LocalCacheStateText" VerticalAlignment="Center"
                                Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
                 </StackPanel>

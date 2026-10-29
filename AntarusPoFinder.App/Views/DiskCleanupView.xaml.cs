@@ -133,6 +133,39 @@ public partial class DiskCleanupView : UserControl
         _fillingCleanupPolicy = false;
 
         ShowLocalCacheState();
+        ShowBaseInventory();
+    }
+
+    /// <summary>Сводка по базе прошивок (см. Core/Services/FirmwareInventory).
+    ///
+    /// Считается БЕЗ похода на сетевой диск: наличие файла проверяется только у локальных копий,
+    /// а у остальных записей честно остаётся «не проверено». Иначе открытие вкладки на машине с
+    /// отвалившейся шарой вставало бы на минуты и заканчивалось отчётом «пропало всё».</summary>
+    private void ShowBaseInventory()
+    {
+        try
+        {
+            var versions = _services.Db.GetAllFwVersionsWithNames();
+            var statuses = versions.Select(v => v.Status).ToList();
+            var released = versions.Select(v => v.Released).ToList();
+
+            var inventory = FirmwareInventory.Count(statuses, released, i =>
+            {
+                var path = versions[i].DiskPath ?? "";
+                // Пусто или сетевой путь — проверять нечем и незачем (см. пояснение выше).
+                if (path.Length == 0) return null;
+                if (!path.StartsWith(ConfigService.LocalFw, StringComparison.OrdinalIgnoreCase)) return null;
+                try { return Directory.Exists(path); }
+                catch (Exception) { return null; }
+            });
+
+            BaseInventoryText.Text = "База прошивок: " + inventory.Summary();
+        }
+        catch (Exception)
+        {
+            // Сводка — справка, а не работа: её отсутствие не повод ломать вкладку.
+            BaseInventoryText.Text = "";
+        }
     }
 
     /// <summary>Сколько сейчас занято и сколько копий лежит. Цифра, а не обещание: решать
