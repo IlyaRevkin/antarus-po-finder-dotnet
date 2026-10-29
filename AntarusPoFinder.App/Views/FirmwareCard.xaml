@@ -111,6 +111,12 @@
                 <Button Grid.Column="1" x:Name="CopyButton" Content="Копировать" Style="{StaticResource SecondaryButton}" Click="Copy_Click"/>
             </Grid>
 
+            <!-- Под каким именем прошивку принесли на загрузку: на диске файл лежит переименованным
+                 в номер версии, и узнать свою сборку по номеру автор не может. Пусто у версий,
+                 загруженных до появления столбца, — строка тогда скрыта. -->
+            <TextBlock x:Name="SourceNameLabel" Style="{StaticResource MutedText}" Margin="0,4,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed"/>
+
             <!-- Состояние локальной копии: раньше на её месте была кнопка «Синхронизировать»,
                  теперь копия подтягивается сама (SearchView.AutoSyncMissing), а карточка просто
                  показывает, что с ней происходит. Ручная синхронизация осталась в меню «Ещё». -->

@@ -121,6 +121,11 @@ public class ExportedFwVersion
     /// чьё значение свежее — иначе исправление не доходило до того, у кого в поле уже лежало
     /// неверное (см. Database.cs, hints_changed_at).</summary>
     [JsonPropertyName("hints_changed_at")] public string HintsChangedAt { get; set; } = "";
+    /// <summary>Исходное имя файла прошивки (fw_versions.source_name) — то, под которым её принесли
+    /// на загрузку. Ехать обязано: на диске файл лежит переименованным в номер версии, и у коллеги
+    /// восстановить прежнее название было бы неоткуда. Пусто в снимке со старой версии программы —
+    /// тогда у приехавшей записи его просто нет, как и у всех загруженных до появления столбца.</summary>
+    [JsonPropertyName("source_name")] public string SourceName { get; set; } = "";
     [JsonPropertyName("version_raw")] public string VersionRaw { get; set; } = "";
     [JsonPropertyName("hw_version")] public int HwVersion { get; set; }
     [JsonPropertyName("sw_version")] public int SwVersion { get; set; }

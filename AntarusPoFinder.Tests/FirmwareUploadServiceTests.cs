@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -732,6 +732,28 @@ public class FirmwareUploadServiceTests : IDisposable
 
             Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
             Assert.Equal("Укажите тип шкафа, подтип и контроллер.", result.Errors.Single());
+        }
+        finally { File.Delete(src); }
+    }
+
+    /// <summary>Исходное имя файла обязано пережить загрузку: на диск он ложится переименованным в
+    /// номер версии, и, кроме этого столбца, прежнее название взять потом неоткуда (тикет «исходное
+    /// название прошивки сохранять и показывать»).</summary>
+    [Fact]
+    public void Upload_RemembersSourceFileName()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, BaseRequest(src, group, subtype, mod));
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            var stored = _db.GetFwVersionById(result.FwVersionId)!;
+            Assert.Equal(Path.GetFileName(src), stored.SourceName);
+            // Имя на диске — это НОМЕР версии, а не исходное название: если они совпали, столбец
+            // ничего не добавил бы и тест ничего бы не проверял.
+            Assert.NotEqual(stored.SourceName, stored.Filename);
         }
         finally { File.Delete(src); }
     }

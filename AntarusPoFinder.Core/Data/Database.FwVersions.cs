@@ -17,13 +17,13 @@ public partial class Database
                 launch_types,io_map_path,instructions_path,hmi_path,executable_hint,hmi_executable_hint,
                 modbus_map_path,
                 is_opc,request_num,cabinet_sn,archived,
-                upload_date,tags,author_id,status,sync_id,config_name,copy_of,execution)
+                upload_date,tags,author_id,status,sync_id,config_name,copy_of,execution,source_name)
             VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
                 @dt_str,@version_raw,@filename,@disk_path,@local_path,@description,@changelog,
                 @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                 @modbus_map_path,
                 @is_opc,@request_num,@cabinet_sn,0,
-                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of,@execution)
+                @upload_date,@tags,@author_id,@status,@sync_id,@config_name,@copy_of,@execution,@source_name)
             """, cmd =>
         {
             // Пусто у обычной загрузки; непустым его заводит только FirmwareConfigService (вариант
@@ -48,6 +48,7 @@ public partial class Database
             cmd.Parameters.AddWithValue("@sw_version", v.SwVersion);
             cmd.Parameters.AddWithValue("@dt_str", v.DtStr);
             cmd.Parameters.AddWithValue("@version_raw", v.VersionRaw);
+            cmd.Parameters.AddWithValue("@source_name", v.SourceName ?? "");
             cmd.Parameters.AddWithValue("@filename", v.Filename);
             cmd.Parameters.AddWithValue("@disk_path", v.DiskPath);
             cmd.Parameters.AddWithValue("@local_path", v.LocalPath);
@@ -1386,6 +1387,7 @@ public partial class Database
             ConfigName = GetString(r, "config_name"),
             CopyOf = GetString(r, "copy_of"),
             Execution = GetString(r, "execution"),
+            SourceName = GetString(r, "source_name"),
         };
     }
 }

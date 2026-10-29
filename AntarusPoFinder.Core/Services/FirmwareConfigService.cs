@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
@@ -252,6 +252,8 @@ public static class FirmwareConfigService
         RequestNum = primary.RequestNum,
         CabinetSn = primary.CabinetSn,
         AuthorId = primary.AuthorId,
+        // Файлы у конфигурации те же самые — значит и имя, под которым их принесли.
+        SourceName = primary.SourceName,
         Status = primary.Status,
     };
 }

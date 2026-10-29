@@ -32,6 +32,12 @@ public class HierarchyResult
     public string FirmwareDir { get; init; } = "";
 
     public string VersionRaw { get; init; } = "";
+
+    /// <summary>Имя файла, под которым прошивку принесли на загрузку (fw_versions.source_name).
+    /// Пусто у версий, загруженных до появления столбца, и у тех, кто синхронизировался со старой
+    /// программы.</summary>
+    public string SourceName { get; init; } = "";
+
     public string Description { get; init; } = "";
     public string Tags { get; init; } = "";
 
@@ -235,6 +241,7 @@ public static class SearchService
             HmiExecutableHint = row.HmiExecutableHint,
             FirmwareDir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot),
             VersionRaw = row.VersionRaw,
+            SourceName = row.SourceName,
             Description = row.Description,
             Tags = row.Tags,
             ConfigName = row.ConfigName,

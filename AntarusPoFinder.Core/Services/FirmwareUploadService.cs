@@ -392,6 +392,23 @@ public static class FirmwareUploadService
         return Register(db, hierarchy, plan, copy, shortcuts);
     }
 
+    /// <summary>Под каким именем файл принесли на загрузку — ровно то, что увидит человек в карточке
+    /// (столбец fw_versions.source_name). На диск он ляжет переименованным в номер версии, поэтому
+    /// запомнить имя можно только здесь.
+    ///
+    /// У папки-проекта берётся имя ГЛАВНОГО файла, если оператор его указал, и имя самой папки, если
+    /// нет: в обоих случаях это та строка, по которой сборку узнаёт её автор, а «имя папки» у проекта
+    /// из SMLogix как раз и есть название прошивки.</summary>
+    private static string SourceDisplayName(FirmwareUploadRequest request, FirmwareUploadPlan plan)
+    {
+        var source = request.SourcePath ?? "";
+        if (string.IsNullOrEmpty(source)) return "";
+        if (!plan.SourceIsDirectory) return Path.GetFileName(source);
+        return string.IsNullOrEmpty(plan.MainFileInFolder)
+            ? Path.GetFileName(source.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : Path.GetFileName(plan.MainFileInFolder);
+    }
+
     /// <summary>Обязателен ли тип пуска при заведении версии. Одно место на всю программу: форма
     /// загрузки по этому же свойству решает, рисовать ли звёздочку у заголовка «ТИП ПУСКА», —
     /// иначе подпись и проверка разъехались бы при следующей правке.</summary>
@@ -840,6 +857,7 @@ public static class FirmwareUploadService
             DtStr = plan.Version.DtStr,
             VersionRaw = plan.Version.Raw,
             Filename = copy.DestinationFilename,
+            SourceName = SourceDisplayName(request, plan),
             DiskPath = plan.DestinationFolder,
             Description = plan.Description,
             Changelog = plan.Description,

@@ -278,6 +278,19 @@ public partial class FirmwareCard : UserControl
         // с тем, что реально копируется, ему нельзя.
         SoftwareNameLabel.Text = $"{result.Name} {versionText}".Trim();
 
+        // ⚠️ ИСХОДНОЕ ИМЯ ФАЙЛА — ПОКАЗЫВАЕТСЯ ТОЛЬКО В БЕТЕ. Само имя запоминается в обеих
+        // сборках (столбец source_name заполняется при загрузке), но лишняя строка на карточке —
+        // переделка вида, а не исправление: в рабочей версии карточка остаётся прежней.
+        var sourceName = result.SourceName ?? "";
+        bool showSource = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(sourceName);
+        SourceNameLabel.Visibility = showSource ? Visibility.Visible : Visibility.Collapsed;
+        if (showSource)
+        {
+            SourceNameLabel.Text = $"Исходное название: {sourceName}";
+            SourceNameLabel.ToolTip = "Имя файла, под которым прошивку принесли на загрузку. На диске "
+                + "файл лежит переименованным в номер версии.";
+        }
+
         ShowFilesLine(result, flags);
 
         ActionsPanel.Children.Clear();

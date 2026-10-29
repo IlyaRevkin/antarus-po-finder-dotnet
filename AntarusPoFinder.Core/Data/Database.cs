@@ -113,7 +113,9 @@ public partial class Database : IDisposable
                  copy_of           TEXT    NOT NULL DEFAULT '',
                  -- ИСПОЛНЕНИЕ прошивки: '' — обычная, непустое — одна из нескольких одновременно
                  -- актуальных прошивок одного шкафа. См. FwExecution и EnsureColumnsExist ниже.
-                 execution         TEXT    NOT NULL DEFAULT ''
+                 execution         TEXT    NOT NULL DEFAULT '',
+                 -- ИСХОДНОЕ имя файла, каким его принесли на загрузку. См. EnsureColumnsExist ниже.
+                 source_name       TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -867,6 +869,17 @@ public partial class Database : IDisposable
         // DEFAULT '' проставляет уже существующим строкам ровно то значение, которое и означает
         // «обычная прошивка». См. FwExecution.
         AddColumnsIfMissing("fw_versions", ("execution", "TEXT NOT NULL DEFAULT ''"));
+
+        // source_name: ИМЯ ФАЙЛА, КАКИМ ЕГО ПРИНЕСЛИ НА ЗАГРУЗКУ.
+        //
+        // На диск файл ложится под номером версии (FirmwareNaming.BuildFirmwareFilename), и прежнее
+        // название — «КПЧ_SMH5_v3.42.2_Pass.lfs», то самое, под которым прошивку знает её автор и
+        // под которым она лежит у него в проекте, — исчезало бесследно. Отсюда тикет: по номеру
+        // версии не опознать, та ли это сборка, что лежит на рабочем столе у программиста.
+        //
+        // Пусто = загружено до появления столбца; показывать тогда нечего, и всё работает как
+        // раньше. Задним числом не восстанавливаем: имя на диске уже заменено номером.
+        AddColumnsIfMissing("fw_versions", ("source_name", "TEXT NOT NULL DEFAULT ''"));
 
         // СПРАВОЧНИК ИСПОЛНЕНИЙ: активность и дата заведения.
         //

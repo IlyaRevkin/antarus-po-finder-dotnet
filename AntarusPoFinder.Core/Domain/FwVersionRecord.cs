@@ -15,6 +15,12 @@ public class FwVersionRecord
     public string DtStr { get; set; } = "";
     public string VersionRaw { get; set; } = "";
     public string Filename { get; set; } = "";
+
+    /// <summary>Имя файла, каким его принесли на загрузку (столбец fw_versions.source_name). На диск
+    /// файл ложится переименованным в номер версии, поэтому исходное название больше взять неоткуда —
+    /// а именно по нему прошивку опознаёт тот, кто её собрал. Пусто у версий, загруженных до
+    /// появления столбца.</summary>
+    public string SourceName { get; set; } = "";
     public string DiskPath { get; set; } = "";
     public string LocalPath { get; set; } = "";
     public string Description { get; set; } = "";
