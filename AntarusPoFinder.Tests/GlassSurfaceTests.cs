@@ -1,3 +1,4 @@
+﻿using System;
 using AntarusPoFinder.App;
 using System.Windows.Media;
 using Xunit;
@@ -17,11 +18,40 @@ public class GlassSurfaceTests
     private static Color Input => Color.FromArgb(0x99, 0x10, 0x17, 0x22);
 
     [Fact]
-    public void На_значении_по_умолчанию_тема_не_меняется()
+    public void На_умолчании_стекло_ровно_такое_как_в_теме()
     {
-        // Человек, не трогавший настройку, обязан видеть ровно то, что нарисовано в Glass.xaml.
-        Assert.Equal(Card, GlassSurface.Scale(Card, GlassSurface.Default));
-        Assert.Equal(Sidebar, GlassSurface.Scale(Sidebar, GlassSurface.Default));
+        // Человек, не трогавший ползунок — и человек, вернувший его кнопкой «Как в теме», —
+        // обязаны видеть ровно то стекло, которое нарисовано в Glass.xaml. Ради этого шкала и
+        // сделана ломаной: умолчание совпадает с темой у ВСЕХ поверхностей, а не у одной.
+        foreach (var themeColor in new[] { Card, Sidebar, Input })
+            Assert.Equal(themeColor.A, GlassSurface.Scale(themeColor, GlassSurface.Default).A);
+    }
+
+    [Fact]
+    public void Края_шкалы_значат_то_что_написано()
+    {
+        // Ноль — «прозрачности нет»: поверхность глухая, как в обычной тёмной теме. Это и чинит
+        // прежнюю шкалу, у которой края означали произвольные числа.
+        foreach (var themeColor in new[] { Card, Sidebar, Input })
+            Assert.Equal(255, GlassSurface.Scale(themeColor, 0).A);
+
+        // Сто — максимум: все поверхности прозрачнее, чем нарисованы в теме.
+        foreach (var themeColor in new[] { Card, Sidebar, Input })
+            Assert.True(GlassSurface.Scale(themeColor, 100).A < themeColor.A);
+    }
+
+    [Fact]
+    public void Ручка_двигается_в_одну_сторону()
+    {
+        // «Регулировка кривая» — это в том числе про немонотонность. Чем правее, тем прозрачнее,
+        // без исключений на всём ходу ползунка.
+        var previous = 256;
+        for (var percent = 0; percent <= 100; percent += 5)
+        {
+            var alpha = GlassSurface.Scale(Card, percent).A;
+            Assert.True(alpha <= previous, $"на {percent} % альфа выросла: {alpha} после {previous}");
+            previous = alpha;
+        }
     }
 
     [Theory]
@@ -46,7 +76,8 @@ public class GlassSurfaceTests
         // интерфейс, 1000 — переполнение байта альфы и внезапно ПРОЗРАЧНУЮ поверхность.
         Assert.Equal(GlassSurface.Scale(Card, GlassSurface.Min), GlassSurface.Scale(Card, -40));
         Assert.Equal(GlassSurface.Scale(Card, GlassSurface.Max), GlassSurface.Scale(Card, 1000));
-        Assert.True(GlassSurface.Scale(Card, 1000).A > GlassSurface.Scale(Card, GlassSurface.Min).A);
+        // Максимум прозрачности — это МЕНЬШЕ альфы, чем на нуле шкалы.
+        Assert.True(GlassSurface.Scale(Card, 1000).A < GlassSurface.Scale(Card, GlassSurface.Min).A);
     }
 
     [Fact]

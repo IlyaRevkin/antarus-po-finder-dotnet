@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
@@ -62,6 +62,11 @@ public static class ClipboardSafe
     public static bool TrySetTextWithNote(string? text, DependencyObject anchor, IAppHost host, string done)
     {
         if (!TrySetText(text)) return false;
+
+        // Пустой текст — осознанное «сообщать не о чем»: тикет «Хлам уведомление "скопировано
+        // *версия прошивки*" убрать полностью». Там, где рядом уже есть видимый отклик (кнопка
+        // становится «✓ Скопировано»), второе сообщение — только шум поверх выдачи.
+        if (string.IsNullOrEmpty(done)) return true;
 
         var owner = Window.GetWindow(anchor);
         if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta && owner is not null) FlashNote.Show(owner, done);

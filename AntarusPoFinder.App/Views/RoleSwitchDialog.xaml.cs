@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
@@ -117,6 +117,9 @@ public partial class RoleSwitchDialog : Window
         {
             RecordRememberChoice(normalized);
             _services.CurrentAdLogin = normalized;
+            // Та же причина, что и в окне входа: роль из группы обязана доехать до ростера, иначе
+            // «Настройки → Пользователи» показывают прошлогоднюю правду.
+            RememberGroupRole(_services, _cfg, normalized, groupRole, login);
             SelectedRole = groupRole;
             DialogResult = true;
             return;
@@ -170,4 +173,37 @@ public partial class RoleSwitchDialog : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    /// <summary>Записать в ростер того, чью роль дала AD-группа.
+    ///
+    /// <b>Баг, который это чинит.</b> Когда роль приходит из группы AD, вход проходил мимо ростера
+    /// целиком: строку не заводили и роль в ней не трогали. Поэтому в «Настройки → Пользователи»
+    /// администратор видел не то, что есть на самом деле: тех, кто всегда входит по группе, в
+    /// списке не было вовсе, а у заведённых когда-то раньше висела СТАРАЯ сохранённая роль —
+    /// «наладчик» у человека, который давно админ по группе. Жалоба Ильи дословно: «роли не
+    /// релевантные, у меня и ещё 2 людей админ а отображается наладчик, ещё нескольких
+    /// пользователей вообще не видно».
+    ///
+    /// Источник истины — группа: если она сказала «администратор», в ростере обязано стоять то же.
+    /// Поэтому роль здесь перезаписывается, а не дополняется. Время правки проставляется заново,
+    /// чтобы запись выиграла слияние на чужой машине (там сравнение идёт по role_updated_at).
+    ///
+    /// Всё best-effort: ростер — это отчёт для администратора, и он не имеет права не пустить
+    /// человека в программу, если сеть или диск сейчас недоступны.</summary>
+    private static void RememberGroupRole(AppServices services, ConfigService cfg, string normalizedLogin, string role, string shownLogin)
+    {
+        try
+        {
+            var user = services.Db.TouchOrCreateAppUser(normalizedLogin);
+            if (user.Id is not null && !string.Equals(user.Role, role, StringComparison.Ordinal))
+                services.Db.SetAppUserRole(user.Id.Value, role);
+
+            try { ConfigSyncService.PushAppUsersOnly(services, cfg.RootPath(), $"{shownLogin} ({RolesConfig.RoleLabel(role)})"); }
+            catch { /* диск недоступен — уедет со следующим входом или ручной отправкой */ }
+        }
+        catch (Exception)
+        {
+            // Ростер — отчёт, а не пропуск: его поломка не имеет права мешать человеку войти.
+        }
+    }
 }
