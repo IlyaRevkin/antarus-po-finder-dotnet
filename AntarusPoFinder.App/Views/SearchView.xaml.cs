@@ -2441,7 +2441,10 @@ public partial class SearchView : UserControl
             return;
         }
 
-        _host.ShowStatus($"Скопировано: {result.Name}");
+        // Тикет: «Хлам уведомление "скопировано *версия прошивки*" убрать полностью». Сама кнопка
+        // на карточке показывает «✓ Скопировано» и этим всё сказано; плашка сверху дублировала её
+        // и перекрывала выдачу. В рабочей версии сообщение оставлено как было — вид там не меняем.
+        if (!AppIdentity.IsBeta) _host.ShowStatus($"Скопировано: {result.Name}");
 
         var dlg = new SyncResultDialog(result, dst) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
@@ -2669,7 +2672,7 @@ public partial class SearchView : UserControl
         var text = FirmwareNaming
             .CopyableVersionName(result.VersionRaw, result.IsOpc, result.RequestNum, result.CabinetSn)
             .ToUpperInvariant();
-        if (!ClipboardSafe.TrySetTextWithNote(text, this, _host, $"Скопировано: {text}"))
+        if (!ClipboardSafe.TrySetTextWithNote(text, this, _host, AppIdentity.IsBeta ? "" : $"Скопировано: {text}"))
             _host.ShowStatus("Буфер обмена занят другим приложением — попробуйте ещё раз");
     }
 

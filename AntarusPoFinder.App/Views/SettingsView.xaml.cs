@@ -4574,6 +4574,30 @@ public partial class SettingsView : UserControl
         SaveApps($"Добавлено в быстрый доступ: {name}");
     }
 
+    /// <summary>Передвинуть выбранный ярлык на одну строку. Жалоба дословно: «порядок приложений
+    /// быстрого доступа менять нельзя» — перетаскивание в таблице, которую правят прямо в ячейках,
+    /// срабатывает не с первого раза, и этого достаточно, чтобы человек решил, что способа нет.
+    /// Кнопки — способ, который работает всегда.</summary>
+    private void MoveApp(int delta)
+    {
+        if (AppsGrid.ItemsSource is not ObservableCollection<AppRow> apps) return;
+        if (AppsGrid.SelectedItem is not AppRow row) return;
+
+        var from = apps.IndexOf(row);
+        var to = from + delta;
+        if (from < 0 || to < 0 || to >= apps.Count) return;
+
+        QuickAppOrder.Move(apps, from, to);
+        // Выделение едет за строкой: иначе второе нажатие двигало бы уже другой ярлык.
+        AppsGrid.SelectedItem = row;
+        AppsGrid.Focus();
+        SaveApps("Порядок быстрого доступа сохранён");
+    }
+
+    private void MoveAppUp_Click(object sender, RoutedEventArgs e) => MoveApp(-1);
+
+    private void MoveAppDown_Click(object sender, RoutedEventArgs e) => MoveApp(+1);
+
     private void DeleteApp_Click(object sender, RoutedEventArgs e)
     {
         if (AppsGrid.SelectedItem is not AppRow row) return;
