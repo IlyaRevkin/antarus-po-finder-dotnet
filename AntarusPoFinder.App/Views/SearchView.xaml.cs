@@ -775,6 +775,13 @@ public partial class SearchView : UserControl
         // (а это тоже запросы в SQLite) один раз, а не по три на карточку.
         var connectionMode = _services.Cfg.LoaderConnectionMode();
         var connectionHint = ConnectionHintText();
+        // ⚠️ ТОЛЬКО БЕТА: у каких версий уже посчитан QR (таблица fw_qr_codes, см. FirmwareQrCodes).
+        // Один запрос на всю выдачу — ровно по той же причине, что и наборы выше. В рабочей версии
+        // набор пустой и ничего не меняет: кнопка наклейки там живёт строго по обходу диска, как и
+        // жила.
+        var qrCovered = AntarusPoFinder.Core.Domain.AppIdentity.IsBeta
+            ? _services.Db.GetFwQrCoveredIds()
+            : new HashSet<int>();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -798,6 +805,7 @@ public partial class SearchView : UserControl
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
                 TagsPending = pendingSubjects.Contains(result.FwVersionId.ToString()),
+                HasStoredQr = qrCovered.Contains(result.FwVersionId),
                 DiskScanPending = true,
                 // По контроллеру/подсказке файла — до обхода диска; после обхода уточняется тем, что
                 // реально нашлось рядом (см. ScanDiskFlagsAsync).
@@ -1108,6 +1116,10 @@ public partial class SearchView : UserControl
                 HasInstructionPrintable = scan.HasInstructionPrintable,
                 HasInstructionStub = scan.HasInstructionStub,
                 HasModbus = scan.HasModbus,
+                // HasStoredQr не трогаем: он из базы, обход диска про него ничего не знает, и
+                // `baseFlags with { … }` сохраняет его сам — строка оставлена комментарием, чтобы
+                // следующий, кто будет переписывать этот блок, не «дополнил» его обнулением.
+
                 PlcOpenExtension = scan.PlcOpenExtension,
                 HmiOpenExtension = scan.HmiOpenExtension,
                 DiskScanPending = false,
@@ -2586,8 +2598,12 @@ public partial class SearchView : UserControl
         var file = doc.Pdf ?? doc.Newest ?? doc.Docx
                    ?? NotPlannedPageFor(result)
                    ?? InstructionStub.ExistingIn(instructionFolder);
+        // ⚠️ Номер записи и записанный у версии путь — ТОЛЬКО ради сохранённого QR (бета, см.
+        // FirmwareQrCodes): по ним окно находит и обновляет строку в fw_qr_codes, а при отвалившемся
+        // сетевом диске (file здесь окажется null) — показывает то, что посчитали заранее. В рабочей
+        // версии оба значения окно просто не использует.
         InstructionLabelWindow.ShowFor(Window.GetWindow(this), _services, _host,
-            result.Name, result.VersionRaw, file);
+            result.Name, result.VersionRaw, file, result.FwVersionId, result.InstructionsPath);
     }
 
     /// <summary>Одна-на-всех страница «инструкции не будет» — если подтип этой версии так отмечен и

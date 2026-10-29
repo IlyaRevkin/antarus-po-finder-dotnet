@@ -25,6 +25,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// <summary>Разовый таймер показа окна «Что нового» после автообновления — см. CheckWhatsNewAsync.</summary>
     private DispatcherTimer? _whatsNewCheckTimer;
     private DispatcherTimer? _fwUpdateCheckTimer;
+    private DispatcherTimer? _qrSweepTimer;
     private DispatcherTimer? _configCheckTimer;
     private DispatcherTimer? _configPullRepeatTimer;
     private DispatcherTimer? _configPushTimer;
@@ -208,6 +209,28 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// hammering GitHub/the update folder. Exposed as internal so a live UI test can temporarily swap
     /// in a shorter interval without touching the timer wiring itself.</summary>
     internal static TimeSpan PeriodicUpdateCheckInterval { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>Как часто пересматривать таблицу QR-кодов (бета, см. FirmwareQrSweep). Настройкой
+    /// намеренно не делается: ручка на то, что человек не видит, — это ещё один способ сломать
+    /// программу и ни одного — её починить. Десять минут — это «залили прошивку, сходили за
+    /// кофе, наклейка уже печатается без диска», и при этом холостой проход ничего не стоит.</summary>
+    internal static TimeSpan QrSweepInterval { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Проход по таблице QR-кодов — МОЛЧА. Человеку он не адресован вовсе: строка в
+    /// служебной таблице — не событие, о котором стоит сообщать, а ошибка здесь ничего не ломает:
+    /// без сохранённого кода окно наклейки работает ровно как раньше, по живому диску.</summary>
+    private void RunQrSweep()
+    {
+        try
+        {
+            FirmwareQrSweep.Run(_services.Db, Views.InstructionLabelWindow.QrOptions(_services),
+                toUnc: path => Services.NetworkPathHelper.TryResolveUnc(path) ?? path);
+        }
+        catch
+        {
+            // База занята / файл заблокирован / приложение закрывается — следующий тик сделает то же самое.
+        }
+    }
 
     public MainWindowViewModel(AppServices services)
     {
@@ -913,6 +936,34 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             await CheckForFirmwareUpdatesAsync();
         };
         _fwUpdateCheckTimer.Start();
+
+        // ⚠️ ТОЛЬКО БЕТА. 4000ms один раз, дальше каждые QrSweepInterval: привести таблицу
+        // QR-кодов в соответствие с базой — завести коды новым версиям, перестроить те, у кого
+        // сменилась ссылка, убрать коды откаченных и архивных (см. FirmwareQrSweep).
+        //
+        // После тика приёма конфига и синхронизации не выстраивается нарочно: проход сам по себе
+        // дешёвый и сам разберётся, что изменилось (на совпавшем отпечатке в базу не пишется ничего),
+        // а строить его на чужих событиях значило бы вернуться к тому самому «ловить события руками»,
+        // от которого таблица и уходит (см. FirmwareQrCodes).
+        //
+        // Сети и диска проход не трогает вовсе, поэтому идёт прямо здесь, без Task.Run: это
+        // короткие запросы к SQLite и по хэшу на версию, а база в этом приложении живёт на потоке
+        // интерфейса (так же работают соседние тики).
+        if (Core.Domain.AppIdentity.IsBeta)
+        {
+            _qrSweepTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
+            // Один обработчик на все тики: первый приходит через 4 секунды после запуска, дальше
+            // интервал подменяется на рабочий прямо в обработчике (DispatcherTimer перезаводит
+            // отсчёт сам). Соседние таймеры здесь устроены иначе — «остановиться и завести второй
+            // таймер на повтор», — но там у разового и у повторного тика РАЗНАЯ работа; здесь она
+            // одна и та же, и второй подписчик означал бы только лишний вызов на каждом тике.
+            _qrSweepTimer.Tick += (_, _) =>
+            {
+                RunQrSweep();
+                if (_qrSweepTimer!.Interval != QrSweepInterval) _qrSweepTimer.Interval = QrSweepInterval;
+            };
+            _qrSweepTimer.Start();
+        }
 
         // 3500ms once, then every sync_interval_min minutes: pull+apply a newer shared config
         // automatically — settings are 100% local-only by design (see ConfigSyncService.
