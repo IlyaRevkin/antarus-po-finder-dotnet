@@ -2617,9 +2617,8 @@ public partial class SearchView : UserControl
         var text = FirmwareNaming
             .CopyableVersionName(result.VersionRaw, result.IsOpc, result.RequestNum, result.CabinetSn)
             .ToUpperInvariant();
-        _host.ShowStatus(ClipboardSafe.TrySetText(text)
-            ? $"Скопировано: {text}"
-            : "Буфер обмена занят другим приложением — попробуйте ещё раз");
+        if (!ClipboardSafe.TrySetTextWithNote(text, this, _host, $"Скопировано: {text}"))
+            _host.ShowStatus("Буфер обмена занят другим приложением — попробуйте ещё раз");
     }
 
     private static void TryOpen(string path) => PrintableDocActions.Open(path);
