@@ -310,6 +310,11 @@ public class FirmwareUploadPlan
 
     public int? AuthorId { get; init; }
 
+    /// <summary>Имя автора строкой — то, что ляжет в fw_versions.author_name и уедет к коллегам
+    /// (см. столбец в Database.cs). AuthorId рядом остаётся: по нему автор связан с локальной
+    /// таблицей users, но за пределы этой машины такая ссылка не выходит.</summary>
+    public string AuthorName { get; init; } = "";
+
     /// <summary>HMI-проект прошлой версии этого же шкафа — подставляется, когда новая версия
     /// загружается без панели (ПЛК и HMI обновляются независимо, см.
     /// Database.GetLatestHmiForFirmware). Пусто — панели у шкафа ещё не было вовсе.</summary>
@@ -617,6 +622,7 @@ public static class FirmwareUploadService
             NewLayout = request.NewDiskLayout,
             ControllerFolder = ctrlFolder,
             AuthorId = user.Id,
+            AuthorName = user.Name,
             InheritedHmiPath = inheritedHmi?.HmiPath ?? "",
             InheritedHmiExecutableHint = inheritedHmi?.HmiExecutableHint ?? "",
             InheritedHmiFromVersion = inheritedHmi?.VersionRaw ?? "",
@@ -873,6 +879,7 @@ public static class FirmwareUploadService
             RequestNum = plan.RequestNum,
             CabinetSn = plan.CabinetSn,
             AuthorId = plan.AuthorId,
+            AuthorName = plan.AuthorName,
             Status = "active",
             Tags = TagString.Join(tags),
         };

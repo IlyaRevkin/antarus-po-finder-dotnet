@@ -736,6 +736,29 @@ public class FirmwareUploadServiceTests : IDisposable
         finally { File.Delete(src); }
     }
 
+    /// <summary>Автор версии хранится ИМЕНЕМ, а не только ссылкой на локальную таблицу users:
+    /// строки users в общем конфиге не ездят, и у коллеги author_id не значил бы ничего (тикет
+    /// «автор прошивки — поле и показ в карточке/истории»).</summary>
+    [Fact]
+    public void Upload_RemembersAuthorName()
+    {
+        var (group, subtype, mod) = SeedTgrSmh5();
+        var src = WriteTempFile(".psl");
+        try
+        {
+            var request = BaseRequest(src, group, subtype, mod);
+            request.AuthorUserName = "Иванов И.И.";
+
+            var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
+
+            Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+            var stored = _db.GetFwVersionById(result.FwVersionId)!;
+            Assert.Equal("Иванов И.И.", stored.AuthorName);
+            Assert.NotNull(stored.AuthorId);
+        }
+        finally { File.Delete(src); }
+    }
+
     /// <summary>Исходное имя файла обязано пережить загрузку: на диск он ложится переименованным в
     /// номер версии, и, кроме этого столбца, прежнее название взять потом неоткуда (тикет «исходное
     /// название прошивки сохранять и показывать»).</summary>

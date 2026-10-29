@@ -22,6 +22,10 @@ public partial class HistoryDialog : Window
             ? $"{Record.DtStr[6..8]}.{Record.DtStr[4..6]}.{Record.DtStr[0..4]} {Record.DtStr[9..11]}:{Record.DtStr[11..13]}"
             : Record.UploadDate;
         public string CtrlName => Record.CtrlName;
+        /// <summary>Кто загрузил версию (fw_versions.author_name). Пусто у записей, заведённых до
+        /// появления столбца, — в таблице тогда пустая ячейка, а не «неизвестно»: это не состояние
+        /// прошивки, а просто отсутствие данных.</summary>
+        public string AuthorName => Record.AuthorName;
         /// <summary>Сколько раз версию выбирали в поиске по всем запросам вместе (Database.
         /// GetFwUsageTotal) — тот же счётчик, что на карточке результата.</summary>
         public int UsageTotal { get; init; }
@@ -50,12 +54,31 @@ public partial class HistoryDialog : Window
     {
         InitializeComponent();
         Title = $"История версий — {cabinetTitle}";
+        AddAuthorColumn();
         _services = services;
         _host = host;
         _subtypeId = subtypeId;
         _controllerId = controllerId;
 
         LoadRows(versions, selectVersionId: null);
+    }
+
+    /// <summary>⚠️ СТОЛБЕЦ «АВТОР» — ТОЛЬКО В БЕТЕ. Само имя пишется в обеих сборках, но лишний
+    /// столбец в истории — переделка вида, а не исправление. Кодом, а не разметкой, потому что
+    /// условного столбца в XAML не объявить, а второй файл разметки ради одного столбца — худший
+    /// размен. Вставляется ПЕРЕД «Обращений»: автор читается вместе с контроллером и датой, а
+    /// счётчик и статус — это уже про судьбу версии.</summary>
+    private void AddAuthorColumn()
+    {
+        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) return;
+        var column = new System.Windows.Controls.DataGridTextColumn
+        {
+            Header = "Автор",
+            Binding = new System.Windows.Data.Binding(nameof(Row.AuthorName)),
+            Width = 140,
+            ElementStyle = (Style)FindResource("HistoryCell"),
+        };
+        VersionsGrid.Columns.Insert(3, column);
     }
 
     /// <summary>Заполняет таблицу по списку версий: считает статусы и счётчик обращений для каждой,

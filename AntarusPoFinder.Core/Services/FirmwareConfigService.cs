@@ -254,6 +254,7 @@ public static class FirmwareConfigService
         AuthorId = primary.AuthorId,
         // Файлы у конфигурации те же самые — значит и имя, под которым их принесли.
         SourceName = primary.SourceName,
+        AuthorName = primary.AuthorName,
         Status = primary.Status,
     };
 }

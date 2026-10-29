@@ -115,7 +115,9 @@ public partial class Database : IDisposable
                  -- актуальных прошивок одного шкафа. См. FwExecution и EnsureColumnsExist ниже.
                  execution         TEXT    NOT NULL DEFAULT '',
                  -- ИСХОДНОЕ имя файла, каким его принесли на загрузку. См. EnsureColumnsExist ниже.
-                 source_name       TEXT    NOT NULL DEFAULT ''
+                 source_name       TEXT    NOT NULL DEFAULT '',
+                 -- ИМЯ АВТОРА прошивки строкой — переносимое, в отличие от author_id. См. ниже.
+                 author_name       TEXT    NOT NULL DEFAULT ''
              );
 
              CREATE TABLE IF NOT EXISTS param_manufacturers (
@@ -880,6 +882,18 @@ public partial class Database : IDisposable
         // Пусто = загружено до появления столбца; показывать тогда нечего, и всё работает как
         // раньше. Задним числом не восстанавливаем: имя на диске уже заменено номером.
         AddColumnsIfMissing("fw_versions", ("source_name", "TEXT NOT NULL DEFAULT ''"));
+
+        // author_name: КТО ЗАГРУЗИЛ ПРОШИВКУ — именем, а не ссылкой.
+        //
+        // Столбец author_id был и раньше, но пользы от него за пределами одной машины нет: users —
+        // локальная таблица, её строки не ездят в общем конфиге, и у коллеги тот же id означает
+        // другого человека или не означает никого. Поэтому имя дублируется строкой — ровно так же,
+        // как в журнале решений модерации (moderation_log.author), который по той же причине возит
+        // автора текстом.
+        //
+        // Пусто = загружено до появления столбца или приехало со старой программы; карточка тогда
+        // строку с автором просто не показывает.
+        AddColumnsIfMissing("fw_versions", ("author_name", "TEXT NOT NULL DEFAULT ''"));
 
         // СПРАВОЧНИК ИСПОЛНЕНИЙ: активность и дата заведения.
         //

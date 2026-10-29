@@ -233,6 +233,8 @@ public static class FirmwareSubtypeLinkService
                 AuthorId = primary.AuthorId,
                 // Копия — та же сборка, значит и исходное имя файла у неё то же самое.
                 SourceName = primary.SourceName,
+                // Копию делает не человек, а программа — автором остаётся тот, кто загрузил оригинал.
+                AuthorName = primary.AuthorName,
                 Status = primary.Status,
                 Tags = TagString.Join(tags),
                 CopyOf = root,

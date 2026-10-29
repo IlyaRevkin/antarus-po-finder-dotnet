@@ -301,7 +301,7 @@ public partial class Database
                    fv.is_opc, fv.request_num, fv.upload_date, fv.archived, fv.tags,
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
                    fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
-                   fv.manual_current, fv.status_changed_at, fv.hints_changed_at, fv.source_name,
+                   fv.manual_current, fv.status_changed_at, fv.hints_changed_at, fv.source_name, fv.author_name,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -327,6 +327,7 @@ public partial class Database
                 ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
                 Execution = GetString(r, "execution"),
                 SourceName = GetString(r, "source_name"),
+                AuthorName = GetString(r, "author_name"),
                 ManualCurrent = GetInt(r, "manual_current") != 0,
                 StatusChangedAt = GetString(r, "status_changed_at"),
                 HintsChangedAt = GetString(r, "hints_changed_at"),
@@ -1852,12 +1853,12 @@ public partial class Database
             ExecuteNonQuery("""
                 INSERT INTO fw_versions
                    (subtype_id, controller_id, eq_prefix, sub_prefix, hw_version, sw_version,
-                    dt_str, version_raw, filename, source_name, disk_path, local_path, description, changelog,
+                    dt_str, version_raw, filename, source_name, author_name, disk_path, local_path, description, changelog,
                     launch_types, io_map_path, instructions_path, hmi_path, executable_hint, hmi_executable_hint,
                     modbus_map_path, is_opc, request_num,
                     upload_date, archived, tags, status, released, sync_id, config_name, copy_of, execution)
                 VALUES(@subtype_id,@controller_id,@eq_prefix,@sub_prefix,@hw_version,@sw_version,
-                    @dt_str,@version_raw,@filename,@source_name,@disk_path,@local_path,@description,@changelog,
+                    @dt_str,@version_raw,@filename,@source_name,@author_name,@disk_path,@local_path,@description,@changelog,
                     @launch_types,@io_map_path,@instructions_path,@hmi_path,@executable_hint,@hmi_executable_hint,
                     @modbus_map_path,@is_opc,@request_num,
                     @upload_date,@archived,@tags,@status,@released,@sync_id,@config_name,@copy_of,@execution)
@@ -1868,6 +1869,7 @@ public partial class Database
                 // (FirmwareUploadService), и перетирать его чужим значением при обновлении записи
                 // незачем — файл-то один и тот же.
                 cmd.Parameters.AddWithValue("@source_name", fv.SourceName ?? "");
+                cmd.Parameters.AddWithValue("@author_name", fv.AuthorName ?? "");
                 // ИСПОЛНЕНИЕ едет вместе со строкой: без него прошивка «3 насоса» приезжала бы к
                 // коллеге обычной и тут же считалась заменой соседней линейки (см. FwExecution).
                 // Снимок со старой версии приложения этого поля не содержит — приезжает '', то есть

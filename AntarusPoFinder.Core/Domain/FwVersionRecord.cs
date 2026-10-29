@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace AntarusPoFinder.Core.Domain;
 
@@ -53,6 +53,12 @@ public class FwVersionRecord
     public string UploadDate { get; set; } = "";
     public string Tags { get; set; } = "";
     public int? AuthorId { get; set; }
+
+    /// <summary>Имя того, кто загрузил прошивку (столбец fw_versions.author_name). Дублирует
+    /// AuthorId строкой намеренно: таблица users локальна для машины, и по id у коллеги автора не
+    /// найти — та же причина, по которой журнал модерации возит автора текстом. Пусто у версий,
+    /// заведённых до появления столбца.</summary>
+    public string AuthorName { get; set; } = "";
     public string Status { get; set; } = "active";
     public bool Released { get; set; }
     /// <summary>Оператор вручную закрепил эту версию «текущей» в её hw-группе (подтип+контроллер+hw),

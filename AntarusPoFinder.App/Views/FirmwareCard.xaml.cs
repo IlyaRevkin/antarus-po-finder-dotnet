@@ -291,6 +291,14 @@ public partial class FirmwareCard : UserControl
                 + "файл лежит переименованным в номер версии.";
         }
 
+        // ⚠️ АВТОР — ТОЖЕ ТОЛЬКО В БЕТЕ, и по той же причине, что исходное имя: записывается в обеих
+        // сборках, показывается в одной. Вопрос «к кому идти с этой прошивкой» до сих пор решался
+        // перепиской, хотя ответ лежал в базе.
+        var author = result.AuthorName ?? "";
+        bool showAuthor = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(author);
+        AuthorLabel.Visibility = showAuthor ? Visibility.Visible : Visibility.Collapsed;
+        if (showAuthor) AuthorLabel.Text = $"Автор: {author}";
+
         ShowFilesLine(result, flags);
 
         ActionsPanel.Children.Clear();

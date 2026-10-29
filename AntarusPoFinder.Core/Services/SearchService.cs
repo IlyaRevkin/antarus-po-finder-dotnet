@@ -38,6 +38,9 @@ public class HierarchyResult
     /// программы.</summary>
     public string SourceName { get; init; } = "";
 
+    /// <summary>Кто загрузил прошивку (fw_versions.author_name). Пусто у старых записей.</summary>
+    public string AuthorName { get; init; } = "";
+
     public string Description { get; init; } = "";
     public string Tags { get; init; } = "";
 
@@ -242,6 +245,7 @@ public static class SearchService
             FirmwareDir = FirmwarePathLocalizer.Localize(row.DiskPath, localRoot),
             VersionRaw = row.VersionRaw,
             SourceName = row.SourceName,
+            AuthorName = row.AuthorName,
             Description = row.Description,
             Tags = row.Tags,
             ConfigName = row.ConfigName,
