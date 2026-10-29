@@ -386,11 +386,29 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             else
                 NoteSyncOutcome(applied > 0 ? $"Тикеты: получено событий: {applied}" : null, isError: false);
             RefreshTicketsBadge(notify: true);
+            // Приехало что-то новое, а страница тикетов открыта прямо сейчас — показываем это
+            // сразу. Раньше открытый список молча оставался вчерашним до ухода со страницы и
+            // возврата на неё, и исправляли это кнопкой «Обновить»; кнопки больше нет (бета), да и
+            // быть её не должно: «сделать это автоматическими» — дословная просьба.
+            if (applied > 0) ReloadOpenTicketsPage();
             // Тикет мог сменить статус на «в очереди на отправке нечего» — освежаем и пилюлю.
             RefreshSyncStatus();
         }
         catch { /* best effort — локальные тикеты всё равно видны, повтор на следующем тике */ }
         finally { _ticketSyncRunning = false; }
+    }
+
+    /// <summary>Перечитать строки страницы тикетов, если она открыта прямо сейчас. Страниц таких
+    /// две — общие «Тикеты» и отдельные «Баги прошивок»: это один и тот же контрол в двух режимах,
+    /// и приехавший с диска баг обязан появиться на обеих одинаково.
+    ///
+    /// Только строки: полный Activate() запустил бы со страницы встречный проход синхронизации, и
+    /// два обмена ходили бы по кругу друг за другом.</summary>
+    private void ReloadOpenTicketsPage()
+    {
+        if (CurrentPageId is not ("tickets" or "fwbugs")) return;
+        if (_pageCache.TryGetValue(CurrentPageId, out var page) && page is TicketsView view)
+            view.ReloadRows();
     }
 
     /// <summary>Обмен тикетами с хранилищем на хостинге — вторая половина синхронизации тикетов,
@@ -475,10 +493,9 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             if (result.Pulled > 0)
             {
                 RefreshTicketsBadge(notify: true);
-                // Страница открыта прямо сейчас — обновляем ТОЛЬКО строки. Полный Activate() запустил
-                // бы с неё второй обмен, и два прохода ходили бы по кругу друг за другом.
-                if (CurrentPageId == "tickets" && _pageCache.TryGetValue("tickets", out var page) && page is TicketsView view)
-                    view.ReloadRows();
+                // Страница открыта прямо сейчас — обновляем ТОЛЬКО строки (и на «Багах прошивок»
+                // тоже: это та же страница в другом режиме, см. ReloadOpenTicketsPage).
+                ReloadOpenTicketsPage();
             }
         }
         catch (Exception e)
