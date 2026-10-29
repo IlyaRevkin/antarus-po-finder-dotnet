@@ -71,6 +71,11 @@ public class FirmwareUploadRequest
     /// номер берётся у базовой версии целиком (OpcFields.SwVersionChoiceApplies).</summary>
     public string SwCodeOverride { get; set; } = "";
 
+    /// <summary>Исходное название прошивки, вписанное человеком в форме загрузки. Пусто — берём имя
+    /// файла или папки (см. ChosenSourceName): поле подставляется само, и обязательность его не про
+    /// «набери руками», а про «не оставляй пустым, когда имени взять неоткуда».</summary>
+    public string SourceNameOverride { get; set; } = "";
+
     /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
     /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
     /// версия этой группы. Полезно, когда сама программа ПЛК не менялась, а обновился только
@@ -415,6 +420,15 @@ public static class FirmwareUploadService
     /// У папки-проекта берётся имя ГЛАВНОГО файла, если оператор его указал, и имя самой папки, если
     /// нет: в обоих случаях это та строка, по которой сборку узнаёт её автор, а «имя папки» у проекта
     /// из SMLogix как раз и есть название прошивки.</summary>
+    /// <summary>Исходное название: то, что человек вписал в форму, а если не вписал — то, что видно
+    /// из самого файла. Своя строка выигрывает всегда: наладчик знает, как сборка называлась у
+    /// программиста, а файл к нему приезжает уже с любым именем.</summary>
+    private static string ChosenSourceName(FirmwareUploadRequest request, FirmwareUploadPlan plan)
+    {
+        var typed = (request.SourceNameOverride ?? "").Trim();
+        return typed.Length > 0 ? typed : SourceDisplayName(request, plan);
+    }
+
     private static string SourceDisplayName(FirmwareUploadRequest request, FirmwareUploadPlan plan)
     {
         var source = request.SourcePath ?? "";
@@ -429,6 +443,20 @@ public static class FirmwareUploadService
     /// загрузки по этому же свойству решает, рисовать ли звёздочку у заголовка «ТИП ПУСКА», —
     /// иначе подпись и проверка разъехались бы при следующей правке.</summary>
     public static bool LaunchTypeRequired => !AppIdentity.IsBeta;
+
+    /// <summary>Обязательно ли исходное название прошивки. Тикет дословно: «добавить при загрузке ПО
+    /// отдельное обязательное поле исходное название прошивки» — и причина там же: «в связи с
+    /// проблемами подключения к фаиндеру программистов, прошивки загружаются вручную наладчиками».
+    /// То есть кладёт файл один человек, а отвечает за него другой, и без имени, под которым сборку
+    /// знает её автор, концов потом не найти: на диск файл ложится переименованным в номер версии.
+    ///
+    /// Поле подставляется само из имени файла или папки — обязательность здесь не про «набери
+    /// руками», а про «не оставляй пустым, если имени взять неоткуда».</summary>
+    public static bool SourceNameRequired => AppIdentity.IsBeta;
+
+    /// <summary>Текст отказа вынесен константой: форма загрузки по нему ставит курсор в нужное поле,
+    /// и сравнение строк в двух местах иначе разъехалось бы при первой же правке формулировки.</summary>
+    public const string SourceNameMissingError = "Укажите исходное название прошивки.";
 
     /// <summary>Фаза 1 (БД + проверки): валидация формы, номер версии, куда всё ляжет. Возвращает
     /// либо план, либо готовый отказ/запрос подтверждения — тогда план null. Копирования здесь нет,
@@ -453,6 +481,17 @@ public static class FirmwareUploadService
         var desc = (request.Description ?? "").Trim();
         if (string.IsNullOrEmpty(desc))
             return (null, FirmwareUploadResult.ValidationFailure("Укажите описание изменений в этой версии."));
+
+        // Исходное название: пусто только тогда, когда и из имени файла взять нечего — например,
+        // принесли папку без имени или путь обрезан. Отказ здесь дешевле, чем запись, по которой
+        // потом не найти, что это за сборка (см. SourceNameRequired).
+        // План здесь ещё не построен, поэтому смотрим на то, что известно: вписанное человеком имя
+        // и имя принесённого файла или папки. Этого достаточно — ровно из них ChosenSourceName
+        // позже и выбирает.
+        if (SourceNameRequired
+            && string.IsNullOrWhiteSpace(request.SourceNameOverride)
+            && string.IsNullOrWhiteSpace(Path.GetFileName((request.SourcePath ?? "").TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))))
+            return (null, FirmwareUploadResult.ValidationFailure(SourceNameMissingError));
 
         // Одна галочка «ОПЦ» — два поля, хотя бы одно обязательно (см. OpcFields).
         var opcError = OpcFields.Validate(request.OpcEnabled, request.CabinetSnRaw, request.RequestNumRaw);
@@ -884,7 +923,7 @@ public static class FirmwareUploadService
             DtStr = plan.Version.DtStr,
             VersionRaw = plan.Version.Raw,
             Filename = copy.DestinationFilename,
-            SourceName = SourceDisplayName(request, plan),
+            SourceName = ChosenSourceName(request, plan),
             DiskPath = plan.DestinationFolder,
             Description = plan.Description,
             Changelog = plan.Description,
