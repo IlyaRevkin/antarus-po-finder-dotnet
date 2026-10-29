@@ -392,6 +392,11 @@ public static class FirmwareUploadService
         return Register(db, hierarchy, plan, copy, shortcuts);
     }
 
+    /// <summary>Обязателен ли тип пуска при заведении версии. Одно место на всю программу: форма
+    /// загрузки по этому же свойству решает, рисовать ли звёздочку у заголовка «ТИП ПУСКА», —
+    /// иначе подпись и проверка разъехались бы при следующей правке.</summary>
+    public static bool LaunchTypeRequired => !AppIdentity.IsBeta;
+
     /// <summary>Фаза 1 (БД + проверки): валидация формы, номер версии, куда всё ляжет. Возвращает
     /// либо план, либо готовый отказ/запрос подтверждения — тогда план null. Копирования здесь нет,
     /// то есть до подтверждений на диск ничего не пишется, как и раньше.</summary>
@@ -405,7 +410,11 @@ public static class FirmwareUploadService
             return (null, FirmwareUploadResult.ValidationFailure("Укажите тип шкафа, подтип и контроллер."));
 
         var launchTypes = request.LaunchTypes ?? new List<string>();
-        if (launchTypes.Count == 0)
+        // ⚠️ НЕОБЯЗАТЕЛЬНЫЙ ТИП ПУСКА — ТОЛЬКО В БЕТЕ. Просьба наладчиков: при заведении версии тип
+        // пуска знают не всегда, а форма не пускала дальше. Это послабление правила заведения, а не
+        // исправление ошибки, поэтому рабочая версия продолжает требовать хотя бы одну галочку —
+        // там по типу пуска ищут, и молча заведённая версия без него просто не нашлась бы.
+        if (launchTypes.Count == 0 && LaunchTypeRequired)
             return (null, FirmwareUploadResult.ValidationFailure("Выберите хотя бы один тип пуска."));
 
         var desc = (request.Description ?? "").Trim();

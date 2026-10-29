@@ -748,8 +748,19 @@ public class FirmwareUploadServiceTests : IDisposable
 
             var result = FirmwareUploadService.Upload(_db, _hierarchy, request);
 
-            Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
-            Assert.Equal("Выберите хотя бы один тип пуска.", result.Errors.Single());
+            // В бете тип пуска необязателен (FirmwareUploadService.LaunchTypeRequired), и версия
+            // заводится без него; в рабочей версии правило прежнее. Тест проверяет ровно ту сборку,
+            // в которой запущен, — иначе прогон с -c Beta падал бы на осознанном послаблении.
+            if (FirmwareUploadService.LaunchTypeRequired)
+            {
+                Assert.Equal(FirmwareUploadOutcome.ValidationFailed, result.Outcome);
+                Assert.Equal("Выберите хотя бы один тип пуска.", result.Errors.Single());
+            }
+            else
+            {
+                Assert.Equal(FirmwareUploadOutcome.Success, result.Outcome);
+                Assert.Empty(result.Record!.LaunchTypes);
+            }
         }
         finally { File.Delete(src); }
     }

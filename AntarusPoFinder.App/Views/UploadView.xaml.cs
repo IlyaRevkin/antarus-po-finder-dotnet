@@ -90,6 +90,9 @@ public partial class UploadView : UserControl
         _host = host;
 
         _launchChecks = new LaunchTypeChecks(LaunchTypesPanel);
+        // Звёздочка в подписи означает «без этого не пустит»; там, где тип пуска стал
+        // необязательным (бета, см. FirmwareUploadService.LaunchTypeRequired), она врала бы.
+        if (!FirmwareUploadService.LaunchTypeRequired) LaunchTypesHeader.Text = "ТИП ПУСКА";
 
         _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
             fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
