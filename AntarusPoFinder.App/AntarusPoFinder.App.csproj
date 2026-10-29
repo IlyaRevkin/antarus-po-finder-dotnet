@@ -26,6 +26,10 @@
          WinForms coexist fine in the same net8.0-windows project. -->
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <!-- Свой манифест вместо стандартного из apphost: нужен ТОЛЬКО ради режима DPI (см. сам файл).
+         Без него процесс оказывался System-DPI-aware, и на экране с другим масштабом Windows
+         растягивала уже нарисованное окно — «мыльные окна». -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Bump on every release published to the update share — drives Настройки → Общие → Обновление приложения. -->
     <Version>1.75.11.0</Version>
   </PropertyGroup>
