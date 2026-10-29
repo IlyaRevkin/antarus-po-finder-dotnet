@@ -105,6 +105,12 @@
                           ToolTip="Закрытые тикеты никуда не делись — они просто не мешают смотреть, что ещё чинить."/>
             </StackPanel>
             <StackPanel Grid.Column="1" x:Name="TopActionsHost" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Бета: бланк «НОВЫЙ ТИКЕТ» свёрнут, пока он не нужен, и раскрывается этой кнопкой.
+                     Он занимал треть экрана над списком, а заводят тикет куда реже, чем смотрят
+                     уже заведённые, — страница открывалась формой, а не тем, за чем на неё пришли. -->
+                <Button x:Name="NewTicketToggleBtn" Content="Новый тикет" Margin="8,0,0,0"
+                        Visibility="Collapsed" Click="NewTicketToggle_Click"
+                        ToolTip="Раскрыть бланк: тип, описание и вложения"/>
                 <!-- Редкое — под одной пилюлей, как вкладки «Ещё» в Настройках. Видна только в бете. -->
                 <Button x:Name="MoreBtn" Style="{StaticResource NavButton}" Padding="12,6" Margin="8,0,0,0"
                         Visibility="Collapsed" Click="More_Click">

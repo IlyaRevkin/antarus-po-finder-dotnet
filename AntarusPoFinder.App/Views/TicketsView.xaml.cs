@@ -154,6 +154,33 @@ public partial class TicketsView : UserControl
             "Вложения остаются на сетевом диске конторы — чтобы их увидел тот, кто вне сети, отправьте архив: «Ещё» → «Выгрузить…».";
     }
 
+    /// <summary>Бета: раскрыт ли бланк «НОВЫЙ ТИКЕТ». Между открытиями страницы не запоминается —
+    /// по умолчанию он свёрнут, страница должна открываться списком.</summary>
+    private bool _newTicketOpen;
+
+    /// <summary>Бланк нового тикета виден, только когда его позвали, и только на вкладке программы.
+    /// Он занимал треть экрана над списком, а заводят тикет заметно реже, чем читают уже
+    /// заведённые: страница открывалась формой, а не тем, за чем на неё приходят.</summary>
+    private void ApplyNewTicketCard()
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        var allowed = !_fwBugsTab;   // баг прошивки заводится только жучком на карточке выдачи
+        NewTicketCard.Visibility = allowed && _newTicketOpen ? Visibility.Visible : Visibility.Collapsed;
+        NewTicketToggleBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
+        NewTicketToggleBtn.Content = _newTicketOpen ? "Свернуть бланк" : "Новый тикет";
+    }
+
+    private void NewTicketToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+
+        _newTicketOpen = !_newTicketOpen;
+        ApplyNewTicketCard();
+        // Раскрыли бланк — курсор сразу в поле описания: жаловаться пришли словами, а не мышью.
+        if (_newTicketOpen) TicketTextInput.Focus();
+    }
+
     /// <summary>Редкие действия страницы под одной пилюлей — как «Ещё» во вкладках Настроек
     /// (SettingsView.MoreTabs_Click).</summary>
     private void More_Click(object sender, RoutedEventArgs e)
@@ -236,7 +263,10 @@ public partial class TicketsView : UserControl
         TabBtnApp.Tag = _fwBugsTab ? null : "Active";
         TabBtnFwBugs.Tag = _fwBugsTab ? "Active" : null;
 
-        NewTicketCard.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
+        // В бете бланк свёрнут, пока его не раскрыли кнопкой «Новый тикет» (см. ApplyNewTicketCard);
+        // в рабочей версии он на странице всегда, как и был.
+        if (AppIdentity.IsBeta) ApplyNewTicketCard();
+        else NewTicketCard.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
         ShowAutoReportsCheck.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
 
         SeverityColumn.Visibility = _fwBugsTab ? Visibility.Visible : Visibility.Collapsed;
@@ -435,6 +465,10 @@ ApplyScopeHint();
         CopyPendingAttachments(ticket.Id);
 
         TicketTextInput.Clear();
+        // Бланк своё отработал и снова сворачивается: оставленный раскрытым, он закрывал собой как
+        // раз то, ради чего тикет заводили, — список, где только что появилась новая строка.
+        _newTicketOpen = false;
+        ApplyNewTicketCard();
         _host.ShowStatus("Тикет создан", category: NotificationCategory.General);
         ReloadGrid();
         // И сразу в хранилище — иначе тикет, заведённый вне офисной сети (сетевого диска нет),
