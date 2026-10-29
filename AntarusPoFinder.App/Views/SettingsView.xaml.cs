@@ -503,6 +503,10 @@ public partial class SettingsView : UserControl
         var tagsAsButton = AppIdentity.IsBeta && tagsAllowed;
         TabBtnTags.Visibility = tagsAllowed && !tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
         OpenTagsBtn.Visibility = tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
+        // Потерянные инструкции — новая возможность, пока только в бете. Право то же, что и у самой
+        // вкладки «Прошивки» (она администраторская): привязка пишет на общий диск и в общий бакет.
+        OpenOrphanInstructionsBtn.Visibility = AppIdentity.IsBeta && isAdmin
+            ? Visibility.Visible : Visibility.Collapsed;
         // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
@@ -654,6 +658,12 @@ public partial class SettingsView : UserControl
     /// <summary>Теги отдельным окном (бета 2.0). Панель НЕ копируется: настоящая уезжает в окно и
     /// возвращается на место при закрытии — см. DetachedPanelWindow. Поэтому переименование двойным
     /// щелчком, фильтр и слова-исключения работают там ровно так же, без единой правки.</summary>
+    /// <summary>«Потерянные инструкции…» — отдельное окно, а не вкладка: обход диска запускается в
+    /// нём по кнопке, а находок обычно нет вовсе, и держать под пустой список постоянную вкладку
+    /// незачем (см. <see cref="OrphanInstructionsDialog"/>).</summary>
+    private void OpenOrphanInstructions_Click(object sender, RoutedEventArgs e) =>
+        new OrphanInstructionsDialog(_services, _host) { Owner = Window.GetWindow(this) }.ShowDialog();
+
     private void OpenTags_Click(object sender, RoutedEventArgs e)
     {
         LoadTagsTab();
