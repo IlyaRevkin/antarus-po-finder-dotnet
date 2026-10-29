@@ -265,6 +265,18 @@
                         <WrapPanel x:Name="LaunchTypesPanel" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6"/>
                     </Grid>
 
+                    <!-- Под каким именем сборку знает её автор. Тикет: «в связи с проблемами
+                         подключения к фаиндеру программистов, прошивки загружаются вручную
+                         наладчиками» — то есть кладёт файл один, а отвечает за него другой, и на
+                         диск файл ложится переименованным в номер версии. Поле подставляется само из
+                         имени файла или папки, поправить его можно руками. Панель только в бете
+                         (UploadView ctor); в рабочей версии название по-прежнему берётся молча. -->
+                    <StackPanel x:Name="SourceNamePanel" Visibility="Collapsed">
+                        <TextBlock x:Name="SourceNameHeader" Text="Исходное название прошивки *:" Margin="0,10,0,4"/>
+                        <TextBox x:Name="SourceNameInput" Height="30" VerticalContentAlignment="Center"
+                                 ToolTip="Как эта сборка называется у программиста. Подставлено из имени файла — поправьте, если на самом деле называется иначе."/>
+                    </StackPanel>
+
                     <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
                     <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
 

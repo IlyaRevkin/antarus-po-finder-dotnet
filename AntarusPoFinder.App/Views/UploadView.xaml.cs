@@ -98,6 +98,9 @@ public partial class UploadView : UserControl
         // коллеге с рабочей версией нечитаемой), а вот ЗАВОДИТЬ такие номера пока можно только в
         // бете; то же правило продублировано в FirmwareUploadService.Prepare.
         if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) SwCodePanel.Visibility = Visibility.Visible;
+        // Исходное название спрашиваем там же, где оно обязательно, — одно правило на форму и на
+        // проверку (FirmwareUploadService.SourceNameRequired), чтобы звёздочка и отказ не разъехались.
+        if (FirmwareUploadService.SourceNameRequired) SourceNamePanel.Visibility = Visibility.Visible;
 
         _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
             fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
@@ -914,6 +917,9 @@ public partial class UploadView : UserControl
         _folderMainFile = null;
         _folderExtraFiles = new List<string>();
         StatusLabel.Text = $"Файл: {Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar))}";
+        // Подставляем имя принесённого файла или папки: в девяти случаях из десяти это и есть то
+        // самое название, а набирать его руками значит плодить опечатки в том, по чему потом ищут.
+        SourceNameInput.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         _autoDetectedModId = null;
         DropZoneLabel.Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
 
@@ -1156,6 +1162,7 @@ public partial class UploadView : UserControl
                 var error = result.Errors.FirstOrDefault() ?? "Не удалось загрузить прошивку.";
                 AppMessageBox.Show(error, "Загрузка", MessageBoxButton.OK, MessageBoxImage.Warning);
                 if (error == "Укажите описание изменений в этой версии.") DescInput.Focus();
+                if (error == FirmwareUploadService.SourceNameMissingError) SourceNameInput.Focus();
                 // Оба поля ОПЦ пусты — раскрываем «доп. настройки» (они могут быть свёрнуты) и ставим
                 // курсор в серийный номер, а не оставляем оператора искать, где именно не заполнено.
                 if (error == OpcFields.BothEmptyError)
@@ -1303,6 +1310,7 @@ public partial class UploadView : UserControl
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
             SwCodeOverride = SwCodeInput.Text,
+            SourceNameOverride = SourceNameInput.Text.Trim(),
             OpcEnabled = IsOpc,
             OpcBaseSwVersion = SelectedOpcBaseSw,
             Execution = ExecutionCombo.Text,
