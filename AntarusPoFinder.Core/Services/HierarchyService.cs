@@ -288,7 +288,9 @@ public class HierarchyService
                 continue;
             }
             // Пересобираем строку версии с новым hw, сохраняя точный суффикс даты/времени (может быть пуст).
-            var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{parsed.SwVersion.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}";
+            // Номер ПО печатается кодеком (SwNumberCode), а не ToString("D4"): у номера за 99999
+            // старший разряд — буква, и собранное вручную «D4» дало бы имя папки, которого на диске нет.
+            var core = $"{parsed.EqPrefix}.{parsed.SubPrefix}.{newHw.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)}.{Domain.SwNumberCode.Format(parsed.SwVersion)}";
             var newRaw = string.IsNullOrEmpty(parsed.DtStr) ? core : $"{core}.{parsed.DtStr}";
 
             // Проигрывание: строка с целевым ключом (новым hw) уже есть. Это либо идемпотентный

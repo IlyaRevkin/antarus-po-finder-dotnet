@@ -60,10 +60,16 @@ public class FirmwareUploadRequest
     /// DateTime.Now. Учитывается только вместе с <see cref="IncludeDateInVersion"/>.</summary>
     public DateTime? VersionDate { get; set; }
 
-    /// <summary>Буква при номере ПО («0001А») или пусто. Отдельным полем, а не частью номера: сам
-    /// номер остаётся целым числом, на котором держатся выдача следующего номера, сортировка и
-    /// освобождение номера при откате — см. FwVersionNumber.SwSuffix.</summary>
-    public string SwSuffix { get; set; } = "";
+    /// <summary>Номер ПО, заданный руками: код счётчика («0007», «A0000») или пусто — тогда номер
+    /// выдаётся как обычно, следующим по счёту (MAX+1). Разбирается кодеком SwNumberCode в целое:
+    /// в базе sw_version остаётся INTEGER, на нём держатся выдача следующего номера, сортировка и
+    /// освобождение номера при откате.
+    ///
+    /// ЗАВОДИТЬ номер руками можно только в бете (см. проверку AppIdentity.IsBeta в Prepare и панель
+    /// в UploadView): ЧИТАТЬ такой номер обязаны обе сборки — прошивка, заведённая в бете, уезжает в
+    /// общий конфиг, — а вот выдавать его в рабочей версии пока рано. При ОПЦ не учитывается: там
+    /// номер берётся у базовой версии целиком (OpcFields.SwVersionChoiceApplies).</summary>
+    public string SwCodeOverride { get; set; } = "";
 
     /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
     /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
@@ -526,7 +532,17 @@ public static class FirmwareUploadService
                     ?? db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                     ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
+                includeDate: request.IncludeDateInVersion);
+        }
+        else if (OpcFields.SwVersionChoiceApplies(isOpc) && AppIdentity.IsBeta
+                 && SwNumberCode.Parse(request.SwCodeOverride) is { } manualSw)
+        {
+            // Номер ПО задан руками (бета). Идёт ВПЕРЕДИ «не увеличивать sw»: явно набранный код —
+            // более сильное указание, чем галочка, и тихо его проигнорировать значило бы записать
+            // версию под не тем номером, которым она уже подписана внутри проекта ПЛК.
+            swInt = manualSw;
+            fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
+                includeDate: request.IncludeDateInVersion);
         }
         else if (request.KeepSwVersion && OpcFields.SwVersionChoiceApplies(isOpc))
         {
@@ -536,13 +552,13 @@ public static class FirmwareUploadService
             var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution);
             swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
+                includeDate: request.IncludeDateInVersion);
         }
         else
         {
             swInt = db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
+                includeDate: request.IncludeDateInVersion);
         }
 
         // Заявка и заводской SN попадают в ИМЯ папки ОПЦ-версии (этап 5): ОПЦ заводят под конкретный

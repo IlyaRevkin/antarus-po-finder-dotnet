@@ -93,10 +93,11 @@ public partial class UploadView : UserControl
         // Звёздочка в подписи означает «без этого не пустит»; там, где тип пуска стал
         // необязательным (бета, см. FirmwareUploadService.LaunchTypeRequired), она врала бы.
         if (!FirmwareUploadService.LaunchTypeRequired) LaunchTypesHeader.Text = "ТИП ПУСКА";
-        // ⚠️ БУКВА ПРИ НОМЕРЕ ПО — ТОЛЬКО В БЕТЕ. Разбирать её умеют обе сборки (FwVersionNumber
-        // принимает такой номер всегда — иначе прошивка, заведённая в бете, приехала бы к коллеге
-        // с рабочей версией нечитаемой), а вот ЗАВОДИТЬ такие номера пока можно только в бете.
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) SwSuffixPanel.Visibility = Visibility.Visible;
+        // ⚠️ НОМЕР ПО ВРУЧНУЮ — ТОЛЬКО В БЕТЕ. Разбирать номер со счётчиком-буквой («A0000») умеют
+        // обе сборки (SwNumberCode лежит в Core — иначе прошивка, заведённая в бете, приехала бы к
+        // коллеге с рабочей версией нечитаемой), а вот ЗАВОДИТЬ такие номера пока можно только в
+        // бете; то же правило продублировано в FirmwareUploadService.Prepare.
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) SwCodePanel.Visibility = Visibility.Visible;
 
         _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
             fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
@@ -590,12 +591,24 @@ public partial class UploadView : UserControl
     /// осталось бы незамеченным до самого нажатия «Загрузить».</summary>
     private void Execution_Changed(object sender, RoutedEventArgs e) => UpdatePreview();
 
-    /// <summary>Буква при номере ПО. IsInitialized — обязательная защита: TextChanged прилетает ещё
-    /// из разметки, до того как конструктор добрал остальные поля страницы, и UpdatePreview() на
-    /// полупостроенной странице роняет её целиком.</summary>
-    private void SwSuffix_Changed(object sender, TextChangedEventArgs e)
+    /// <summary>Номер ПО, набранный руками. IsInitialized — обязательная защита: TextChanged
+    /// прилетает ещё из разметки, до того как конструктор добрал остальные поля страницы, и
+    /// UpdatePreview() на полупостроенной странице роняет её целиком.</summary>
+    private void SwCode_Changed(object sender, TextChangedEventArgs e)
     {
         if (!IsInitialized) return;
+        // Подсказка рядом с полем — единственное место, где видно, что набранное НЕ является кодом
+        // номера: предпросмотр ниже в этом случае просто показывает обычный следующий номер, и без
+        // подсказки опечатка выглядела бы как «программа меня не послушалась».
+        if (SwCodeHint is not null)
+        {
+            var typed = SwCodeInput.Text.Trim();
+            SwCodeHint.Text = typed.Length == 0
+                ? "Пусто — номер выдаётся следующим по счёту."
+                : SwNumberCode.Parse(typed) is null
+                    ? "Не похоже на номер: 0001 … 99999, дальше A0000 … Z9999."
+                    : "Номер задан вручную.";
+        }
         UpdatePreview();
     }
 
@@ -774,8 +787,13 @@ public partial class UploadView : UserControl
                     ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                         ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
                     : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
+            // Набранный руками номер (бета) перебивает и «не увеличивать sw», и обычный MAX+1 —
+            // тот же порядок, что и в FirmwareUploadService.Prepare, иначе предпросмотр показывал бы
+            // не тот путь, по которому прошивка ляжет.
+            if (!IsOpc && AntarusPoFinder.Core.Domain.AppIdentity.IsBeta
+                && SwNumberCode.Parse(SwCodeInput.Text) is { } manualSw) swInt = manualSw;
             fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt,
-                includeDate: IncludeDateCheck.IsChecked == true, swSuffix: SwSuffixInput.Text);
+                includeDate: IncludeDateCheck.IsChecked == true);
         }
 
         bool isOpc = IsOpc;
@@ -1284,7 +1302,7 @@ public partial class UploadView : UserControl
             Description = DescInput.Text.Trim(),
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
-            SwSuffix = SwSuffixInput.Text,
+            SwCodeOverride = SwCodeInput.Text,
             OpcEnabled = IsOpc,
             OpcBaseSwVersion = SelectedOpcBaseSw,
             Execution = ExecutionCombo.Text,
@@ -1344,9 +1362,9 @@ public partial class UploadView : UserControl
         // который сознательно НЕ сбрасывается здесь) — оставленный включённым по инерции молча увёл бы
         // sw-номер СЛЕДУЮЩЕЙ, уже не связанной загрузки назад к прежнему значению.
         KeepSwVersionCheck.IsChecked = false;
-        // По той же причине, что и галочка выше: буква относится к КОНКРЕТНОЙ сборке, и
-        // забытая в поле она молча приписалась бы к следующей, ни с чем не связанной загрузке.
-        SwSuffixInput.Text = "";
+        // По той же причине, что и галочка выше: номер относится к КОНКРЕТНОЙ сборке, и забытый
+        // в поле он молча увёл бы номер следующей, ни с чем не связанной загрузки.
+        SwCodeInput.Text = "";
         _launchChecks.ClearAll();
         DescInput.Text = "";
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
