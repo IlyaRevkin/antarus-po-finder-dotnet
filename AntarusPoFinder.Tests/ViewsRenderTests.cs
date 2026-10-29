@@ -503,6 +503,44 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>Окно правки таблицы параметров строится, и столбец «Назначение» в нём есть.
+    ///
+    /// Показывается он только в бете (AppIdentity.IsBeta), поэтому проверяется не видимость, а то,
+    /// что колонка вообще разобралась и привязка к RowVm.PurposeLabel не промахнулась мимо имени:
+    /// промах в пути привязки компилятор не ловит, а на живом прогоне он выглядит как пустая
+    /// ячейка, которую легко принять за «ещё не разметили».</summary>
+    [Fact]
+    public void ParamTableEditorDialog_BuildsAndShowsPurposeColumn()
+    {
+        Ui.Run(() =>
+        {
+            var rows = new List<AntarusPoFinder.Core.Domain.ParamTableRow>
+            {
+                new()
+                {
+                    Kind = AntarusPoFinder.Core.Domain.ParamRowKind.Param, GroupName = "Двигатель",
+                    Code = "P1-02", Title = "Номинальный ток двигателя",
+                    Purpose = AntarusPoFinder.Core.Domain.ParamRowPurpose.Service,
+                },
+            };
+
+            var dialog = new ParamTableEditorDialog(new[] { "Настройка ШУ", "Двигатель" },
+                Array.Empty<AntarusPoFinder.Core.Domain.ParamTableColumn>(), "Задание Modbus", rows);
+            Render(dialog);
+
+            var column = dialog.FindName("PurposeColumn") as System.Windows.Controls.DataGridColumn;
+            Assert.NotNull(column);
+            Assert.Equal(AntarusPoFinder.Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed,
+                column!.Visibility);
+
+            var grid = dialog.FindName("RowsGrid") as System.Windows.Controls.DataGrid;
+            var vm = Assert.IsType<ParamTableEditorDialog.RowVm>(grid!.Items[0]);
+            Assert.Equal("Сервис", vm.PurposeLabel);
+
+            dialog.Close();
+        });
+    }
+
     [Fact]
     public void FwBugDialog_BuildsAndRenders()
     {

@@ -1,11 +1,15 @@
 ﻿<Window x:Class="AntarusPoFinder.App.Views.ParamTableEditorDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Icon="/Assets/icon.ico"
+        Icon="pack://application:,,,/AntarusPoFinder.App;component/Assets/icon.ico"
         Title="Таблица параметров"
         Width="1180" Height="720" MinWidth="860" MinHeight="520"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
+    <!-- Иконка задана абсолютным pack-URI, а не коротким «/Assets/icon.ico», как в остальных
+         диалогах: короткий адрес WPF разрешает относительно ВХОДНОЙ сборки процесса, и под
+         тестовым хостом иконка не находится — окно не строится вовсе, а проверять его сборку
+         тестом надо (ViewsRenderTests). Правило записано в CLAUDE.md, здесь оно соблюдено. -->
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
