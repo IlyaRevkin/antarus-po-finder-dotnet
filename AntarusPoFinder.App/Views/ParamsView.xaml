@@ -198,7 +198,10 @@
             <!-- List section — fixed height (own internal scrollbar via the DataGrid, same pattern
                  as the upload card above) instead of a "*" share of whatever the page grid had left,
                  so the table always shows several rows without needing to maximize the window. -->
-            <Border Grid.Row="2" Style="{StaticResource CardBorder}">
+            <!-- В бете этой карточки нет вовсе (см. ParamsView: FilesCard.Visibility). Файл
+                 перестал быть способом хранить параметры и остался способом их ПЕРЕНЕСТИ — его
+                 собирают по требованию кнопкой «Выгрузить в папку…» на карточке таблиц. -->
+            <Border x:Name="FilesCard" Grid.Row="2" Style="{StaticResource CardBorder}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -231,6 +234,8 @@
                              сразу за открытием: с файлом параметров работают не «открывая» его
                              (это проприетарная выгрузка конфигуратора вендора), а сверяясь с
                              заданием на настройку. -->
+                        <Button x:Name="ExportTableBtn" Content="Выгрузить в папку…" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="ExportTable_Click"
+                                ToolTip="Собрать файл с этой таблицей и положить в выбранную папку — чтобы отдать, переслать или унести на флешке"/>
                         <Button x:Name="ParamTableBtn" Content="Таблица параметров" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="ParamTable_Click" Visibility="Collapsed"
                                 ToolTip="Что выставлять на этом ПЧ/УПП: значения, заводские, применимость к конкретному аппарату — и что менялось от редакции к редакции"/>
                         <!-- Разовый перенос всего накопленного: до этого документ заводился только
