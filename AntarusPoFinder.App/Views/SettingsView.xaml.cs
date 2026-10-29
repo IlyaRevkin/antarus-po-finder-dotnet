@@ -392,6 +392,10 @@ public partial class SettingsView : UserControl
             "moderation" => TabBtnModeration,
             "hierarchy" => TabBtnHierarchy,
             "loader" => TabBtnLoader,
+            // «Тикеты» в бете живут вкладкой настроек, а не пунктом меню (см. RolesConfig.BetaNavItems),
+            // и в обход страниц поэтому не попадают вовсе. Именно на этой вкладке и пряталась вёрстка,
+            // на которую пожаловался Илья: страница прокручивалась целиком, унося кнопки за край окна.
+            "tickets" => TabBtnTickets,
             _ => TabBtnGeneral,
         };
         Tab_Click(button, new RoutedEventArgs());

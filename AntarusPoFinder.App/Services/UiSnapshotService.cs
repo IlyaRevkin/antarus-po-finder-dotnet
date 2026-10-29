@@ -176,7 +176,10 @@ public static class UiSnapshotService
                 return;
             }
 
-            foreach (var tab in new[] { "firmware", "moderation", "hierarchy", "loader" })
+            // «tickets» — вкладка, а не страница бокового меню (бета), поэтому в общий обход страниц
+            // она не попадает: снимать её надо здесь, иначе единственный экран, где живут тикеты,
+            // перед релизом не видит никто.
+            foreach (var tab in new[] { "firmware", "moderation", "hierarchy", "loader", "tickets" })
             {
                 settings.ShowTabForSnapshot(tab);
                 await Settle(window);
