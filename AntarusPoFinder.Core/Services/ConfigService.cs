@@ -895,6 +895,39 @@ public class ConfigService
     public bool SearchAutoSync() => Get("search_auto_sync").Equals("true", StringComparison.OrdinalIgnoreCase);
     public void SetSearchAutoSync(bool value) => Set("search_auto_sync", value ? "true" : "false");
 
+    // ── Уборка локальных копий прошивок ──────────────────────────────
+    //
+    // Локальные копии ОСТАЮТСЯ — это решено после жалобы «диск отвалился и в файндере не
+    // найти прошивки». Регулируется только ТО, КАК ЧАСТО и НАСКОЛЬКО глубоко их чистить.
+    //
+    // Настройки ОБЩИЕ (в SkipSettingsKeys их нет), в отличие от search_auto_sync выше, и это
+    // осознанный размен: ручка живёт на администраторской вкладке «Чистка диска», а значит,
+    // будь она местной, наладчик не смог бы её ни увидеть, ни поменять вовсе. Общей она
+    // хотя бы доезжает до всех машин одним решением. Отметка «когда чистили в последний
+    // раз» — наоборот, строго местная: папка кэша у каждого своя.
+
+    /// <summary>Как часто чистить локальные копии: <c>never</c> / <c>weekly</c> / <c>monthly</c>.
+    /// По умолчанию <c>monthly</c> — середина: кэш не растёт бесконечно, но и не выметается
+    /// после каждой синхронизации, как было до этой настройки.</summary>
+    public string LocalCleanupMode() => Get("local_cleanup_mode") is { Length: > 0 } v ? v : "monthly";
+    public void SetLocalCleanupMode(string mode) => Set("local_cleanup_mode", (mode ?? "").Trim().ToLowerInvariant());
+
+    /// <summary>Сколько дней держать невостребованную копию. 0 — по возрасту не чистим вовсе.</summary>
+    public int LocalCleanupKeepDays() =>
+        int.TryParse(Get("local_cleanup_keep_days"), out var v) && v >= 0 ? v : 90;
+    public void SetLocalCleanupKeepDays(int days) => Set("local_cleanup_keep_days", Math.Max(0, days).ToString());
+
+    /// <summary>Потолок объёма кэша в гигабайтах. 0 — по объёму не чистим.</summary>
+    public int LocalCleanupMaxGb() =>
+        int.TryParse(Get("local_cleanup_max_gb"), out var v) && v >= 0 ? v : 0;
+    public void SetLocalCleanupMaxGb(int gb) => Set("local_cleanup_max_gb", Math.Max(0, gb).ToString());
+
+    /// <summary>Когда на ЭТОЙ машине уборка отработала в последний раз (ISO). Per-machine — см.
+    /// ConfigSyncService.SkipSettingsKeys: приехав с чужой машины, эта отметка отменила бы уборку здесь,
+    /// где она не проходила ни разу.</summary>
+    public string LocalCleanupLastRun() => Get("local_cleanup_last_run");
+    public void SetLocalCleanupLastRun(string at) => Set("local_cleanup_last_run", at);
+
     /// <summary>Показывать в выдаче ВСЕ подходящие версии, не схлопывая их к одной строке на шкаф
     /// (см. Database.Deduplicate). Тикет: «сделать чекбокс настройки отображения всего имеющегося в
     /// поиске — кому надо, тот включит и будет видеть всё; удобно для модерации видеть, что есть и

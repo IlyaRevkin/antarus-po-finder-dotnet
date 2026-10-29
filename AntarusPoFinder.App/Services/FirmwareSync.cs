@@ -28,7 +28,17 @@ public static class FirmwareSync
         var srcDir = FirmwareDiskPresence.ResolveVersionDir(result.FirmwareDir, result.VersionRaw) ?? result.FirmwareDir;
 
         FileSystemHelpers.CopyTree(srcDir, dst, overwrite: true);
-        if (cleanup) CleanupOldLocalVersions(localDir, result.VersionRaw);
+        // ⚠️ ТОЛЬКО БЕТА: немедленной зачистки соседних версий больше нет — её заменила настраиваемая
+        // уборка по расписанию (Настройки → Чистка диска → «Локальные копии», см. LocalCacheCleanup).
+        //
+        // Почему именно так, а не «добавили настройку рядом с этим вызовом»: здесь уборка жёстко
+        // привязана к СОБЫТИЮ скачивания, то есть к моменту, когда человек как раз собирается
+        // работать. Ровно отсюда и росла жалоба «диск отвалился и в фаиндере не найти прошивки»:
+        // скачал одну версию — остальные по этому шкафу исчезли, причём именно в дорогу. Решение
+        // по объёму и возрасту принимает фоновая уборка, которая от скачиваний не зависит вовсе.
+        //
+        // В рабочей версии всё остаётся как было: поведение кэша посреди рабочего дня не меняем.
+        if (cleanup && !Core.Domain.AppIdentity.IsBeta) CleanupOldLocalVersions(localDir, result.VersionRaw);
 
         var ctrlDir = Directory.GetParent(srcDir)?.FullName;
         if (ctrlDir is not null)

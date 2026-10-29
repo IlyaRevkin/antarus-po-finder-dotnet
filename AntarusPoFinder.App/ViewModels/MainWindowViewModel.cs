@@ -26,6 +26,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     private DispatcherTimer? _whatsNewCheckTimer;
     private DispatcherTimer? _fwUpdateCheckTimer;
     private DispatcherTimer? _qrSweepTimer;
+    private DispatcherTimer? _localCleanupTimer;
     private DispatcherTimer? _configCheckTimer;
     private DispatcherTimer? _configPullRepeatTimer;
     private DispatcherTimer? _configPushTimer;
@@ -215,6 +216,41 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// программу и ни одного — её починить. Десять минут — это «залили прошивку, сходили за
     /// кофе, наклейка уже печатается без диска», и при этом холостой проход ничего не стоит.</summary>
     internal static TimeSpan QrSweepInterval { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Как часто СПРАШИВАТЬ, не пора ли убрать локальные копии — не то же, что частота
+    /// самой уборки (та в настройках, см. ConfigService.LocalCleanupMode).</summary>
+    internal static TimeSpan LocalCleanupCheckInterval { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>Уборка локальных копий — МОЛЧА и ФОНОМ. Ни окна, ни подтверждения, ни
+    /// строки состояния: человек эту работу не заказывал и не должен о ней узнавать.
+    ///
+    /// В Task.Run, в отличие от прохода QR рядом: здесь считаются размеры сотен папок и удаляются
+    /// деревья файлов — файловая работа на потоке интерфейса и есть то самое «программа
+    /// задумалась, когда что-то делает в фоне». Базы уборка не касается совсем: настройки
+    /// читаются до ухода в фон, отметка пишется после возврата.</summary>
+    private async Task RunLocalCacheCleanupAsync()
+    {
+        try
+        {
+            var policy = new LocalCacheCleanup.Policy(
+                _services.Cfg.LocalCleanupMode(),
+                _services.Cfg.LocalCleanupKeepDays(),
+                _services.Cfg.LocalCleanupMaxGb());
+            if (!LocalCacheCleanup.IsDue(policy, _services.Cfg.LocalCleanupLastRun(), DateTime.Now)) return;
+
+            var root = ConfigService.LocalFw;
+            await Task.Run(() => LocalCacheCleanup.Apply(LocalCacheCleanup.Build(root, policy, DateTime.Now)));
+
+            // Отметка ставится ДАЖЕ если удалять было нечего: смысл её — «проверяли тогда-то»,
+            // иначе на пустом кэше полный обход крутился бы каждый час.
+            _services.Cfg.SetLocalCleanupLastRun(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+        catch
+        {
+            // Папка занята, прав нет, приложение закрывается — следующая проверка попробует снова.
+            // Отметка при этом НЕ ставится: неудавшаяся уборка не должна считаться состоявшейся.
+        }
+    }
 
     /// <summary>Проход по таблице QR-кодов — МОЛЧА. Человеку он не адресован вовсе: строка в
     /// служебной таблице — не событие, о котором стоит сообщать, а ошибка здесь ничего не ломает:
@@ -963,6 +999,24 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 if (_qrSweepTimer!.Interval != QrSweepInterval) _qrSweepTimer.Interval = QrSweepInterval;
             };
             _qrSweepTimer.Start();
+        }
+
+        // ⚠️ ТОЛЬКО БЕТА. 9000ms один раз, дальше раз в час — УБОРКА ЛОКАЛЬНЫХ КОПИЙ
+        // прошивок по настроенной частоте (см. LocalCacheCleanup и ConfigService.LocalCleanupMode).
+        //
+        // Час — это не частота уборки, а частота ПРОВЕРКИ «не пора ли»: сама она ходит раз в
+        // неделю/месяц, но программу держат открытой сутками, и проверять только при запуске значило
+        // бы не убираться вовсе у тех, кто её не закрывает. Холостая проверка — сравнение двух дат.
+        if (Core.Domain.AppIdentity.IsBeta)
+        {
+            _localCleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(9000) };
+            _localCleanupTimer.Tick += async (_, _) =>
+            {
+                if (_localCleanupTimer!.Interval != LocalCleanupCheckInterval)
+                    _localCleanupTimer.Interval = LocalCleanupCheckInterval;
+                await RunLocalCacheCleanupAsync();
+            };
+            _localCleanupTimer.Start();
         }
 
         // 3500ms once, then every sync_interval_min minutes: pull+apply a newer shared config
