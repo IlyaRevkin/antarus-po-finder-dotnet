@@ -273,6 +273,17 @@ ApplyScopeHint();
         // Закрытые не считаются: число должно отвечать на вопрос «сколько ещё чинить», а не «сколько было всего».
         var openFwBugs = visibleToMe.Count(t => t.Type == TicketType.FwBug && t.Status != TicketStatus.Closed);
         TabFwBugsText.Text = openFwBugs > 0 ? $"Баги прошивок ({openFwBugs})" : "Баги прошивок";
+
+        // То же число для второй вкладки. Только в бете: на рабочей версии надпись на вкладке —
+        // привычка, а привычки меняются бетой (см. SearchView.PlaceSearchHowChecks).
+        if (AppIdentity.IsBeta)
+        {
+            // Автоотчёты в это число не входят: это падения программы, а не чья-то просьба, и
+            // человек на них не отвечает. Иначе вкладка показывала бы «24», а в списке лежало бы 17.
+            var openApp = TicketBoard.ActiveCount(
+                visibleToMe.Where(t => t.Type != TicketType.FwBug && !TicketAutoReports.IsAutoReport(t)));
+            TabAppText.Text = openApp > 0 ? $"Программа ({openApp})" : "Программа";
+        }
         // Вкладка режет ПОСЛЕ прав доступа, а не вместо них: права — это вопрос «что человеку
         // вообще положено видеть», а вкладка — всего лишь «что он сейчас смотрит».
         var mine = visibleToMe.Where(t => (t.Type == TicketType.FwBug) == _fwBugsTab).ToList();
@@ -283,7 +294,19 @@ ApplyScopeHint();
             : "Автоматических отчётов о сбоях нет";
         ShowAutoReportsCheck.IsEnabled = autoCount > 0;
 
-        var visible = TicketAutoReports.Visible(mine, ShowAutoReportsCheck.IsChecked == true);
+        // Закрытые: в бете их прячет галка (по умолчанию снята), в рабочей версии список остаётся
+        // прежним — целиком. Отбор и порядок считает ядро (TicketBoard), чтобы правило проверялось
+        // тестом, а не глазами по живому экрану.
+        var showClosed = !AppIdentity.IsBeta || ShowClosedCheck.IsChecked == true;
+        var closedCount = TicketBoard.ClosedCount(TicketAutoReports.Visible(mine, ShowAutoReportsCheck.IsChecked == true));
+        ShowClosedCheck.Content = closedCount > 0 ? $"Показывать закрытые ({closedCount})" : "Закрытых тикетов нет";
+        ShowClosedCheck.IsEnabled = closedCount > 0;
+        ShowClosedCheck.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+
+        var visible = TicketBoard.Visible(mine, ShowAutoReportsCheck.IsChecked == true, showClosed);
+        // Порядок по умолчанию — «за что браться», а не «когда заводили» (TicketBoard.Order).
+        // Выбранную человеком сортировку это не трогает: она восстанавливается ниже.
+        if (AppIdentity.IsBeta) visible = TicketBoard.Order(visible);
 
         // Порядок сортировки запоминается и восстанавливается вокруг подмены источника.
         // Новый ItemsSource обнуляет и стрелку в заголовке, и сам порядок — и тикет, открытый из
@@ -314,8 +337,10 @@ ApplyScopeHint();
 
     private void ShowAutoReports_Changed(object sender, RoutedEventArgs e)
     {
-        // Загружается страница — обработчик срабатывает до того, как построен сам список.
-        if (TicketsGrid is null) return;
+        // Загружается страница — обработчик галки срабатывает из разметки, ДО того как построено
+        // всё остальное. На этом сегодня целиком упала страница настроек, так что проверка одна и
+        // та же везде: пока окно не собрано, обработчику трогать нечего.
+        if (!IsInitialized) return;
         ReloadGrid();
     }
 
