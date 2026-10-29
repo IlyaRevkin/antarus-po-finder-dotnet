@@ -1,0 +1,44 @@
+﻿<Window x:Class="AntarusPoFinder.App.Views.OrphanInstructionsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="pack://application:,,,/AntarusPoFinder.App;component/Assets/icon.ico"
+        Title="Потерянные инструкции"
+        Width="900" Height="600" MinWidth="700" MinHeight="420"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Дата стоит в самом номере версии, а номер — это имя папки: перезалили ту же сборку с
+             датой, получилась другая папка и пустая «Инструкция» у новой записи, а документ остался
+             в прежней папке, на которую больше никто не смотрит. Здесь такие документы и собраны. -->
+        <TextBlock Grid.Row="0" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="Документы, у которых пропала их версия прошивки: папка с инструкцией на диске есть, а записи о такой версии в базе нет. Чаще всего это перезаливка с новой датой — дата входит в номер версии, а номер это имя папки, поэтому у новой записи папка другая и пустая. Выберите, какой версии отдать документ: он скопируется ей под её именем, ссылка и QR будут вести на него, а исходный файл останется на месте."/>
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,10">
+            <Button x:Name="ScanBtn" DockPanel.Dock="Left" Content="Проверить" Width="130" Click="Scan_Click"
+                    ToolTip="Обход идёт по сетевому диску, поэтому делается по кнопке, а не при каждом открытии окна."/>
+            <TextBlock x:Name="StatusLabel" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                       Margin="12,0,0,0" TextWrapping="Wrap"/>
+        </DockPanel>
+
+        <Border Grid.Row="2" Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                BorderThickness="1" CornerRadius="6" Padding="8">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="FindingsPanel"/>
+            </ScrollViewer>
+        </Border>
+
+        <DockPanel Grid.Row="3" Margin="0,12,0,0">
+            <Button DockPanel.Dock="Right" Content="Закрыть" IsCancel="True" Style="{StaticResource SecondaryButton}"
+                    Width="100" Click="Close_Click"/>
+            <TextBlock x:Name="HintLabel" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Text="Привязка не удаляет и не переносит исходный файл: найдётся потерянная версия — её инструкция окажется там же, где была."/>
+        </DockPanel>
+    </Grid>
+</Window>

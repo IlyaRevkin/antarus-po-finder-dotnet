@@ -1540,6 +1540,13 @@
                     <Button x:Name="OpenTagsBtn" Content="Теги…" Style="{StaticResource SecondaryButton}"
                             Margin="0,0,8,0" Visibility="Collapsed" Click="OpenTags_Click"
                             ToolTip="Справочник тегов и слов, которые не показываются, пока их не спросили"/>
+                    <!-- Поиск документов, у которых пропала их версия (OrphanInstructions). Кнопкой,
+                         а не вкладкой: обход сетевого диска запускается по требованию, а список
+                         находок обычно пуст — постоянная вкладка под пустой список не нужна. -->
+                    <Button x:Name="OpenOrphanInstructionsBtn" Content="Потерянные инструкции…"
+                            Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Visibility="Collapsed"
+                            Click="OpenOrphanInstructions_Click"
+                            ToolTip="Документы, у которых пропала их версия прошивки (чаще всего — перезалитая с новой датой). Можно отдать документ новой версии."/>
                     <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Click="RefreshFirmware_Click"/>
                 </StackPanel>
             </Grid>

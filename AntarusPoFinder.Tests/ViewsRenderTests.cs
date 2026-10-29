@@ -609,6 +609,24 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>Окно «потерянные инструкции» строится и НЕ лезет на диск при открытии: обход сетевой
+    /// шары на каждом показе окна человек читает как зависание, поэтому он запускается кнопкой
+    /// «Проверить» (см. OrphanInstructionsDialog).</summary>
+    [Fact]
+    public void OrphanInstructionsDialog_ОткрываетсяНеТрогаяДиск()
+    {
+        Ui.Run(() =>
+        {
+            var dialog = new OrphanInstructionsDialog(Services());
+            Render(dialog);
+
+            Assert.Equal("Проверка не запускалась.", ((TextBlock)dialog.FindName("StatusLabel")!).Text);
+            Assert.Empty(((StackPanel)dialog.FindName("FindingsPanel")!).Children);
+
+            dialog.Close();
+        });
+    }
+
     [Fact]
     public void TheHierarchyTable_HasTheNoInstructionCheckbox()
     {
