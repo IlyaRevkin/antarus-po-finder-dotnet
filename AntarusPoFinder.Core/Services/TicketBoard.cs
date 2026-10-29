@@ -43,6 +43,22 @@ public static class TicketBoard
         return showClosed ? afterAuto : afterAuto.Where(IsActive).ToList();
     }
 
+    /// <summary>Сколько непросмотренного — то число, что висит на пункте меню «Тикеты».
+    ///
+    /// Считается ровно по тому же правилу доступа, по которому строится сама страница
+    /// (<see cref="TicketVisibility.CanSee"/>): своя копия правила здесь уже жила и уже разъехалась
+    /// — баги прошивок видны всем ролям, а в бейдж наладчику чужой баг не попадал, и на странице
+    /// тикет был, а цифры не было.
+    ///
+    /// <paramref name="fwBugsHaveOwnPage"/> — есть ли у багов прошивок отдельный пункт меню со
+    /// своим счётчиком. Есть — здесь они не считаются: одно и то же число в двух местах меню
+    /// означает «что-то новое» дважды, и человек ищет его дважды.</summary>
+    public static int UnseenCount(IEnumerable<Ticket> tickets, string role, string userName,
+        string lastSeenAt, bool fwBugsHaveOwnPage) => tickets
+        .Where(t => TicketVisibility.CanSee(t, role, userName))
+        .Where(t => !fwBugsHaveOwnPage || t.Type != TicketType.FwBug)
+        .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeenAt) > 0);
+
     /// <summary>Порядок по умолчанию: СНАЧАЛА ТО, ЧЕМ ЗАНЯТЫ, потом то, что ждёт, потом закрытое;
     /// внутри — сначала страшное, потом свежее.
     ///

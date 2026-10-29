@@ -119,6 +119,50 @@ public class TicketBoardTests
         Assert.Equal(new[] { "2026-10-20T10:00:00", "2026-09-01T10:00:00" }, ordered);
     }
 
+    /// <summary>Бейдж на пункте меню считается ТЕМ ЖЕ правилом доступа, что и страница. Своя копия
+    /// правила здесь уже жила и уже разъехалась: чужой баг прошивки наладчик на странице видел, а в
+    /// цифре — нет.</summary>
+    [Fact]
+    public void Чужой_баг_прошивки_попадает_в_счётчик_наладчика()
+    {
+        var foreign = T(TicketStatus.Open, TicketType.FwBug, "2026-10-20T10:00:00");
+        foreign.CreatedBy = "belyi.a";
+        var all = new List<Ticket> { foreign };
+
+        var unseen = TicketBoard.UnseenCount(all, TicketVisibility.Naladchik, "kiselyov.a",
+            "2026-10-01T00:00:00", fwBugsHaveOwnPage: false);
+
+        Assert.Equal(1, unseen);
+    }
+
+    /// <summary>Там, где у багов прошивок свой пункт меню со своим счётчиком, второй раз их не
+    /// считаем: одно и то же число в двух местах заставляет искать новое дважды.</summary>
+    [Fact]
+    public void Баги_прошивок_не_считаются_дважды()
+    {
+        var all = new List<Ticket>
+        {
+            T(TicketStatus.Open, TicketType.FwBug, "2026-10-20T10:00:00"),
+            T(TicketStatus.Open, created: "2026-10-20T10:00:00"),
+        };
+
+        Assert.Equal(1, TicketBoard.UnseenCount(all, TicketVisibility.Administrator, "ilia",
+            "2026-10-01T00:00:00", fwBugsHaveOwnPage: true));
+        Assert.Equal(2, TicketBoard.UnseenCount(all, TicketVisibility.Administrator, "ilia",
+            "2026-10-01T00:00:00", fwBugsHaveOwnPage: false));
+    }
+
+    /// <summary>Просмотренное не считается: отметка времени двигается при каждом открытии
+    /// страницы.</summary>
+    [Fact]
+    public void Старое_в_счётчик_не_идёт()
+    {
+        var all = new List<Ticket> { T(TicketStatus.Open, created: "2026-09-01T10:00:00") };
+
+        Assert.Equal(0, TicketBoard.UnseenCount(all, TicketVisibility.Administrator, "ilia",
+            "2026-10-01T00:00:00", fwBugsHaveOwnPage: false));
+    }
+
     /// <summary>Неразобранная дата не притворяется сегодняшней и уезжает вниз — то же правило, что
     /// у столбца «Создан» (TicketsView.TicketRow.CreatedAtSort).</summary>
     [Fact]

@@ -315,6 +315,12 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     ///
     /// Закрытые не считаем, взятые в работу — считаем: пока баг не закрыт, он занимает место в
     /// очереди, и прятать его из счётчика значило бы показывать меньше работы, чем есть.</summary>
+    /// <summary>Есть ли у багов прошивок свой пункт меню. Он заведён не для всех (только бета, и
+    /// только программисту с администратором — см. RolesConfig), а от этого зависит, где их
+    /// считать: там, где пункта нет, баги прошивок живут вкладкой на странице «Тикеты» и обязаны
+    /// попадать в её счётчик.</summary>
+    private bool HasFwBugsPage => NavItems.Any(n => n.PageId == "fwbugs");
+
     private void RefreshFwBugsBadge()
     {
         var item = NavItems.FirstOrDefault(n => n.PageId == "fwbugs");
@@ -497,10 +503,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         {
             var lastSeen = _services.Cfg.TicketsLastSeenAt();
             var me = _services.CurrentUserName;
-            var isAdmin = CurrentRole == "administrator";
-            var unseen = _services.Db.GetTickets()
-                .Where(t => isAdmin || string.Equals(t.CreatedBy, me, StringComparison.OrdinalIgnoreCase))
-                .Count(t => string.CompareOrdinal(t.UpdatedAt, lastSeen) > 0);
+            // Кто что видит, спрашиваем у ЕДИНСТВЕННОГО правила — TicketVisibility.CanSee, того же,
+            // по которому строится сама страница. Здесь стояла своя копия («администратор — все,
+            // остальные — свои»), и она уже разъехалась с правилом: баги прошивок видны всем ролям,
+            // но чужой баг в бейдж наладчику не попадал — тикет на странице есть, цифры нет.
+            var unseen = TicketBoard.UnseenCount(_services.Db.GetTickets(), CurrentRole, me, lastSeen, HasFwBugsPage);
 
             item.BadgeCount = unseen;
             RefreshFwBugsBadge();
