@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace AntarusPoFinder.Core.Domain;
@@ -13,41 +13,67 @@ namespace AntarusPoFinder.Core.Domain;
 /// </summary>
 public sealed class FwVersionNumber : IComparable<FwVersionNumber>
 {
+    /// <summary>Буква после номера ПО необязательна и стоит СРАЗУ за ним, без точки: «0001А».
+    /// Отдельной точкой её ставить нельзя — тогда номер с буквой и номер с датой стали бы
+    /// неразличимы по форме. Допускаются и латиница, и кириллица: папки на диске и так кириллические,
+    /// а наладчик набирает букву в той раскладке, какая стоит.</summary>
     private static readonly Regex ParsePattern =
-        new(@"^(\d+)\.(\d+)\.(\d+)\.(\d+)(?:\.(\d{8}_\d{4}))?$", RegexOptions.Compiled);
+        new(@"^(\d+)\.(\d+)\.(\d+)\.(\d+)([A-Za-zА-ЯЁа-яё]?)(?:\.(\d{8}_\d{4}))?$", RegexOptions.Compiled);
 
     public string Raw { get; }
     public int EqPrefix { get; }
     public int SubPrefix { get; }
     public int HwVersion { get; }
     public int SwVersion { get; }
+
+    /// <summary>Буква при номере ПО или пустая строка. НЕ часть числа: sw_version в базе остался
+    /// целым, на нём держатся и выдача следующего номера (Database.GetNextSwVersion — MAX+1), и
+    /// сортировка истории, и освобождение номера при откате. Буква — пометка РЯДОМ с номером, вроде
+    /// «та же версия, пересобранная под другой контроллер»; превращение номера в строку сломало бы
+    /// всё перечисленное разом, ради одного символа.</summary>
+    public string SwSuffix { get; }
+
     public string DtStr { get; }
 
-    private FwVersionNumber(string raw, int eqPrefix, int subPrefix, int hwVersion, int swVersion, string dtStr)
+    private FwVersionNumber(string raw, int eqPrefix, int subPrefix, int hwVersion, int swVersion, string swSuffix, string dtStr)
     {
         Raw = raw;
         EqPrefix = eqPrefix;
         SubPrefix = subPrefix;
         HwVersion = hwVersion;
         SwVersion = swVersion;
+        SwSuffix = swSuffix;
         DtStr = dtStr;
     }
 
-    public static FwVersionNumber Build(int eqPrefix, int subPrefix, int hwVersion, int swVersion, DateTime? dt = null, bool includeDate = true)
+    /// <summary>Приводит букву к виду, в котором она попадёт в номер: одна буква в верхнем регистре.
+    /// Всё остальное (цифры, знаки, вторая буква, пробелы) отбрасывается — номер версии становится
+    /// именем папки и файла на сетевом диске, и пускать туда произвольный ввод нельзя.</summary>
+    public static string NormalizeSwSuffix(string? suffix)
+    {
+        var trimmed = (suffix ?? "").Trim();
+        if (trimmed.Length == 0) return "";
+        var c = char.ToUpperInvariant(trimmed[0]);
+        return char.IsLetter(c) ? c.ToString() : "";
+    }
+
+    public static FwVersionNumber Build(int eqPrefix, int subPrefix, int hwVersion, int swVersion, DateTime? dt = null,
+        bool includeDate = true, string swSuffix = "")
     {
         var hwStr = hwVersion.ToString("D4", CultureInfo.InvariantCulture);
-        var swStr = swVersion.ToString("D4", CultureInfo.InvariantCulture);
+        var swStr = swVersion.ToString("D4", CultureInfo.InvariantCulture) + NormalizeSwSuffix(swSuffix);
+        var suffix = NormalizeSwSuffix(swSuffix);
 
         if (!includeDate)
         {
             var rawNoDate = $"{eqPrefix}.{subPrefix}.{hwStr}.{swStr}";
-            return new FwVersionNumber(rawNoDate, eqPrefix, subPrefix, hwVersion, swVersion, "");
+            return new FwVersionNumber(rawNoDate, eqPrefix, subPrefix, hwVersion, swVersion, suffix, "");
         }
 
         var d = dt ?? DateTime.Now;
         var dtStr = d.ToString("yyyyMMdd_HHmm", CultureInfo.InvariantCulture);
         var raw = $"{eqPrefix}.{subPrefix}.{hwStr}.{swStr}.{dtStr}";
-        return new FwVersionNumber(raw, eqPrefix, subPrefix, hwVersion, swVersion, dtStr);
+        return new FwVersionNumber(raw, eqPrefix, subPrefix, hwVersion, swVersion, suffix, dtStr);
     }
 
     public static FwVersionNumber? Parse(string s)
@@ -60,7 +86,8 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
             int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture),
             int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture),
             int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture),
-            m.Groups[5].Success ? m.Groups[5].Value : "");
+            m.Groups[5].Value.ToUpperInvariant(),
+            m.Groups[6].Success ? m.Groups[6].Value : "");
     }
 
     public override string ToString() => Raw;
@@ -70,7 +97,7 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
     {
         get
         {
-            if (string.IsNullOrEmpty(DtStr)) return $"hw{HwVersion}.sw{SwVersion}";
+            if (string.IsNullOrEmpty(DtStr)) return $"hw{HwVersion}.sw{SwVersion}{SwSuffix}";
 
             string dateStr = DtStr;
             if (DateTime.TryParseExact(DtStr, "yyyyMMdd_HHmm", CultureInfo.InvariantCulture,
@@ -78,7 +105,7 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
             {
                 dateStr = d.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
             }
-            return $"hw{HwVersion}.sw{SwVersion}  ({dateStr})";
+            return $"hw{HwVersion}.sw{SwVersion}{SwSuffix}  ({dateStr})";
         }
     }
 
@@ -92,6 +119,10 @@ public sealed class FwVersionNumber : IComparable<FwVersionNumber>
         c = HwVersion.CompareTo(other.HwVersion);
         if (c != 0) return c;
         c = SwVersion.CompareTo(other.SwVersion);
+        if (c != 0) return c;
+        // Номер без буквы идёт ПЕРЕД тем же номером с буквой: буква появляется позже, когда к уже
+        // выпущенной версии делают вариант, и сравнение обязано ставить её следом, а не вперемешку.
+        c = string.CompareOrdinal(SwSuffix, other.SwSuffix);
         if (c != 0) return c;
         return string.CompareOrdinal(DtStr, other.DtStr);
     }

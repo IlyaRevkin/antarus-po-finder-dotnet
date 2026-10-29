@@ -60,6 +60,11 @@ public class FirmwareUploadRequest
     /// DateTime.Now. Учитывается только вместе с <see cref="IncludeDateInVersion"/>.</summary>
     public DateTime? VersionDate { get; set; }
 
+    /// <summary>Буква при номере ПО («0001А») или пусто. Отдельным полем, а не частью номера: сам
+    /// номер остаётся целым числом, на котором держатся выдача следующего номера, сортировка и
+    /// освобождение номера при откате — см. FwVersionNumber.SwSuffix.</summary>
+    public string SwSuffix { get; set; } = "";
+
     /// <summary>"Не увеличивать версию ПО (sw)" checkbox — вместо обычного MAX+1 новая загрузка для
     /// того же (подтип, контроллер, hw) берёт ТОТ ЖЕ sw_version, что и текущая последняя активная
     /// версия этой группы. Полезно, когда сама программа ПЛК не менялась, а обновился только
@@ -521,7 +526,7 @@ public static class FirmwareUploadService
                     ?? db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                     ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
         else if (request.KeepSwVersion && OpcFields.SwVersionChoiceApplies(isOpc))
         {
@@ -531,13 +536,13 @@ public static class FirmwareUploadService
             var last = db.GetLastActiveFwVersion(subOption.Id!.Value, mod.ControllerId, hwInt, execution);
             swInt = last?.SwVersion ?? db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
         else
         {
             swInt = db.GetNextSwVersion(subOption.Id!.Value, mod.ControllerId, hwInt);
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
-                includeDate: request.IncludeDateInVersion);
+                includeDate: request.IncludeDateInVersion, swSuffix: request.SwSuffix);
         }
 
         // Заявка и заводской SN попадают в ИМЯ папки ОПЦ-версии (этап 5): ОПЦ заводят под конкретный

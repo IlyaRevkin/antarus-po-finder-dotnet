@@ -93,6 +93,10 @@ public partial class UploadView : UserControl
         // Звёздочка в подписи означает «без этого не пустит»; там, где тип пуска стал
         // необязательным (бета, см. FirmwareUploadService.LaunchTypeRequired), она врала бы.
         if (!FirmwareUploadService.LaunchTypeRequired) LaunchTypesHeader.Text = "ТИП ПУСКА";
+        // ⚠️ БУКВА ПРИ НОМЕРЕ ПО — ТОЛЬКО В БЕТЕ. Разбирать её умеют обе сборки (FwVersionNumber
+        // принимает такой номер всегда — иначе прошивка, заведённая в бете, приехала бы к коллеге
+        // с рабочей версией нечитаемой), а вот ЗАВОДИТЬ такие номера пока можно только в бете.
+        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) SwSuffixPanel.Visibility = Visibility.Visible;
 
         _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
             fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
@@ -586,6 +590,15 @@ public partial class UploadView : UserControl
     /// осталось бы незамеченным до самого нажатия «Загрузить».</summary>
     private void Execution_Changed(object sender, RoutedEventArgs e) => UpdatePreview();
 
+    /// <summary>Буква при номере ПО. IsInitialized — обязательная защита: TextChanged прилетает ещё
+    /// из разметки, до того как конструктор добрал остальные поля страницы, и UpdatePreview() на
+    /// полупостроенной странице роняет её целиком.</summary>
+    private void SwSuffix_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        UpdatePreview();
+    }
+
     private void ReservationCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdatePreview();
 
     private FwVersionReservation? GetSelectedReservation() => (ReservationCombo.SelectedItem as ReservationOption)?.Reservation;
@@ -761,7 +774,8 @@ public partial class UploadView : UserControl
                     ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                         ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
                     : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
-            fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt, includeDate: IncludeDateCheck.IsChecked == true);
+            fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt,
+                includeDate: IncludeDateCheck.IsChecked == true, swSuffix: SwSuffixInput.Text);
         }
 
         bool isOpc = IsOpc;
@@ -1270,6 +1284,7 @@ public partial class UploadView : UserControl
             Description = DescInput.Text.Trim(),
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
+            SwSuffix = SwSuffixInput.Text,
             OpcEnabled = IsOpc,
             OpcBaseSwVersion = SelectedOpcBaseSw,
             Execution = ExecutionCombo.Text,
@@ -1329,6 +1344,9 @@ public partial class UploadView : UserControl
         // который сознательно НЕ сбрасывается здесь) — оставленный включённым по инерции молча увёл бы
         // sw-номер СЛЕДУЮЩЕЙ, уже не связанной загрузки назад к прежнему значению.
         KeepSwVersionCheck.IsChecked = false;
+        // По той же причине, что и галочка выше: буква относится к КОНКРЕТНОЙ сборке, и
+        // забытая в поле она молча приписалась бы к следующей, ни с чем не связанной загрузке.
+        SwSuffixInput.Text = "";
         _launchChecks.ClearAll();
         DescInput.Text = "";
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());
