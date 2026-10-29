@@ -300,6 +300,10 @@ public partial class Database : IDisposable
                  description   TEXT NOT NULL DEFAULT '',
                  applicability TEXT NOT NULL DEFAULT '',
                  applies_when  TEXT NOT NULL DEFAULT '',
+                 -- purpose: для чего строка нужна — «для наладки» (прогнать алгоритм) и/или «для
+                 -- сервиса» (подогнать под установленный двигатель). Набор токенов через запятую,
+                 -- пусто — не размечено; отбор неразмеченное НЕ прячет (см. ParamPurposes.Filter).
+                 purpose       TEXT NOT NULL DEFAULT '',
                  extra         TEXT NOT NULL DEFAULT ''
              );
 
@@ -1008,6 +1012,10 @@ public partial class Database : IDisposable
             ("unit", "TEXT NOT NULL DEFAULT ''"),
             ("applicability", "TEXT NOT NULL DEFAULT ''"),
             ("applies_when", "TEXT NOT NULL DEFAULT ''"),
+            // Назначение строки (наладка/сервис) завелось позже самой таблицы: у установленных
+            // копий CREATE TABLE IF NOT EXISTS выше существующую таблицу не трогает, и без этой
+            // строки разметка молча не доехала бы ни до одной уже работающей базы.
+            ("purpose", "TEXT NOT NULL DEFAULT ''"),
             ("extra", "TEXT NOT NULL DEFAULT ''"));
 
         // Свои столбцы документа завелись в 1.74.2 парой «заголовок + порядок»; окна для них не

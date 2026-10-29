@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Services;
@@ -222,7 +222,11 @@ public static class ParamTableDiff
         && Norm(a.Factory) == Norm(b.Factory)
         && Norm(a.Unit) == Norm(b.Unit)
         && Norm(a.Description) == Norm(b.Description)
-        && Norm(a.GroupName) == Norm(b.GroupName);
+        && Norm(a.GroupName) == Norm(b.GroupName)
+        // Назначение (наладка/сервис) входит в сравнение намеренно: перезалили таблицу из файла,
+        // разметка не перенеслась — и без этого ревизия отчиталась бы «изменений нет», а наладчик
+        // на объекте недосчитался бы строк в своём отборе.
+        && ParamPurposes.Normalize(a.Purpose) == ParamPurposes.Normalize(b.Purpose);
 
     /// <summary>Разбор изменений человеческим текстом — он и ложится в
     /// ParamTableRevision.Summary, и показывается под таблицей.

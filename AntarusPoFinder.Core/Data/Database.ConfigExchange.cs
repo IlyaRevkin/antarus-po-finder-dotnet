@@ -201,7 +201,8 @@ public partial class Database
                             Kind = row.Kind, GroupName = row.GroupName, Code = row.Code, Title = row.Title,
                             Value = row.Value, ValueState = row.ValueState, Factory = row.Factory,
                             Unit = row.Unit, Description = row.Description,
-                            Applicability = row.Applicability, AppliesWhen = row.AppliesWhen, Extra = row.Extra,
+                            Applicability = row.Applicability, AppliesWhen = row.AppliesWhen,
+                            Purpose = row.Purpose, Extra = row.Extra,
                         }).ToList(),
                 });
 
@@ -2215,6 +2216,7 @@ public partial class Database
                         Description = r.Description,
                         Applicability = r.Applicability,
                         AppliesWhen = r.AppliesWhen,
+                        Purpose = r.Purpose,
                         Extra = r.Extra,
                     }).ToList(),
                 });

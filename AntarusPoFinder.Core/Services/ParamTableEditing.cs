@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 
@@ -110,6 +110,7 @@ public static class ParamTableEditing
             tidy.Description = (tidy.Description ?? "").Trim();
             tidy.Applicability = (tidy.Applicability ?? "").Trim();
             tidy.AppliesWhen = (tidy.AppliesWhen ?? "").Trim();
+            tidy.Purpose = ParamPurposes.Normalize(tidy.Purpose);
             tidy.GroupName = NormalizeGroup(known, tidy.GroupName);
             tidy.ValueState = ParamValueState.Normalize(tidy.ValueState);
             // Свои столбцы — к единому виду: пустые значения выброшены, ключи по порядку. Иначе
