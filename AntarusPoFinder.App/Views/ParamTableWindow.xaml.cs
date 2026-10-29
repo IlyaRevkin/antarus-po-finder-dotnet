@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -131,6 +132,7 @@ public partial class ParamTableWindow : Window
         _diskPath = diskPath;
         _filename = filename;
         _standalone = diskPath.Trim().Length == 0 && filename.Trim().Length == 0;
+        MakeEditPencil();
 
         FileLabel.Text = _standalone
             ? "Свободные таблицы — не привязаны к файлу параметров"
@@ -603,6 +605,34 @@ public partial class ParamTableWindow : Window
 
         LoadDocuments(tableId);
         Announce($"Заведена таблица параметров «{dialog.ResultName}»: строк {dialog.ResultRows.Count}");
+    }
+
+    /// <summary>В бете «Править…» превращается в карандаш.
+    ///
+    /// Тикет: «в интерфейсе параметров добавить иконку карандаша для возможности редактирования».
+    /// Ряд из четырёх кнопок с длинными подписями занимал всю ширину под таблицей, а нажимают из
+    /// него чаще всего одну. Подпись не выбрасывается, а уезжает в подсказку и в имя для экранного
+    /// диктора: кнопка без текста обязана остаться понятной тому, кто её не видит.</summary>
+    private void MakeEditPencil()
+    {
+        if (!AppIdentity.IsBeta) return;
+        if (TryFindResource("Icon.Edit") is not Geometry pencil) return;
+
+        var tip = EditBtn.ToolTip as string ?? "Править таблицу";
+        EditBtn.Content = new System.Windows.Shapes.Path
+        {
+            Data = pencil,
+            Stroke = (Brush)FindResource("TextBrush"),
+            StrokeThickness = 1.6,
+            Stretch = Stretch.Uniform,
+            Width = 16,
+            Height = 16,
+        };
+        EditBtn.Style = (Style)FindResource("IconButton");
+        // Ширину задаём ПОСЛЕ стиля: IconButton ставит свою, и присвоение до него просто затёрлось бы.
+        EditBtn.Width = 36;
+        EditBtn.ToolTip = "Править таблицу. " + tip;
+        System.Windows.Automation.AutomationProperties.SetName(EditBtn, "Править таблицу");
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)

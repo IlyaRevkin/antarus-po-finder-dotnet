@@ -155,6 +155,11 @@ public partial class ParamTableEditorDialog : Window
     private readonly string _fileName = "";
     private string _sourceText = "";
 
+    /// <summary>Как таблица выглядела, когда окно открыли. Нужен ровно для одного вопроса: правили
+    /// её или просто посмотрели. Сравнение по содержимому, а не флажок «что-то трогали»: человек
+    /// вписывает значение, потом стирает обратно — и спрашивать его на выходе не за что.</summary>
+    private string _openedAs = "";
+
     public string ResultName => NameInput.Text.Trim();
     public string ResultReason => ReasonInput.Text.Trim();
     public List<ParamTableRow> ResultRows { get; private set; } = new();
@@ -167,6 +172,7 @@ public partial class ParamTableEditorDialog : Window
         _extraKeys = _columns.Select(c => c.Key).ToList();
         AddOwnColumns();
         RowsGrid.ItemsSource = _rows;
+        Closing += Editor_Closing;
         foreach (var choice in TextFileEncoding.Choices) EncodingCombo.Items.Add(choice);
         EncodingCombo.SelectedIndex = 0;
         // Назначение строки — только в бете: рабочая версия 1.75 обязана выглядеть как выглядела.
@@ -233,6 +239,7 @@ public partial class ParamTableEditorDialog : Window
     {
         _rows.Clear();
         foreach (var row in rows) _rows.Add(RowVm.From(row, _groups, _extraKeys));
+        _openedAs = Snapshot();
         RefreshCount();
     }
 
@@ -355,5 +362,71 @@ public partial class ParamTableEditorDialog : Window
         DialogResult = true;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+    /// <summary>Строки и название одной строкой текста — этого достаточно, чтобы понять, изменилось
+    /// ли что-нибудь. Сравнивать объекты попарно здесь незачем: нам нужен ответ «да/нет», а не что
+    /// именно поменялось (это посчитает ParamTableDiff уже при сохранении).</summary>
+    private string Snapshot()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(NameInput.Text.Trim()).Append('\u0001');
+        foreach (var row in _rows.Select(r => r.ToRow()))
+        {
+            sb.Append(row.Kind).Append('\u0002').Append(row.GroupName).Append('\u0002')
+              .Append(row.Code).Append('\u0002').Append(row.Title).Append('\u0002')
+              .Append(row.Value).Append('\u0002').Append(row.ValueState).Append('\u0002')
+              .Append(row.Factory).Append('\u0002').Append(row.Unit).Append('\u0002')
+              .Append(row.Description).Append('\u0002').Append(row.Applicability).Append('\u0002')
+              .Append(row.AppliesWhen).Append('\u0002').Append(row.Purpose).Append('\u0002')
+              .Append(row.Extra).Append('\u0001');
+        }
+        return sb.ToString();
+    }
+
+    private bool HasUnsavedChanges => !string.Equals(Snapshot(), _openedAs, StringComparison.Ordinal);
+
+    /// <summary>Уход из редактора с несохранёнными правками.
+    ///
+    /// Тикет дословно: «после выхода из интерфейса параметров, в случае изменения выводить окно
+    /// сохранять ли изменение или нет, и комментарий что поменялось». До этого «Отмена» и крестик
+    /// молча выбрасывали работу — а в таблице на полсотни строк это полчаса, которых уже не вернуть.
+    ///
+    /// Вопрос задаётся ТОЛЬКО когда правки есть. Лишний вопрос на выходе приучает жать «да» не
+    /// глядя, и тогда он перестаёт защищать в тот единственный раз, когда это важно.
+    ///
+    /// «Нет» означает потерю правок, и в тексте это сказано прямо, а не намёком: кнопка, после
+    /// которой работа исчезает, обязана называть последствие.</summary>
+    private bool ConfirmExit()
+    {
+        if (!HasUnsavedChanges) return true;
+
+        var answer = AppMessageBox.Show(
+            "В таблице есть несохранённые правки." + Environment.NewLine + Environment.NewLine +
+            "«Да» — сохранить их новой ревизией." + Environment.NewLine +
+            "«Нет» — закрыть и потерять правки." + Environment.NewLine +
+            "«Отмена» — вернуться к правке.",
+            "Таблица параметров", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+
+        if (answer == MessageBoxResult.Cancel) return false;
+        if (answer == MessageBoxResult.No) return true;
+
+        // Сохраняем тем же путём, что и кнопка «Сохранить»: вторая копия проверок разошлась бы с
+        // первой. Если сохранение не прошло (например, не осталось ни одной строки), остаёмся в окне.
+        Save_Click(this, new RoutedEventArgs());
+        return DialogResult == true;
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmExit()) return;
+        DialogResult = false;
+    }
+
+    /// <summary>Крестик окна — тот же выход, и обходить вопрос он не имеет права: закрывают окно
+    /// крестиком ничуть не реже, чем кнопкой.</summary>
+    private void Editor_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // Сохранение и отказ уже прошли через вопрос — второй раз спрашивать не за что.
+        if (DialogResult is not null) return;
+        if (!ConfirmExit()) e.Cancel = true;
+    }
 }
