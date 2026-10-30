@@ -334,7 +334,22 @@ public partial class InspectionView : UserControl
             QrInfoText.Text = "Укажите папку осмотра, чтобы включить приём фото по QR.";
             return;
         }
-        Directory.CreateDirectory(proto);
+
+        // Папка осмотра теперь обычно лежит на сетевом диске (туда телефон кладёт снимки по SMB), а
+        // сетевой диск отваливается: сервер выключили, ноутбук унесли из конторы, VPN отвалился.
+        // Голый Directory.CreateDirectory в этом случае бросал исключение прямо из Loaded — то есть
+        // вкладка «Осмотр» не открывалась вовсе и роняла программу. Папка недоступна — это повод
+        // сказать об этом и не поднимать приём фото, а не падать.
+        try
+        {
+            Directory.CreateDirectory(proto);
+        }
+        catch (Exception ex)
+        {
+            QrImage.Source = null;
+            QrInfoText.Text = $"Папка осмотра недоступна:\n{ex.Message}";
+            return;
+        }
 
         try
         {
