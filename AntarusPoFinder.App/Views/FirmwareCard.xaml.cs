@@ -304,9 +304,11 @@ public partial class FirmwareCard : UserControl
         // сборках (столбец source_name заполняется при загрузке), но лишняя строка на карточке —
         // переделка вида, а не исправление: в рабочей версии карточка остаётся прежней.
         var sourceName = result.SourceName ?? "";
-        // Под значком «i» это уже есть — вторая копия на карточке и была той самой «избыточной
-        // информацией», от которой просили избавиться.
-        bool showSource = false && !string.IsNullOrWhiteSpace(sourceName);
+        // ИСХОДНОЕ НАЗВАНИЕ ОСТАЁТСЯ ОТДЕЛЬНОЙ СТРОКОЙ, а не прячется под значок «i», — в отличие
+        // от автора и прочих подробностей. Причина простая: пока у наладчиков нет доступа к Finder,
+        // прошивки заливают за программиста, и единственное, по чему наладчик узнаёт нужную сборку, —
+        // это имя, которое ему назвал программист. Прятать ответ на главный вопрос под значок нельзя.
+        bool showSource = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(sourceName);
         SourceNameLabel.Visibility = showSource ? Visibility.Visible : Visibility.Collapsed;
         if (showSource)
         {

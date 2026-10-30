@@ -340,25 +340,7 @@
                                           Checked="KeepSwVersion_Toggled" Unchecked="KeepSwVersion_Toggled"/>
                             </WrapPanel>
 
-                            <!-- НОМЕР ПО ВРУЧНУЮ. Номер — счётчик из пяти знаков: 0001, 0002, …
-                                 99999, дальше A0000, A0001 (см. Core/Domain/SwNumberCode.cs). Буква —
-                                 старший разряд счёта, а не пометка варианта. Пусто — номер выдаётся
-                                 как обычно, следующим по счёту. Панель показывается только в бете: в
-                                 рабочей версии форма загрузки остаётся прежней (UploadView ctor). -->
-                            <Grid x:Name="SwCodePanel" Margin="0,0,0,6" Visibility="Collapsed">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Номер ПО вручную:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <TextBox Grid.Column="1" x:Name="SwCodeInput" Width="72" Height="34" MaxLength="5"
-                                         TextAlignment="Center" TextChanged="SwCode_Changed"
-                                         ToolTip="Код номера ПО: 0001 … 99999, затем A0000, A0001 и дальше. Пусто — следующий по счёту."/>
-                                <TextBlock Grid.Column="2" x:Name="SwCodeHint" Style="{StaticResource MutedText}" VerticalAlignment="Center"
-                                           Margin="8,0,0,0" TextWrapping="Wrap"
-                                           Text="Пусто — номер выдаётся следующим по счёту."/>
-                            </Grid>
+                            
 
                             <!-- ИСПОЛНЕНИЕ: у одного шкафа бывает несколько прошивок, актуальных
                                  ОДНОВРЕМЕННО и отличающихся комплектацией, а не возрастом («3 насоса»,

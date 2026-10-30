@@ -46,6 +46,10 @@ public partial class EditFirmwareDialog : Window
     private bool _isSegnetics;
 
     public string ResultDescription { get; private set; } = "";
+
+    /// <summary>Исходное название прошивки после правки. <c>null</c> — поля на форме не было
+    /// (рабочая версия), и трогать его нельзя: передача пустой строки стёрла бы уже записанное.</summary>
+    public string? ResultSourceName { get; private set; }
     public string ResultTags { get; private set; } = "";
     public List<string> ResultLaunchTypes { get; private set; } = new();
     /// <summary>ИСПОЛНЕНИЕ прошивки (см. FwExecution): '' — обычная. Правится здесь, потому что
@@ -105,6 +109,12 @@ public partial class EditFirmwareDialog : Window
         _title = title;
         TitleLabel.Text = $"Модерация прошивки: {title}";
         DescriptionInput.Text = v.Description;
+
+        // Исходное название — только в бете: в рабочей версии окно модерации остаётся прежним.
+        // Поле показываем и пустым тоже: у всех прошивок, заведённых до его появления, оно пустое,
+        // и добавить его задним числом можно ровно здесь.
+        SourceNamePanel.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        SourceNameInput.Text = v.SourceName ?? "";
         TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
 
         _checks = new LaunchTypeChecks(LaunchTypesPanel, v.LaunchTypes);
@@ -1161,6 +1171,9 @@ public partial class EditFirmwareDialog : Window
             BusySubjectGuard.Blocked(_services, _record.DiskPath, "Модерация прошивки")) return;
 
         ResultDescription = DescriptionInput.Text.Trim();
+        // null, когда поля на форме нет: передать пустую строку значило бы стереть уже записанное
+        // исходное название у того, кто просто открыл модерацию в рабочей версии.
+        ResultSourceName = SourceNamePanel.Visibility == Visibility.Visible ? SourceNameInput.Text.Trim() : null;
         var tags = TagsEditor.Tags;
         foreach (var tag in tags) _db.AddTag(tag);
         ResultTags = AntarusPoFinder.Core.Services.TagString.Join(tags);
@@ -1209,7 +1222,8 @@ public partial class EditFirmwareDialog : Window
     public static void ApplyResult(EditFirmwareDialog dlg, AppServices services, IAppHost host, int versionId)
     {
         services.Db.UpdateFwVersion(versionId, dlg.ResultDescription, dlg.ResultTags, dlg.ResultLaunchTypes,
-            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint, dlg.ResultExecution);
+            dlg.ResultHmiExecutableHint, dlg.ResultExecutableHint, dlg.ResultExecution,
+            dlg.ResultSourceName);
         ReportChanges(dlg, host);
     }
 

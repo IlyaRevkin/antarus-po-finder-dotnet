@@ -19,6 +19,16 @@
                  VerticalScrollBarVisibility="Auto" Margin="0,0,0,12"/>
 
         <TextBlock Text="Теги:" Margin="0,0,0,4"/>
+        <!-- Исходное название — то, как сборку называет программист. Наладчик заливает прошивку
+             за него и ищет её потом именно по этому имени; на диске файл лежит переименованным в
+             номер версии, поэтому другого следа не остаётся. Правится здесь, потому что у всех
+             прошивок, заведённых до появления поля, оно пустое. Только бета (см. код окна). -->
+        <StackPanel x:Name="SourceNamePanel" Visibility="Collapsed" Margin="0,0,0,10">
+            <TextBlock Text="Исходное название прошивки" Margin="0,0,0,4"/>
+            <TextBox x:Name="SourceNameInput" Height="30" VerticalContentAlignment="Center"
+                     ToolTip="Как эта сборка называется у программиста. Видно наладчику в карточке поиска."/>
+        </StackPanel>
+
         <views:TagBubbleEditor x:Name="TagsEditor" Margin="0,0,0,4"/>
         <!-- Подстановка в теге (см. Core/Services/TagPattern.cs): один тег вместо десятка почти
              одинаковых названий шкафов, отличающихся только амперажом. -->

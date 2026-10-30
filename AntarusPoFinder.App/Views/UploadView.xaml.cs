@@ -97,7 +97,6 @@ public partial class UploadView : UserControl
         // обе сборки (SwNumberCode лежит в Core — иначе прошивка, заведённая в бете, приехала бы к
         // коллеге с рабочей версией нечитаемой), а вот ЗАВОДИТЬ такие номера пока можно только в
         // бете; то же правило продублировано в FirmwareUploadService.Prepare.
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) SwCodePanel.Visibility = Visibility.Visible;
         // Исходное название спрашиваем там же, где оно обязательно, — одно правило на форму и на
         // проверку (FirmwareUploadService.SourceNameRequired), чтобы звёздочка и отказ не разъехались.
         if (FirmwareUploadService.SourceNameRequired) SourceNamePanel.Visibility = Visibility.Visible;
@@ -594,26 +593,6 @@ public partial class UploadView : UserControl
     /// осталось бы незамеченным до самого нажатия «Загрузить».</summary>
     private void Execution_Changed(object sender, RoutedEventArgs e) => UpdatePreview();
 
-    /// <summary>Номер ПО, набранный руками. IsInitialized — обязательная защита: TextChanged
-    /// прилетает ещё из разметки, до того как конструктор добрал остальные поля страницы, и
-    /// UpdatePreview() на полупостроенной странице роняет её целиком.</summary>
-    private void SwCode_Changed(object sender, TextChangedEventArgs e)
-    {
-        if (!IsInitialized) return;
-        // Подсказка рядом с полем — единственное место, где видно, что набранное НЕ является кодом
-        // номера: предпросмотр ниже в этом случае просто показывает обычный следующий номер, и без
-        // подсказки опечатка выглядела бы как «программа меня не послушалась».
-        if (SwCodeHint is not null)
-        {
-            var typed = SwCodeInput.Text.Trim();
-            SwCodeHint.Text = typed.Length == 0
-                ? "Пусто — номер выдаётся следующим по счёту."
-                : SwNumberCode.Parse(typed) is null
-                    ? "Не похоже на номер: 0001 … 99999, дальше A0000 … Z9999."
-                    : "Номер задан вручную.";
-        }
-        UpdatePreview();
-    }
 
     private void ReservationCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdatePreview();
 
@@ -790,11 +769,10 @@ public partial class UploadView : UserControl
                     ? _services.Db.GetLastActiveFwVersion(subtype.Id!.Value, mod.ControllerId, hwInt, execution)?.SwVersion
                         ?? _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt)
                     : _services.Db.GetNextSwVersion(subtype.Id!.Value, mod.ControllerId, hwInt);
-            // Набранный руками номер (бета) перебивает и «не увеличивать sw», и обычный MAX+1 —
-            // тот же порядок, что и в FirmwareUploadService.Prepare, иначе предпросмотр показывал бы
-            // не тот путь, по которому прошивка ляжет.
-            if (!IsOpc && AntarusPoFinder.Core.Domain.AppIdentity.IsBeta
-                && SwNumberCode.Parse(SwCodeInput.Text) is { } manualSw) swInt = manualSw;
+            // Поля «номер ПО вручную» на форме больше нет: его тут не просили. Номер по-прежнему
+            // выдаётся счётом (0001 … 99999, дальше A0000 — см. Core/Domain/SwNumberCode), а то,
+            // что программист задаёт руками и что должен увидеть наладчик, — это ИСХОДНОЕ НАЗВАНИЕ
+            // прошивки, отдельное поле ниже.
             fwv = FwVersionNumber.Build(group.Prefix, subtype.Prefix, hwInt, swInt,
                 includeDate: IncludeDateCheck.IsChecked == true);
         }
@@ -1309,7 +1287,6 @@ public partial class UploadView : UserControl
             Description = DescInput.Text.Trim(),
             IncludeDateInVersion = IncludeDateCheck.IsChecked == true,
             KeepSwVersion = KeepSwVersionCheck.IsChecked == true,
-            SwCodeOverride = SwCodeInput.Text,
             SourceNameOverride = SourceNameInput.Text.Trim(),
             OpcEnabled = IsOpc,
             OpcBaseSwVersion = SelectedOpcBaseSw,
@@ -1372,7 +1349,6 @@ public partial class UploadView : UserControl
         KeepSwVersionCheck.IsChecked = false;
         // По той же причине, что и галочка выше: номер относится к КОНКРЕТНОЙ сборке, и забытый
         // в поле он молча увёл бы номер следующей, ни с чем не связанной загрузки.
-        SwCodeInput.Text = "";
         _launchChecks.ClearAll();
         DescInput.Text = "";
         TagsEditor.Configure(System.Array.Empty<string>(), () => _services.Db.GetAllTags());

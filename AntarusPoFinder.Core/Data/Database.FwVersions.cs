@@ -77,7 +77,8 @@ public partial class Database
     /// <summary>Update editable fields (description, tags, launch_types, исполняемые файлы ПЛК/HMI)
     /// of a fw_version. Любой параметр null — «не трогать это поле».</summary>
     public void UpdateFwVersion(int versionId, string? description = null, string? tags = null, List<string>? launchTypes = null,
-        string? hmiExecutableHint = null, string? executableHint = null, string? execution = null)
+        string? hmiExecutableHint = null, string? executableHint = null, string? execution = null,
+        string? sourceName = null)
     {
         // Снятие тега обязано пережить синхронизацию: без явной отметки об удалении тег вернулся бы с
         // первой машины, которая о снятии ещё не знает (см. Database.FlatLists.RecordRowTagChange —
@@ -92,6 +93,11 @@ public partial class Database
         if (launchTypes is not null) { sets.Add("launch_types=@launch_types"); values.Add(("@launch_types", JsonSerializer.Serialize(launchTypes))); }
         if (hmiExecutableHint is not null) { sets.Add("hmi_executable_hint=@hmi_executable_hint"); values.Add(("@hmi_executable_hint", hmiExecutableHint)); }
         if (executableHint is not null) { sets.Add("executable_hint=@executable_hint"); values.Add(("@executable_hint", executableHint)); }
+        // ИСХОДНОЕ НАЗВАНИЕ правится и после загрузки — через модерацию. Иначе его нельзя было бы ни
+        // добавить старым прошивкам (у них поле пустое: заполняться оно начало только сейчас), ни
+        // исправить опечатку наладчика, который заливал за программиста. Ради этого поле и заведено:
+        // наладчик ищет сборку по тому имени, которое ему назвал программист.
+        if (sourceName is not null) { sets.Add("source_name=@source_name"); values.Add(("@source_name", sourceName)); }
         // Отметка времени правки подсказок — по ней обмен решает, чьё значение свежее
         // (см. Database.cs, hints_changed_at). Без неё исправление не доезжало до того, у кого в поле
         // уже лежало неверное значение.

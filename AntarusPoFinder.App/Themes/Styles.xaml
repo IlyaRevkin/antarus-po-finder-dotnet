@@ -1496,8 +1496,20 @@
                                     </Rectangle.Fill>
                                 </Rectangle>
 
+                                <!-- СТРУИ ОБРЕЗАНЫ ПО ВОДЕ. Раньше холст со струями шёл во всю трубу,
+                                     и косые чёрточки было видно ЗА краем заливки — на пустой части.
+                                     Жалоба дословно: «какие-то стрелочки на 75% всегда активны»: на
+                                     четверти пустой трубы они и правда стояли, показывая поток там,
+                                     где ничего не течёт. Белый цвет, как предполагалось раньше, их не
+                                     прячет — на светлом фоне он виден отлично.
+
+                                     Ширина обёртки привязана к PART_Indicator — к самой заливке, —
+                                     поэтому струи живут ровно в налитой части и исчезают из пустой
+                                     сами, без отдельного пересчёта на каждое изменение значения. -->
+                                <Border x:Name="JetsClip" HorizontalAlignment="Left" ClipToBounds="True"
+                                        Width="{Binding ActualWidth, ElementName=PART_Indicator}">
                                 <Canvas x:Name="Jets" IsHitTestVisible="False" ClipToBounds="True"
-                                        Height="12" VerticalAlignment="Center">
+                                        Height="12" VerticalAlignment="Center" HorizontalAlignment="Left">
                                     <Canvas.RenderTransform>
                                         <TranslateTransform X="0"/>
                                     </Canvas.RenderTransform>
@@ -1508,6 +1520,7 @@
                                     <Path Stroke="#FFFFFF" StrokeThickness="1.8" Opacity="0.5" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                           Data="M1,2 L5,6 L1,10 M17,2 L21,6 L17,10 M33,2 L37,6 L33,10 M49,2 L53,6 L49,10 M65,2 L69,6 L65,10 M81,2 L85,6 L81,10 M97,2 L101,6 L97,10 M113,2 L117,6 L113,10 M129,2 L133,6 L129,10 M145,2 L149,6 L145,10 M161,2 L165,6 L161,10 M177,2 L181,6 L177,10 M193,2 L197,6 L193,10 M209,2 L213,6 L209,10 M225,2 L229,6 L225,10 M241,2 L245,6 L241,10 M257,2 L261,6 L257,10 M273,2 L277,6 L273,10 M289,2 L293,6 L289,10 M305,2 L309,6 L305,10"/>
                                 </Canvas>
+                                </Border>
                             </Grid>
                         </Border>
                     </Grid>
