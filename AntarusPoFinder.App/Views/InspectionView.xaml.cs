@@ -452,13 +452,8 @@ public partial class InspectionView : UserControl
         {
             if (!File.Exists(path)) { vanished.Add(path); continue; }
 
-            long length;
-            try
-            {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
-                length = stream.Length;
-            }
-            catch
+            var length = IncomingFileProbe.TryMeasureIfFree(path);
+            if (length is null)
             {
                 // Занят писателем (или отобрали права/отвалилась шара) — ждём следующего тика.
                 // Сброс запомненной длины: после перерыва её надо мерить заново.
@@ -466,8 +461,8 @@ public partial class InspectionView : UserControl
                 continue;
             }
 
-            if (_incoming[path] == length) ready.Add(path);
-            else _incoming[path] = length;
+            if (_incoming[path] == length.Value) ready.Add(path);
+            else _incoming[path] = length.Value;
         }
 
         foreach (var path in vanished) _incoming.Remove(path);
