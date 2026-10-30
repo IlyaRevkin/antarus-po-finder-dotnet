@@ -2625,9 +2625,20 @@ public partial class SettingsView : UserControl
     /// <summary>Открыть постоянный журнал «что менялось по версиям программы» — то же, что разовое
     /// окно «Что нового» после обновления, но сохранённое (ConfigService.AppChangelogHistory), чтобы
     /// вернуться в любой момент.</summary>
-    private void ShowAppChangelog_Click(object sender, RoutedEventArgs e)
+    private async void ShowAppChangelog_Click(object sender, RoutedEventArgs e)
     {
-        var win = new AppChangelogWindow(_services.Cfg.AppChangelogHistory()) { Owner = Window.GetWindow(this) };
+        // Журнал копится по факту обновлений, поэтому у свежей установки он пуст. Один раз
+        // заполняем его из самих релизов — иначе человек открывает «Историю изменений» и видит
+        // пустое окно, хотя версий вышло полтора десятка.
+        var history = _services.Cfg.AppChangelogHistory();
+        if (history.Count == 0)
+        {
+            foreach (var (version, notes, published) in await AppUpdateService.ListChannelNotesAsync())
+                _services.Cfg.AddAppChangelogEntry(version, notes, published);
+            history = _services.Cfg.AppChangelogHistory();
+        }
+
+        var win = new AppChangelogWindow(history) { Owner = Window.GetWindow(this) };
         win.ShowDialog();
     }
 

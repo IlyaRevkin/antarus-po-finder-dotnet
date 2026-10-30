@@ -477,6 +477,57 @@ public static class AppUpdateService
         return releases.OrderByDescending(r => r.Version).ToList();
     }
 
+    /// <summary>Заметки ко ВСЕМ релизам своего канала, от новых к старым — чтобы заполнить
+    /// «Историю изменений программы» за прошлое.
+    ///
+    /// Журнал копится по факту обновлений: обновилась программа — записали. Значит у того, кто
+    /// поставил бету вчера, он пуст, и пустым останется до следующего выпуска. Жалоба про это и
+    /// была: «история изменений пропала, в бете ни одной записи». Здесь журнал заполняется один раз
+    /// из самого источника — списка релизов на GitHub.
+    ///
+    /// Канал определяется тем же правилом, что и лента обновлений: бета живёт на тегах
+    /// «beta-v…», стабильная — на «v…». Чужие записи в журнал не попадают.
+    ///
+    /// Возвращает пустой список при любой ошибке: журнал — удобство, а не работа, и падать из-за
+    /// недоступного GitHub ему незачем.</summary>
+    public static async Task<List<(string Version, string Notes, DateTime PublishedAt)>> ListChannelNotesAsync(
+        System.Threading.CancellationToken ct = default)
+    {
+        var result = new List<(string, string, DateTime)>();
+        try
+        {
+            var json = await Http.GetStringAsync(
+                $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases?per_page=50", ct);
+            using var doc = JsonDocument.Parse(json);
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) continue;
+
+                var tag = item.GetProperty("tag_name").GetString() ?? "";
+                var isBetaTag = tag.StartsWith(AppIdentity.BetaTagPrefix, StringComparison.OrdinalIgnoreCase);
+                if (isBetaTag != AppIdentity.IsBeta) continue;
+
+                var versionStr = isBetaTag ? tag[AppIdentity.BetaTagPrefix.Length..] : tag;
+                versionStr = versionStr.TrimStart('v', 'V');
+                if (!Version.TryParse(versionStr, out _)) continue;
+
+                var body = item.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(body)) continue;
+
+                var published = item.TryGetProperty("published_at", out var pub)
+                    && DateTime.TryParse(pub.GetString(), out var dt) ? dt.ToLocalTime() : DateTime.Now;
+
+                result.Add((versionStr, body, published));
+            }
+        }
+        catch
+        {
+            // Сети нет, GitHub лежит, ответ битый — журнал просто останется таким, какой есть.
+        }
+        return result;
+    }
+
     /// <summary>Тело GitHub-релиза (Markdown/plain-текст из формы «Describe this release») по номеру
     /// версии — источник текста для окна «Что нового» (см. MainWindowViewModel.CheckWhatsNewAsync).
     /// Запрашивает релиз по тегу <c>v{version}</c> (та же схема тегов, что ListGitHubReleasesAsync
@@ -489,7 +540,14 @@ public static class AppUpdateService
     {
         try
         {
-            var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/tags/v{version}");
+            // ⚠️ ТЕГ ЗАВИСИТ ОТ КАНАЛА. Стабильные релизы помечены «v1.75.12.0», бета — «beta-v2.1.1.0»
+            // (AppIdentity.BetaTagPrefix, та же схема, что у ленты обновлений в ListGitHubReleasesAsync).
+            // Пока здесь стояло «v{version}» всегда, бета спрашивала несуществующий тег, получала 404 —
+            // и молча оставалась без заметок. Видно это было не сразу: окно «Что нового» просто не
+            // появлялось, а «История изменений программы» копится из тех же заметок и поэтому стояла
+            // пустой — «в бете ни одной записи».
+            var tag = AppIdentity.IsBeta ? $"{AppIdentity.BetaTagPrefix}v{version}" : $"v{version}";
+            var json = await Http.GetStringAsync($"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/tags/{tag}");
             using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("body", out var bodyProp)) return null;
             var body = bodyProp.GetString();
