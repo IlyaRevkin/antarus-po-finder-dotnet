@@ -1385,9 +1385,23 @@ public partial class SearchView : UserControl
         openBtn.Click += (_, _) => OpenParamTable(hit);
         actions.Children.Add(openBtn);
 
-        var openFolderBtn = new Button { Content = "Открыть папку с файлом", Style = (Style)FindResource("SecondaryButton") };
-        openFolderBtn.Click += (_, _) => OpenParamTableFolder(table);
-        actions.Children.Add(openFolderBtn);
+        // «Открыть папку с файлом» — ТОЛЬКО у документа, который и правда привязан к файлу.
+        //
+        // В бете параметры от файлов отвязаны («в бете только таблицы, файлы создаются временно для
+        // переноса в папку», см. ParamTableExport): disk_path/filename у таблиц пусты, папки у них
+        // нет в принципе, и кнопка там — обещание, которое выполнить нечем. Файл по требованию
+        // собирает «Выгрузить в папку…» на странице параметров.
+        //
+        // В рабочей версии кнопка остаётся, но у СВОБОДНОЙ таблицы (её мог отвязать от файла сам
+        // оператор — Database.DetachParamTableFromFile) она всё равно бессмысленна: нажатие вело
+        // только к окну «папка недоступна: » с пустым путём.
+        if (!AppIdentity.IsBeta && table.DiskPath.Length > 0 && table.Filename.Length > 0)
+        {
+            var openFolderBtn = new Button { Content = "Открыть папку с файлом", Style = (Style)FindResource("SecondaryButton") };
+            openFolderBtn.ToolTip = "Открыть папку файла параметров — с выделенным файлом";
+            openFolderBtn.Click += (_, _) => OpenParamTableFolder(table);
+            actions.Children.Add(openFolderBtn);
+        }
         panel.Children.Add(actions);
 
         return new Border { Style = (Style)FindResource("CardBorder"), Margin = new Thickness(0, 0, 0, 10), Child = panel };
@@ -1405,15 +1419,29 @@ public partial class SearchView : UserControl
         MarkResultsDirty();
     }
 
+    /// <summary>Папка ИМЕННО ЭТОГО документа — с выделенным в ней файлом параметров.
+    ///
+    /// Жалоба была «везде одна и та же открывается», и это не замыкание: файлы параметров лежат
+    /// ПО ПАПКЕ НА ПОДТИП (HierarchyService: Параметры\&lt;группа&gt;\&lt;подтип&gt;), а документов на один
+    /// файл бывает несколько. Прежний код открывал голый table.DiskPath, то есть у всех документов
+    /// одного подтипа — буквально одну и ту же папку с десятком .par внутри, и который из них «тот
+    /// самый», человек определить не мог. Выделяем файл через /select (как у схем и доп. материалов).
+    ///
+    /// Путь перед этим приводится к СВОЕЙ машине: в базе он лежит с корнем той машины, что заводила
+    /// документ (у коллеги Z:\, у нас \\ant_srv\) — без FirmwarePathLocalizer чужой путь просто не
+    /// существует, и кнопка отвечала бы «папка недоступна» на живой папке.</summary>
     private void OpenParamTableFolder(ParamTable table)
     {
-        if (string.IsNullOrWhiteSpace(table.DiskPath) || !Directory.Exists(table.DiskPath))
+        var folder = FirmwarePathLocalizer.Localize(table.DiskPath, _services.Cfg.RootPath());
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
         {
-            AppMessageBox.Show("Папка файла параметров недоступна: " + table.DiskPath, "Таблица параметров",
+            AppMessageBox.Show("Папка файла параметров недоступна: " + folder, "Таблица параметров",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        Process.Start(new ProcessStartInfo(table.DiskPath) { UseShellExecute = true });
+
+        var file = table.Filename.Length > 0 ? Path.Combine(folder, table.Filename) : folder;
+        PrintableDocActions.Reveal(File.Exists(file) ? file : folder);
     }
 
     /// <summary>Обход второго диска, идущий прямо сейчас — null, когда ничего не идёт. Обход всегда
