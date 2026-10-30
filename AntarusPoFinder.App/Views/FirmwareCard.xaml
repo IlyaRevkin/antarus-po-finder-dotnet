@@ -51,6 +51,29 @@
 
                      Собственный обработчик с Handled=true обязателен: вся шапка по нажатию копирует
                      номер версии, и без этого нажатие на жучка заодно клало бы в буфер номер. -->
+                <!-- ЗНАЧОК «i» — то, что спрашивают редко и по одной карточке: автор, исходное
+                     название, тип оборудования, вид работ, дата, номера ОПЦ. Тикет: «мб добавить
+                     значок i, тогда продумать, что там ещё можно отобразить» и «избавиться от лишних
+                     пилюль в карточке». Строка из шести пунктов через точку в столбике одинаковых
+                     карточек не читается вовсе — глаз скользит мимо неё целиком, вместе с нужным.
+                     Только бета: в рабочей версии карточка остаётся прежней. -->
+                <Border Grid.Column="4" x:Name="InfoIcon" Visibility="Collapsed" Cursor="Hand" Background="Transparent"
+                        Padding="6,2,0,2" VerticalAlignment="Center"
+                        MouseLeftButtonUp="InfoIcon_Click"
+                        ToolTip="Подробности об этой версии">
+                    <Grid>
+                        <Ellipse Width="15" Height="15" Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1.4"/>
+                        <TextBlock Text="i" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
+                    </Grid>
+                </Border>
+                <Popup x:Name="InfoPopup" Grid.Column="4" PlacementTarget="{Binding ElementName=InfoIcon}"
+                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                    <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                            BorderThickness="1" CornerRadius="6" Padding="12" MaxWidth="420">
+                        <StackPanel x:Name="InfoPopupPanel"/>
+                    </Border>
+                </Popup>
                 <Border Grid.Column="4" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
                         Padding="6,2,0,2" VerticalAlignment="Center"
                         MouseLeftButtonUp="BugIcon_Click"

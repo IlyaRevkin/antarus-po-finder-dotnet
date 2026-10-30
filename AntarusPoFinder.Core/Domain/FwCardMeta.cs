@@ -1,4 +1,6 @@
-﻿namespace AntarusPoFinder.Core.Domain;
+﻿using System.Collections.Generic;
+
+namespace AntarusPoFinder.Core.Domain;
 
 /// <summary>Строка под названием прошивки на карточке выдачи — та, где исполнение, комплектация,
 /// контроллер, тип оборудования и дата.
@@ -60,6 +62,49 @@ public static class FwCardMeta
         string execution, string configName, string controller, string equipmentType,
         string workType, string uploadDate, int usageCount) =>
         string.Join(Separator, Parts(execution, configName, controller, equipmentType, workType, uploadDate, usageCount));
+
+    /// <summary>Короткая строка карточки — только то, что наладчик читает глазами на бегу:
+    /// исполнение, комплектация, контроллер.
+    ///
+    /// Тикет: «избавиться от лишних пилюль в карточке» и «мб добавить значок i, тогда продумать, что
+    /// там ещё можно отобразить». Выдача — это столбик одинаковых карточек, и строка из шести пунктов
+    /// через точку в нём не читается: глаз скользит мимо всей строки целиком, включая нужное.
+    /// Поэтому тип оборудования, вид работ, дата загрузки и счётчик выборов уезжают под значок —
+    /// они отвечают на вопросы, которые задают РЕДКО и по одной карточке, а не по всей выдаче.</summary>
+    public static string ShortLine(string execution, string configName, string controller)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(execution)) parts.Add(execution.Trim());
+        if (!string.IsNullOrWhiteSpace(configName)) parts.Add(configName.Trim());
+        if (!string.IsNullOrWhiteSpace(controller)) parts.Add($"Контроллер: {controller.Trim()}");
+        return string.Join(Separator, parts);
+    }
+
+    /// <summary>Что показывает значок «i»: пары «подпись — значение» в том порядке, в каком их
+    /// спрашивают. Пустые значения не попадают сюда вовсе — строка «Автор: —» не отвечает ни на
+    /// какой вопрос, а место занимает.</summary>
+    public static List<(string Label, string Value)> Details(
+        string equipmentType, string workType, string uploadDate, int usageCount,
+        string sourceName, string author, string hardware, string requestNum, string cabinetSn)
+    {
+        var rows = new List<(string, string)>();
+        Add("Исходное название", sourceName);
+        Add("Автор", author);
+        Add("Тип оборудования", equipmentType);
+        Add("Вид работ", workType);
+        Add("Железо", hardware);
+        Add("Загружена", uploadDate);
+        Add("Заявка", requestNum);
+        Add("Номер шкафа", cabinetSn);
+        if (usageCount > 0)
+            rows.Add(("По этому запросу выбирали", usageCount == 1 ? "1 раз" : $"{usageCount} раз"));
+        return rows;
+
+        void Add(string label, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) rows.Add((label, value.Trim()));
+        }
+    }
 
     /// <summary>Отдельная строка карточки — номера шкафа, под который собрана ОПЦ. ОТДЕЛЬНАЯ, а не
     /// часть строки выше, и это главное требование: «более явно номер заявки или SN». В общем ряду

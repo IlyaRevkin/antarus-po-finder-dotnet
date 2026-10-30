@@ -113,4 +113,58 @@ public class FwCardMetaTests
     {
         Assert.Equal("", Line());
     }
+
+    // ── Короткая строка и значок «i» ─────────────────────────────────────────
+
+    /// <summary>В короткой строке остаётся только то, что читают на бегу.
+    ///
+    /// Тикет: «избавиться от лишних пилюль в карточке». Выдача — столбик одинаковых карточек, и
+    /// строка из шести пунктов через точку в нём не читается целиком, вместе с нужным.</summary>
+    [Fact]
+    public void Короткая_строка_несёт_только_исполнение_комплектацию_и_контроллер()
+    {
+        var line = FwCardMeta.ShortLine("2 насоса", "с частотником", "SMH5");
+
+        Assert.Contains("2 насоса", line);
+        Assert.Contains("с частотником", line);
+        Assert.Contains("Контроллер: SMH5", line);
+        Assert.DoesNotContain("20.10.2026", line);
+    }
+
+    [Fact]
+    public void Под_значком_пустые_поля_не_показываются()
+    {
+        // «Автор: —» не отвечает ни на какой вопрос, а место занимает.
+        var rows = FwCardMeta.Details(
+            equipmentType: "", workType: "", uploadDate: "20.10.2026", usageCount: 0,
+            sourceName: "", author: "Киселёв", hardware: "", requestNum: "", cabinetSn: "");
+
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.Label == "Автор" && r.Value == "Киселёв");
+        Assert.Contains(rows, r => r.Label == "Загружена");
+        Assert.DoesNotContain(rows, r => r.Label == "Исходное название");
+    }
+
+    [Fact]
+    public void Счётчик_выборов_уходит_под_значок_а_не_в_строку()
+    {
+        var rows = FwCardMeta.Details("", "", "", usageCount: 3,
+            sourceName: "", author: "", hardware: "", requestNum: "", cabinetSn: "");
+
+        Assert.Single(rows);
+        Assert.Equal("По этому запросу выбирали", rows[0].Label);
+        Assert.Equal("3 раз", rows[0].Value);
+    }
+
+    [Fact]
+    public void Исходное_название_и_автор_идут_первыми()
+    {
+        // Это два ответа на вопросы «что это за сборка» и «к кому с ней идти» — остальное в
+        // подробностях спрашивают реже.
+        var rows = FwCardMeta.Details("насосная", "наладка", "20.10.2026", 0,
+            sourceName: "НГР_КПЧ_v12.psl", author: "Ревкин", hardware: "", requestNum: "", cabinetSn: "");
+
+        Assert.Equal("Исходное название", rows[0].Label);
+        Assert.Equal("Автор", rows[1].Label);
+    }
 }

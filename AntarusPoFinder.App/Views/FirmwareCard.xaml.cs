@@ -245,9 +245,16 @@ public partial class FirmwareCard : UserControl
 
         // Сама строка собирается в Core (FwCardMeta): что человек прочтёт первым и какими словами —
         // решение, а не оформление, и проверять его глазами каждый раз мы уже пробовали.
-        MetaLabel.Text = FwCardMeta.Line(
-            result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
-            result.WorkType, result.UploadDate?.ToString("dd.MM.yyyy") ?? "", result.UsageCount);
+        var uploadDate = result.UploadDate?.ToString("dd.MM.yyyy") ?? "";
+
+        // В бете строка под названием короткая, а остальное уезжает под значок «i» (см. разметку и
+        // FwCardMeta.ShortLine). В рабочей версии строка прежняя: вид там не меняем.
+        MetaLabel.Text = AppIdentity.IsBeta
+            ? FwCardMeta.ShortLine(result.Execution, result.ConfigName, result.Controller)
+            : FwCardMeta.Line(result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
+                result.WorkType, uploadDate, result.UsageCount);
+
+        FillInfoPopup(result, uploadDate);
 
         // Номера ОПЦ — своей строкой, выше общей (см. FwCardMeta.OpcLine и разметку).
         var opcNumbers = result.IsOpc ? FwCardMeta.OpcLine(result.RequestNum, result.CabinetSn) : "";
@@ -297,7 +304,9 @@ public partial class FirmwareCard : UserControl
         // сборках (столбец source_name заполняется при загрузке), но лишняя строка на карточке —
         // переделка вида, а не исправление: в рабочей версии карточка остаётся прежней.
         var sourceName = result.SourceName ?? "";
-        bool showSource = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(sourceName);
+        // Под значком «i» это уже есть — вторая копия на карточке и была той самой «избыточной
+        // информацией», от которой просили избавиться.
+        bool showSource = false && !string.IsNullOrWhiteSpace(sourceName);
         SourceNameLabel.Visibility = showSource ? Visibility.Visible : Visibility.Collapsed;
         if (showSource)
         {
@@ -310,7 +319,7 @@ public partial class FirmwareCard : UserControl
         // сборках, показывается в одной. Вопрос «к кому идти с этой прошивкой» до сих пор решался
         // перепиской, хотя ответ лежал в базе.
         var author = result.AuthorName ?? "";
-        bool showAuthor = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(author);
+        bool showAuthor = false && !string.IsNullOrWhiteSpace(author);
         AuthorLabel.Visibility = showAuthor ? Visibility.Visible : Visibility.Collapsed;
         if (showAuthor) AuthorLabel.Text = $"Автор: {author}";
 
@@ -1006,6 +1015,47 @@ public partial class FirmwareCard : UserControl
     /// Handled = true обязательно: вся шапка карточки по нажатию копирует номер версии
     /// (Header_Click), и без этого жалоба на баг заодно клала бы в буфер номер — и человек потом
     /// вставлял бы его туда, где ждал совсем другого.</summary>
+    /// <summary>Наполнить всплывающую карточку значка «i».
+    ///
+    /// Собирается заново на каждую отрисовку карточки: карточки выдачи переиспользуются, и
+    /// оставшийся от прошлой прошивки список показал бы чужого автора — ошибка, которую заметят не
+    /// сразу и которая дороже любой экономии.
+    ///
+    /// Пустых строк здесь нет вовсе (см. FwCardMeta.Details): «Автор: —» не отвечает ни на какой
+    /// вопрос, а место занимает. Если показывать нечего, значок не появляется.</summary>
+    private void FillInfoPopup(HierarchyResult result, string uploadDate)
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        var rows = FwCardMeta.Details(
+            result.EquipmentType, result.WorkType, uploadDate, result.UsageCount,
+            result.SourceName ?? "", result.AuthorName ?? "", hardware: "",
+            result.IsOpc ? result.RequestNum : "", result.IsOpc ? result.CabinetSn : "");
+
+        InfoPopupPanel.Children.Clear();
+        foreach (var (label, value) in rows)
+        {
+            var line = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) };
+            line.Inlines.Add(new System.Windows.Documents.Run(label + ": ")
+            {
+                Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush"),
+            });
+            line.Inlines.Add(new System.Windows.Documents.Run(value));
+            InfoPopupPanel.Children.Add(line);
+        }
+
+        InfoIcon.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Нажатие на «i». Handled=true обязателен по той же причине, что и у жучка: вся шапка
+    /// по нажатию копирует номер версии, и без этого открытие подробностей заодно клало бы его в
+    /// буфер.</summary>
+    private void InfoIcon_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        InfoPopup.IsOpen = !InfoPopup.IsOpen;
+    }
+
     private void BugIcon_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         e.Handled = true;
