@@ -256,18 +256,71 @@ public partial class SettingsView : UserControl
         }
     }
 
-    private void CleanupPolicy_Changed(object sender, RoutedEventArgs e)
+    /// <summary>Частота уборки — выбор из списка, и записывается он сразу: промежуточных состояний
+    /// у выпадающего списка не бывает.</summary>
+    private void CleanupMode_Changed(object sender, SelectionChangedEventArgs e)
     {
         // Обработчик срабатывает из разметки — до InitializeComponent полей ещё нет.
         if (!IsInitialized) return;
         if (_fillingCleanupPolicy) return;
 
-        var mode = CleanupModes[Math.Max(0, CleanupModeCombo.SelectedIndex)].Value;
-        _services.Cfg.SetLocalCleanupMode(mode);
-        // Нечисло в поле — не повод ругаться окном на каждое нажатие клавиши: человек ещё
-        // набирает. Пустое и битое значение просто не сохраняется — в настройках остаётся прежнее.
-        if (int.TryParse(CleanupKeepDaysInput.Text, out var days)) _services.Cfg.SetLocalCleanupKeepDays(days);
-        if (int.TryParse(CleanupMaxGbInput.Text, out var gb)) _services.Cfg.SetLocalCleanupMaxGb(gb);
+        _services.Cfg.SetLocalCleanupMode(CleanupModes[Math.Max(0, CleanupModeCombo.SelectedIndex)].Value);
+    }
+
+    /// <summary>Числовые поля («дней» и «ГБ») пишутся ПО УХОДУ ИЗ ПОЛЯ, а не на каждое нажатие
+    /// клавиши — и это не причёсывание, а починка.
+    ///
+    /// Пока запись шла по TextChanged, потолок применялся к НЕДОНАБРАННОМУ числу. Человек с
+    /// кэшем на 40 ГБ ставит потолок «40»: первым же нажатием в настройки уходит 4 — и уборка,
+    /// которая проверяет «не пора ли» раз в час и ходит сама (MainWindowViewModel.
+    /// RunLocalCacheCleanupAsync), имеет полное право сработать именно в эту секунду и выместь
+    /// кэш до четырёх гигабайт. Унесённое не вернуть: это локальные копии, за которыми и ехали
+    /// без сети. То же и с «днями»: «90» успевает побыть «9».
+    ///
+    /// По уходу из поля значение ещё и нормализуется обратно в поле, поэтому на экране всегда
+    /// ровно то число, по которому уборка и меряет.</summary>
+    private void CleanupLimit_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (_fillingCleanupPolicy) return;
+
+        if (ParseCleanupLimit(CleanupKeepDaysInput.Text) is { } days) _services.Cfg.SetLocalCleanupKeepDays(days);
+        if (ParseCleanupLimit(CleanupMaxGbInput.Text) is { } gb) _services.Cfg.SetLocalCleanupMaxGb(gb);
+
+        _fillingCleanupPolicy = true;
+        CleanupKeepDaysInput.Text = _services.Cfg.LocalCleanupKeepDays().ToString();
+        CleanupMaxGbInput.Text = _services.Cfg.LocalCleanupMaxGb().ToString();
+        _fillingCleanupPolicy = false;
+
+        ShowLocalCacheState();
+    }
+
+    /// <summary>Enter в поле — это «я закончил», а не «перевести строку»: человек набирает число и
+    /// жмёт ввод, не трогая мышь. Без этого значение сохранялось бы только после щелчка мимо поля,
+    /// и «я же нажал Enter» означало бы незаписанный потолок.</summary>
+    private void CleanupLimit_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (e.Key != Key.Enter) return;
+
+        e.Handled = true;
+        CleanupLimit_LostFocus(sender, e);
+    }
+
+    /// <summary>Число из поля «дней» / «ГБ». null — «не трогать настройку».
+    ///
+    /// ПУСТОЕ ПОЛЕ — ЭТО НОЛЬ, то есть «по объёму не убирать» / «по возрасту не убирать». Иначе
+    /// снять заданный когда-то потолок было нечем: человек вычищает поле, видит пусто и уходит, а
+    /// в настройках остаются прежние гигабайты, и уборка продолжает ими мерить.
+    ///
+    /// Нечисло («20 ГБ», минус, число длиннее int) — наоборот, не сохраняется вовсе и возвращается
+    /// к прежнему значению: записать по опечатке ноль значило бы молча выключить потолок, а ругань
+    /// окном на опечатку в поле, которое правят раз в год, — перебор.</summary>
+    internal static int? ParseCleanupLimit(string? text)
+    {
+        var trimmed = (text ?? "").Trim();
+        if (trimmed.Length == 0) return 0;
+        return int.TryParse(trimmed, out var value) && value >= 0 ? value : null;
     }
 
     /// <summary>«Почистить сейчас» — ЕДИНСТВЕННЫЙ случай, когда уборка что-то говорит: её

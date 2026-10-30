@@ -305,20 +305,20 @@
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Частота уборки" VerticalAlignment="Center"
                                            Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
                                 <ComboBox Grid.Row="0" Grid.Column="1" x:Name="CleanupModeCombo" Height="32" Margin="0,0,0,6"
-                                          SelectionChanged="CleanupPolicy_Changed"
+                                          SelectionChanged="CleanupMode_Changed"
                                           ToolTip="«Не чистить» — копии не удаляются вовсе, кэш растёт, пока хватает места на диске."/>
 
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Держать копии, дней" VerticalAlignment="Center"
                                            Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
                                 <TextBox Grid.Row="1" Grid.Column="1" x:Name="CleanupKeepDaysInput" Height="32" Margin="0,0,0,6"
-                                         TextChanged="CleanupPolicy_Changed"
-                                         ToolTip="Копию, которой столько дней не пользовались, можно убрать. 0 — по возрасту не убирать."/>
+                                         LostFocus="CleanupLimit_LostFocus" KeyDown="CleanupLimit_KeyDown"
+                                         ToolTip="Копию, которой столько дней не пользовались, можно убрать. 0 или пустое поле — по возрасту не убирать."/>
 
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Потолок объёма, ГБ" VerticalAlignment="Center"
                                            Margin="0,0,10,0" Foreground="{DynamicResource TextBrush}"/>
                                 <TextBox Grid.Row="2" Grid.Column="1" x:Name="CleanupMaxGbInput" Height="32"
-                                         TextChanged="CleanupPolicy_Changed"
-                                         ToolTip="Когда кэш перерастает этот размер, убираются самые давно не нужные копии. 0 — по объёму не убирать."/>
+                                         LostFocus="CleanupLimit_LostFocus" KeyDown="CleanupLimit_KeyDown"
+                                         ToolTip="Когда кэш перерастает этот размер, убираются самые давно не нужные копии. 0 или пустое поле — по объёму не убирать. Значение записывается, когда уходите из поля или нажимаете Enter."/>
                             </Grid>
 
                             <StackPanel Orientation="Horizontal">

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using AntarusPoFinder.Core.Services;
 using Xunit;
@@ -139,6 +139,39 @@ public class LocalCacheCleanupTests
     }
 
     [Fact]
+    public void Build_MaxGbZero_SizeRuleOff()
+    {
+        using var cache = new TempCache();
+        // Ноль — это «по объёму не убирать», а не «потолок нулевой»: иначе настройка по умолчанию
+        // (0, см. ConfigService.LocalCleanupMaxGb) выметала бы кэш начисто у всех, кто её не трогал.
+        cache.Add("НГР КНС SMH5", "4.0", ageDays: 1, sizeKb: 400 * 1024);
+        cache.Add("НГР КНС SMH5", "1.0", ageDays: 300, sizeKb: 400 * 1024);
+        cache.Add("НГР КНС SMH5", "2.0", ageDays: 200, sizeKb: 400 * 1024);
+
+        var plan = LocalCacheCleanup.Build(cache.Path,
+            new LocalCacheCleanup.Policy(LocalCacheCleanup.Mode.Monthly, 0, 0), DateTime.Now);
+
+        Assert.True(plan.Empty);
+    }
+
+    [Fact]
+    public void Build_SizeCap_StopsAtProtectedCopies_EvenIfStillOverCap()
+    {
+        using var cache = new TempCache();
+        // Потолок 1 ГБ недостижим: у двух разных прошивок по ОДНОЙ копии, и каждая из них — самая
+        // свежая у своей прошивки, то есть неприкосновенна. Вместе они весят 1.56 ГБ, но уборка
+        // обязана остановиться, а не вымести защищённое, — иначе наладчик приезжает на объект без
+        // прошивки, ради которой копию и держали.
+        cache.Add("НГР КНС SMH5", "4.0", ageDays: 1, sizeKb: 800 * 1024);
+        cache.Add("НГР КПЧ ATV310", "2.0", ageDays: 900, sizeKb: 800 * 1024);
+
+        var plan = LocalCacheCleanup.Build(cache.Path,
+            new LocalCacheCleanup.Policy(LocalCacheCleanup.Mode.Monthly, 0, 1), DateTime.Now);
+
+        Assert.True(plan.Empty);
+    }
+
+    [Fact]
     public void Apply_RemovesPlannedFoldersOnly()
     {
         using var cache = new TempCache();
@@ -170,4 +203,31 @@ public class LocalCacheCleanupTests
     public void IsDue_NeverMode_NeverDue() =>
         Assert.False(LocalCacheCleanup.IsDue(new LocalCacheCleanup.Policy(LocalCacheCleanup.Mode.Never, 90, 0),
             "", DateTime.Now));
+}
+
+/// <summary>Разбор полей «Держать копии, дней» и «Потолок объёма, ГБ» на странице настроек
+/// (SettingsView.ParseCleanupLimit).
+///
+/// Без поднятия самого WPF-контрола (доступ — AssemblyInfo.cs,
+/// InternalsVisibleTo("AntarusPoFinder.Tests")): правило здесь арифметическое, разметка к нему
+/// отношения не имеет.</summary>
+public class CleanupLimitInputTests
+{
+    [Theory]
+    [InlineData("0", 0)]          // ноль — «без потолка», и он обязан доходить до настроек
+    [InlineData("", 0)]           // пустое поле — тоже ноль: иначе заданный потолок нечем снять
+    [InlineData("   ", 0)]
+    [InlineData("40", 40)]
+    [InlineData(" 40 ", 40)]
+    public void Parse_NumberOrEmpty_Saved(string text, int expected) =>
+        Assert.Equal(expected, App.Views.SettingsView.ParseCleanupLimit(text));
+
+    [Theory]
+    [InlineData("40 ГБ")]
+    [InlineData("сорок")]
+    [InlineData("-5")]
+    [InlineData("99999999999")]   // длиннее int — не ноль и не мусор в базе, а «не трогать»
+    [InlineData("4,5")]
+    public void Parse_Garbage_LeavesSettingAlone(string text) =>
+        Assert.Null(App.Views.SettingsView.ParseCleanupLimit(text));
 }
