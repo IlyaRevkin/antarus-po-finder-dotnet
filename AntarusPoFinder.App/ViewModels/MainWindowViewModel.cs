@@ -770,6 +770,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             // меню для программиста (бета 2.0, см. RolesConfig).
             "fwbugs" => new TicketsView(_services, this, fwBugsOnly: true),
             "hosting" => new HostingView(_services, this),
+            // Только бета — пункт меню заведён лишь в бета-раскладке (RolesConfig).
+            "mobile" => new MobileAccessView(_services, this),
             "tickets" => new TicketsView(_services, this),
             _ => null,
         };

@@ -25,6 +25,10 @@ public static class RolesConfig
         ("inspection", "Осмотр", NavSection.Setup),
         ("params", "Параметры ПЧ/УПП", NavSection.Setup),
         ("newversions", "Модерация прошивок", NavSection.Setup),
+        // Мобильный доступ — у наладчика, потому что с телефоном у шкафа стоит он. Пункт есть
+        // ТОЛЬКО в бета-раскладке: в рабочей программе ничего слушающего сеть появиться не должно,
+        // пока не станет понятно, что схема живёт на объекте (docs/mobile-access-plan.md).
+        ("mobile", "Мобильный доступ", NavSection.Setup),
         // ДЛЯ ПРОГРАММИСТА
         ("upload", "Загрузка ПО", NavSection.Dev),
         ("fwbugs", "Баги прошивок", NavSection.Dev),
@@ -86,9 +90,11 @@ public static class RolesConfig
         // выкладывает, а читает их по QR. Программист выкладывает и обязан видеть, доехало ли.
         // «fwbugs» — страница багов прошивок. Наладчик заводит их жучком на карточке и видит на
         // общей странице «Тикеты», отдельный пункт ему не нужен; правит их программист.
-        ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets"],
+        // «mobile» в списках у наладчика и администратора, но пунктом меню существует только в
+        // бета-раскладке выше — в рабочей программе эта строка ни на что не влияет.
+        ["naladchik"] = ["search", "inspection", "newversions", "params", "settings", "network", "tickets", "mobile"],
         ["programmer"] = ["search", "upload", "params", "settings", "network", "hosting", "tickets", "fwbugs"],
-        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "hosting", "tickets", "fwbugs"],
+        ["administrator"] = ["search", "inspection", "newversions", "upload", "params", "settings", "network", "hosting", "tickets", "fwbugs", "mobile"],
     };
 
     public static readonly (string RoleId, string Label)[] Roles =

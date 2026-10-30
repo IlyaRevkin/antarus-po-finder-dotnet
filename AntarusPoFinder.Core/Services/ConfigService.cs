@@ -149,6 +149,10 @@ public class ConfigService
         ["theme"] = "light",
         ["keep_archives"] = "false",
         ["image_server_port"] = "9876",
+        // Мобильный доступ слушает СВОЙ порт, а не порт приёма фото: вкладка «Осмотр» может быть
+        // открыта одновременно, и на одном порту второй слушатель просто не поднялся бы.
+        ["mobile_server_port"] = "9877",
+        ["mobile_access_enabled"] = "false",
         // Домен предприятия по умолчанию — Elita: единственный домен, в котором приложение реально
         // работает, поэтому оператору на первом входе достаточно логина и пароля, а поле домена
         // спрятано в «Дополнительные параметры» (AdStartupLoginDialog). Если строка домена уже
@@ -1280,6 +1284,40 @@ public class ConfigService
     public void SetQuickApps(List<QuickApp> apps) => Set("quick_apps", JsonSerializer.Serialize(apps));
 
     public int ImageServerPort() => int.TryParse(Get("image_server_port"), out var v) ? v : 9876;
+
+    public int MobileServerPort() => int.TryParse(Get("mobile_server_port"), out var v) ? v : 9877;
+
+    /// <summary>Включён ли мобильный доступ на ЭТОЙ машине. Выключено по умолчанию: слушающий сокет
+    /// заводится только тогда, когда человек этого попросил.</summary>
+    public bool MobileAccessEnabled() => Get("mobile_access_enabled") == "true";
+
+    public void SetMobileAccessEnabled(bool on) => Set("mobile_access_enabled", on ? "true" : "false");
+
+    /// <summary>ПОСТОЯННЫЙ токен мобильного доступа — часть адреса, который телефон держит в
+    /// закладках. Постоянный именно затем, чтобы не сканировать QR заново на каждую сессию (прямая
+    /// просьба Ильи «чтобы без qr»): одноразовый токен приёма фото ровно этим и неудобен.
+    ///
+    /// Заводится при первом обращении и дальше живёт в профиле. Уехать на другие машины он не должен
+    /// никогда (см. ConfigSyncService.SkipSettingsKeys): это пропуск в базу КОНКРЕТНОГО компьютера,
+    /// и общий на всех означал бы, что узнавший его открывает чей угодно Finder.</summary>
+    public string MobileAccessToken()
+    {
+        var token = Get("mobile_access_token");
+        if (!string.IsNullOrWhiteSpace(token)) return token;
+
+        token = System.Convert.ToHexString(
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        Set("mobile_access_token", token);
+        return token;
+    }
+
+    /// <summary>Выдать новый токен — адрес меняется, все прежние закладки и ссылки перестают
+    /// работать. То же, что «сменить пароль»: нужно, если ссылку показали лишнему.</summary>
+    public string ResetMobileAccessToken()
+    {
+        Set("mobile_access_token", "");
+        return MobileAccessToken();
+    }
 
     /// <summary>Local-cache directory names (see LocalFirmwareCache.SanitizeName) the user has opted
     /// into silent auto-update for — everything else just surfaces in the "Обновить" banner/window.</summary>

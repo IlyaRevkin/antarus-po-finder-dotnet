@@ -132,6 +132,10 @@ public class ViewsRenderTests
         // остаётся отдельным контролом — и строиться обязана так же: разбор её разметки от переезда
         // не изменился, а вкладка создаёт её тем же конструктором.
         new object[] { "cleanup" },
+        // «Мобильный доступ» — пункт только бета-раскладки. Проверяется безусловно, как и «fwbugs»:
+        // тесты собираются в Debug, и условный список покрывал бы бету ровно никогда. По умолчанию
+        // доступ выключен, поэтому страница строится, не поднимая ни одного сокета.
+        new object[] { "mobile" },
     };
 
     /// <summary>Каждая страница из бокового меню строится и рисуется. Список берётся не руками, а из
@@ -157,6 +161,7 @@ public class ViewsRenderTests
                 "tickets" => new TicketsView(services, host),
                 "fwbugs" => new TicketsView(services, host, fwBugsOnly: true),
                 "cleanup" => new DiskCleanupView(services, host),
+                "mobile" => new MobileAccessView(services, host),
                 _ => throw new ArgumentOutOfRangeException(nameof(pageId), pageId, "неизвестная страница"),
             };
             Render(page);
