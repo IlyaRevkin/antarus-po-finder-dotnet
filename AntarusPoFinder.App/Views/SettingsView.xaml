@@ -267,6 +267,70 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ─── Локальные копии прошивок ───
+                         ⚠️ ТОЛЬКО В БЕТЕ (включается из кода, см. SettingsView.SetUpLocalCacheBlock).
+
+                         Жил на администраторской вкладке «Чистка диска», переехал сюда вместе со
+                         сменой самой настройки на ЛИЧНУЮ. Причина одна и та же: «сколько держать
+                         копий» решает не тот, кто отвечает за общий диск, а тот, у кого ноутбук и
+                         кто завтра едет на объект без сети. На прежнем месте наладчик свою
+                         собственную частоту уборки не видел вовсе, и приходилось делать настройку
+                         общей — администратор задавал её разом на всех.
+
+                         Соседство с «Чисткой диска» было обманчивым: там убирается ОБЩИЙ диск —
+                         чужая работа, в два шага и с подтверждением по строке; здесь — свой кэш,
+                         который подчищается сам и молча. Дублировать блок на обеих вкладках нельзя:
+                         две ручки на одну настройку рано или поздно дают вопрос «почему показывает
+                         не то». -->
+                    <Border x:Name="LocalCacheCard" Style="{StaticResource CardBorder}" Margin="0,0,0,16"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="ЛОКАЛЬНЫЕ КОПИИ ПРОШИВОК" Style="{StaticResource MutedText}"
+                                       FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Text="Копии нужны, чтобы прошивки находились, когда сетевой диск недоступен — поэтому они никуда не деваются. Здесь настраивается только то, как часто и насколько глубоко их подчищать. Настройка личная: она описывает ЭТОТ компьютер и на другие машины не уезжает. Уборка идёт сама и молча. Она НИКОГДА не трогает самую свежую копию каждой прошивки и копии, закреплённые вручную."/>
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Частота уборки" VerticalAlignment="Center"
+                                           Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
+                                <ComboBox Grid.Row="0" Grid.Column="1" x:Name="CleanupModeCombo" Height="32" Margin="0,0,0,6"
+                                          SelectionChanged="CleanupMode_Changed"
+                                          ToolTip="«Не чистить» — копии не удаляются вовсе, кэш растёт, пока хватает места на диске."/>
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Держать копии, дней" VerticalAlignment="Center"
+                                           Margin="0,0,10,6" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="CleanupKeepDaysInput" Height="32" Margin="0,0,0,6"
+                                         LostFocus="CleanupLimit_LostFocus" KeyDown="CleanupLimit_KeyDown"
+                                         ToolTip="Копию, которой столько дней не пользовались, можно убрать. 0 или пустое поле — по возрасту не убирать."/>
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Потолок объёма, ГБ" VerticalAlignment="Center"
+                                           Margin="0,0,10,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" x:Name="CleanupMaxGbInput" Height="32"
+                                         LostFocus="CleanupLimit_LostFocus" KeyDown="CleanupLimit_KeyDown"
+                                         ToolTip="Когда кэш перерастает этот размер, убираются самые давно не нужные копии. 0 или пустое поле — по объёму не убирать. Значение записывается, когда уходите из поля или нажимаете Enter."/>
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Почистить сейчас" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                                        Click="CleanLocalNow_Click"
+                                        ToolTip="Применить настроенные правила прямо сейчас, не дожидаясь срока"/>
+                                <TextBlock x:Name="LocalCacheStateText" VerticalAlignment="Center"
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ─── Доступ: только пароли ролей. Весь вход по AD (домен, группы, способ
                          проверки, URL, требовать вход, срок повторного входа) переехал на вкладку
                          «Подключение» — по прямой просьбе: это и есть настройка подключения к домену,

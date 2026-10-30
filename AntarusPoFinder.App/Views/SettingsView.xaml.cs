@@ -174,6 +174,7 @@ public partial class SettingsView : UserControl
         Loaded += (_, _) =>
         {
             LoadGeneral();
+            SetUpLocalCacheBlock();
             LoadHierarchy();
             LoadFirmwareTab();
             LoadQuickApps();
@@ -187,6 +188,171 @@ public partial class SettingsView : UserControl
             if (ReservationsTab.Visibility == Visibility.Visible)
                 ReservationsGrid.Items.Refresh();
         };
+    }
+
+    // ── Локальные копии прошивок ──────────────────────────────────────────────
+    //
+    // ⚠️ ТОЛЬКО БЕТА (образец — SearchView.HideParamFilesMode): в рабочей версии карточка скрыта,
+    // и уборка кэша работает по-старому.
+    //
+    // Почему здесь, в «Общих», а не на администраторской «Чистке диска», где блок жил раньше:
+    // настройка стала ЛИЧНОЙ (ConfigSyncService.SkipSettingsKeys), а значит, её должен видеть тот,
+    // чей это компьютер, — наладчик с ноутбуком, а не только администратор. На «Чистке диска»
+    // блока больше нет совсем: две ручки на одну настройку расходятся, и человек верит той, что
+    // попалась первой.
+
+    /// <summary>Режимы уборки в том порядке, в каком они стоят в списке.</summary>
+    private static readonly (string Value, string Label)[] CleanupModes =
+    {
+        (LocalCacheCleanup.Mode.Never, "Не чистить"),
+        (LocalCacheCleanup.Mode.Weekly, "Раз в неделю"),
+        (LocalCacheCleanup.Mode.Monthly, "Раз в месяц"),
+    };
+
+    /// <summary>Пока поля заполняются из настроек, их события не должны писать настройки
+    /// обратно — иначе полузаполненная форма успевает сохраниться.</summary>
+    private bool _fillingCleanupPolicy;
+
+    /// <summary>Зовётся из Loaded, а Loaded у кэшируемой страницы приходит на КАЖДЫЙ заход
+    /// (экземпляр живёт в кэше страниц MainWindowViewModel). Поэтому список режимов не дополняется,
+    /// а пересобирается: иначе после третьего захода в настройки «Раз в месяц» стояло бы в списке
+    /// трижды.</summary>
+    private void SetUpLocalCacheBlock()
+    {
+        if (!AppIdentity.IsBeta) return;
+
+        LocalCacheCard.Visibility = Visibility.Visible;
+
+        _fillingCleanupPolicy = true;
+        CleanupModeCombo.Items.Clear();
+        foreach (var (_, label) in CleanupModes) CleanupModeCombo.Items.Add(label);
+        var mode = _services.Cfg.LocalCleanupMode();
+        var index = Array.FindIndex(CleanupModes, m => string.Equals(m.Value, mode, StringComparison.OrdinalIgnoreCase));
+        CleanupModeCombo.SelectedIndex = index >= 0 ? index : CleanupModes.Length - 1;
+        CleanupKeepDaysInput.Text = _services.Cfg.LocalCleanupKeepDays().ToString();
+        CleanupMaxGbInput.Text = _services.Cfg.LocalCleanupMaxGb().ToString();
+        _fillingCleanupPolicy = false;
+
+        ShowLocalCacheState();
+    }
+
+    /// <summary>Сколько сейчас занято и сколько копий лежит. Цифра, а не обещание: решать
+    /// «чистить ли чаще» без неё — гадание.</summary>
+    private void ShowLocalCacheState()
+    {
+        try
+        {
+            var copies = LocalCacheCleanup.Scan(ConfigService.LocalFw);
+            var gb = copies.Sum(c => c.Bytes) / 1024.0 / 1024.0 / 1024.0;
+            var last = _services.Cfg.LocalCleanupLastRun();
+            LocalCacheStateText.Text = copies.Count == 0
+                ? "Локальных копий пока нет."
+                : $"Сейчас: {copies.Count} копий, {gb:0.0} ГБ"
+                  + (last.Length > 0 ? $". Последняя уборка: {last}" : ". Уборка ещё не проходила.");
+        }
+        catch (Exception)
+        {
+            LocalCacheStateText.Text = "";
+        }
+    }
+
+    /// <summary>Частота уборки — выбор из списка, и записывается он сразу: промежуточных состояний
+    /// у выпадающего списка не бывает.</summary>
+    private void CleanupMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        // Обработчик срабатывает из разметки — до InitializeComponent полей ещё нет.
+        if (!IsInitialized) return;
+        if (_fillingCleanupPolicy) return;
+
+        _services.Cfg.SetLocalCleanupMode(CleanupModes[Math.Max(0, CleanupModeCombo.SelectedIndex)].Value);
+    }
+
+    /// <summary>Числовые поля («дней» и «ГБ») пишутся ПО УХОДУ ИЗ ПОЛЯ, а не на каждое нажатие
+    /// клавиши — и это не причёсывание, а починка.
+    ///
+    /// Пока запись шла по TextChanged, потолок применялся к НЕДОНАБРАННОМУ числу. Человек с
+    /// кэшем на 40 ГБ ставит потолок «40»: первым же нажатием в настройки уходит 4 — и уборка,
+    /// которая проверяет «не пора ли» раз в час и ходит сама (MainWindowViewModel.
+    /// RunLocalCacheCleanupAsync), имеет полное право сработать именно в эту секунду и выместь
+    /// кэш до четырёх гигабайт. Унесённое не вернуть: это локальные копии, за которыми и ехали
+    /// без сети. То же и с «днями»: «90» успевает побыть «9».
+    ///
+    /// По уходу из поля значение ещё и нормализуется обратно в поле, поэтому на экране всегда
+    /// ровно то число, по которому уборка и меряет.</summary>
+    private void CleanupLimit_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (_fillingCleanupPolicy) return;
+
+        if (ParseCleanupLimit(CleanupKeepDaysInput.Text) is { } days) _services.Cfg.SetLocalCleanupKeepDays(days);
+        if (ParseCleanupLimit(CleanupMaxGbInput.Text) is { } gb) _services.Cfg.SetLocalCleanupMaxGb(gb);
+
+        _fillingCleanupPolicy = true;
+        CleanupKeepDaysInput.Text = _services.Cfg.LocalCleanupKeepDays().ToString();
+        CleanupMaxGbInput.Text = _services.Cfg.LocalCleanupMaxGb().ToString();
+        _fillingCleanupPolicy = false;
+
+        ShowLocalCacheState();
+    }
+
+    /// <summary>Enter в поле — это «я закончил», а не «перевести строку»: человек набирает число и
+    /// жмёт ввод, не трогая мышь. Без этого значение сохранялось бы только после щелчка мимо поля,
+    /// и «я же нажал Enter» означало бы незаписанный потолок.</summary>
+    private void CleanupLimit_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (e.Key != Key.Enter) return;
+
+        e.Handled = true;
+        CleanupLimit_LostFocus(sender, e);
+    }
+
+    /// <summary>Число из поля «дней» / «ГБ». null — «не трогать настройку».
+    ///
+    /// ПУСТОЕ ПОЛЕ — ЭТО НОЛЬ, то есть «по объёму не убирать» / «по возрасту не убирать». Иначе
+    /// снять заданный когда-то потолок было нечем: человек вычищает поле, видит пусто и уходит, а
+    /// в настройках остаются прежние гигабайты, и уборка продолжает ими мерить.
+    ///
+    /// Нечисло («20 ГБ», минус, число длиннее int) — наоборот, не сохраняется вовсе и возвращается
+    /// к прежнему значению: записать по опечатке ноль значило бы молча выключить потолок, а ругань
+    /// окном на опечатку в поле, которое правят раз в год, — перебор.</summary>
+    internal static int? ParseCleanupLimit(string? text)
+    {
+        var trimmed = (text ?? "").Trim();
+        if (trimmed.Length == 0) return 0;
+        return int.TryParse(trimmed, out var value) && value >= 0 ? value : null;
+    }
+
+    /// <summary>«Почистить сейчас» — ЕДИНСТВЕННЫЙ случай, когда уборка что-то говорит: её
+    /// попросили нажатием, и молчание в ответ читалось бы как «кнопка не работает». Фоновая уборка
+    /// по расписанию молчит всегда (см. MainWindowViewModel.RunLocalCacheCleanupAsync).
+    ///
+    /// Режим «Не чистить» здесь не обходится: кнопка говорит «применить настроенные правила», а
+    /// настроенное правило в этом режиме — именно «ничего не удалять».</summary>
+    private async void CleanLocalNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+
+        var policy = new LocalCacheCleanup.Policy(
+            _services.Cfg.LocalCleanupMode(),
+            _services.Cfg.LocalCleanupKeepDays(),
+            _services.Cfg.LocalCleanupMaxGb());
+
+        var root = ConfigService.LocalFw;
+        var (removed, freed) = await Task.Run(() =>
+        {
+            var plan = LocalCacheCleanup.Build(root, policy, DateTime.Now);
+            return (LocalCacheCleanup.Apply(plan), plan.Freed);
+        });
+
+        _services.Cfg.SetLocalCleanupLastRun(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        ShowLocalCacheState();
+
+        _host.ShowStatus(removed == 0
+            ? (policy.Enabled ? "Убирать нечего — все копии под правила не попадают."
+                              : "Выбрано «Не чистить» — локальные копии не трогаем.")
+            : $"Убрано копий: {removed}, освобождено {freed / 1024.0 / 1024.0 / 1024.0:0.0} ГБ.",
+            category: NotificationCategory.General);
     }
 
     // ── Tab switching ─────────────────────────────────────────────────────────
