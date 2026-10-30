@@ -15,6 +15,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
@@ -44,11 +45,39 @@
                         ToolTip="Качество сканирования и автоочистка папки осмотра"/>
             </Grid>
 
+
+            <!-- Сетевой путь папки осмотра — то, что вводят в файловом менеджере телефона (SMB).
+                 Только бета (см. UpdateSmbPath): решение Ильи от 30.10.2026 — снимки кладутся прямо
+                 в сетевую папку, а программа их просто видит. Показывается ИМЕННО UNC-вид
+                 (\\сервер\шара\...), а не Z:\... — буква диска существует только внутри этого
+                 компьютера, на телефоне она не значит ничего. -->
+            <Grid Grid.Row="1" x:Name="SmbPathPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" x:Name="SmbPathRow">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Путь для телефона:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Grid.Column="1" x:Name="SmbPathText" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                             VerticalContentAlignment="Center" Height="30"
+                             ToolTip="Этот адрес вводится в файловом менеджере телефона с поддержкой SMB"/>
+                    <Button Grid.Column="2" x:Name="CopySmbPathButton" Content="Скопировать путь"
+                            Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="CopySmbPath_Click"
+                            ToolTip="Скопировать сетевой путь, чтобы вставить его на телефоне"/>
+                </Grid>
+                <TextBlock Grid.Row="1" x:Name="SmbPathWarning" Visibility="Collapsed" TextWrapping="Wrap"
+                           Margin="0,6,0,0" Foreground="{DynamicResource WarningBrush}"/>
+            </Grid>
             <!-- Автоочистка/качество сканирования — редко трогаемые настройки "один раз задал и забыл",
                  убраны за переключатель вместо постоянного места на панели инструментов, чтобы не
                  загромождать основную область страницы. Same collapsed-by-default toggle-button
                  pattern as ParamsView's "Все загруженные"/ListContentPanel. -->
-            <Border Grid.Row="1" x:Name="InspectionSettingsPanel" Style="{StaticResource CardBorder}" Margin="0,8,0,0" Visibility="Collapsed">
+            <Border Grid.Row="2" x:Name="InspectionSettingsPanel" Style="{StaticResource CardBorder}" Margin="0,8,0,0" Visibility="Collapsed">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Качество сканирования:" VerticalAlignment="Center" Margin="0,0,8,0"/>

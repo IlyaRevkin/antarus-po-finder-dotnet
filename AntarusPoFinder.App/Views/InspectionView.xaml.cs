@@ -25,6 +25,21 @@ public partial class InspectionView : UserControl
     private FileSystemWatcher? _watcher;
     private Microsoft.Web.WebView2.Wpf.WebView2? _pdfView;
 
+    /// <summary>Файлы, которые наблюдатель уже увидел, но которые ещё НЕ дописаны (телефон кладёт
+    /// снимок по SMB, и до конца копирования это обрезанный файл). Ключ — полный путь, значение —
+    /// длина на прошлом тике таймера ниже. Пока файл здесь, он показывается в списке как
+    /// «копируется…» и не открывается в предпросмотре.</summary>
+    private readonly Dictionary<string, long> _incoming = new(StringComparer.OrdinalIgnoreCase);
+    private System.Windows.Threading.DispatcherTimer? _incomingTimer;
+
+    /// <summary>Подпись текущего содержимого списка — чтобы не пересобирать ItemsSource на каждое
+    /// событие наблюдателя (их на одно копирование прилетает пачка) и не сбрасывать этим выделение
+    /// и предпросмотр под руками у человека.</summary>
+    private string _fileListSignature = "";
+
+    /// <summary>Путь, который показывается телефону (UNC) — null, когда показывать нечего.</summary>
+    private string? _smbPath;
+
     // ── Image preview state (rotate, view-only — and zoom) ───────────────────
     private static readonly double[] ZoomSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
     private BitmapSource? _previewOriginalImage;
@@ -35,8 +50,12 @@ public partial class InspectionView : UserControl
     private class FileRow
     {
         public string FullPath { get; init; } = "";
+        /// <summary>Файл ещё дописывается (копируется с телефона по сети) — трогать его рано.</summary>
+        public bool Incomplete { get; init; }
         public string Name => Path.GetFileName(FullPath);
-        public string DateText => File.Exists(FullPath) ? File.GetLastWriteTime(FullPath).ToString("dd.MM HH:mm") : "";
+        public string DateText => Incomplete
+            ? "копируется…"
+            : File.Exists(FullPath) ? File.GetLastWriteTime(FullPath).ToString("dd.MM HH:mm") : "";
     }
 
     public InspectionView(AppServices services, IAppHost host)
@@ -56,6 +75,7 @@ public partial class InspectionView : UserControl
     private void Activate()
     {
         UpdateProtoLabel();
+        UpdateSmbPath();
         LoadScanResolution();
         LoadInspectionCleanupInputs();
         StartPhotoServer();
@@ -134,13 +154,84 @@ public partial class InspectionView : UserControl
             _services.Cfg.SetScanResolutionDpi(dpi);
     }
 
+    /// <summary>Уход с вкладки обязан снять ВСЁ фоновое: и сокет приёма фото, и наблюдатель за
+    /// папкой, и таймер дозаписи. Наблюдатель держит дескриптор каталога (на сетевой шаре — ещё и
+    /// сессию SMB) и зовёт обратно в этот UserControl; переживи он вкладку — события продолжали бы
+    /// приходить в уже выброшенную страницу, а на закрытии окна упирались бы в мёртвый диспетчер.</summary>
     private void Deactivate()
     {
         _server?.Dispose();
         _server = null;
         _watcher?.Dispose();
         _watcher = null;
+        _incomingTimer?.Stop();
+        _incomingTimer = null;
+        _incoming.Clear();
         DisposePdfView();
+    }
+
+    // ── Путь для телефона (SMB) ─────────────────────────────────────────────
+
+    /// <summary>Показывает адрес папки осмотра в том виде, в котором его можно ввести на телефоне.
+    ///
+    /// Почему именно UNC, а не то, что записано в настройках. Папка осмотра почти всегда задана
+    /// буквой подключённого сетевого диска (<c>Z:\…</c>), а буква — выдумка ЭТОГО компьютера: она
+    /// живёт в его таблице подключений и за его пределами не значит ничего. Телефону нужен адрес
+    /// самой шары, поэтому букву разворачиваем через WNetGetConnection
+    /// (<see cref="NetworkPathHelper.TryResolveUnc"/>) в <c>\сервер\шара\…</c>.
+    ///
+    /// Если развернуть не удалось — папка локальная и по сети не раздаётся. Показывать её путь
+    /// нельзя: человек перепишет его на телефон и будет думать, что это он ошибся, а зайти туда
+    /// нельзя в принципе. Поэтому вместо пути — прямой текст о том, что так не получится.
+    ///
+    /// Только бета (решение по фотографиям осмотра от 30.10.2026) — в рабочей версии панель не
+    /// появляется вовсе.</summary>
+    private void UpdateSmbPath()
+    {
+        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
+        {
+            SmbPathPanel.Visibility = Visibility.Collapsed;
+            _smbPath = null;
+            return;
+        }
+        SmbPathPanel.Visibility = Visibility.Visible;
+
+        var proto = _services.Cfg.Get("inspection_folder");
+        if (string.IsNullOrEmpty(proto))
+        {
+            ShowSmbWarning("Папка осмотра не задана — задать её можно в разделе «Настройки». Пока её нет, класть снимки с телефона некуда.");
+            return;
+        }
+
+        var unc = NetworkPathHelper.TryResolveUnc(proto);
+        if (unc is null)
+        {
+            ShowSmbWarning($"Папка осмотра лежит на этом компьютере ({proto}) и по сети не раздаётся — с телефона в неё не зайти. "
+                + "Чтобы класть снимки прямо в папку, выберите в «Настройках» папку на сетевом диске или попросите администратора открыть к этой общий доступ.");
+            return;
+        }
+
+        _smbPath = unc;
+        SmbPathText.Text = unc;
+        SmbPathRow.Visibility = Visibility.Visible;
+        SmbPathWarning.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowSmbWarning(string text)
+    {
+        _smbPath = null;
+        SmbPathText.Text = "";
+        SmbPathRow.Visibility = Visibility.Collapsed;
+        SmbPathWarning.Text = text;
+        SmbPathWarning.Visibility = Visibility.Visible;
+    }
+
+    private void CopySmbPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (string.IsNullOrEmpty(_smbPath)) return;
+        if (!ClipboardSafe.TrySetTextWithNote(_smbPath, this, _host, "Путь скопирован"))
+            _host.ShowStatus("Буфер обмена занят другой программой — повторите", category: NotificationCategory.Inspection);
     }
 
     // ── Protocol / inspection folder ────────────────────────────────────────
@@ -275,18 +366,121 @@ public partial class InspectionView : UserControl
 
     // ── File list ──────────────────────────────────────────────────────────
 
+    /// <summary>Наблюдатель за папкой осмотра — тот же приём, что у Конфиг\revision.json в
+    /// MainWindowViewModel.SetupConfigWatcher, и с теми же оговорками: сетевая шара может не
+    /// поддерживать уведомления вовсе, пропасть в момент вызова или отвалиться посреди работы. Во
+    /// всех случаях молча остаёмся на ручном «Обновить» и обходе при открытии вкладки.
+    ///
+    /// События приходят на СВОЁМ потоке, а не на UI, — отсюда Dispatcher. Именно BeginInvoke, а не
+    /// Invoke: Invoke синхронный, и если поток наблюдателя встанет в него ровно тогда, когда UI-поток
+    /// выполняет Deactivate, Dispose наблюдателя будет ждать завершения обратного вызова, а тот —
+    /// освобождения UI-потока. Ставить задачу в очередь и отпускать поток наблюдателя безопаснее.</summary>
     private void RestartWatcher(string proto)
     {
         _watcher?.Dispose();
         _watcher = null;
         try
         {
-            _watcher = new FileSystemWatcher(proto) { EnableRaisingEvents = true };
-            _watcher.Created += (_, _) => Dispatcher.Invoke(RefreshFileList);
-            _watcher.Deleted += (_, _) => Dispatcher.Invoke(RefreshFileList);
-            _watcher.Renamed += (_, _) => Dispatcher.Invoke(RefreshFileList);
+            _watcher = new FileSystemWatcher(proto)
+            {
+                // Size/LastWrite — чтобы видеть дозапись копируемого файла, а не только его появление.
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime,
+                EnableRaisingEvents = true,
+            };
+            _watcher.Created += (_, e) => OnWatcherFileAppeared(e.FullPath);
+            _watcher.Changed += (_, e) => OnWatcherFileAppeared(e.FullPath);
+            _watcher.Renamed += (_, e) => OnWatcherFileAppeared(e.FullPath);
+            _watcher.Deleted += (_, _) => BeginRefresh();
         }
         catch { /* best effort — list still refreshes manually / on tab visit */ }
+    }
+
+    private void BeginRefresh()
+    {
+        try { Dispatcher.BeginInvoke(RefreshFileList); }
+        catch { /* страница уже выброшена, диспетчер закрывается — событию просто некуда деться */ }
+    }
+
+    /// <summary>В папке что-то появилось или дописалось. Сразу показывать файл как готовый нельзя:
+    /// по SMB он приезжает кусками, и в момент события это, как правило, ещё обрезанный JPEG — как
+    /// раз тот случай, когда предпросмотр показывает половину снимка или вообще отказывается его
+    /// открывать. Поэтому файл берётся «на карандаш», а в список попадает пометкой «копируется…»,
+    /// пока таймер ниже не убедится, что запись кончилась.</summary>
+    private void OnWatcherFileAppeared(string path)
+    {
+        try
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!IsLoaded) return;
+                if (string.Equals(Path.GetFileName(path), "Thumbs.db", StringComparison.OrdinalIgnoreCase)) return;
+                if (!File.Exists(path)) { RefreshFileList(); return; }
+                if (_incoming.ContainsKey(path)) return; // уже ждём этот файл — пачка событий на одну запись
+
+                // -1 = длину ещё не мерили: первый тик её запомнит, второй сравнит.
+                _incoming[path] = -1;
+                EnsureIncomingTimer();
+                RefreshFileList();
+            });
+        }
+        catch { /* см. BeginRefresh */ }
+    }
+
+    private void EnsureIncomingTimer()
+    {
+        if (_incomingTimer is not null) return;
+        _incomingTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _incomingTimer.Tick += (_, _) => PollIncoming();
+        _incomingTimer.Start();
+    }
+
+    /// <summary>Раз в секунду проверяет, дописались ли ожидаемые файлы. Готовность — два признака
+    /// сразу: файл открывается на чтение БЕЗ общего доступа (значит, писатель его отпустил) и его
+    /// длина не изменилась с прошлого тика. Одной блокировки мало: часть реализаций SMB не держит
+    /// файл заблокированным между порциями записи, и в паузе он открывается как ни в чём не
+    /// бывало. Одной длины тоже мало: копирование может встать на секунду посреди большого файла.</summary>
+    private void PollIncoming()
+    {
+        if (!IsLoaded) { _incomingTimer?.Stop(); _incomingTimer = null; _incoming.Clear(); return; }
+
+        var ready = new List<string>();
+        var vanished = new List<string>();
+        foreach (var path in _incoming.Keys.ToList())
+        {
+            if (!File.Exists(path)) { vanished.Add(path); continue; }
+
+            long length;
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+                length = stream.Length;
+            }
+            catch
+            {
+                // Занят писателем (или отобрали права/отвалилась шара) — ждём следующего тика.
+                // Сброс запомненной длины: после перерыва её надо мерить заново.
+                _incoming[path] = -1;
+                continue;
+            }
+
+            if (_incoming[path] == length) ready.Add(path);
+            else _incoming[path] = length;
+        }
+
+        foreach (var path in vanished) _incoming.Remove(path);
+        foreach (var path in ready) _incoming.Remove(path);
+
+        if (_incoming.Count == 0) { _incomingTimer?.Stop(); _incomingTimer = null; }
+        if (ready.Count == 0 && vanished.Count == 0) return;
+
+        RefreshFileList();
+        if (ready.Count == 1)
+            _host.ShowStatus($"В папке осмотра новый файл: {Path.GetFileName(ready[0])}", category: NotificationCategory.Inspection);
+        else if (ready.Count > 1)
+            _host.ShowStatus($"В папке осмотра новых файлов: {ready.Count}", category: NotificationCategory.Inspection);
     }
 
     private void RefreshFileList()
@@ -297,21 +491,50 @@ public partial class InspectionView : UserControl
         {
             FilesList.ItemsSource = null;
             FileCountText.Text = "Файлы";
+            _fileListSignature = "";
             return;
         }
         if (_watcher is null || !string.Equals(_watcher.Path, proto, StringComparison.OrdinalIgnoreCase))
             RestartWatcher(proto);
 
-        var files = Directory.EnumerateFiles(proto)
-            .Where(f => !string.Equals(Path.GetFileName(f), "Thumbs.db", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(File.GetLastWriteTime)
-            .Select(f => new FileRow { FullPath = f })
-            .ToList();
-        FilesList.ItemsSource = files;
+        List<FileRow> files;
+        try
+        {
+            files = Directory.EnumerateFiles(proto)
+                .Where(f => !string.Equals(Path.GetFileName(f), "Thumbs.db", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(File.GetLastWriteTime)
+                .Select(f => new FileRow { FullPath = f, Incomplete = _incoming.ContainsKey(f) })
+                .ToList();
+        }
+        catch
+        {
+            // Шара отвалилась ровно между Directory.Exists выше и обходом — оставляем список как
+            // есть, следующий тик наблюдателя или «Обновить» его поправят.
+            return;
+        }
+
         FileCountText.Text = files.Count > 0 ? $"Файлы ({files.Count})" : "Файлы — папка пуста";
+
+        // Наблюдатель за папкой шлёт пачку событий на одно копирование, и пересборка ItemsSource на
+        // каждое из них сбрасывала бы выделение и перезагружала предпросмотр прямо под руками.
+        // Поэтому список трогаем, только когда он действительно изменился.
+        var signature = string.Join("|", files.Select(f => $"{f.FullPath}?{f.Incomplete}?{f.DateText}"));
+        if (signature == _fileListSignature && FilesList.ItemsSource is not null) return;
+        _fileListSignature = signature;
+
+        var selected = FilesList.SelectedItems.Cast<FileRow>().Select(r => r.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        FilesList.ItemsSource = files;
+        if (selected.Count == 0) return;
+        foreach (var row in files.Where(f => selected.Contains(f.FullPath)))
+            FilesList.SelectedItems.Add(row);
     }
 
-    private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshFileList();
+    private void Refresh_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        UpdateSmbPath();
+        RefreshFileList();
+    }
 
     /// <summary>Double-click opens with the default app — single-click already shows the inline
     /// preview pane (see FilesList_SelectionChanged), matching Windows Explorer's convention.</summary>
@@ -339,6 +562,16 @@ public partial class InspectionView : UserControl
         {
             PreviewPlaceholder.Visibility = Visibility.Visible;
             PreviewTitleText.Text = "Предпросмотр";
+            return;
+        }
+
+        // Файл ещё приезжает по сети — открывать его рано: получится половина снимка или ошибка
+        // чтения. Как только копирование кончится (см. PollIncoming), список обновится сам.
+        if (row.Incomplete)
+        {
+            PreviewPlaceholder.Visibility = Visibility.Visible;
+            PreviewTitleText.Text = row.Name;
+            PreviewPlaceholder.Text = "Файл ещё копируется — предпросмотр появится, когда копирование закончится.";
             return;
         }
 
