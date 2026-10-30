@@ -33,7 +33,7 @@ public partial class TicketExportDialog : Window
     public Destination SelectedDestination { get; private set; } = Destination.File;
 
     /// <param name="visibleCount">Сколько тикетов видно на странице сейчас.</param>
-    /// <param name="activeCount">Из них открытых и в работе.</param>
+    /// <param name="activeCount">Из них незакрытых.</param>
     /// <param name="hasSelection">Выделен ли тикет в списке.</param>
     /// <param name="shareAvailable">Доступен ли сетевой диск — вложения лежат только там.</param>
     /// <param name="storageAvailable">Настроено ли хранилище (адрес и ключи). Не настроено — кнопка
@@ -43,7 +43,13 @@ public partial class TicketExportDialog : Window
     {
         InitializeComponent();
 
-        ScopeActive.Content = $"Только открытые и взятые в работу ({activeCount})";
+        // ⚠️ В БЕТЕ отбор называется просто «открытые»: статуса «в работе» там больше не ставят
+        // (см. TicketStatus.InProgress), и упоминать его в названии отбора значило бы обещать
+        // ручку, которой нет. Сам отбор не менялся — он всегда брал ВСЕ незакрытые, и старый
+        // тикет, когда-то взятый в работу, из выгрузки не выпадает.
+        ScopeActive.Content = Core.Domain.AppIdentity.IsBeta
+            ? $"Только открытые ({activeCount})"
+            : $"Только открытые и взятые в работу ({activeCount})";
         ScopeAll.Content = $"Все, что видны на странице ({visibleCount})";
         ScopeSelected.IsEnabled = hasSelection;
 

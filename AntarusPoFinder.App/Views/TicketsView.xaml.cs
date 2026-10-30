@@ -441,7 +441,19 @@ ApplyScopeHint();
         var canModerate = selected is not null &&
             TicketVisibility.CanModerate(selected, _services.Cfg.CurrentRole(), _services.CurrentUserName);
 
-        TakeInProgressBtn.Visibility = canModerate && selected!.Status != TicketStatus.InProgress ? Visibility.Visible : Visibility.Collapsed;
+        // ⚠️ «ВЗЯТЬ В РАБОТУ» — ТОЛЬКО В РАБОЧЕЙ ВЕРСИИ, в бете кнопки нет вовсе.
+        //
+        // За всю историю (55 тикетов в выгрузке на 29.10.2026) этот статус не поставил никто ни
+        // разу: тикет либо открыт, либо закрыт, а «я этим занимаюсь» говорят репликой в обсуждении.
+        // Кнопка, за которой никто никогда не тянется, — это лишний выбор на каждом тикете и ещё
+        // одно значение, которое приходится учитывать в отборах, цветах и сортировке.
+        //
+        // Сам статус из программы НЕ ВЫРЕЗАН и из базы не мигрирован (TicketStatus.InProgress на
+        // месте): если где-то такая запись всё же есть — в чужой базе, в архиве, в бакете, — она
+        // обязана остаться читаемой. Поставить этот статус заново в бете нельзя, прочитать —
+        // можно всегда.
+        TakeInProgressBtn.Visibility = !AppIdentity.IsBeta && canModerate && selected!.Status != TicketStatus.InProgress
+            ? Visibility.Visible : Visibility.Collapsed;
         CloseTicketBtn.Visibility = canModerate && selected!.Status != TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;
         ReopenTicketBtn.Visibility = canModerate && selected!.Status == TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -572,7 +584,10 @@ ApplyScopeHint();
         {
             TicketExportDialog.Scope.Selected => (new List<Ticket> { selected! }, "один выбранный тикет"),
             TicketExportDialog.Scope.AllVisible => (visible, IsAdmin ? "все тикеты" : "тикеты этого пользователя"),
-            _ => (active, "открытые и в работе"),
+            // Отбор один и тот же — ВСЕ незакрытые; в бете у него только название короче, потому
+            // что статуса «в работе» там больше не ставят (см. UpdateActionButtons). Старый тикет
+            // с этим статусом в выгрузку по-прежнему попадает.
+            _ => (active, AppIdentity.IsBeta ? "открытые" : "открытые и в работе"),
         };
         if (tickets.Count == 0)
         {
