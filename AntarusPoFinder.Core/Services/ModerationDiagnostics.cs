@@ -42,9 +42,9 @@ public static class ModerationDiagnostics
         /// <summary>Срезы по отдельным условиям отбора: где числа разойдутся, там и причина.</summary>
         [JsonPropertyName("slices")] public Dictionary<string, int> Slices { get; init; } = new();
 
-        /// <summary>Идентификаторы строк, которые попали в счётчик, но не попали в список (или
-        /// наоборот). Пусто — значит расхождения на этой машине нет.</summary>
-        [JsonPropertyName("mismatchIds")] public List<int> MismatchIds { get; init; } = new();
+        /// <summary>Номера версий, стоящих в очереди. Нужны, чтобы сравнить ДВЕ машины: если наборы
+        /// разные, дело не в счёте, а в том, что отметка «выведена из модерации» не доехала.</summary>
+        [JsonPropertyName("versions")] public List<string> Versions { get; init; } = new();
     }
 
     private static readonly JsonSerializerOptions Json = new()
@@ -57,8 +57,7 @@ public static class ModerationDiagnostics
 
     /// <summary>Есть ли о чём сообщать. Отправлять снимок с каждой машины, где всё сходится, значит
     /// утопить настоящий случай в сотне пустых — поэтому отправка привязана к расхождению.</summary>
-    public static bool WorthSending(Snapshot snapshot) =>
-        snapshot.Badge != snapshot.ListRows || snapshot.MismatchIds.Count > 0;
+    public static bool WorthSending(Snapshot snapshot) => snapshot.Badge != snapshot.ListRows;
 
     /// <summary>Имя файла снимка. Машина в имени нужна, чтобы при разборе не открывать каждый файл:
     /// жалоба звучит как «у кого-то 2–3, у меня 20+», и сравнивать придётся именно по машинам.</summary>

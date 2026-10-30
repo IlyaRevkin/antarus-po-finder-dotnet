@@ -3817,6 +3817,7 @@ public partial class SettingsView : UserControl
     {
         var data = _services.Db.GetUnreleasedFwVersionsWithNames();
         ModGrid.ItemsSource = data.Select(v => new FwRow { Record = v }).ToList();
+        Services.ModerationDiagnosticsReporter.ReportOnce(_services, data.Count);
         ModerationCountText.Text = data.Count > 0
             ? $"Версии, ожидающие модерации — {data.Count}"
             : "Версии, ожидающие модерации — все загруженные версии уже выведены из модерации";

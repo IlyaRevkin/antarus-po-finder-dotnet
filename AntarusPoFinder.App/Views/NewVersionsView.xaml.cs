@@ -59,9 +59,15 @@ public partial class NewVersionsView : UserControl
     /// <summary>Откатанные и заменённые более свежей версией сюда больше не приезжают вовсе — их
     /// отсекает сам запрос (Database.GetUnreleasedFwVersionsWithNames): размечать теги у версии,
     /// которую уже не поставят, незачем, а список они забивали.</summary>
-    private void LoadData() =>
-        RecentGrid.ItemsSource = _services.Db.GetUnreleasedFwVersionsWithNames()
-            .Select(v => new RecentRow { Record = v }).ToList();
+    private void LoadData()
+    {
+        var rows = _services.Db.GetUnreleasedFwVersionsWithNames();
+        RecentGrid.ItemsSource = rows.Select(v => new RecentRow { Record = v }).ToList();
+        // Снимок очереди — раз в сутки, молча (см. ModerationDiagnosticsReporter): причину
+        // расхождения «у кого-то 2–3, у меня 20+» иначе не установить, а просить людей переписывать
+        // цифры руками — верный способ не узнать ничего.
+        Services.ModerationDiagnosticsReporter.ReportOnce(_services, rows.Count);
+    }
 
     private void EditTagsButton_Click(object sender, RoutedEventArgs e)
     {
