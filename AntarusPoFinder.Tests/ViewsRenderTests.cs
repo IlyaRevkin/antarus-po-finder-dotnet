@@ -546,6 +546,32 @@ public class ViewsRenderTests
         });
     }
 
+    /// <summary>Окно свойств свободной таблицы параметров строится, и в нём есть оба поля, ради
+    /// которых оно и заведено: производитель и выбор подтипов шкафов (жалоба Ильи — «не могу
+    /// указать производителя и к какому типу шкафов привязать»).</summary>
+    [Fact]
+    public void ParamTablePropsDialog_BuildsWithManufacturerAndSubtypes()
+    {
+        Ui.Run(() =>
+        {
+            var services = Services();
+            var dialog = new ParamTablePropsDialog(services.Db, "Пуск по месту", "", Array.Empty<int>());
+            Render(dialog);
+
+            var manufacturer = dialog.FindName("ManufacturerCombo") as ComboBox;
+            var subtypes = dialog.FindName("SubtypesSelect") as SubtypeMultiSelect;
+            Assert.NotNull(manufacturer);
+            Assert.NotNull(subtypes);
+            // Список производителей — из справочника, и пункт «не указан» в нём первый: пустая
+            // строка читалась бы как промах отрисовки.
+            Assert.True(manufacturer!.Items.Count >= 1);
+            Assert.Equal(manufacturer.Items[0], manufacturer.SelectedItem);
+            Assert.Empty(subtypes!.Selected);
+
+            dialog.Close();
+        });
+    }
+
     [Fact]
     public void FwBugDialog_BuildsAndRenders()
     {

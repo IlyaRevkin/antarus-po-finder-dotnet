@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
@@ -433,6 +433,68 @@ public class ParamTableSyncTests : IDisposable
 
         var revision = _b.GetParamTableRevisions(OnB().Id!.Value).Single();
         Assert.Equal("0…600", ParamRowExtra.Get(_b.GetParamTableRows(revision.Id!.Value)[0].Extra, "Диапазон"));
+    }
+
+    // ── Привязка свободной таблицы к шкафам ─────────────────────────────────────────────────
+
+    /// <summary>Подтипы свободной таблицы доезжают до коллеги и становятся ЕГО местными id: наружу
+    /// они едут переносимо (sync_id подтипа плюс имена), потому что id у каждой машины свои.</summary>
+    [Fact]
+    public void SubtypesOfAStandaloneTableTravel()
+    {
+        var subtype = _a.GetAllEquipmentSubtypes().First(s => s.Id is not null);
+        var group = _a.GetAllEquipmentGroups().First(g => g.Id == subtype.GroupId);
+        var id = _a.AddParamTable(new ParamTable { Name = "Пуск по месту", Manufacturer = "ESQ" });
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "первая", "Ilia");
+        _a.UpdateParamTableSubtypes(id, ParamTableBinding.FormatIds(new[] { subtype.Id!.Value }));
+
+        Sync();
+
+        var onB = _b.GetStandaloneParamTables().Single(t => t.Name == "Пуск по месту");
+        var link = Assert.Single(ParamTableBinding.Of(_b, onB).Links);
+        Assert.Equal(group.Name, link.GroupName);
+    }
+
+    /// <summary>Снятая привязка тоже доезжает: промолчи мы о ней — и убранный шкаф остался бы жить
+    /// у коллеги вечно (тот же довод, что у тумбстоунов).</summary>
+    [Fact]
+    public void ClearingSubtypesTravelsToo()
+    {
+        var subtype = _a.GetAllEquipmentSubtypes().First(s => s.Id is not null);
+        var id = _a.AddParamTable(new ParamTable { Name = "Пуск по месту" });
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "первая", "Ilia");
+        _a.UpdateParamTableSubtypes(id, ParamTableBinding.FormatIds(new[] { subtype.Id!.Value }));
+        Sync();
+
+        _a.UpdateParamTableSubtypes(id, "");
+        Sync();
+
+        var onB = _b.GetStandaloneParamTables().Single(t => t.Name == "Пуск по месту");
+        Assert.Empty(ParamTableBinding.Of(_b, onB).Links);
+    }
+
+    /// <summary>Снимок СО СТАРОЙ версии (секции подтипов нет вовсе) свою привязку не стирает:
+    /// «отправитель о поле не знает» и «отправитель его очистил» — разные вещи.</summary>
+    [Fact]
+    public void OlderSnapshotWithoutSubtypesKeepsLocalBinding()
+    {
+        var subtype = _b.GetAllEquipmentSubtypes().First(s => s.Id is not null);
+        var id = _a.AddParamTable(new ParamTable { Name = "Пуск по месту" });
+        ParamTableEditing.SaveRevision(_a, id, new[] { P("P0-02", "2") }, "первая", "Ilia");
+        Sync();
+
+        var onB = _b.GetStandaloneParamTables().Single(t => t.Name == "Пуск по месту");
+        _b.UpdateParamTableSubtypes(onB.Id!.Value, ParamTableBinding.FormatIds(new[] { subtype.Id!.Value }));
+
+        // Та же таблица правится на A и приезжает снимком, где поля подтипов нет вовсе.
+        _a.UpdateParamTable(id, "Пуск по месту (новое имя)", "");
+        var snapshot = _a.ExportHierarchyData();
+        foreach (var table in snapshot.ParamTables!) table.Subtypes = null;
+        _b.ImportHierarchyData(snapshot);
+
+        var after = _b.GetParamTable(onB.Id!.Value)!;
+        Assert.Equal("Пуск по месту (новое имя)", after.Name);
+        Assert.Single(ParamTableBinding.Of(_b, after).Links);
     }
 
     private static ParamTableRow WithExtra(ParamTableRow row, string key, string value)
