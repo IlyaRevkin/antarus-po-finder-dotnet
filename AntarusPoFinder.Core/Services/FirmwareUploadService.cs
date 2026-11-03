@@ -65,10 +65,8 @@ public class FirmwareUploadRequest
     /// в базе sw_version остаётся INTEGER, на нём держатся выдача следующего номера, сортировка и
     /// освобождение номера при откате.
     ///
-    /// ЗАВОДИТЬ номер руками можно только в бете (см. проверку AppIdentity.IsBeta в Prepare и панель
-    /// в UploadView): ЧИТАТЬ такой номер обязаны обе сборки — прошивка, заведённая в бете, уезжает в
-    /// общий конфиг, — а вот выдавать его в рабочей версии пока рано. При ОПЦ не учитывается: там
-    /// номер берётся у базовой версии целиком (OpcFields.SwVersionChoiceApplies).</summary>
+    /// При ОПЦ не учитывается: там номер берётся у базовой версии целиком
+    /// (OpcFields.SwVersionChoiceApplies).</summary>
     public string SwCodeOverride { get; set; } = "";
 
     /// <summary>Исходное название прошивки, вписанное человеком в форме загрузки. Пусто — берём имя
@@ -439,10 +437,14 @@ public static class FirmwareUploadService
             : Path.GetFileName(plan.MainFileInFolder);
     }
 
-    /// <summary>Обязателен ли тип пуска при заведении версии. Одно место на всю программу: форма
-    /// загрузки по этому же свойству решает, рисовать ли звёздочку у заголовка «ТИП ПУСКА», —
-    /// иначе подпись и проверка разъехались бы при следующей правке.</summary>
-    public static bool LaunchTypeRequired => !AppIdentity.IsBeta;
+    /// <summary>Обязателен ли тип пуска при заведении версии. НЕТ: прошивку часто заливает
+    /// наладчик за программиста, и тип пуска он знает не всегда — обязательное поле здесь
+    /// кончалось выдуманным ответом, а выдуманный тип пуска хуже пустого.
+    ///
+    /// Свойство, а не выкинутая проверка: форма загрузки по нему же решает, рисовать ли звёздочку
+    /// у заголовка «ТИП ПУСКА», — иначе подпись и проверка разъехались бы при следующей
+    /// правке.</summary>
+    public static bool LaunchTypeRequired => false;
 
     /// <summary>Обязательно ли исходное название прошивки. Тикет дословно: «добавить при загрузке ПО
     /// отдельное обязательное поле исходное название прошивки» — и причина там же: «в связи с
@@ -452,7 +454,7 @@ public static class FirmwareUploadService
     ///
     /// Поле подставляется само из имени файла или папки — обязательность здесь не про «набери
     /// руками», а про «не оставляй пустым, если имени взять неоткуда».</summary>
-    public static bool SourceNameRequired => AppIdentity.IsBeta;
+    public static bool SourceNameRequired => true;
 
     /// <summary>Текст отказа вынесен константой: форма загрузки по нему ставит курсор в нужное поле,
     /// и сравнение строк в двух местах иначе разъехалось бы при первой же правке формулировки.</summary>
@@ -573,10 +575,10 @@ public static class FirmwareUploadService
             fwv = FwVersionNumber.Build(group.Prefix, subOption.Prefix, hwInt, swInt, request.VersionDate,
                 includeDate: request.IncludeDateInVersion);
         }
-        else if (OpcFields.SwVersionChoiceApplies(isOpc) && AppIdentity.IsBeta
+        else if (OpcFields.SwVersionChoiceApplies(isOpc)
                  && SwNumberCode.Parse(request.SwCodeOverride) is { } manualSw)
         {
-            // Номер ПО задан руками (бета). Идёт ВПЕРЕДИ «не увеличивать sw»: явно набранный код —
+            // Номер ПО задан руками. Идёт ВПЕРЕДИ «не увеличивать sw»: явно набранный код —
             // более сильное указание, чем галочка, и тихо его проигнорировать значило бы записать
             // версию под не тем номером, которым она уже подписана внутри проекта ПЛК.
             swInt = manualSw;
@@ -803,13 +805,11 @@ public static class FirmwareUploadService
             catch (Exception ex) { warnings.Add($"Карта ВВ: {ex.Message}"); }
         }
         // Чья инструкция уже лежит в папке этой версии — разбираем ДО того, как положим свою.
-        // Только в бете: правило разбирается с редким и неочевидным случаем (номер версии пошёл по
-        // второму кругу), трогает документ на общем диске, и обкатать его надо на бете, а не сразу
-        // на всех рабочих машинах. В рабочей версии всё идёт ровно как раньше.
-        InstructionClaim? claim = null;
-        if (AppIdentity.IsBeta)
-            claim = InstructionOwnership.Claim(plan.DestinationFolder, plan.InstructionsFolder,
-                plan.Version.Raw, plan.FolderOutlivedItsVersion, warnings);
+        // Правило разбирается с редким и неочевидным случаем (номер версии пошёл по второму кругу)
+        // и трогает документ на общем диске, поэтому ничего не удаляет: в худшем случае прежняя
+        // редакция переезжает в подпапку и об этом говорится словами (см. InstructionOwnership).
+        InstructionClaim? claim = InstructionOwnership.Claim(plan.DestinationFolder,
+            plan.InstructionsFolder, plan.Version.Raw, plan.FolderOutlivedItsVersion, warnings);
 
         string instrStored = "";
         if (!string.IsNullOrEmpty(request.InstructionsSourcePath))

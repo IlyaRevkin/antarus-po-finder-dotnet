@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using AntarusPoFinder.Core.Infrastructure;
 using AntarusPoFinder.Core.Services;
 
@@ -9,12 +9,7 @@ namespace AntarusPoFinder.App.Services;
 /// scan/window (see MainWindowViewModel.CheckForFirmwareUpdates, FirmwareUpdatesWindow).</summary>
 public static class FirmwareSync
 {
-    /// <param name="cleanup">Снести ли остальные локальные версии этой прошивки (кроме закреплённых).
-    /// true — обычная авто-синхронизация из поиска (локально держим только актуальную). false —
-    /// ручное «Скачать на этот ПК»/«Закрепить» из истории версий: там наладчик осознанно тянет
-    /// КОНКРЕТНУЮ (часто старую) версию и не хочет, чтобы это стёрло уже лежащую под рукой текущую;
-    /// не закреплённую разовую копию потом всё равно уберёт ближайшая авто-синхронизация.</param>
-    public static string CopyToLocal(HierarchyResult result, bool cleanup = true)
+    public static string CopyToLocal(HierarchyResult result)
     {
         var localDir = LocalFirmwareCache.SanitizeName(result.Name);
         var dst = Path.Combine(ConfigService.LocalFw, localDir, result.VersionRaw);
@@ -28,17 +23,17 @@ public static class FirmwareSync
         var srcDir = FirmwareDiskPresence.ResolveVersionDir(result.FirmwareDir, result.VersionRaw) ?? result.FirmwareDir;
 
         FileSystemHelpers.CopyTree(srcDir, dst, overwrite: true);
-        // ⚠️ ТОЛЬКО БЕТА: немедленной зачистки соседних версий больше нет — её заменила настраиваемая
-        // уборка по расписанию (Настройки → Чистка диска → «Локальные копии», см. LocalCacheCleanup).
+        // ⚠️ ЗДЕСЬ БОЛЬШЕ НИЧЕГО НЕ УДАЛЯЕТСЯ. Раньше скачивание сносило остальные локальные версии
+        // этой же прошивки (параметр cleanup и CleanupOldLocalVersions); с 2.2 этим занимается
+        // настраиваемая уборка по расписанию — Настройки → Общие → «Локальные копии», см.
+        // LocalCacheCleanup.
         //
-        // Почему именно так, а не «добавили настройку рядом с этим вызовом»: здесь уборка жёстко
-        // привязана к СОБЫТИЮ скачивания, то есть к моменту, когда человек как раз собирается
-        // работать. Ровно отсюда и росла жалоба «диск отвалился и в фаиндере не найти прошивки»:
-        // скачал одну версию — остальные по этому шкафу исчезли, причём именно в дорогу. Решение
-        // по объёму и возрасту принимает фоновая уборка, которая от скачиваний не зависит вовсе.
-        //
-        // В рабочей версии всё остаётся как было: поведение кэша посреди рабочего дня не меняем.
-        if (cleanup && !Core.Domain.AppIdentity.IsBeta) CleanupOldLocalVersions(localDir, result.VersionRaw);
+        // Почему не «добавили настройку рядом с этим вызовом»: здесь уборка была жёстко привязана
+        // к СОБЫТИЮ скачивания, то есть к моменту, когда человек как раз собирается работать.
+        // Ровно отсюда и росла жалоба «диск отвалился и в фаиндере не найти прошивки»: скачал одну
+        // версию — остальные по этому шкафу исчезли, причём именно в дорогу. Решение по объёму и
+        // возрасту принимает фоновая уборка, которая от скачиваний не зависит вовсе. Обратно сюда
+        // удаление не возвращать.
 
         var ctrlDir = Directory.GetParent(srcDir)?.FullName;
         if (ctrlDir is not null)
@@ -61,23 +56,5 @@ public static class FirmwareSync
             FileSystemHelpers.CopyFileOrFolderShallow(result.ModbusMapPath, Path.Combine(ConfigService.LocalTemplates, "Карта Modbus", localDir));
 
         return dst;
-    }
-
-    /// <summary>Removes locally cached version subfolders other than the one just downloaded, so the
-    /// local cache doesn't accumulate superseded versions after an update. Версии, помеченные
-    /// «закреплено локально» (LocalFirmwareCache — метка .keep в папке версии), НЕ трогаются: наладчик
-    /// сознательно оставил их под рукой, даже когда на сетевом диске они уже неактуальны/удалены (#12).</summary>
-    private static void CleanupOldLocalVersions(string localDir, string keepVersionRaw)
-    {
-        var baseDir = Path.Combine(ConfigService.LocalFw, localDir);
-        if (!Directory.Exists(baseDir)) return;
-
-        foreach (var sub in Directory.EnumerateDirectories(baseDir))
-        {
-            if (string.Equals(Path.GetFileName(sub), keepVersionRaw, StringComparison.OrdinalIgnoreCase)) continue;
-            if (LocalFirmwareCache.IsKeptDir(sub)) continue; // закреплённую версию уборка не удаляет
-            try { Directory.Delete(sub, recursive: true); }
-            catch { /* best effort — don't fail the sync over a stale cache folder */ }
-        }
     }
 }
