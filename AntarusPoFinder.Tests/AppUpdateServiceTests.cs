@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -750,5 +751,162 @@ public class AppUpdateServiceTests
             Assert.Empty(result.Releases);
         }
         finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    // ── ПЕРЕХОД 1.75.x → 2.2.0.0 ───────────────────────────────────────────────────────────────
+    //
+    // Рабочие машины стоят на 1.75.13.0 и ждут обновлений с тегов «v…». Выпуск накопленного в бете
+    // делает рабочей версией 2.2.0.0, а бета уезжает вперёд, на 2.3.0.0. Тут проверяется, что
+    // обновление доедет, а бета — нет; оба правила держатся на одном и том же разборе тега и на
+    // сравнении System.Version, то есть по СТАРШЕМУ числу, а не по длине строки.
+
+    /// <summary>«1.75.13.0» строкой больше, чем «2.2.0.0», а версией — меньше. Если бы номер
+    /// сравнивали как текст (или по первому символу), ветка 1.75.x никогда не увидела бы 2.2.0.0 и
+    /// вся контора осталась бы на старом. Утверждение дословно повторяет условие, по которому
+    /// MainWindowViewModel решает показывать обновление: latest.Version &lt;= CurrentVersion.</summary>
+    [Fact]
+    public void Версия_2_2_новее_чем_1_75_13()
+    {
+        Assert.True(new Version("2.2.0.0") > new Version("1.75.13.0"));
+        Assert.False(new Version("2.2.0.0") <= new Version("1.75.13.0"));
+
+        // И соседи по ветке 1.75 между собой тоже сравниваются по числу, а не по строке.
+        Assert.True(new Version("1.75.13.0") > new Version("1.75.2.0"));
+    }
+
+    /// <summary>Релиз 2.2.0.0 в стабильной ленте разбирается и становится самым новым — именно его
+    /// предложат машине с 1.75.13.0. Порядок проверяется тоже: выдача отсортирована по убыванию
+    /// версии, и «самый новый» берётся первым элементом.</summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_Релиз22ВстаётВпередиВетки175()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "v1.75.13.0",
+                "prerelease": false,
+                "assets": [
+                  { "name": "AntarusPoFinder-1.75.13.0.exe", "browser_download_url": "https://example.invalid/a.exe", "size": 1 }
+                ]
+              },
+              {
+                "tag_name": "v2.2.0.0",
+                "prerelease": false,
+                "assets": [
+                  { "name": "AntarusPoFinder-2.2.0.0.exe", "browser_download_url": "https://example.invalid/b.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Equal(2, result.Releases.Count);
+            Assert.Equal(new Version(2, 2, 0, 0), result.Releases[0].Version);
+            Assert.True(result.Releases[0].Version > new Version("1.75.13.0"));
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    /// <summary>⚠️ ГЛАВНОЕ ПОСЛЕ ВЫПУСКА 2.2. Раньше бету от рабочей версии отличал ещё и порядок
+    /// чисел — 2.x против 1.75.x, — и ошибка в фильтре была бы заметна. Теперь обе ветки на «2.»,
+    /// 2.3.0.0 отличается от 2.2.0.0 одной цифрой, и единственное, что держит бету в её ленте, —
+    /// приставка тега и имя ассета. Поэтому проверка берёт ровно те номера, которые выпускаются
+    /// прямо сейчас.</summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_Бета23НеПрилетаетНаРабочиеМашины()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "beta-v2.3.0.0",
+                "prerelease": true,
+                "assets": [
+                  { "name": "AntarusPoFinderBeta-2.3.0.0.exe", "browser_download_url": "https://example.invalid/beta.exe", "size": 1 }
+                ]
+              },
+              {
+                "tag_name": "v2.2.0.0",
+                "prerelease": false,
+                "assets": [
+                  { "name": "AntarusPoFinder-2.2.0.0.exe", "browser_download_url": "https://example.invalid/stable.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Single(result.Releases);
+            Assert.Equal(new Version(2, 2, 0, 0), result.Releases[0].Version);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    /// <summary>Второй барьер под тем же номером: даже если prerelease у беты забыли поставить
+    /// (ставится руками при выпуске), приставка тега «beta-» обязана увести её из стабильной ленты.
+    /// Имя ассета здесь нарочно СТАБИЛЬНОЕ — чтобы проверялся именно разбор тега, а не фильтр по
+    /// имени файла, который поймал бы этот случай заодно.</summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_GitHubSource_Бета23БезПометкиВсёРавноОтсекается()
+    {
+        const string releasesJson = """
+            [
+              {
+                "tag_name": "beta-v2.3.0.0",
+                "assets": [
+                  { "name": "AntarusPoFinder-2.3.0.0.exe", "browser_download_url": "https://example.invalid/beta.exe", "size": 1 }
+                ]
+              }
+            ]
+            """;
+        try
+        {
+            AppUpdateService.SetHttpClientForTests(new HttpClient(new FakeHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasesJson) })));
+
+            var result = await AppUpdateService.CheckForUpdatesAsync(null);
+
+            Assert.Empty(result.Releases);
+        }
+        finally { AppUpdateService.ResetHttpClientForTests(); }
+    }
+
+    /// <summary>ВЕРСИИ В ПРОЕКТЕ — то, с чем сверяют `gh release list` перед выпуском. Номера живут
+    /// в AntarusPoFinder.App.csproj двумя строками (рабочая и, в конфигурации Beta, бета), и
+    /// разъезжаются они молча: собрали не ту конфигурацию — и бета ушла под номером рабочей.
+    ///
+    /// Проверяется ОТНОШЕНИЕ, а не конкретные числа: бета обязана быть строго впереди, иначе
+    /// обновление внутри бета-канала перестаёт работать (её лента отбирается тем же сравнением
+    /// версий). Ровно это и разъехалось бы при следующем выпуске, если поднять одну строку и
+    /// забыть вторую.</summary>
+    [Fact]
+    public void Версия_беты_в_проекте_впереди_рабочей()
+    {
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+            System.AppContext.BaseDirectory, "..", "..", "..", "..",
+            "AntarusPoFinder.App", "AntarusPoFinder.App.csproj"));
+        var xml = System.IO.File.ReadAllText(path);
+
+        var versions = System.Text.RegularExpressions.Regex
+            .Matches(xml, @"<Version>([^<]+)</Version>")
+            .Select(m => Version.Parse(m.Groups[1].Value))
+            .ToList();
+
+        Assert.Equal(2, versions.Count);
+        var stable = versions[0];
+        var beta = versions[1];
+
+        Assert.True(beta > stable, $"бета ({beta}) обязана быть впереди рабочей ({stable})");
+        // И обе — впереди последней версии ветки 1.75, с которой обновляются рабочие машины.
+        Assert.True(stable > new Version("1.75.13.0"));
     }
 }
