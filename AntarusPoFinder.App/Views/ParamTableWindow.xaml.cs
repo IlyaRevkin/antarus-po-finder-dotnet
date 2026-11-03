@@ -676,7 +676,11 @@ public partial class ParamTableWindow : Window
             DiskPath = _diskPath,
             Filename = _filename,
             Name = dialog.ResultName,
-            Manufacturer = Current?.Manufacturer ?? "",
+            // Производитель наследуется от уже открытого документа ТОЛЬКО при файле: там он и
+            // берётся от файла, общего для всех его документов. У свободной таблицы наследовать
+            // нечего — её производителя спрашивают сразу после заведения (AskPropsOnCreate), а
+            // подставить сюда чужой значило бы записать за человека не глядя.
+            Manufacturer = _standalone ? "" : Current?.Manufacturer ?? "",
         }, dialog.ResultRows, dialog.ResultReason, _services.CurrentUserName);
 
         LoadDocuments(tableId);

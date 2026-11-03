@@ -124,6 +124,27 @@ public static class ParamTableBinding
         return links;
     }
 
+    /// <summary>Отвязать документ от файла, СОХРАНИВ привязку к шкафам.
+    ///
+    /// Пока документ при файле, привязка выводится из записей param_files. Отвяжи его просто так —
+    /// и выводить станет не из чего: шкафы пропадали молча, а восстанавливать их приходилось по
+    /// памяти. Поэтому выведенная привязка переписывается в собственное поле документа ровно в
+    /// момент отвязки: ответ остаётся тот же, меняется только то, откуда он берётся.
+    ///
+    /// Возвращает, сколько подтипов удалось сохранить, — чтобы вызывающему было что сказать
+    /// человеку, а не «готово».</summary>
+    public static int Detach(Database db, ParamTable table,
+        HierarchyService? hierarchy = null, string? rootPath = null)
+    {
+        if (table.Id is not int id) return 0;
+
+        var links = For(db, table.DiskPath, table.Filename, hierarchy, rootPath).Links;
+        db.DetachParamTableFromFile(id);
+        if (links.Count > 0)
+            db.UpdateParamTableSubtypes(id, FormatIds(links.Select(l => l.SubtypeId)));
+        return links.Count;
+    }
+
     /// <summary>«12,30,31» → список id. Пустые и повторяющиеся куски отбрасываются: строка
     /// собирается программой, но приехать может и из чужого конфига, и из правки руками.</summary>
     public static List<int> ParseIds(string? raw)

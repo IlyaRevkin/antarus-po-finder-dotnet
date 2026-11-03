@@ -197,13 +197,18 @@ public partial class ParamsView : UserControl
 
         var answer = AppMessageBox.Show(
             $"Отвязать «{row.Name}» от файла {row.Source.Filename}?" + Environment.NewLine + Environment.NewLine
-            + "Значения, ревизии и теги остаются — пропадает только привязка к файлу на диске, "
-            + "а вместе с ней и привязка к подтипам шкафов, которая из этого файла выводилась.",
+            + "Значения, ревизии и теги остаются. Пропадает привязка к файлу на диске, а подтипы "
+            + "шкафов, которые из этого файла выводились, запишутся самой таблице — дальше они "
+            + "правятся в ней («Свойства…»).",
             "Отвязать от файла", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
 
-        _services.Db.DetachParamTableFromFile(id);
-        _host.PushCatalogChange($"Таблица параметров «{row.Name}» отвязана от файла");
+        // Привязка к шкафам переносится в саму таблицу, а не теряется: до отвязки она выводилась
+        // из записей файла, после — выводить не из чего (см. ParamTableBinding.Detach).
+        var kept = ParamTableBinding.Detach(_services.Db, row.Source, _services.Hierarchy, _services.Cfg.RootPath());
+        _host.PushCatalogChange(kept > 0
+            ? $"Таблица параметров «{row.Name}» отвязана от файла, подтипов сохранено: {kept}"
+            : $"Таблица параметров «{row.Name}» отвязана от файла");
         ReloadTables();
     }
 
@@ -227,14 +232,15 @@ public partial class ParamsView : UserControl
 
         var answer = AppMessageBox.Show(
             $"Отвязать от файлов все таблицы — их {attached.Count}?" + Environment.NewLine + Environment.NewLine
-            + "Значения, ревизии и теги остаются. Пропадает привязка к .par на диске, а вместе с ней "
-            + "и привязка к подтипам шкафов, которая из этого файла выводилась: её после переноса "
-            + "задают в самой таблице.",
+            + "Значения, ревизии и теги остаются. Пропадает привязка к .par на диске, а подтипы "
+            + "шкафов, которые из него выводились, запишутся самим таблицам — дальше они правятся "
+            + "в каждой из них («Свойства…»).",
             "Перенести все", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
 
+        var root = _services.Cfg.RootPath();
         foreach (var row in attached)
-            _services.Db.DetachParamTableFromFile((int)row.Source.Id!);
+            ParamTableBinding.Detach(_services.Db, row.Source, _services.Hierarchy, root);
 
         _host.PushCatalogChange($"Таблицы параметров отвязаны от файлов: {attached.Count}");
         ReloadTables();

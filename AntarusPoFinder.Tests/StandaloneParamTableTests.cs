@@ -172,6 +172,33 @@ public class StandaloneParamTableTests
         Assert.Empty(ParamTableBinding.Of(db, db.GetParamTable(id)!).Links);
     }
 
+    /// <summary>Отвязка от файла ПЕРЕНОСИТ привязку к шкафам в саму таблицу, а не теряет её.
+    ///
+    /// До отвязки привязка выводилась из записей файла параметров, после — выводить не из чего. Не
+    /// перепиши её в поле документа, и перенос на свободные таблицы (в бете он делается по кнопке,
+    /// в том числе разом для всех) молча стёр бы ответ на вопрос «к какому шкафу это относится».</summary>
+    [Fact]
+    public void Отвязка_от_файла_сохраняет_привязку_к_шкафам()
+    {
+        using var tmp = new TempDb();
+        using var db = new Database(tmp.Path);
+        var subtype = db.GetAllEquipmentSubtypes().First(s => s.Id is not null);
+        const string folder = @"Z:\Software\Параметры\ESQ";
+        db.AddParamFile(new ParamFile
+        {
+            SubtypeId = subtype.Id, Manufacturer = "ESQ", Filename = "esq.par",
+            DiskPath = folder, UploadDate = "2026-08-26 10:00:00",
+        });
+        var id = db.AddParamTable(new ParamTable { Name = "Задание Modbus", DiskPath = folder, Filename = "esq.par" });
+
+        var kept = ParamTableBinding.Detach(db, db.GetParamTable(id)!);
+
+        Assert.Equal(1, kept);
+        var after = db.GetParamTable(id)!;
+        Assert.Equal("", after.Filename);
+        Assert.Equal(subtype.Id!.Value, Assert.Single(ParamTableBinding.Of(db, after).Links).SubtypeId);
+    }
+
     /// <summary>Правка свойств не трогает ни значения, ни ревизии: шапка документа и его содержимое
     /// — разные вещи, и заводить ревизию из-за дописанного производителя значит засорить историю.</summary>
     [Fact]
