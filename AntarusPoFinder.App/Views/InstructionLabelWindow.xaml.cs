@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Windows.Threading;
 using System.Globalization;
 using System.Windows;
@@ -397,10 +397,11 @@ public partial class InstructionLabelWindow : Window
     /// правила разошлись бы ровно в том месте, где наклейка из базы перестала бы совпадать с
     /// наклейкой с живого диска.
     ///
-    /// <b>⚠️ Сохранённый код — только бета.</b> При <see cref="AppIdentity.IsBeta"/> и известном
-    /// номере версии содержимое проходит через <see cref="FirmwareQrSweep.Ensure"/>: ответ тот же,
-    /// но попутно обновляется строка в <c>fw_qr_codes</c>, а если диска под рукой нет (резолвер
-    /// документа вернул пусто), берётся посчитанное заранее. В рабочей версии всё ровно как было.</summary>
+    /// <b>Сохранённый код.</b> При известном номере версии содержимое проходит через
+    /// <see cref="FirmwareQrSweep.Ensure"/>: ответ тот же, но попутно обновляется строка в
+    /// <c>fw_qr_codes</c>, а если диска под рукой нет (резолвер документа вернул пусто), берётся
+    /// посчитанное заранее — ровно ради этого таблица и заведена. Номер версии неизвестен (0) —
+    /// считаем на месте, записывать нечего и некуда.</summary>
     private static (string Content, string Explanation) ResolveQrContent(AppServices services, string? file,
         int fwVersionId, string instructionRecordPath)
     {
@@ -413,7 +414,7 @@ public partial class InstructionLabelWindow : Window
         // формате Word уезжает туда собранным PDF (см. InstructionPublisher), и наклейка, ведущая на
         // .docx, вела бы в пустоту — при том что напечатана и наклеена она обычно раньше, чем кто-то
         // это заметит. Обе тонкости живут внутри FirmwareQrCodes.Build.
-        var useLedger = AppIdentity.IsBeta && fwVersionId > 0;
+        var useLedger = fwVersionId > 0;
         var payload = useLedger
             ? FirmwareQrSweep.Ensure(services.Db, fwVersionId, syncId: "", sourcePath: file ?? "",
                 instructionPath: instructionRecordPath, options: QrOptions(services), toUnc: ToUnc)

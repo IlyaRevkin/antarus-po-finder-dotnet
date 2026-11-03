@@ -111,7 +111,6 @@ public partial class DiskCleanupView : UserControl
     /// отвалившейся шарой вставало бы на минуты и заканчивалось отчётом «пропало всё».</summary>
     private void ShowBaseInventory()
     {
-        if (!AppIdentity.IsBeta) return;
         BaseInventoryText.Visibility = Visibility.Visible;
 
         try

@@ -63,14 +63,12 @@ public partial class HistoryDialog : Window
         LoadRows(versions, selectVersionId: null);
     }
 
-    /// <summary>⚠️ СТОЛБЕЦ «АВТОР» — ТОЛЬКО В БЕТЕ. Само имя пишется в обеих сборках, но лишний
-    /// столбец в истории — переделка вида, а не исправление. Кодом, а не разметкой, потому что
-    /// условного столбца в XAML не объявить, а второй файл разметки ради одного столбца — худший
+    /// <summary>Столбец «Автор» в истории версий. Кодом, а не разметкой, потому что столбец
+    /// добавляется к уже объявленной сетке, а второй файл разметки ради одного столбца — худший
     /// размен. Вставляется ПЕРЕД «Обращений»: автор читается вместе с контроллером и датой, а
     /// счётчик и статус — это уже про судьбу версии.</summary>
     private void AddAuthorColumn()
     {
-        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) return;
         var column = new System.Windows.Controls.DataGridTextColumn
         {
             Header = "Автор",
@@ -162,8 +160,7 @@ public partial class HistoryDialog : Window
         // Выключение доступно у любой НЕ откатанной версии: откатанную сначала возвращают в активные,
         // иначе две разные отметки «не выдаётся» накладывались бы друг на друга и снимать их пришлось
         // бы вслепую в нужном порядке.
-        // ⚠️ Выключение версии — переделка 2.0, в рабочей версии кнопки нет вовсе.
-        DisableBtn.Visibility = Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        DisableBtn.Visibility = Visibility.Visible;
         DisableBtn.IsEnabled = has && !FwStatus.IsRolledBack(_selectedRecord?.Status);
         DisableBtn.Content = FwStatus.IsDisabled(_selectedRecord?.Status) ? "Включить" : "Выключить";
         DeleteBtn.IsEnabled = has;
@@ -480,7 +477,7 @@ public partial class HistoryDialog : Window
                 // Ход — вниз главного окна: окно истории можно отодвинуть, а сотни мегабайт с шары
                 // не должны выглядеть как «программа ничего не делает».
                 using (_host.BeginBusy($"Скачивание версии: {r.VersionRaw}"))
-                    await Task.Run(() => FirmwareSync.CopyToLocal(result, cleanup: false));
+                    await Task.Run(() => FirmwareSync.CopyToLocal(result));
             }
             if (pin) LocalFirmwareCache.SetKept(name, r.VersionRaw, true);
         }

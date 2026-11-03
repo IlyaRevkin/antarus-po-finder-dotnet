@@ -165,15 +165,11 @@ public partial class ParamTableWindow : Window
             ImportBtn.ToolTip = hint;
         }
 
-        // Отбор по назначению (наладка/сервис) — только в бете: это новая функциональность, а
-        // рабочая версия 1.75 обязана выглядеть как выглядела. Данные при этом пишутся и ездят в
-        // конфиге всегда — вернуть показ можно будет одной правкой этой развилки.
-        if (AppIdentity.IsBeta)
-        {
-            PurposeCombo.Visibility = Visibility.Visible;
-            PurposeCombo.ItemsSource = ParamPurposes.Options();
-            PurposeCombo.SelectedIndex = 0;
-        }
+        // Отбор по назначению (наладка/сервис). Данные пишутся и ездят в конфиге с 1.75, показ
+        // обкатывался в бете и выпущен в 2.2.
+        PurposeCombo.Visibility = Visibility.Visible;
+        PurposeCombo.ItemsSource = ParamPurposes.Options();
+        PurposeCombo.SelectedIndex = 0;
 
         _focusCode = (focusCode ?? "").Trim();
         LoadDocuments(selectTableId);
@@ -336,9 +332,9 @@ public partial class ParamTableWindow : Window
         // встроенные. Гасим Visibility, а не удаляем колонку: удаление сбило бы счёт _builtInColumns,
         // по которому ShowOwnColumns отличает свои столбцы от встроенных.
         FactoryColumn.Visibility = ParamTableView.NeedsFactory(ordered) ? Visibility.Visible : Visibility.Collapsed;
-        // Колонка назначения — по факту разметки и только в бете: у накопленных таблиц разметка
-        // пустая, и пустой столбец отнимал бы ширину у названия параметра.
-        PurposeColumn.Visibility = AppIdentity.IsBeta && ordered.Any(r => ParamPurposes.Label(r.Purpose).Length > 0)
+        // Колонка назначения — ПО ФАКТУ РАЗМЕТКИ: у накопленных таблиц она пустая, и пустой
+        // столбец отнимал бы ширину у названия параметра.
+        PurposeColumn.Visibility = ordered.Any(r => ParamPurposes.Label(r.Purpose).Length > 0)
             ? Visibility.Visible
             : Visibility.Collapsed;
         ChangeColumn.Visibility = ParamTableView.NeedsChange(_diff, ordered) ? Visibility.Visible : Visibility.Collapsed;
@@ -366,7 +362,7 @@ public partial class ParamTableWindow : Window
         if (PurposeHint is null) return;
 
         var unmarked = ParamPurposes.Unmarked(_rows);
-        var show = AppIdentity.IsBeta && ParamPurposes.TokenOf(option).Length > 0 && unmarked > 0;
+        var show = ParamPurposes.TokenOf(option).Length > 0 && unmarked > 0;
         PurposeHint.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         PurposeHint.Text = show ? $"без разметки: {unmarked} — показаны тоже" : "";
     }
@@ -607,7 +603,7 @@ public partial class ParamTableWindow : Window
         Announce($"Заведена таблица параметров «{dialog.ResultName}»: строк {dialog.ResultRows.Count}");
     }
 
-    /// <summary>В бете «Править…» превращается в карандаш.
+    /// <summary>«Править…» показывается карандашом, а не подписью.
     ///
     /// Тикет: «в интерфейсе параметров добавить иконку карандаша для возможности редактирования».
     /// Ряд из четырёх кнопок с длинными подписями занимал всю ширину под таблицей, а нажимают из
@@ -615,7 +611,6 @@ public partial class ParamTableWindow : Window
     /// диктора: кнопка без текста обязана остаться понятной тому, кто её не видит.</summary>
     private void MakeEditPencil()
     {
-        if (!AppIdentity.IsBeta) return;
         if (TryFindResource("Icon.Edit") is not Geometry pencil) return;
 
         var tip = EditBtn.ToolTip as string ?? "Править таблицу";

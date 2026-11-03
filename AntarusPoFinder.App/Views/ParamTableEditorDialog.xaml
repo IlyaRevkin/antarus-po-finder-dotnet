@@ -99,7 +99,7 @@
                                     Width="2*" MinWidth="150" ElementStyle="{StaticResource DataGridCellText}"/>
                 <!-- Назначение строки: для наладки (прогнать алгоритм) или для сервиса (подогнать
                      под установленный двигатель). Столбец показывается только в бете — ставится из
-                     кода по AppIdentity.IsBeta (см. ParamTableEditorDialog). -->
+                     кода (см. ParamTableEditorDialog: столбец объявлен скрытым и открывается при построении). -->
                 <DataGridTemplateColumn x:Name="PurposeColumn" Header="Назначение" Width="Auto" MinWidth="150"
                                         Visibility="Collapsed">
                     <DataGridTemplateColumn.CellTemplate>

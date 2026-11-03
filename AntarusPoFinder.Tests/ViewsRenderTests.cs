@@ -510,10 +510,10 @@ public class ViewsRenderTests
 
     /// <summary>Окно правки таблицы параметров строится, и столбец «Назначение» в нём есть.
     ///
-    /// Показывается он только в бете (AppIdentity.IsBeta), поэтому проверяется не видимость, а то,
-    /// что колонка вообще разобралась и привязка к RowVm.PurposeLabel не промахнулась мимо имени:
-    /// промах в пути привязки компилятор не ловит, а на живом прогоне он выглядит как пустая
-    /// ячейка, которую легко принять за «ещё не разметили».</summary>
+    /// Столбец объявлен в разметке скрытым и открывается кодом при построении окна, поэтому
+    /// проверяется и видимость, и то, что привязка к RowVm.PurposeLabel не промахнулась мимо
+    /// имени: промах в пути привязки компилятор не ловит, а на живом прогоне он выглядит как
+    /// пустая ячейка, которую легко принять за «ещё не разметили».</summary>
     [Fact]
     public void ParamTableEditorDialog_BuildsAndShowsPurposeColumn()
     {
@@ -535,8 +535,7 @@ public class ViewsRenderTests
 
             var column = dialog.FindName("PurposeColumn") as System.Windows.Controls.DataGridColumn;
             Assert.NotNull(column);
-            Assert.Equal(AntarusPoFinder.Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed,
-                column!.Visibility);
+            Assert.Equal(Visibility.Visible, column!.Visibility);
 
             var grid = dialog.FindName("RowsGrid") as System.Windows.Controls.DataGrid;
             var vm = Assert.IsType<ParamTableEditorDialog.RowVm>(grid!.Items[0]);
@@ -562,15 +561,15 @@ public class ViewsRenderTests
         });
     }
 
-    /// <summary>Страница тикетов в бете показывает СПИСОК, а не ряд кнопок: «Подробнее»,
-    /// «Обновить» и «Выгрузить…» с неё убраны (первые две стали автоматическими, третья переехала
-    /// в «Ещё»), а оставшиеся действия подняты НАД таблицей — иначе в невысоком окне они уезжали за
-    /// нижний край, о чём и была жалоба.
+    /// <summary>Страница тикетов показывает СПИСОК, а не ряд кнопок: «Подробнее», «Обновить» и
+    /// «Выгрузить…» с неё убраны (первые две стали автоматическими, третья переехала в «Ещё»), а
+    /// оставшиеся действия подняты НАД таблицей — иначе в невысоком окне они уезжали за нижний
+    /// край, о чём и была жалоба.
     ///
-    /// Проверяется в обеих сборках: в рабочей версии страница обязана остаться прежней, и «заодно
-    /// убралось и там» — ровно та ошибка, которую руками никто не заметит.</summary>
+    /// Перестановку делает код (TicketsView.ApplyPageLayout), а не разметка, поэтому проверять её
+    /// надо на построенной странице: кнопки объявлены на прежних местах и гасятся уже там.</summary>
     [Fact]
-    public void TicketsView_BetaHidesManualButtonsAndLiftsActions()
+    public void TicketsView_HidesManualButtonsAndLiftsActions()
     {
         Ui.Run(() =>
         {
@@ -578,27 +577,25 @@ public class ViewsRenderTests
             var page = new TicketsView(services, new MainWindowViewModel(services));
             Render(page);
 
-            var beta = AntarusPoFinder.Core.Domain.AppIdentity.IsBeta;
-            var expected = beta ? Visibility.Collapsed : Visibility.Visible;
             foreach (var name in new[] { "DetailBtn", "RefreshBtn", "ExportBtn" })
             {
                 var button = page.FindName(name) as System.Windows.Controls.Button;
                 Assert.NotNull(button);
-                Assert.Equal(expected, button!.Visibility);
+                Assert.Equal(Visibility.Collapsed, button!.Visibility);
             }
 
             // «Выгрузить…» не исчезла — она в «Ещё»: автовыгрузка возит записи тикетов, но НЕ
             // вложения, и собрать архив вместе с ними больше нечем.
             var more = page.FindName("MoreBtn") as System.Windows.Controls.Button;
             Assert.NotNull(more);
-            Assert.Equal(beta ? Visibility.Visible : Visibility.Collapsed, more!.Visibility);
+            Assert.Equal(Visibility.Visible, more!.Visibility);
 
-            // Где живёт ряд действий: в бете — в полосе над таблицей, в рабочей версии — под ней.
+            // Ряд действий живёт в полосе НАД таблицей, а не под ней.
             var actions = page.FindName("ActionsRow") as System.Windows.FrameworkElement;
             var host = page.FindName("TopActionsHost") as System.Windows.Controls.Panel;
             Assert.NotNull(actions);
             Assert.NotNull(host);
-            Assert.Equal(beta, host!.Children.Contains(actions));
+            Assert.Contains(actions, host!.Children.Cast<System.Windows.UIElement>());
         });
     }
 

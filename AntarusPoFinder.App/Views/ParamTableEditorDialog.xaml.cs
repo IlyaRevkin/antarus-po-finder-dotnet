@@ -175,14 +175,11 @@ public partial class ParamTableEditorDialog : Window
         Closing += Editor_Closing;
         foreach (var choice in TextFileEncoding.Choices) EncodingCombo.Items.Add(choice);
         EncodingCombo.SelectedIndex = 0;
-        // Назначение строки — только в бете: рабочая версия 1.75 обязана выглядеть как выглядела.
-        // Столбец в базе при этом есть всегда, и уже проставленная бетой разметка через правку
-        // в рабочей версии не теряется — ToRow() берёт её из той же ячейки.
-        if (AppIdentity.IsBeta)
-        {
-            PurposeColumn.Visibility = Visibility.Visible;
-            GuessPurposeBtn.Visibility = Visibility.Visible;
-        }
+        // Назначение строки (наладка/сервис). Столбец объявлен в разметке скрытым и открывается
+        // здесь: до 2.2 он показывался только в бете, пока разметку обкатывали. Данные в базе были
+        // всегда, поэтому уже проставленная разметка никуда не делась.
+        PurposeColumn.Visibility = Visibility.Visible;
+        GuessPurposeBtn.Visibility = Visibility.Visible;
     }
 
     /// <summary>Свои столбцы документа — колонками справа от встроенных. В коде, а не в XAML, по

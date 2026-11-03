@@ -110,10 +110,9 @@ public partial class EditFirmwareDialog : Window
         TitleLabel.Text = $"Модерация прошивки: {title}";
         DescriptionInput.Text = v.Description;
 
-        // Исходное название — только в бете: в рабочей версии окно модерации остаётся прежним.
         // Поле показываем и пустым тоже: у всех прошивок, заведённых до его появления, оно пустое,
         // и добавить его задним числом можно ровно здесь.
-        SourceNamePanel.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        SourceNamePanel.Visibility = Visibility.Visible;
         SourceNameInput.Text = v.SourceName ?? "";
         TagsEditor.Configure(AntarusPoFinder.Core.Services.TagString.Parse(v.Tags), () => _db.GetAllTags());
 
@@ -216,9 +215,7 @@ public partial class EditFirmwareDialog : Window
                 // Модератору отбирать нечего: положить правильный документ поверх неправильного он
                 // по-прежнему может, имя у него каноническое (см. InstructionNaming).
                 InstructionsDeleteBtn.IsEnabled = IsAdministrator;
-                // Раздача инструкции нескольким версиям — новая возможность, и пока она только в
-                // бете: в рабочей версии ряд кнопок у инструкции остаётся прежним.
-                if (AppIdentity.IsBeta) InstructionsScopeBtn.Visibility = Visibility.Visible;
+                InstructionsScopeBtn.Visibility = Visibility.Visible;
                 if (!IsAdministrator)
                     InstructionsDeleteBtn.ToolTip = "Удалять инструкцию может только администратор. " +
                         "Заменить её можно, выбрав правильный документ в поле слева.";

@@ -247,12 +247,10 @@ public partial class FirmwareCard : UserControl
         // решение, а не оформление, и проверять его глазами каждый раз мы уже пробовали.
         var uploadDate = result.UploadDate?.ToString("dd.MM.yyyy") ?? "";
 
-        // В бете строка под названием короткая, а остальное уезжает под значок «i» (см. разметку и
-        // FwCardMeta.ShortLine). В рабочей версии строка прежняя: вид там не меняем.
-        MetaLabel.Text = AppIdentity.IsBeta
-            ? FwCardMeta.ShortLine(result.Execution, result.ConfigName, uploadDate)
-            : FwCardMeta.Line(result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
-                result.WorkType, uploadDate, result.UsageCount);
+        // Строка под названием короткая, а остальное уезжает под значок «i» (см. разметку,
+        // FwCardMeta.ShortLine и FillInfoPopup). FwCardMeta.Line, собиравшая прежнюю длинную
+        // строку, осталась в Core со своими тестами — карточка её больше не зовёт.
+        MetaLabel.Text = FwCardMeta.ShortLine(result.Execution, result.ConfigName, uploadDate);
         // Пустая строка — не повод держать пустое место под ней.
         MetaLabel.Visibility = string.IsNullOrWhiteSpace(MetaLabel.Text) ? Visibility.Collapsed : Visibility.Visible;
 
@@ -290,7 +288,12 @@ public partial class FirmwareCard : UserControl
         // значком «i». Пилюли занимали в выдаче целую строку на каждой карточке — ровно то, от чего
         // просили избавиться («избавиться от лишних пилюль в карточке»).
         TagsView.Configure(tags, null, readOnly: true, collapseAfter: TagsCollapseAfter);
-        TagsView.Visibility = AppIdentity.IsBeta ? Visibility.Collapsed : Visibility.Visible;
+        // ⚠️ ЗАМЫСЕЛ БЫЛ УБРАТЬ ПИЛЮЛИ С КАРТОЧКИ СОВСЕМ («избавиться от лишних пилюль в
+        // карточке»): полный набор тегов виден под значком «i», а для правки есть кнопка «Теги».
+        // Но строка, которая их прятала, стояла ПЕРЕД этой и молча ею перезатиралась — то есть в
+        // бете пилюли всё это время показывались, и выпускать «как в бете» значит оставить их.
+        // Поэтому здесь ровно прежнее поведение: показываем, когда теги есть. Убирать их —
+        // отдельное решение Ильи, а не побочный эффект выпуска.
         TagsView.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // «Синхронизирован ли этот тег» — правки этой прошивки ещё в накопителе, на диск не ушли
@@ -304,15 +307,12 @@ public partial class FirmwareCard : UserControl
         // с тем, что реально копируется, ему нельзя.
         SoftwareNameLabel.Text = $"{result.Name} {versionText}".Trim();
 
-        // ⚠️ ИСХОДНОЕ ИМЯ ФАЙЛА — ПОКАЗЫВАЕТСЯ ТОЛЬКО В БЕТЕ. Само имя запоминается в обеих
-        // сборках (столбец source_name заполняется при загрузке), но лишняя строка на карточке —
-        // переделка вида, а не исправление: в рабочей версии карточка остаётся прежней.
         var sourceName = result.SourceName ?? "";
         // ИСХОДНОЕ НАЗВАНИЕ ОСТАЁТСЯ ОТДЕЛЬНОЙ СТРОКОЙ, а не прячется под значок «i», — в отличие
         // от автора и прочих подробностей. Причина простая: пока у наладчиков нет доступа к Finder,
         // прошивки заливают за программиста, и единственное, по чему наладчик узнаёт нужную сборку, —
         // это имя, которое ему назвал программист. Прятать ответ на главный вопрос под значок нельзя.
-        bool showSource = AppIdentity.IsBeta && !string.IsNullOrWhiteSpace(sourceName);
+        bool showSource = !string.IsNullOrWhiteSpace(sourceName);
         SourceNameLabel.Visibility = showSource ? Visibility.Visible : Visibility.Collapsed;
         if (showSource)
         {
@@ -321,9 +321,9 @@ public partial class FirmwareCard : UserControl
                 + "файл лежит переименованным в номер версии.";
         }
 
-        // ⚠️ АВТОР — ТОЖЕ ТОЛЬКО В БЕТЕ, и по той же причине, что исходное имя: записывается в обеих
-        // сборках, показывается в одной. Вопрос «к кому идти с этой прошивкой» до сих пор решался
-        // перепиской, хотя ответ лежал в базе.
+        // ⚠️ АВТОР ОТДЕЛЬНОЙ СТРОКОЙ НА КАРТОЧКЕ НЕ ПОКАЗЫВАЕТСЯ — он уехал под значок «i»
+        // (FillInfoPopup), в отличие от исходного названия выше. Условие оставлено выключенным
+        // вместе с самим TextBlock: вернуть строку — правка одного слова.
         var author = result.AuthorName ?? "";
         bool showAuthor = false && !string.IsNullOrWhiteSpace(author);
         AuthorLabel.Visibility = showAuthor ? Visibility.Visible : Visibility.Collapsed;
@@ -334,7 +334,7 @@ public partial class FirmwareCard : UserControl
         var filesText = FilesLabel.Text.StartsWith("Файлы: ", StringComparison.Ordinal)
             ? FilesLabel.Text["Файлы: ".Length..]
             : FilesLabel.Text;
-        if (AppIdentity.IsBeta) FilesLabel.Visibility = Visibility.Collapsed;
+        FilesLabel.Visibility = Visibility.Collapsed;
         FillInfoPopup(result, uploadDate, result.Controller ?? "", filesText, string.Join(", ", tags));
 
         ActionsPanel.Children.Clear();
@@ -364,19 +364,10 @@ public partial class FirmwareCard : UserControl
             loadBtn.ToolTip = flags.LoaderConnected
                 ? "Загрузить найденный LFS или собрать и загрузить PSL через Segnetics Loader"
                 : "Segnetics Loader Automation не найден; при нажатии будет показана причина";
-            // ⚠️ РАЗДЕЛЁННАЯ КНОПКА — ТОЛЬКО В БЕТЕ. Правило простое: всё, что мы переделываем
-            // в 2.0, живёт в бете и никуда не уезжает само; в рабочей версии меняется только то,
-            // что названо ошибкой. Обе сборки идут из одного дерева, поэтому единственный способ
-            // это удержать — явная проверка, а не память.
-            if (AppIdentity.IsBeta)
-            {
-                ActionsPanel.Children.Add(WithConnectionSplit(loadBtn, flags));
-            }
-            else
-            {
-                ActionsPanel.Children.Add(loadBtn);
-                ActionsPanel.Children.Add(MakeConnectionModeBox(flags));
-            }
+            // Разделённая кнопка: режим подключения — её правой половиной, а не отдельным
+            // выпадающим списком рядом (MakeConnectionModeBox, который для этого больше не
+            // зовётся). Ряд действий на карточке и так тесный.
+            ActionsPanel.Children.Add(WithConnectionSplit(loadBtn, flags));
         }
         else
         {
@@ -414,7 +405,7 @@ public partial class FirmwareCard : UserControl
         // указывает на тот же файл, которым документ станет позже, поэтому напечатанная сегодня
         // наклейка не устареет (см. FirmwareCardFlags.HasInstructionStub).
         //
-        // ⚠️ HasStoredQr — ТОЛЬКО БЕТА (см. его доку): сохранённый код даёт кнопке право на жизнь
+        // ⚠️ HasStoredQr (см. его доку): сохранённый код даёт кнопке право на жизнь
         // даже когда обход диска не нашёл ничего, потому что диска сейчас нет. Раньше в этом
         // случае кнопка просто пропадала — вместе с единственным способом напечатать наклейку.
         if (flags.HasInstructions || flags.HasInstructionStub || flags.HasStoredQr)
@@ -425,14 +416,14 @@ public partial class FirmwareCard : UserControl
                 ? "Наклейка со ссылкой на инструкцию: предпросмотр, настройка макета и печать"
                 : "Инструкция ещё в разработке, но ссылка уже постоянная: наклейку можно печатать — "
                   + "когда документ допишут, тот же QR откроет его";
-            // ⚠️ ЗНАЧОК ВМЕСТО ПОДПИСИ — ТОЛЬКО В БЕТЕ. Просьба наладчиков: «QR показывать значком,
-            // а не подписью» — ряд действий короче, а сам QR узнаётся с одного взгляда. Это правка
-            // вида, не ошибка, поэтому в рабочей версии кнопка остаётся со своим текстом.
-            if (AppIdentity.IsBeta) MakeIconOnly(qrBtn, "Icon.QrCode");
+            // Просьба наладчиков: «QR показывать значком, а не подписью» — ряд действий короче,
+            // а сам QR узнаётся с одного взгляда. Подпись не пропадает, а уезжает в подсказку и в
+            // имя для экранного диктора (см. MakeIconOnly).
+            MakeIconOnly(qrBtn, "Icon.QrCode");
             ActionsPanel.Children.Add(qrBtn);
         }
 
-        // ⚠️ ОТДЕЛЬНАЯ КНОПКА «ТЕГИ» — ТОЛЬКО В БЕТЕ. Тикет: теги правят чаще всего остального, а
+        // ОТДЕЛЬНАЯ КНОПКА «ТЕГИ». Тикет: теги правят чаще всего остального, а
         // лежали они за «Ещё» → «Модерация прошивки» — два нажатия и чужое по смыслу название.
         //
         // Открывает КОРОТКИЙ редактор тегов (EditFwTagsDialog), а не окно модерации, как было
@@ -441,7 +432,7 @@ public partial class FirmwareCard : UserControl
         // параметром tags: — остальные колонки в UPDATE не попадают вовсе (подробнее — в комментарии
         // к EditFwTagsDialog). Окно модерации при этом никуда не делось: оно по-прежнему в «Ещё» и в
         // разделе «Модерация прошивок».
-        if (flags.CanEditTags && AppIdentity.IsBeta)
+        if (flags.CanEditTags)
         {
             var tagsBtn = MakeActionButton("Теги", (_, _) => TagsEditRequested?.Invoke(this, EventArgs.Empty));
             tagsBtn.ToolTip = "Короткий редактор тегов этой прошивки: добавить, убрать, выбрать из уже заведённых";
@@ -1038,8 +1029,6 @@ public partial class FirmwareCard : UserControl
     private void FillInfoPopup(HierarchyResult result, string uploadDate,
         string controller = "", string files = "", string tags = "")
     {
-        if (!AppIdentity.IsBeta) return;
-
         var rows = FwCardMeta.Details(
             result.EquipmentType, result.WorkType, uploadDate, result.UsageCount,
             result.SourceName ?? "", result.AuthorName ?? "", hardware: "",
@@ -1111,11 +1100,10 @@ public partial class FirmwareCard : UserControl
     /// чем прочитано название, — тем же цветом и тем же рисунком, что потом показывает окно
     /// загрузки (см. EquipmentMotifArt): человек читает их как один знак.
     ///
-    /// Только в бете: это переделка 2.0, а обе сборки идут из одного дерева.</summary>
+    /// Незнакомое оборудование (EquipmentMotif.Neutral) остаётся без значка — выдумывать ему
+    /// картинку хуже, чем не рисовать ничего.</summary>
     private void ShowMotif(HierarchyResult result)
     {
-        if (!AppIdentity.IsBeta) return;
-
         var motif = EquipmentMotifResolver.For(result.Name, result.Controller);
         if (motif == EquipmentMotif.Neutral) return;
 

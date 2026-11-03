@@ -60,7 +60,6 @@ public partial class SearchView : UserControl
         // ПОСЛЕ присваивания _services: обработчик Checked тут же попробует сохранить значение.
         ShowAllVersionsCheck.IsChecked = _services.Cfg.SearchShowAllVersions();
         RefreshAllVersionsBanner();
-        PlaceSearchHowChecks();
         HideParamFilesMode();
     }
 
@@ -85,23 +84,14 @@ public partial class SearchView : UserControl
     /// (его зовёт переход из карточки), и выкидывать его вместе с разбором, тестами и данными
     /// означало бы ломать то, что ещё лежит у людей на дисках. Исчезает ручка, а не механизм.
     ///
-    /// Только бета — это переделка вида.</summary>
+    /// Кодом, а не Visibility="Collapsed" в разметке: прятать пилюлю и возвращать выбранный режим
+    /// на место — одно решение, и разносить его на два файла нельзя.</summary>
     private void HideParamFilesMode()
     {
-        if (!AppIdentity.IsBeta) return;
         ParamsModeRadio.Visibility = Visibility.Collapsed;
         // Режим мог остаться выбранным с прошлого запуска — тогда человек увидел бы выдачу режима,
         // кнопки которого на экране нет.
         if (ParamsModeRadio.IsChecked == true) FwModeRadio.IsChecked = true;
-    }
-
-    private void PlaceSearchHowChecks()
-    {
-        if (AppIdentity.IsBeta) return;
-        SearchHowPanel.Children.Clear();
-        LegacyHowHost.Children.Add(ExactWordCheck);
-        LegacyHowHost.Children.Add(ShowAllVersionsCheck);
-        SearchHowPanel.Visibility = Visibility.Collapsed;
     }
 
     // ── Search ────────────────────────────────────────────────────────────
@@ -382,8 +372,6 @@ public partial class SearchView : UserControl
         // Схлопывать по шкафам нечего нигде, кроме прошивок: в остальных режимах галочку прячем, а
         // не оставляем висеть галочкой, которая ничего не делает.
         ShowAllVersionsCheck.Visibility = mode == SearchMode.Firmware ? Visibility.Visible : Visibility.Collapsed;
-        if (!AppIdentity.IsBeta && mode is SearchMode.Params or SearchMode.ParamTables)
-            FiltersPanel.Visibility = Visibility.Collapsed;
         FiltersHint.Text = mode switch
         {
             SearchMode.Schemas => SchemaFiltersHint,
@@ -501,13 +489,8 @@ public partial class SearchView : UserControl
     {
         if (FiltersToggle is null) return;
         var mode = CurrentMode;
-        // В рабочей версии галочки остались снаружи, значит за кнопкой в «Параметрах» по-прежнему
-        // пусто — и она, как и раньше, прячется.
-        if (!AppIdentity.IsBeta && mode is SearchMode.Params or SearchMode.ParamTables)
-        {
-            FiltersToggle.Visibility = Visibility.Collapsed;
-            return;
-        }
+        // Кнопка видна во всех режимах: с тех пор как «Точный поиск» живёт под ней
+        // (PlaceSearchHowChecks), в «Параметрах» за ней уже не пусто.
         FiltersToggle.Visibility = Visibility.Visible;
         var how = ExactWordCheck.IsChecked == true
             || (mode == SearchMode.Firmware && ShowAllVersionsCheck.IsChecked == true);
@@ -775,13 +758,10 @@ public partial class SearchView : UserControl
         // (а это тоже запросы в SQLite) один раз, а не по три на карточку.
         var connectionMode = _services.Cfg.LoaderConnectionMode();
         var connectionHint = ConnectionHintText();
-        // ⚠️ ТОЛЬКО БЕТА: у каких версий уже посчитан QR (таблица fw_qr_codes, см. FirmwareQrCodes).
-        // Один запрос на всю выдачу — ровно по той же причине, что и наборы выше. В рабочей версии
-        // набор пустой и ничего не меняет: кнопка наклейки там живёт строго по обходу диска, как и
-        // жила.
-        var qrCovered = AntarusPoFinder.Core.Domain.AppIdentity.IsBeta
-            ? _services.Db.GetFwQrCoveredIds()
-            : new HashSet<int>();
+        // У каких версий уже посчитан QR (таблица fw_qr_codes, см. FirmwareQrCodes). Один запрос
+        // на всю выдачу — ровно по той же причине, что и наборы выше. Благодаря этому набору
+        // кнопка наклейки остаётся на карточке и когда диск отвалился: код уже сохранён.
+        var qrCovered = _services.Db.GetFwQrCoveredIds();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -1387,15 +1367,16 @@ public partial class SearchView : UserControl
 
         // «Открыть папку с файлом» — ТОЛЬКО у документа, который и правда привязан к файлу.
         //
-        // В бете параметры от файлов отвязаны («в бете только таблицы, файлы создаются временно для
-        // переноса в папку», см. ParamTableExport): disk_path/filename у таблиц пусты, папки у них
-        // нет в принципе, и кнопка там — обещание, которое выполнить нечем. Файл по требованию
+        // Параметры от файлов отвязаны («только таблицы, файлы создаются временно для переноса в
+        // папку», см. ParamTableExport): у новых таблиц disk_path/filename пусты, папки у них нет
+        // в принципе, и кнопка там — обещание, которое выполнить нечем. Файл по требованию
         // собирает «Выгрузить в папку…» на странице параметров.
         //
-        // В рабочей версии кнопка остаётся, но у СВОБОДНОЙ таблицы (её мог отвязать от файла сам
-        // оператор — Database.DetachParamTableFromFile) она всё равно бессмысленна: нажатие вело
-        // только к окну «папка недоступна: » с пустым путём.
-        if (!AppIdentity.IsBeta && table.DiskPath.Length > 0 && table.Filename.Length > 0)
+        // У накопленных таблиц, ещё привязанных к файлу, кнопка остаётся: папка у них настоящая.
+        // Проверка обоих полей обязательна — у СВОБОДНОЙ таблицы (её мог отвязать от файла сам
+        // оператор, Database.DetachParamTableFromFile) нажатие вело только к окну
+        // «папка недоступна: » с пустым путём.
+        if (table.DiskPath.Length > 0 && table.Filename.Length > 0)
         {
             var openFolderBtn = new Button { Content = "Открыть папку с файлом", Style = (Style)FindResource("SecondaryButton") };
             openFolderBtn.ToolTip = "Открыть папку файла параметров — с выделенным файлом";
@@ -2481,10 +2462,9 @@ public partial class SearchView : UserControl
             return;
         }
 
-        // Тикет: «Хлам уведомление "скопировано *версия прошивки*" убрать полностью». Сама кнопка
-        // на карточке показывает «✓ Скопировано» и этим всё сказано; плашка сверху дублировала её
-        // и перекрывала выдачу. В рабочей версии сообщение оставлено как было — вид там не меняем.
-        if (!AppIdentity.IsBeta) _host.ShowStatus($"Скопировано: {result.Name}");
+        // Сообщения «Скопировано: …» здесь нет намеренно. Тикет: «Хлам уведомление "скопировано
+        // *версия прошивки*" убрать полностью». Сама кнопка на карточке показывает «✓ Скопировано»
+        // и этим всё сказано; плашка сверху дублировала её и перекрывала выдачу.
 
         var dlg = new SyncResultDialog(result, dst) { Owner = Window.GetWindow(this) };
         dlg.ShowDialog();
@@ -2716,7 +2696,9 @@ public partial class SearchView : UserControl
         var text = FirmwareNaming
             .CopyableVersionName(result.VersionRaw, result.IsOpc, result.RequestNum, result.CabinetSn)
             .ToUpperInvariant();
-        if (!ClipboardSafe.TrySetTextWithNote(text, this, _host, AppIdentity.IsBeta ? "" : $"Скопировано: {text}"))
+        // Пустой текст отклика — сознательно: кнопка сама становится «✓ Скопировано»,
+        // см. ClipboardSafe.TrySetTextWithNote и тикет про «хлам уведомление».
+        if (!ClipboardSafe.TrySetTextWithNote(text, this, _host, ""))
             _host.ShowStatus("Буфер обмена занят другим приложением — попробуйте ещё раз");
     }
 

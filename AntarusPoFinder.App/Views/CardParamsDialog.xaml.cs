@@ -102,10 +102,7 @@ public partial class CardParamsDialog : Window
         // уже случившегося не должно требовать отдельного нажатия (см. FlashNote). Плашка уходит
         // сама — по щелчку в любом месте, при уходе фокуса с окна, при его сдвиге или по времени.
         var done = $"Скопировано в протокол: {item.File.Filename}";
-        // ⚠️ Самоуходящая плашка — переделка 2.0, и она остаётся в бете. В рабочей версии
-        // подтверждение прежнее, с «ОК»: менять её поведение без отдельной просьбы нельзя.
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) FlashNote.Show(this, done);
-        else AppMessageBox.Show(done, "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+        FlashNote.Show(this, done);
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

@@ -68,8 +68,12 @@ public static class ClipboardSafe
         // становится «✓ Скопировано»), второе сообщение — только шум поверх выдачи.
         if (string.IsNullOrEmpty(done)) return true;
 
+        // Самоуходящая плашка поверх окна, а строка состояния — только когда окна нет (элемент
+        // ещё не в дереве). До 2.2 плашка была бета-поведением: подтверждение уже случившегося не
+        // должно требовать нажатия, но и менять привычный отклик посреди рабочего дня без обкатки
+        // не хотелось.
         var owner = Window.GetWindow(anchor);
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta && owner is not null) FlashNote.Show(owner, done);
+        if (owner is not null) FlashNote.Show(owner, done);
         else host.ShowStatus(done);
         return true;
     }

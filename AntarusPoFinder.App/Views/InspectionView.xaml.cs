@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -184,16 +184,11 @@ public partial class InspectionView : UserControl
     /// нельзя: человек перепишет его на телефон и будет думать, что это он ошибся, а зайти туда
     /// нельзя в принципе. Поэтому вместо пути — прямой текст о том, что так не получится.
     ///
-    /// Только бета (решение по фотографиям осмотра от 30.10.2026) — в рабочей версии панель не
-    /// появляется вовсе.</summary>
+    /// Решение по фотографиям осмотра от 30.10.2026. Сам адрес — просто путь к сетевой папке:
+    /// ничего слушающего сеть эта панель не поднимает (в отличие от «Мобильного доступа», который
+    /// и остался бета-функцией).</summary>
     private void UpdateSmbPath()
     {
-        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
-        {
-            SmbPathPanel.Visibility = Visibility.Collapsed;
-            _smbPath = null;
-            return;
-        }
         SmbPathPanel.Visibility = Visibility.Visible;
 
         var proto = _services.Cfg.Get("inspection_folder");

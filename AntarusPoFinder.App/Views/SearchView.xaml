@@ -179,10 +179,6 @@
                     </StackPanel>
                 </Grid>
             </Border>
-            <!-- Пусто в бете и занято в основной версии: переделки вида едут только бетой, а в
-                 рабочей программе галочки обязаны остаться там, где к ним привыкли. Кто куда —
-                 решает SearchView (PlaceSearchHowChecks); здесь только место под них. -->
-            <WrapPanel x:Name="LegacyHowHost" VerticalAlignment="Center"/>
         </StackPanel>
 
         <StackPanel Grid.Row="4">
