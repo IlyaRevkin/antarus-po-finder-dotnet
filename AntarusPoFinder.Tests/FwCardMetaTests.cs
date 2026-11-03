@@ -1,4 +1,5 @@
-﻿using AntarusPoFinder.Core.Domain;
+﻿using System.Linq;
+using AntarusPoFinder.Core.Domain;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -116,32 +117,50 @@ public class FwCardMetaTests
 
     // ── Короткая строка и значок «i» ─────────────────────────────────────────
 
-    /// <summary>В короткой строке остаётся только то, что читают на бегу.
+    /// <summary>В короткой строке остаётся только то, что читают на бегу: исполнение,
+    /// комплектация и ДАТА.
     ///
     /// Тикет: «избавиться от лишних пилюль в карточке». Выдача — столбик одинаковых карточек, и
-    /// строка из шести пунктов через точку в нём не читается целиком, вместе с нужным.</summary>
+    /// строка из шести пунктов через точку в нём не читается целиком, вместе с нужным. Дата при
+    /// этом осталась именно здесь, а не уехала под значок: «дату нужно знать» — по ней отличают ту
+    /// самую свежую версию от прошлогодней, не открывая ничего. Контроллер, наоборот, ушёл под
+    /// значок «i» (см. Details) — он нужен, когда разбираются с одной версией.</summary>
     [Fact]
-    public void Короткая_строка_несёт_только_исполнение_комплектацию_и_контроллер()
+    public void Короткая_строка_несёт_исполнение_комплектацию_и_дату()
     {
-        var line = FwCardMeta.ShortLine("2 насоса", "с частотником", "SMH5");
+        var line = FwCardMeta.ShortLine("2 насоса", "с частотником", "20.10.2026");
 
         Assert.Contains("2 насоса", line);
         Assert.Contains("с частотником", line);
-        Assert.Contains("Контроллер: SMH5", line);
-        Assert.DoesNotContain("20.10.2026", line);
+        Assert.Contains("20.10.2026", line);
+        Assert.DoesNotContain("Контроллер", line);
+    }
+
+    /// <summary>Контроллер под значком — с подписью: «SMH5» само по себе ни о чём не говорит
+    /// тому, кто пришёл в программу впервые.</summary>
+    [Fact]
+    public void Под_значком_контроллер_подписан()
+    {
+        var rows = FwCardMeta.Details(
+            equipmentType: "", workType: "", uploadDate: "", usageCount: 0,
+            sourceName: "", author: "", hardware: "", requestNum: "", cabinetSn: "",
+            controller: "SMH5");
+
+        Assert.Contains(rows, r => r.Label == "Контроллер" && r.Value == "SMH5");
     }
 
     [Fact]
     public void Под_значком_пустые_поля_не_показываются()
     {
-        // «Автор: —» не отвечает ни на какой вопрос, а место занимает.
+        // «Автор: —» не отвечает ни на какой вопрос, а место занимает. Дата сюда не попадает
+        // вовсе — она осталась на самой карточке (см. ShortLine), и дублировать её под значком
+        // значило бы отвечать дважды на один вопрос.
         var rows = FwCardMeta.Details(
             equipmentType: "", workType: "", uploadDate: "20.10.2026", usageCount: 0,
             sourceName: "", author: "Киселёв", hardware: "", requestNum: "", cabinetSn: "");
 
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(new[] { "Автор" }, rows.Select(r => r.Label).ToArray());
         Assert.Contains(rows, r => r.Label == "Автор" && r.Value == "Киселёв");
-        Assert.Contains(rows, r => r.Label == "Загружена");
         Assert.DoesNotContain(rows, r => r.Label == "Исходное название");
     }
 
