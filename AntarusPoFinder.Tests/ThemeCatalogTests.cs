@@ -115,21 +115,18 @@ public class ThemeCatalogTests
         Assert.Equal("light", ThemeCatalog.Resolve(null).Id);
     }
 
-    /// <summary>Новые темы — переделка 2.0, и в стабильной программе их не предлагают: обе сборки
-    /// идут из одного дерева.</summary>
+    /// <summary>Все четыре темы предлагаются человеку, и одинаково в обеих сборках.
+    ///
+    /// До 2.2 «Material» и «Стекло» были закрыты признаком AppTheme.Beta, пока их обкатывали; с
+    /// выпуском 2.2.0.0 закрытых тем не осталось ни одной. Проверяется и то, что отбор больше не
+    /// зависит от конфигурации сборки: разъехавшийся список тем означал бы, что настройка,
+    /// приехавшая с чужой машины через общий конфиг, разворачивается в разное.</summary>
     [Fact]
-    public void Новые_темы_предлагаются_только_в_бете()
+    public void Все_темы_предлагаются_и_одинаково_в_обеих_сборках()
     {
         var available = ThemeCatalog.Available.Select(t => t.Id).ToList();
 
-        // Светлая и тёмная есть всегда — это рабочий минимум.
-        Assert.Contains("light", available);
-        Assert.Contains("dark", available);
-
-        // А новые — ровно по признаку сборки. Утверждение написано так, чтобы тест был осмысленным
-        // в ОБЕИХ конфигурациях: в стабильной он требует, чтобы их не было, в бете — чтобы были.
-        // Проверка «просто нет» проходила бы в бете мимо и молчала там, где как раз и важна.
-        Assert.Equal(AppIdentity.IsBeta, available.Contains("material"));
-        Assert.Equal(AppIdentity.IsBeta, available.Contains("glass"));
+        Assert.Equal(new[] { "light", "dark", "material", "glass" }, available);
+        Assert.DoesNotContain(ThemeCatalog.All, t => t.Beta);
     }
 }

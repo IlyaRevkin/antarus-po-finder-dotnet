@@ -78,16 +78,12 @@ public partial class MainWindow : Window
         // Версия ниже той, которой общий конфиг ещё доверяет: сказать об этом сразу и прямо.
         Loaded += (_, _) => WarnIfOutdated();
 
-        // Настройки значком в нижней строке — переделка 2.0 («настройки можно значком рядом с
-        // уведомлениями сделать чтобы не занимало лишнее место»). В стабильной программе значка нет
-        // и кнопка остаётся в «Дополнительно»: обе сборки идут из одного дерева, и переставлять
-        // людям привычное посреди рабочего дня незачем. Показываем значок — убираем кнопку, иначе
-        // одно и то же оказалось бы в двух местах сразу.
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
-        {
-            SettingsIconButton.Visibility = Visibility.Visible;
-            SettingsNavButton.Visibility = Visibility.Collapsed;
-        }
+        // Настройки значком в нижней строке («настройки можно значком рядом с уведомлениями
+        // сделать чтобы не занимало лишнее место»). Показываем значок — убираем кнопку, иначе одно
+        // и то же оказалось бы в двух местах сразу; к тому же секции «Дополнительно», где эта
+        // кнопка жила, больше нет вовсе (MainWindowViewModel.MoreSectionVisible).
+        SettingsIconButton.Visibility = Visibility.Visible;
+        SettingsNavButton.Visibility = Visibility.Collapsed;
 
         // Режим самоснимка цепляется к Loaded, а НЕ к ContentRendered. Разница принципиальная: без
         // активного рабочего стола (отключённая сессия, RDP в фоне) окно до отрисовки не доходит
@@ -97,14 +93,13 @@ public partial class MainWindow : Window
         if (Services.UiSnapshotService.Enabled)
             Loaded += (_, _) => Services.UiSnapshotService.RunAndExit(this, _vm, services);
 
-        // Переход между страницами — только в бете: в рабочей версии менять поведение экрана,
-        // которым пользуются каждый день, без просьбы незачем.
-        if (AntarusPoFinder.Core.Domain.AppIdentity.IsBeta)
-            _vm.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(ViewModels.MainWindowViewModel.CurrentPageContent))
-                    AnimatePageChange();
-            };
+        // Переход между страницами. Движение короткое и однократное — см. AnimatePageChange:
+        // экран рабочий, и анимация здесь не украшение, а подсказка «содержимое сменилось».
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ViewModels.MainWindowViewModel.CurrentPageContent))
+                AnimatePageChange();
+        };
 
         ContentRendered += MainWindow_ContentRendered;
         InitTrayIcon();
@@ -128,8 +123,14 @@ public partial class MainWindow : Window
     /// здесь, чем дать ему полдня считать, что он делится работой.</summary>
     private void WarnIfOutdated()
     {
-        // Только бета: окно — новое поведение, а рабочая версия по правилу владельца получает
-        // лишь исправления. Подпись своей версии она ставит и так, поэтому в списке подключений
+        // ⚠️ ОСТАЁТСЯ БЕТА-ПОВЕДЕНИЕМ И ПОСЛЕ ВЫПУСКА 2.2. Это половина карантина по минимальной
+        // версии; вторая половина — отказ принимать чужой снимок (Database.ConfigExchange). Обе
+        // держатся вместе: окно «вы устарели» без отказа принимать — пустая угроза, а отказ без
+        // окна — молчаливая поломка обмена. Выпускать карантин можно только целиком и только
+        // убедившись на живых машинах, что min_app_version выставлен осмысленно: ошибка в нём
+        // выкидывает из обмена всю контору разом.
+        //
+        // Подпись своей версии рабочая сборка ставит и так, поэтому в списке подключений она
         // видна наравне с остальными.
         if (!Core.Domain.AppIdentity.IsBeta) return;
 

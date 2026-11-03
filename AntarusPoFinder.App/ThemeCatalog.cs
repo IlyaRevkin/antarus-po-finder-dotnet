@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.App;
 
@@ -10,7 +9,10 @@ namespace AntarusPoFinder.App;
 /// выбрано.</param>
 /// <param name="IsDark">Тёмная ли. От этого зависят не только цвета: заголовок окна красится через
 /// DWM, а наведение и фон выделения считаются от акцента по-разному (см. AccentPalette).</param>
-/// <param name="Beta">Тема из переделки 2.0 — в стабильной программе её не предлагают.</param>
+/// <param name="Beta">Тема, которую ещё не предлагают человеку: она есть в списке, её словарь
+/// проверяется тестом на полноту ключей, но в настройках её не видно. До 2.2 так были закрыты
+/// «Material» и «Стекло», пока их обкатывали в бете; сейчас таких тем нет ни одной, признак
+/// оставлен как заготовка под следующую недоделанную.</param>
 /// <param name="Backdrop">Нужно ли этой теме РАЗМЫТИЕ за окном (DWM acrylic). Только цветом стекло
 /// не делается: стекло — это размытие того, что под окном, и рисует его система (см.
 /// WindowBackdrop).</param>
@@ -38,19 +40,21 @@ public static class ThemeCatalog
         new("light", "Светлая", "Light", IsDark: false),
         new("dark", "Тёмная", "Dark", IsDark: true),
         // Material — плотные поверхности и спокойный контраст, привычные по Android и вебу.
-        new("material", "Material", "Material", IsDark: false, Beta: true, Tonal: true),
+        new("material", "Material", "Material", IsDark: false, Tonal: true),
         // «Стекло» — тёмная основа с полупрозрачными карточками: модно и, что важнее, даёт глубину
         // там, где у нас много вложенных панелей.
-        new("glass", "Стекло", "Glass", IsDark: true, Beta: true, Backdrop: true, Tonal: true),
+        new("glass", "Стекло", "Glass", IsDark: true, Backdrop: true, Tonal: true),
     };
 
-    /// <summary>Что предлагать человеку в настройках. В стабильной программе — только то, что
-    /// доделано: обе сборки идут из одного дерева (см. AppIdentity).</summary>
+    /// <summary>Что предлагать человеку в настройках — всё, что доделано. С 2.2 это все четыре
+    /// темы: «Material» и «Стекло» выпущены вместе с остальной переделкой 2.x, и сборка на отбор
+    /// больше не влияет.</summary>
     public static IReadOnlyList<AppTheme> Available =>
-        All.Where(t => !t.Beta || AppIdentity.IsBeta).ToList();
+        All.Where(t => !t.Beta).ToList();
 
     /// <summary>Тема по сохранённому имени. Неизвестное имя — светлая: так ведёт себя и старый код
-    /// (всё, что не «dark», считалось светлым), и настройка могла приехать с машины, где стоит бета.</summary>
+    /// (всё, что не «dark», считалось светлым), и настройка могла приехать с машины, где стоит
+    /// более новая сборка с темой, которой здесь ещё нет.</summary>
     public static AppTheme Resolve(string? id) =>
         All.FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase)) ?? All[0];
 }

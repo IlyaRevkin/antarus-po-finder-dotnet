@@ -156,15 +156,19 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// (баг прошивки он заводит жучком на карточке), поэтому у него секции не будет.</summary>
     [ObservableProperty] private bool _devSectionVisible;
 
-    /// <summary>Сворачиваются ли секции бокового меню. В бете — НЕТ: «по умолчанию эти поля
-    /// развернуты и убери вообще чтобы они сворачивались просто отдельно отображались в боковой
-    /// панели». Секции там не ящики, которые открывают, а просто подписанные группы.</summary>
-    public bool SectionsCollapsible => !AppIdentity.IsBeta;
+    /// <summary>Сворачиваются ли секции бокового меню. НЕТ: «по умолчанию эти поля развернуты и
+    /// убери вообще чтобы они сворачивались просто отдельно отображались в боковой панели». Секции
+    /// здесь не ящики, которые открывают, а просто подписанные группы.
+    ///
+    /// Свойство, а не выкинутая из разметки стрелка: на него завязаны и разделители, и заголовки
+    /// секций в MainWindow.xaml, и вернуть сворачивание — это по-прежнему правка одной строки.
+    /// До 2.2 стояло <c>!AppIdentity.IsBeta</c> — перестройка меню обкатывалась в бете.</summary>
+    public bool SectionsCollapsible => false;
 
-    /// <summary>Показывать ли секцию «ДОПОЛНИТЕЛЬНО». В бете её нет вовсе: пункты разошлись по
-    /// секциям, которым принадлежат, а настройки открываются значком внизу («все ещё висит пункт
-    /// дополнительно который нужно было перенести»).</summary>
-    public bool MoreSectionVisible => !AppIdentity.IsBeta;
+    /// <summary>Показывать ли секцию «ДОПОЛНИТЕЛЬНО». Её нет вовсе: пункты разошлись по секциям,
+    /// которым принадлежат, а настройки открываются значком внизу («все ещё висит пункт
+    /// дополнительно который нужно было перенести»). До 2.2 — только в бете.</summary>
+    public bool MoreSectionVisible => false;
 
     /// <summary>Состояние пилюли синхронизации в статус-строке (отдельный от поиска индикатор — см.
     /// _syncActivity и тикет коллеги «отделить анимацию синхронизации от анимации поиска»):
@@ -275,21 +279,14 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
         foreach (var (pageId, label, section) in RolesConfig.NavItems)
         {
-            // Секция «ДЛЯ ПРОГРАММИСТА» — переделка 2.0, и в СТАБИЛЬНОЙ программе её быть не должно:
-            // обе собираются из одного дерева, и без этой проверки ближайший обычный релиз принёс бы
-            // всем недоделанную перестройку меню. Бета ставится отдельным приложением — см.
-            // Core/Domain/AppIdentity.
-            if (section == NavSection.Dev && !AppIdentity.IsBeta) continue;
             NavItems.Add(new NavItem(pageId, label, section));
         }
 
-        // Свёрнута/развёрнута секция «ДЛЯ НАЛАДЧИКА» — запоминается между запусками (в отличие от
-        // «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой): туда ходят работать, а не смотреть
-        // настройку раз в месяц. Ставится ДО первого показа окна, чтобы секция не «моргала».
-        // В бете секции всегда раскрыты и не сворачиваются (см. SectionsCollapsible): сохранённое
-        // состояние там не при чём, иначе человек получил бы свёрнутую группу без способа её
-        // раскрыть.
-        _setupSectionExpanded = !AppIdentity.IsBeta ? _services.Cfg.SidebarSetupExpanded() : true;
+        // Секции бокового меню всегда раскрыты и не сворачиваются (см. SectionsCollapsible), так
+        // что сохранённое состояние здесь ни при чём: прочитать его значило бы показать человеку
+        // свёрнутую группу без способа её раскрыть. Настройка SidebarSetupExpanded из конфига не
+        // выброшена — она пишется и читается прежним кодом и оживёт, если сворачивание вернут.
+        _setupSectionExpanded = true;
 
         CurrentRole = _services.Cfg.CurrentRole();
         CurrentTheme = _services.Cfg.Theme();
@@ -992,7 +989,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         };
         _fwUpdateCheckTimer.Start();
 
-        // ⚠️ ТОЛЬКО БЕТА. 4000ms один раз, дальше каждые QrSweepInterval: привести таблицу
+        // 4000ms один раз, дальше каждые QrSweepInterval: привести таблицу
         // QR-кодов в соответствие с базой — завести коды новым версиям, перестроить те, у кого
         // сменилась ссылка, убрать коды откаченных и архивных (см. FirmwareQrSweep).
         //
@@ -1004,39 +1001,33 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         // Сети и диска проход не трогает вовсе, поэтому идёт прямо здесь, без Task.Run: это
         // короткие запросы к SQLite и по хэшу на версию, а база в этом приложении живёт на потоке
         // интерфейса (так же работают соседние тики).
-        if (Core.Domain.AppIdentity.IsBeta)
+        _qrSweepTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
+        // Один обработчик на все тики: первый приходит через 4 секунды после запуска, дальше
+        // интервал подменяется на рабочий прямо в обработчике (DispatcherTimer перезаводит
+        // отсчёт сам). Соседние таймеры здесь устроены иначе — «остановиться и завести второй
+        // таймер на повтор», — но там у разового и у повторного тика РАЗНАЯ работа; здесь она
+        // одна и та же, и второй подписчик означал бы только лишний вызов на каждом тике.
+        _qrSweepTimer.Tick += (_, _) =>
         {
-            _qrSweepTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
-            // Один обработчик на все тики: первый приходит через 4 секунды после запуска, дальше
-            // интервал подменяется на рабочий прямо в обработчике (DispatcherTimer перезаводит
-            // отсчёт сам). Соседние таймеры здесь устроены иначе — «остановиться и завести второй
-            // таймер на повтор», — но там у разового и у повторного тика РАЗНАЯ работа; здесь она
-            // одна и та же, и второй подписчик означал бы только лишний вызов на каждом тике.
-            _qrSweepTimer.Tick += (_, _) =>
-            {
-                RunQrSweep();
-                if (_qrSweepTimer!.Interval != QrSweepInterval) _qrSweepTimer.Interval = QrSweepInterval;
-            };
-            _qrSweepTimer.Start();
-        }
+            RunQrSweep();
+            if (_qrSweepTimer!.Interval != QrSweepInterval) _qrSweepTimer.Interval = QrSweepInterval;
+        };
+        _qrSweepTimer.Start();
 
-        // ⚠️ ТОЛЬКО БЕТА. 9000ms один раз, дальше раз в час — УБОРКА ЛОКАЛЬНЫХ КОПИЙ
+        // 9000ms один раз, дальше раз в час — УБОРКА ЛОКАЛЬНЫХ КОПИЙ
         // прошивок по настроенной частоте (см. LocalCacheCleanup и ConfigService.LocalCleanupMode).
         //
         // Час — это не частота уборки, а частота ПРОВЕРКИ «не пора ли»: сама она ходит раз в
         // неделю/месяц, но программу держат открытой сутками, и проверять только при запуске значило
         // бы не убираться вовсе у тех, кто её не закрывает. Холостая проверка — сравнение двух дат.
-        if (Core.Domain.AppIdentity.IsBeta)
+        _localCleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(9000) };
+        _localCleanupTimer.Tick += async (_, _) =>
         {
-            _localCleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(9000) };
-            _localCleanupTimer.Tick += async (_, _) =>
-            {
-                if (_localCleanupTimer!.Interval != LocalCleanupCheckInterval)
-                    _localCleanupTimer.Interval = LocalCleanupCheckInterval;
-                await RunLocalCacheCleanupAsync();
-            };
-            _localCleanupTimer.Start();
-        }
+            if (_localCleanupTimer!.Interval != LocalCleanupCheckInterval)
+                _localCleanupTimer.Interval = LocalCleanupCheckInterval;
+            await RunLocalCacheCleanupAsync();
+        };
+        _localCleanupTimer.Start();
 
         // 3500ms once, then every sync_interval_min minutes: pull+apply a newer shared config
         // automatically — settings are 100% local-only by design (see ConfigSyncService.

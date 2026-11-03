@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Services;
@@ -32,20 +32,25 @@ public class SidebarSetupSectionTests
         Assert.Equal(NavSection.Setup, SectionOf("newversions"));
     }
 
-    /// <summary>«ДОПОЛНИТЕЛЬНО» — «заглянуть раз в месяц»: хранилище на хостинге и тикеты. Состав
-    /// фиксируется тестом целиком, чтобы пополнение было осознанным, а не заезжало сюда случайно.
+    /// <summary>СЕКЦИИ «ДОПОЛНИТЕЛЬНО» БОЛЬШЕ НЕТ (выпущено в 2.2.0.0). Жили в ней «Хранилище» и
+    /// «Тикеты», и обе — сервисное, а не работа: «тикеты это сервисное это убрать надо в
+    /// настройки», «хранилище не должно быть у программиста». Теперь это вкладки настроек
+    /// (SettingsView), а «Сетевые диски» ушли отсюда ещё раньше — на них переходят щелчком по
+    /// состоянию диска в нижней строке.
     ///
-    /// «Сетевые диски» отсюда УБРАНЫ (15.10.2026): «лучше убрать из дополнительного сетевые диски и
-    /// как раз сделать там где диск и значок синхронизации сделать переход на вкладку сетевых
-    /// дисков». В «Дополнительно» пункт лежал мёртвым грузом — о диске вспоминают, глядя на его
-    /// состояние в нижней строке, а не копаясь в меню.</summary>
+    /// Проверяется ПУСТОТА секции, а не её отсутствие в перечислении: NavSection.More из кода не
+    /// выброшена (на неё завязан ShowInCompactList), и вернуть туда пункт — одна строка, которую
+    /// надо заметить. Права ролей при этом обязаны остаться: страницы никуда не делись.</summary>
     [Fact]
-    public void TheOldMoreSection_IsUntouched()
+    public void TheOldMoreSection_IsEmptyNow()
     {
-        Assert.Equal(NavSection.More, SectionOf("hosting"));
-        Assert.Equal(NavSection.More, SectionOf("tickets"));
-        Assert.Equal(new[] { "hosting", "tickets" },
-            RolesConfig.NavItems.Where(n => n.Section == NavSection.More).Select(n => n.PageId).ToArray());
+        Assert.Empty(RolesConfig.NavItems.Where(n => n.Section == NavSection.More));
+        Assert.DoesNotContain(RolesConfig.NavItems, n => n.PageId == "hosting");
+        Assert.DoesNotContain(RolesConfig.NavItems, n => n.PageId == "tickets");
+
+        foreach (var (role, pages) in RolesConfig.RoleAccess)
+            Assert.True(pages.Contains("tickets"), $"роль «{role}» потеряла страницу тикетов");
+        Assert.Contains("hosting", RolesConfig.RoleAccess["programmer"]);
     }
 
     /// <summary>Пункта «Сетевые диски» в меню больше нет, но САМА СТРАНИЦА доступна — её открывают
@@ -76,12 +81,18 @@ public class SidebarSetupSectionTests
             Assert.False(pages.Contains("cleanup"), $"роль «{role}» всё ещё видит страницу cleanup");
     }
 
-    /// <summary>Каждодневное остаётся наверху и в один клик: поиск, осмотр, загрузка ПО.</summary>
+    /// <summary>Наверху, в один клик и без заголовка — ПОИСК, и только он: ради него программу и
+    /// открывают. «Осмотр» и «Загрузка ПО» ушли отсюда в свои секции (выпущено в 2.2.0.0) — «для
+    /// программиста перенеси загрузку прошивок а для наладчика вкладку осмотр»: это их работа, а
+    /// не общий список. Состав фиксируется целиком, чтобы пополнение было осознанным.</summary>
     [Fact]
     public void TheEverydayPages_StayInTheMainList()
     {
-        Assert.Equal(new[] { "search", "inspection", "upload" },
+        Assert.Equal(new[] { "search" },
             RolesConfig.NavItems.Where(n => n.Section == NavSection.Main).Select(n => n.PageId).ToArray());
+
+        Assert.Equal(NavSection.Setup, SectionOf("inspection"));
+        Assert.Equal(NavSection.Dev, SectionOf("upload"));
     }
 
     /// <summary>Переезд — это ТОЛЬКО про место кнопки: кто какую страницу видит, по-прежнему решает
@@ -112,7 +123,8 @@ public class SidebarSetupSectionTests
         foreach (var (pageId, label, section) in RolesConfig.NavItems)
         {
             var item = new NavItem(pageId, label, section) { IsVisible = true };
-            // Списков стало четыре: добавилась секция «ДЛЯ ПРОГРАММИСТА» (бета 2.0). Перечислять их
+            // Списков четыре: к основному, «ДЛЯ НАЛАДЧИКА» и компактному добавилась секция «ДЛЯ
+            // ПРОГРАММИСТА» (выпущено в 2.2.0.0). Перечислять их
             // здесь обязательно ВСЕ — иначе пункт новой секции выглядел бы «нигде не показывается»,
             // и тест ловил бы ровно наоборот: не ошибку, а свою неполноту.
             var shown = new[] { item.ShowInMainList, item.ShowInSetupList, item.ShowInDevList, item.ShowInCompactList };
@@ -133,9 +145,14 @@ public class SidebarSetupSectionTests
             Assert.Contains(RolesConfig.RoleAccess, role => role.Value.Contains(item.PageId));
     }
 
-    /// <summary>Свёрнута или развёрнута секция — запоминается между запусками (в отличие от
-    /// «ДОПОЛНИТЕЛЬНО», которая всегда открывается свёрнутой). По умолчанию свёрнута: смысл
-    /// секции — убрать редкое с глаз.</summary>
+    /// <summary>Настройка «свёрнута ли секция» и её правило «не уезжать в общий конфиг».
+    ///
+    /// ⚠️ СЕЙЧАС ЕЮ НИКТО НЕ ПОЛЬЗУЕТСЯ: секции бокового меню раскрыты всегда и не сворачиваются
+    /// (MainWindowViewModel.SectionsCollapsible — «по умолчанию эти поля развернуты и убери вообще
+    /// чтобы они сворачивались»). Сама настройка не выброшена — она читается и пишется прежним
+    /// кодом и оживёт, если сворачивание вернут; тест держит её рабочей и, главное, держит её в
+    /// списке ключей, которые НЕ синхронизируются: состояние окна на одном компьютере не должно
+    /// разворачивать секцию у всех.</summary>
     [Fact]
     public void TheCollapsedState_IsRemembered_AndStaysOnThisMachine()
     {
