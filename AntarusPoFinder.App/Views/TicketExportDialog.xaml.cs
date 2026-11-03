@@ -43,13 +43,11 @@ public partial class TicketExportDialog : Window
     {
         InitializeComponent();
 
-        // ⚠️ В БЕТЕ отбор называется просто «открытые»: статуса «в работе» там больше не ставят
-        // (см. TicketStatus.InProgress), и упоминать его в названии отбора значило бы обещать
-        // ручку, которой нет. Сам отбор не менялся — он всегда брал ВСЕ незакрытые, и старый
-        // тикет, когда-то взятый в работу, из выгрузки не выпадает.
-        ScopeActive.Content = Core.Domain.AppIdentity.IsBeta
-            ? $"Только открытые ({activeCount})"
-            : $"Только открытые и взятые в работу ({activeCount})";
+        // Отбор называется просто «открытые»: статуса «в работе» больше не ставят (см.
+        // TicketStatus.InProgress и TicketsView.UpdateActionButtons), и упоминать его в названии
+        // отбора значило бы обещать ручку, которой нет. Сам отбор не менялся — он всегда брал ВСЕ
+        // незакрытые, и старый тикет, когда-то взятый в работу, из выгрузки не выпадает.
+        ScopeActive.Content = $"Только открытые ({activeCount})";
         ScopeAll.Content = $"Все, что видны на странице ({visibleCount})";
         ScopeSelected.IsEnabled = hasSelection;
 

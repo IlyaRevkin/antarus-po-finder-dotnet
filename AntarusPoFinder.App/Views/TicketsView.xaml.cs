@@ -36,9 +36,10 @@ public partial class TicketsView : UserControl
         /// одинаково красными и шкала не значила бы ничего. Закрытый тикет не красится вовсе: красная строка
         /// о решённой беде — ложная тревога, а именно от неё цветовые списки и перестают читать.</summary>
         /// <summary>Правило живёт в Core (TicketBoard.RowBrushKey), а не здесь: его проверяют тесты,
-        /// а приватный класс страницы им не виден. Приглушение закрытых — переделка вида, поэтому
-        /// только в бете; в рабочей версии закрытый тикет выглядит как прежде.</summary>
-        public string RowBrushKey => TicketBoard.RowBrushKey(Ticket, muteClosed: AppIdentity.IsBeta);
+        /// а приватный класс страницы им не виден. muteClosed остаётся параметром, а не вшито в
+        /// правило: приглушение закрытых — решение экрана, и у выгрузки/письма оно может быть
+        /// своим.</summary>
+        public string RowBrushKey => TicketBoard.RowBrushKey(Ticket, muteClosed: true);
         public string Text => Ticket.Text;
         public string StatusLabel => TicketStatus.Label(Ticket.Status);
         /// <summary>По чему столбец «Статус» на самом деле сортируется — см. TicketStatus.SortOrder.</summary>
@@ -101,7 +102,7 @@ public partial class TicketsView : UserControl
         TicketTypeCombo.SelectedIndex = 0;
 
         ApplyTab();
-        ApplyBetaLayout();
+        ApplyPageLayout();
         Loaded += (_, _) => Activate();
     }
 
@@ -127,11 +128,10 @@ public partial class TicketsView : UserControl
     ///   таблица занимает всё оставшееся место и прокручивается сама, а ряд под ней в невысоком
     ///   окне уходил за нижний край — о чём жалоба и была.
     ///
-    /// Только бета: рабочая версия обязана остаться прежней (образец — SearchView.HideParamFilesMode).</summary>
-    private void ApplyBetaLayout()
+    /// Кодом, а не правкой самой разметки: кнопки и ряд действий объявлены на своих местах, а
+    /// перестановка — одно решение в одном методе (образец — SearchView.HideParamFilesMode).</summary>
+    private void ApplyPageLayout()
     {
-        if (!AppIdentity.IsBeta) return;
-
         DetailBtn.Visibility = Visibility.Collapsed;
         RefreshBtn.Visibility = Visibility.Collapsed;
         ExportBtn.Visibility = Visibility.Collapsed;   // живёт в «Ещё», см. More_Click
@@ -154,7 +154,7 @@ public partial class TicketsView : UserControl
             "Вложения остаются на сетевом диске конторы — чтобы их увидел тот, кто вне сети, отправьте архив: «Ещё» → «Выгрузить…».";
     }
 
-    /// <summary>Бета: раскрыт ли бланк «НОВЫЙ ТИКЕТ». Между открытиями страницы не запоминается —
+    /// <summary>Раскрыт ли бланк «НОВЫЙ ТИКЕТ». Между открытиями страницы не запоминается —
     /// по умолчанию он свёрнут, страница должна открываться списком.</summary>
     private bool _newTicketOpen;
 
@@ -163,8 +163,6 @@ public partial class TicketsView : UserControl
     /// заведённые: страница открывалась формой, а не тем, за чем на неё приходят.</summary>
     private void ApplyNewTicketCard()
     {
-        if (!AppIdentity.IsBeta) return;
-
         var allowed = !_fwBugsTab;   // баг прошивки заводится только жучком на карточке выдачи
         NewTicketCard.Visibility = allowed && _newTicketOpen ? Visibility.Visible : Visibility.Collapsed;
         NewTicketToggleBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
@@ -263,10 +261,8 @@ public partial class TicketsView : UserControl
         TabBtnApp.Tag = _fwBugsTab ? null : "Active";
         TabBtnFwBugs.Tag = _fwBugsTab ? "Active" : null;
 
-        // В бете бланк свёрнут, пока его не раскрыли кнопкой «Новый тикет» (см. ApplyNewTicketCard);
-        // в рабочей версии он на странице всегда, как и был.
-        if (AppIdentity.IsBeta) ApplyNewTicketCard();
-        else NewTicketCard.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
+        // Бланк свёрнут, пока его не раскрыли кнопкой «Новый тикет» — см. ApplyNewTicketCard.
+        ApplyNewTicketCard();
         ShowAutoReportsCheck.Visibility = _fwBugsTab ? Visibility.Collapsed : Visibility.Visible;
 
         SeverityColumn.Visibility = _fwBugsTab ? Visibility.Visible : Visibility.Collapsed;
@@ -363,9 +359,7 @@ ApplyScopeHint();
         var openFwBugs = visibleToMe.Count(t => t.Type == TicketType.FwBug && t.Status != TicketStatus.Closed);
         TabFwBugsText.Text = openFwBugs > 0 ? $"Баги прошивок ({openFwBugs})" : "Баги прошивок";
 
-        // То же число для второй вкладки. Только в бете: на рабочей версии надпись на вкладке —
-        // привычка, а привычки меняются бетой (см. SearchView.PlaceSearchHowChecks).
-        if (AppIdentity.IsBeta)
+        // То же число для второй вкладки.
         {
             // Автоотчёты в это число не входят: это падения программы, а не чья-то просьба, и
             // человек на них не отвечает. Иначе вкладка показывала бы «24», а в списке лежало бы 17.
@@ -383,19 +377,18 @@ ApplyScopeHint();
             : "Автоматических отчётов о сбоях нет";
         ShowAutoReportsCheck.IsEnabled = autoCount > 0;
 
-        // Закрытые: в бете их прячет галка (по умолчанию снята), в рабочей версии список остаётся
-        // прежним — целиком. Отбор и порядок считает ядро (TicketBoard), чтобы правило проверялось
-        // тестом, а не глазами по живому экрану.
-        var showClosed = !AppIdentity.IsBeta || ShowClosedCheck.IsChecked == true;
+        // Закрытые прячет галка, по умолчанию снятая. Отбор и порядок считает ядро (TicketBoard),
+        // чтобы правило проверялось тестом, а не глазами по живому экрану.
+        var showClosed = ShowClosedCheck.IsChecked == true;
         var closedCount = TicketBoard.ClosedCount(TicketAutoReports.Visible(mine, ShowAutoReportsCheck.IsChecked == true));
         ShowClosedCheck.Content = closedCount > 0 ? $"Показывать закрытые ({closedCount})" : "Закрытых тикетов нет";
         ShowClosedCheck.IsEnabled = closedCount > 0;
-        ShowClosedCheck.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        ShowClosedCheck.Visibility = Visibility.Visible;
 
         var visible = TicketBoard.Visible(mine, ShowAutoReportsCheck.IsChecked == true, showClosed);
         // Порядок по умолчанию — «за что браться», а не «когда заводили» (TicketBoard.Order).
         // Выбранную человеком сортировку это не трогает: она восстанавливается ниже.
-        if (AppIdentity.IsBeta) visible = TicketBoard.Order(visible);
+        visible = TicketBoard.Order(visible);
 
         // Порядок сортировки запоминается и восстанавливается вокруг подмены источника.
         // Новый ItemsSource обнуляет и стрелку в заголовке, и сам порядок — и тикет, открытый из
@@ -450,10 +443,9 @@ ApplyScopeHint();
         //
         // Сам статус из программы НЕ ВЫРЕЗАН и из базы не мигрирован (TicketStatus.InProgress на
         // месте): если где-то такая запись всё же есть — в чужой базе, в архиве, в бакете, — она
-        // обязана остаться читаемой. Поставить этот статус заново в бете нельзя, прочитать —
-        // можно всегда.
-        TakeInProgressBtn.Visibility = !AppIdentity.IsBeta && canModerate && selected!.Status != TicketStatus.InProgress
-            ? Visibility.Visible : Visibility.Collapsed;
+        // обязана остаться читаемой. Поставить этот статус заново нельзя, прочитать — можно всегда.
+        // Кнопка объявлена в разметке и гасится здесь, а не удалена: вернуть её — одна строка.
+        TakeInProgressBtn.Visibility = Visibility.Collapsed;
         CloseTicketBtn.Visibility = canModerate && selected!.Status != TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;
         ReopenTicketBtn.Visibility = canModerate && selected!.Status == TicketStatus.Closed ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -584,10 +576,10 @@ ApplyScopeHint();
         {
             TicketExportDialog.Scope.Selected => (new List<Ticket> { selected! }, "один выбранный тикет"),
             TicketExportDialog.Scope.AllVisible => (visible, IsAdmin ? "все тикеты" : "тикеты этого пользователя"),
-            // Отбор один и тот же — ВСЕ незакрытые; в бете у него только название короче, потому
-            // что статуса «в работе» там больше не ставят (см. UpdateActionButtons). Старый тикет
-            // с этим статусом в выгрузку по-прежнему попадает.
-            _ => (active, AppIdentity.IsBeta ? "открытые" : "открытые и в работе"),
+            // Отбор — ВСЕ незакрытые. Название короткое, потому что статуса «в работе» больше не
+            // ставят (см. UpdateActionButtons); старый тикет с этим статусом в выгрузку
+            // по-прежнему попадает.
+            _ => (active, "открытые"),
         };
         if (tickets.Count == 0)
         {
@@ -702,17 +694,15 @@ ApplyScopeHint();
     private void ShowDetail_Click(object sender, RoutedEventArgs e) => OpenDetailForSelected();
     private void TicketsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenDetailForSelected();
 
-    /// <summary>Enter на выделенной строке открывает тикет — замена кнопке «Подробнее», которой в
-    /// бете больше нет. Иначе единственным входом в тикет остался бы двойной щелчок, то есть мышь:
-    /// список, по которому ходят стрелками, оказался бы без входа вовсе.
+    /// <summary>Enter на выделенной строке открывает тикет — замена кнопке «Подробнее», которой
+    /// больше нет (ApplyPageLayout). Иначе единственным входом в тикет остался бы двойной щелчок,
+    /// то есть мышь: список, по которому ходят стрелками, оказался бы без входа вовсе.
     ///
     /// Preview — намеренно: собственная обработка Enter в DataGrid переводит выделение на строку
-    /// ниже, и до нас событие дошло бы уже съеденным. В рабочей версии поведение прежнее — там
-    /// кнопка на месте, а менять привычное нажатие без нужды незачем.</summary>
+    /// ниже, и до нас событие дошло бы уже съеденным.</summary>
     private void TicketsGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (!IsInitialized) return;
-        if (!AppIdentity.IsBeta) return;
         if (e.Key != System.Windows.Input.Key.Enter) return;
         if (TicketsGrid.SelectedItem is not TicketRow) return;
 
