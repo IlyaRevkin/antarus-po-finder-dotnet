@@ -17,6 +17,11 @@ public partial class NewVersionsView : UserControl
         public string SubtypeName => Record.SubtypeName;
         public string CtrlName => Record.CtrlName;
         public string VersionRaw => Record.VersionRaw;
+        /// <summary>Кто залил версию. Прочерк вместо пустоты: у прошивок, заведённых до появления
+        /// поля, автора нет, и пустая ячейка читалась бы как «данные не загрузились».</summary>
+        public string AuthorName => string.IsNullOrWhiteSpace(Record.AuthorName) ? "—" : Record.AuthorName;
+        /// <summary>Исходное название — то, как сборку зовёт программист; по нему её и ищут.</summary>
+        public string SourceName => string.IsNullOrWhiteSpace(Record.SourceName) ? "—" : Record.SourceName;
         /// <summary>Описание В ОДНУ СТРОКУ.
         ///
         /// Программист пишет «что изменилось» в несколько абзацев — это правильно и так и задумано.

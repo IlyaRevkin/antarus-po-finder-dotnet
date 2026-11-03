@@ -20,6 +20,9 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <!-- Значок «i» и жучок — КАЖДЫЙ В СВОЕЙ колонке. Пока они делили одну, оба
+                         прижимались друг к другу вплотную и читались как один слипшийся знак. -->
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <!-- ЧТО ЭТО ЗА ОБЪЕКТ — значком, перед названием. Выдача поиска это столбик
@@ -58,7 +61,7 @@
                      карточек не читается вовсе — глаз скользит мимо неё целиком, вместе с нужным.
                      Только бета: в рабочей версии карточка остаётся прежней. -->
                 <Border Grid.Column="4" x:Name="InfoIcon" Visibility="Collapsed" Cursor="Hand" Background="Transparent"
-                        Padding="6,2,0,2" VerticalAlignment="Center"
+                        Padding="8,2,2,2" Margin="0,0,6,0" VerticalAlignment="Center"
                         MouseLeftButtonUp="InfoIcon_Click"
                         ToolTip="Подробности об этой версии">
                     <Grid>
@@ -74,7 +77,7 @@
                         <StackPanel x:Name="InfoPopupPanel"/>
                     </Border>
                 </Popup>
-                <Border Grid.Column="4" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
+                <Border Grid.Column="5" x:Name="BugIcon" Cursor="Hand" Background="Transparent"
                         Padding="6,2,0,2" VerticalAlignment="Center"
                         MouseLeftButtonUp="BugIcon_Click"
                         ToolTip="Сообщить о баге в этой прошивке">
@@ -137,8 +140,13 @@
             <!-- Под каким именем прошивку принесли на загрузку: на диске файл лежит переименованным
                  в номер версии, и узнать свою сборку по номеру автор не может. Пусто у версий,
                  загруженных до появления столбца, — строка тогда скрыта. -->
-            <TextBlock x:Name="SourceNameLabel" Style="{StaticResource MutedText}" Margin="0,4,0,0"
-                       TextWrapping="Wrap" Visibility="Collapsed"/>
+            <!-- ВЫДЕЛЯЕМЫЙ ТЕКСТ, а не надпись: исходное название переписывают в переписку и в
+                 заявку, а из TextBlock его не скопировать мышью. Поле только для чтения и без
+                 рамки — выглядит как обычная строка карточки, но текст в нём выделяется. -->
+            <TextBox x:Name="SourceNameLabel" IsReadOnly="True" BorderThickness="0" Padding="0"
+                     Background="Transparent" Foreground="{DynamicResource TextMutedBrush}"
+                     FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                     IsReadOnlyCaretVisible="False" Cursor="IBeam"/>
 
             <!-- Кто загрузил прошивку. Имя хранится строкой (fw_versions.author_name): ссылка на
                  локальную таблицу users у коллеги не значит ничего. Пусто у старых записей —

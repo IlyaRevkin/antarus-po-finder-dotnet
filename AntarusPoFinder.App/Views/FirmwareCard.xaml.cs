@@ -250,11 +250,11 @@ public partial class FirmwareCard : UserControl
         // В бете строка под названием короткая, а остальное уезжает под значок «i» (см. разметку и
         // FwCardMeta.ShortLine). В рабочей версии строка прежняя: вид там не меняем.
         MetaLabel.Text = AppIdentity.IsBeta
-            ? FwCardMeta.ShortLine(result.Execution, result.ConfigName, result.Controller)
+            ? FwCardMeta.ShortLine(result.Execution, result.ConfigName, uploadDate)
             : FwCardMeta.Line(result.Execution, result.ConfigName, result.Controller, result.EquipmentType,
                 result.WorkType, uploadDate, result.UsageCount);
-
-        FillInfoPopup(result, uploadDate);
+        // Пустая строка — не повод держать пустое место под ней.
+        MetaLabel.Visibility = string.IsNullOrWhiteSpace(MetaLabel.Text) ? Visibility.Collapsed : Visibility.Visible;
 
         // Номера ОПЦ — своей строкой, выше общей (см. FwCardMeta.OpcLine и разметку).
         var opcNumbers = result.IsOpc ? FwCardMeta.OpcLine(result.RequestNum, result.CabinetSn) : "";
@@ -286,7 +286,11 @@ public partial class FirmwareCard : UserControl
         _allTags = tags;
         // Свёрнуто: у прошивки, подходящей десятку шкафов, все теги-названия занимали полкарточки.
         // Показываем несколько самых коротких, остальное — за «показать все теги (N)» (см. ShowAllTags).
+        // ТЕГИ НА КАРТОЧКЕ НЕ ПОКАЗЫВАЕМ: для них есть кнопка «Теги», а полный набор виден под
+        // значком «i». Пилюли занимали в выдаче целую строку на каждой карточке — ровно то, от чего
+        // просили избавиться («избавиться от лишних пилюль в карточке»).
         TagsView.Configure(tags, null, readOnly: true, collapseAfter: TagsCollapseAfter);
+        TagsView.Visibility = AppIdentity.IsBeta ? Visibility.Collapsed : Visibility.Visible;
         TagsView.Visibility = tags.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // «Синхронизирован ли этот тег» — правки этой прошивки ещё в накопителе, на диск не ушли
@@ -326,6 +330,12 @@ public partial class FirmwareCard : UserControl
         if (showAuthor) AuthorLabel.Text = $"Автор: {author}";
 
         ShowFilesLine(result, flags);
+        // Строка файлов и контроллер уезжают под значок «i»; на карточке их больше нет.
+        var filesText = FilesLabel.Text.StartsWith("Файлы: ", StringComparison.Ordinal)
+            ? FilesLabel.Text["Файлы: ".Length..]
+            : FilesLabel.Text;
+        if (AppIdentity.IsBeta) FilesLabel.Visibility = Visibility.Collapsed;
+        FillInfoPopup(result, uploadDate, result.Controller ?? "", filesText, string.Join(", ", tags));
 
         ActionsPanel.Children.Clear();
         MorePanel.Children.Clear();
@@ -1025,14 +1035,16 @@ public partial class FirmwareCard : UserControl
     ///
     /// Пустых строк здесь нет вовсе (см. FwCardMeta.Details): «Автор: —» не отвечает ни на какой
     /// вопрос, а место занимает. Если показывать нечего, значок не появляется.</summary>
-    private void FillInfoPopup(HierarchyResult result, string uploadDate)
+    private void FillInfoPopup(HierarchyResult result, string uploadDate,
+        string controller = "", string files = "", string tags = "")
     {
         if (!AppIdentity.IsBeta) return;
 
         var rows = FwCardMeta.Details(
             result.EquipmentType, result.WorkType, uploadDate, result.UsageCount,
             result.SourceName ?? "", result.AuthorName ?? "", hardware: "",
-            result.IsOpc ? result.RequestNum : "", result.IsOpc ? result.CabinetSn : "");
+            result.IsOpc ? result.RequestNum : "", result.IsOpc ? result.CabinetSn : "",
+            controller, files, tags);
 
         InfoPopupPanel.Children.Clear();
         foreach (var (label, value) in rows)

@@ -35,6 +35,10 @@
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*" ElementStyle="{StaticResource DataGridCellText}"/>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DateOnly}" Width="100" ElementStyle="{StaticResource DataGridCellText}"/>
+                <!-- КТО ЗАЛИЛ. На модерации первый вопрос по незнакомой версии — «к кому идти», и
+                     до сих пор ответ приходилось искать перепиской, хотя он лежит в базе. -->
+                <DataGridTextColumn Header="Автор" Binding="{Binding AuthorName}" Width="120" ElementStyle="{StaticResource DataGridCellText}"/>
+                <DataGridTextColumn Header="Исходное название" Binding="{Binding SourceName}" Width="160" ElementStyle="{StaticResource DataGridCellText}"/>
                 <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="140" ElementStyle="{StaticResource DataGridCellText}"/>
                 <!-- Столбца «Статус» здесь больше нет: в списке остались только текущие активные
                      версии, и он всегда показывал бы одно и то же «Текущая». -->

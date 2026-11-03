@@ -71,12 +71,15 @@ public static class FwCardMeta
     /// через точку в нём не читается: глаз скользит мимо всей строки целиком, включая нужное.
     /// Поэтому тип оборудования, вид работ, дата загрузки и счётчик выборов уезжают под значок —
     /// они отвечают на вопросы, которые задают РЕДКО и по одной карточке, а не по всей выдаче.</summary>
-    public static string ShortLine(string execution, string configName, string controller)
+    public static string ShortLine(string execution, string configName, string uploadDate = "")
     {
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(execution)) parts.Add(execution.Trim());
         if (!string.IsNullOrWhiteSpace(configName)) parts.Add(configName.Trim());
-        if (!string.IsNullOrWhiteSpace(controller)) parts.Add($"Контроллер: {controller.Trim()}");
+        // ДАТА ОСТАЁТСЯ НА КАРТОЧКЕ. Сначала она уехала под значок «i» вместе с остальными
+        // подробностями, и это была ошибка: по дате отличают «ту самую свежую» от прошлогодней
+        // прямо в выдаче, не открывая ничего. Илья дословно: «дату нужно знать».
+        if (!string.IsNullOrWhiteSpace(uploadDate)) parts.Add(uploadDate.Trim());
         return string.Join(Separator, parts);
     }
 
@@ -85,15 +88,21 @@ public static class FwCardMeta
     /// какой вопрос, а место занимает.</summary>
     public static List<(string Label, string Value)> Details(
         string equipmentType, string workType, string uploadDate, int usageCount,
-        string sourceName, string author, string hardware, string requestNum, string cabinetSn)
+        string sourceName, string author, string hardware, string requestNum, string cabinetSn,
+        string controller = "", string files = "", string tags = "")
     {
         var rows = new List<(string, string)>();
         Add("Исходное название", sourceName);
         Add("Автор", author);
+        // Контроллер, список файлов и теги раньше стояли на самой карточке и занимали по строке
+        // каждый. В столбике одинаковых карточек это и было «избыточной информацией»: нужны они,
+        // когда разбираются с ОДНОЙ версией, а не когда просматривают выдачу.
+        Add("Контроллер", controller);
+        Add("Файлы", files);
+        Add("Теги", tags);
         Add("Тип оборудования", equipmentType);
         Add("Вид работ", workType);
         Add("Железо", hardware);
-        Add("Загружена", uploadDate);
         Add("Заявка", requestNum);
         Add("Номер шкафа", cabinetSn);
         if (usageCount > 0)
