@@ -246,7 +246,11 @@ public partial class Database : IDisposable
                  -- Теги документа — ровно как param_files.tags и fw_versions.tags: строкой через
                  -- разделитель (TagString), а не отдельной таблицей связей. По ним документ
                  -- находится поиском, и ими же он отбирается в списке.
-                 tags         TEXT NOT NULL DEFAULT ''
+                 tags         TEXT NOT NULL DEFAULT '',
+                 -- Подтипы шкафов СВОБОДНОЙ таблицы (у которой нет файла) — местные id через
+                 -- запятую. У таблицы при файле привязка выводится из param_files и это поле пусто:
+                 -- см. Domain/ParamTable.cs, ParamTableBinding.
+                 subtype_ids  TEXT NOT NULL DEFAULT ''
              );
 
              -- Произвольные столбцы документа сверх обязательных семи. Отдельной таблицей, а не
@@ -1054,7 +1058,11 @@ public partial class Database : IDisposable
             ("tags", "TEXT NOT NULL DEFAULT ''"),
             ("deleted_at", "TEXT NOT NULL DEFAULT ''"),
             ("sync_id", "TEXT NOT NULL DEFAULT ''"),
-            ("updated_at", "TEXT NOT NULL DEFAULT ''"));
+            ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+            // Подтипы шкафов свободной таблицы. Без этой строки поле не доехало бы ни до одной уже
+            // работающей базы: CREATE TABLE IF NOT EXISTS выше существующую таблицу не трогает, а
+            // свободные таблицы в бете заводятся именно в таких базах.
+            ("subtype_ids", "TEXT NOT NULL DEFAULT ''"));
         AddColumnsIfMissing("param_table_revisions",
             ("summary", "TEXT NOT NULL DEFAULT ''"),
             ("deleted_at", "TEXT NOT NULL DEFAULT ''"),

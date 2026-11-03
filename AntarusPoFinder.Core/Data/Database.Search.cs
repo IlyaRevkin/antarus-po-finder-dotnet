@@ -754,7 +754,20 @@ public partial class Database
         {
             if (table.Id is not int tableId) continue;
 
-            var head = new[] { table.Name, table.Manufacturer, table.Filename };
+            // Привязка к шкафам — ЧЕРЕЗ ParamTableBinding.Of, а не по файлу: у свободной таблицы
+            // (в бете такие и заводятся) файла нет, и привязка живёт её собственным полем. Раньше
+            // здесь стоял разбор по файлу, и у свободных таблиц колонка «Шкафы» в выдаче была
+            // пустой всегда — ровно то, из-за чего таблица «не находится там, где её ищут».
+            var links = Services.ParamTableBinding.Of(this, table).Links;
+            var subtypes = string.Join(", ", links.Select(l => l.Display));
+
+            // Тип и подтип шкафа ищутся наравне с названием и производителем: наладчик спрашивает
+            // «параметры ПЧ на ПЖ 2.0», а не «документ по имени». Поиск по прошивкам по этим же
+            // полям и идёт (см. SearchableTextOf), и расходиться с ним здесь незачем.
+            var head = new[] { table.Name, table.Manufacturer, table.Filename }
+                .Concat(links.Select(l => l.GroupName))
+                .Concat(links.Select(l => l.SubtypeName))
+                .ToArray();
             var tags = TagString.Parse(table.Tags);
 
             // Веса: название/производитель/имя файла — 2, теги — 3, содержимое — 1. Документ,
@@ -770,8 +783,6 @@ public partial class Database
 
             if (score == 0) continue;
 
-            var subtypes = string.Join(", ", Services.ParamTableBinding
-                .For(this, table.DiskPath, table.Filename).Links.Select(l => l.Display));
             hits.Add(new ParamTableHit(table, score, matched, subtypes));
         }
 

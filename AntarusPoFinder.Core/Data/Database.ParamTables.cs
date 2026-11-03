@@ -202,7 +202,7 @@ public partial class Database
     // ── Документы ─────────────────────────────────────────────────────────────
 
     private const string ParamTableColumns =
-        "id, disk_path, filename, name, manufacturer, tags, created_at, updated_at, deleted_at, sync_id";
+        "id, disk_path, filename, name, manufacturer, tags, subtype_ids, created_at, updated_at, deleted_at, sync_id";
 
     private static ParamTable ReadParamTable(Microsoft.Data.Sqlite.SqliteDataReader r) => new()
     {
@@ -212,6 +212,7 @@ public partial class Database
         Name = GetString(r, "name"),
         Manufacturer = GetString(r, "manufacturer"),
         Tags = GetString(r, "tags"),
+        SubtypeIds = GetString(r, "subtype_ids"),
         CreatedAt = GetString(r, "created_at"),
         UpdatedAt = GetString(r, "updated_at"),
         DeletedAt = GetString(r, "deleted_at"),
@@ -361,8 +362,8 @@ public partial class Database
         var updatedAt = string.IsNullOrEmpty(table.UpdatedAt) ? NowIsoPrecise() : table.UpdatedAt;
 
         ExecuteNonQuery("""
-            INSERT INTO param_tables (disk_path, filename, name, manufacturer, tags, created_at, updated_at, deleted_at, sync_id)
-            VALUES (@d, @f, @n, @m, @tg, @c, @u, @del, @sy)
+            INSERT INTO param_tables (disk_path, filename, name, manufacturer, tags, subtype_ids, created_at, updated_at, deleted_at, sync_id)
+            VALUES (@d, @f, @n, @m, @tg, @sub, @c, @u, @del, @sy)
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@d", table.DiskPath);
@@ -370,6 +371,7 @@ public partial class Database
             cmd.Parameters.AddWithValue("@n", table.Name);
             cmd.Parameters.AddWithValue("@m", table.Manufacturer);
             cmd.Parameters.AddWithValue("@tg", table.Tags ?? "");
+            cmd.Parameters.AddWithValue("@sub", table.SubtypeIds ?? "");
             cmd.Parameters.AddWithValue("@c", createdAt);
             cmd.Parameters.AddWithValue("@u", updatedAt);
             cmd.Parameters.AddWithValue("@del", table.DeletedAt);
@@ -403,6 +405,21 @@ public partial class Database
         ExecuteNonQuery("UPDATE param_tables SET tags=@t, updated_at=@u WHERE id=@id", cmd =>
         {
             cmd.Parameters.AddWithValue("@t", tags ?? "");
+            cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt);
+            cmd.Parameters.AddWithValue("@id", id);
+        });
+
+    /// <summary>Подтипы шкафов СВОБОДНОЙ таблицы — набором целиком, а не по одному: человек правит
+    /// его целиком одним списком отметок, и «добавь/убери» здесь было бы придуманной дробностью.
+    ///
+    /// У таблицы при файле это поле не заполняется: там привязка выводится из записей param_files
+    /// (см. ParamTableBinding), и второй, свой ответ на тот же вопрос разошёлся бы с первым.
+    /// <paramref name="updatedAt"/> задаётся только импортом конфига — по той же причине, что и у
+    /// остальной шапки документа.</summary>
+    public void UpdateParamTableSubtypes(int id, string subtypeIds, string? updatedAt = null) =>
+        ExecuteNonQuery("UPDATE param_tables SET subtype_ids=@s, updated_at=@u WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@s", subtypeIds ?? "");
             cmd.Parameters.AddWithValue("@u", string.IsNullOrEmpty(updatedAt) ? NowIsoPrecise() : updatedAt);
             cmd.Parameters.AddWithValue("@id", id);
         });
