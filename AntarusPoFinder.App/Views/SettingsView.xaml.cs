@@ -219,8 +219,6 @@ public partial class SettingsView : UserControl
     /// трижды.</summary>
     private void SetUpLocalCacheBlock()
     {
-        if (!AppIdentity.IsBeta) return;
-
         LocalCacheCard.Visibility = Visibility.Visible;
 
         _fillingCleanupPolicy = true;
@@ -428,8 +426,6 @@ public partial class SettingsView : UserControl
     /// бы пустой «АДМИНИСТРИРОВАНИЕ».</summary>
     private void BuildSidebar()
     {
-        if (!AppIdentity.IsBeta) return;
-
         // Лента переезжает из своей строки в левую колонку основной строки — и становится
         // вертикальной. Отдельного контрола под это не заводим: два списка одних и тех же разделов
         // разъехались бы при первой же добавленной вкладке.
@@ -506,8 +502,6 @@ public partial class SettingsView : UserControl
     /// нельзя.</summary>
     private void CollapseRareTabs()
     {
-        if (!AppIdentity.IsBeta) return;
-
         var any = false;
         foreach (var (button, _) in RareTabs())
         {
@@ -649,34 +643,29 @@ public partial class SettingsView : UserControl
 
         TabBtnHierarchy.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
-        // Список подключений — переделка 2.0 и инструмент администратора: в рабочей версии вкладки
-        // нет вовсе, иначе наладчик получил бы экран, на котором ему нечего решать.
-        TabBtnConnections.Visibility =
-            isAdmin && Core.Domain.AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        // Список подключений — инструмент администратора: наладчику там нечего решать.
+        TabBtnConnections.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnUsers.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // «Чистка диска» переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то
         // есть чужую работу. Была единственной администраторской СТРАНИЦЕЙ (RolesConfig.RoleAccess) —
         // став вкладкой, осталась администраторской ровно так же.
         TabBtnCleanup.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnModeration.Visibility = isAdmin || role == "naladchik" ? Visibility.Visible : Visibility.Collapsed;
-        // ТЕГИ: в бете — кнопкой в «Прошивках», а не отдельной пилюлей сверху («пелюль сверху стало
-        // уже слишком много»). Панель при этом одна и та же, просто показывается окном. В стабильной
-        // программе всё остаётся как было: обе сборки идут из одного дерева, и менять привычное
-        // расположение людям посреди рабочего дня незачем.
-        // Сервисные вкладки — только в бете и только тем ролям, которым эти страницы и так были
-        // доступны (RolesConfig.RoleAccess): место поменялось, права нет.
-        TabBtnTickets.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
-        TabBtnHosting.Visibility = AppIdentity.IsBeta && (isAdmin || role == "programmer")
-            ? Visibility.Visible : Visibility.Collapsed;
+        // «Тикеты» и «Хранилище» — ВКЛАДКИ НАСТРОЕК, а не пункты бокового меню: это сервисное, а
+        // не работа (Илья 16.10.2026, см. RolesConfig). Роли те же, что и были у самих страниц
+        // (RolesConfig.RoleAccess): место поменялось, права нет.
+        TabBtnTickets.Visibility = Visibility.Visible;
+        TabBtnHosting.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
 
+        // ТЕГИ — кнопкой в «Прошивках», а не отдельной пилюлей сверху («пелюль сверху стало уже
+        // слишком много»). Панель при этом одна и та же, просто показывается окном, поэтому
+        // собственная вкладка «Теги» не нужна вовсе.
         var tagsAllowed = isAdmin || role == "naladchik";
-        var tagsAsButton = AppIdentity.IsBeta && tagsAllowed;
-        TabBtnTags.Visibility = tagsAllowed && !tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
-        OpenTagsBtn.Visibility = tagsAsButton ? Visibility.Visible : Visibility.Collapsed;
-        // Потерянные инструкции — новая возможность, пока только в бете. Право то же, что и у самой
-        // вкладки «Прошивки» (она администраторская): привязка пишет на общий диск и в общий бакет.
-        OpenOrphanInstructionsBtn.Visibility = AppIdentity.IsBeta && isAdmin
-            ? Visibility.Visible : Visibility.Collapsed;
+        TabBtnTags.Visibility = Visibility.Collapsed;
+        OpenTagsBtn.Visibility = tagsAllowed ? Visibility.Visible : Visibility.Collapsed;
+        // Потерянные инструкции. Право то же, что и у самой вкладки «Прошивки» (она
+        // администраторская): привязка пишет на общий диск и в общий бакет.
+        OpenOrphanInstructionsBtn.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // «Исполнения» ведёт тот, кто собирает прошивки: администратор и программист.
         TabBtnReservations.Visibility = isAdmin || role == "programmer" ? Visibility.Visible : Visibility.Collapsed;
         // «Почта» — только администратору: здесь реквизиты почтового ящика конторы и список
@@ -4252,12 +4241,10 @@ public partial class SettingsView : UserControl
     /// откатить или (если она не текущая) сделать текущей.</summary>
     private void UpdateFirmwareActionState()
     {
-        // ⚠️ ВЫКЛЮЧЕНИЕ ВЕРСИЙ — ТОЛЬКО В БЕТЕ (тот же довод, что и в FirmwareCard): в рабочей
-        // версии у прошивки по-прежнему есть лишь откат. Видимость ставится ДО проверки выбора:
-        // без выбранной строки метод выходит раньше, и кнопки оставались на экране.
-        // Роль здесь на тех же правах, что и у кнопок отката (UpdateRollbackAccess): правка
-        // состояния прошивки — дело администратора.
-        var allowed = Core.Domain.AppIdentity.IsBeta && _services.Cfg.CurrentRole() == "administrator";
+        // Видимость ставится ДО проверки выбора: без выбранной строки метод выходит раньше, и
+        // кнопки оставались бы на экране. Роль здесь на тех же правах, что и у кнопок отката
+        // (UpdateRollbackAccess): правка состояния прошивки — дело администратора.
+        var allowed = _services.Cfg.CurrentRole() == "administrator";
         DisableFirmwareBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
         KeepOnlyFirmwareBtn.Visibility = allowed ? Visibility.Visible : Visibility.Collapsed;
 
@@ -4643,13 +4630,13 @@ public partial class SettingsView : UserControl
         EnableQuickAppsDragDrop();
     }
 
-    /// <summary>Перетаскивание в «Быстрый доступ» — переделка вида, а значит только бета. Код общий
-    /// (бета и рабочая версия отличаются константой сборки), поэтому развилка стоит здесь, явно:
-    /// в рабочей версии список остаётся прежним — «Добавить», «Удалить» и правка в таблице.</summary>
+    /// <summary>Перетаскивание в «Быстрый доступ»: порядок значков меняется мышью, а не только
+    /// кнопками «Добавить»/«Удалить» и правкой в таблице. Подсказка показывается рядом — без неё о
+    /// перетаскивании не догадываются.</summary>
     private void EnableQuickAppsDragDrop()
     {
-        AppsGrid.AllowDrop = AppIdentity.IsBeta;
-        QuickAppsDragHint.Visibility = AppIdentity.IsBeta ? Visibility.Visible : Visibility.Collapsed;
+        AppsGrid.AllowDrop = true;
+        QuickAppsDragHint.Visibility = Visibility.Visible;
     }
 
     private Point _appDragStart;
