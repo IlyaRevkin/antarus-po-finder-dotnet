@@ -1,7 +1,7 @@
 ﻿<Window x:Class="AntarusPoFinder.App.Views.ParamTableWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Icon="/Assets/icon.ico"
+        Icon="pack://application:,,,/AntarusPoFinder.App;component/Assets/icon.ico"
         Title="Таблица параметров"
         Width="1180" Height="720" MinWidth="900" MinHeight="540"
         Background="{DynamicResource BgBrush}"

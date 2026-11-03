@@ -111,6 +111,37 @@ public class ViewsRenderTests
 
     private static AppServices Services() => new();
 
+    /// <summary>Оболочка-заглушка: окнам она нужна только чтобы было куда сказать «готово».
+    /// Ничего не делает и ничего не проверяет — проверяется здесь построение разметки.</summary>
+    private sealed class SilentHost : IAppHost
+    {
+        private sealed class Scope : IBusyScope
+        {
+            public string Text { get; set; } = "";
+            public void Report(int done, int total) { }
+            public void Dispose() { }
+        }
+
+        public void ShowStatus(string message, int ms = 4000,
+            AntarusPoFinder.Core.Domain.NotificationCategory category = AntarusPoFinder.Core.Domain.NotificationCategory.General,
+            Action? reopen = null, bool record = true) { }
+        public IBusyScope BeginBusy(string text) => new Scope();
+        public IDisposable BeginSync(string stage) => new Scope();
+        public void NoteSyncResult(string? message, bool isError) { }
+        public void ReloadSidebarApps() { }
+        public void SwitchRole(string role) { }
+        public void Navigate(string pageId, string? section = null) { }
+        public void RefreshConfigSync() { }
+        public void OnRootPathChanged() { }
+        public void RefreshDiskStatus() { }
+        public void PushCatalogChange(string what, string subjectKey = "",
+            AntarusPoFinder.Core.Domain.NotificationCategory category = AntarusPoFinder.Core.Domain.NotificationCategory.Hierarchy) { }
+        public void InvalidateSearchResults() { }
+        public void OnTicketsViewed() { }
+        public System.Threading.Tasks.Task SyncTicketsWithStorageAsync(bool force = false) =>
+            System.Threading.Tasks.Task.CompletedTask;
+    }
+
     // ── Страницы ──────────────────────────────────────────────────────────────
 
     public static IEnumerable<object[]> Pages() => new[]
@@ -569,6 +600,30 @@ public class ViewsRenderTests
             Assert.Empty(subtypes!.Selected);
 
             dialog.Close();
+        });
+    }
+
+    /// <summary>Окно СВОБОДНЫХ таблиц параметров строится, и кнопка «Свойства…» в нём есть.
+    ///
+    /// Без неё указать производителя и шкафы свободной таблице негде — это и была жалоба. Заодно
+    /// это первая проверка самого окна на построение: разметку у него правили не раз, а ловилось
+    /// это только тем, что кто-то вспомнил открыть документ.</summary>
+    [Fact]
+    public void ParamTableWindow_Standalone_ShowsPropsButton()
+    {
+        Ui.Run(() =>
+        {
+            var window = new ParamTableWindow(Services(), new SilentHost(), "", "", "");
+            Render(window);
+
+            var props = window.FindName("PropsBtn") as FrameworkElement;
+            var subtypes = window.FindName("SubtypesBtn") as FrameworkElement;
+            Assert.NotNull(props);
+            Assert.Equal(Visibility.Visible, props!.Visibility);
+            // «Подтипы…» правит подтипы ФАЙЛА параметров — записи, которой у свободной таблицы нет.
+            Assert.Equal(Visibility.Collapsed, subtypes!.Visibility);
+
+            window.Close();
         });
     }
 
