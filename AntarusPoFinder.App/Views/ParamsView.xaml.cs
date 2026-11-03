@@ -81,6 +81,13 @@ public partial class ParamsView : UserControl
         public string Manufacturer => string.IsNullOrWhiteSpace(Source.Manufacturer) ? "—" : Source.Manufacturer;
         public string TagsDisplay => string.IsNullOrWhiteSpace(Source.Tags) ? "—" : Source.Tags;
         public bool Standalone => Source.DiskPath.Length == 0 && Source.Filename.Length == 0;
+
+        /// <summary>К каким шкафам таблица относится — одной строкой. Считается при чтении списка
+        /// (ParamTableBinding.Of): у свободной таблицы привязка своя, у таблицы при файле выводится
+        /// из записей файла, и спрашивать надо одно и то же место, а не разбираться здесь заново.</summary>
+        public string Subtypes { get; init; } = "";
+
+        public string SubtypesDisplay => Subtypes.Length == 0 ? "—" : Subtypes;
         public string Origin => Standalone ? "свободная" : Source.Filename;
         public string DateOnly
         {
@@ -96,7 +103,15 @@ public partial class ParamsView : UserControl
 
     private void ReloadTables()
     {
-        _tableRows = _services.Db.GetParamTables().Select(t => new ParamTableRow { Source = t }).ToList();
+        _tableRows = _services.Db.GetParamTables()
+            .Select(t => new ParamTableRow
+            {
+                Source = t,
+                Subtypes = string.Join(", ", ParamTableBinding
+                    .Of(_services.Db, t, _services.Hierarchy, _services.Cfg.RootPath())
+                    .Links.Select(l => l.Display)),
+            })
+            .ToList();
         ApplyTableFilter();
     }
 
@@ -108,7 +123,10 @@ public partial class ParamsView : UserControl
             : _tableRows.Where(r =>
                 r.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || r.Source.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase)
-                || r.Source.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+                || r.Source.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)
+                // Тип и подтип шкафа — наравне с названием: таблицу ищут «по ПЖ 2.0», а не по
+                // имени документа, которого никто не помнит.
+                || r.Subtypes.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         TablesGrid.ItemsSource = shown;
         TablesEmptyHint.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

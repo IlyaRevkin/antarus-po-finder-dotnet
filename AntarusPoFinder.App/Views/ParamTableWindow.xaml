@@ -85,6 +85,7 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" x:Name="FileLabel"
@@ -106,12 +107,20 @@
                     Style="{StaticResource CompactSecondaryButton}" Margin="0,0,8,6"
                     Click="Subtypes_Click"
                     ToolTip="К каким подтипам шкафов подходит этот файл параметров. Тот же набор, что на странице «Параметры»: файл и документ описывают один и тот же шкаф"/>
-            <Button Grid.Row="0" Grid.Column="4" x:Name="TagsBtn" Content="Теги…"
+            <!-- СВОЙСТВА СВОБОДНОЙ ТАБЛИЦЫ — производитель ПЧ/УПП и подтипы шкафов. Показывается
+                 только у свободных таблиц (ставится из кода, см. ParamTableWindow): у документа при
+                 файле и то и другое берётся от самого файла, и второе место, где это правят,
+                 означало бы два расходящихся ответа на один вопрос. -->
+            <Button Grid.Row="0" Grid.Column="4" x:Name="PropsBtn" Content="Свойства…" Visibility="Collapsed"
+                    Style="{StaticResource CompactSecondaryButton}" Margin="0,0,8,6"
+                    Click="Props_Click"
+                    ToolTip="Производитель ПЧ/УПП и подтипы шкафов, к которым таблица относится: по ним её находят поиском"/>
+            <Button Grid.Row="0" Grid.Column="5" x:Name="TagsBtn" Content="Теги…"
                     Style="{StaticResource CompactSecondaryButton}" Margin="0,0,0,6"
                     Click="Tags_Click"
                     ToolTip="Слова, по которым документ находится поиском: «modbus», «пуск по месту», модель ПЧ"/>
 
-            <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="5">
+            <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="6">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*" MinWidth="160"/>

@@ -1,0 +1,70 @@
+﻿<Window x:Class="AntarusPoFinder.App.Views.ParamTablePropsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:AntarusPoFinder.App.Views"
+        Icon="pack://application:,,,/AntarusPoFinder.App;component/Assets/icon.ico"
+        Title="Свойства таблицы параметров"
+        Width="620" SizeToContent="Height" MinWidth="520"
+        Background="{DynamicResource BgBrush}"
+        WindowStartupLocation="CenterOwner">
+    <!-- Иконка абсолютным pack-URI, как во всех диалогах: короткий адрес WPF разрешает относительно
+         входной сборки процесса, и под тестовым хостом окно не строится вовсе (правило в CLAUDE.md). -->
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="TitleLabel" Style="{StaticResource SubtitleText}"
+                   TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+        <!-- Зачем это окно. Свободная таблица (в бете их и заводят) не привязана ни к какому файлу,
+             и привязку к шкафам выводить ей не из чего — её надо указать. Ровно это и была жалоба:
+             «я загружаю из файла таблицу ПЧ/УПП, но не могу указать производителя и к какому типу
+             шкафов привязать». Без того и другого таблица не находится там, где её ищут. -->
+        <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Чей это аппарат и к каким шкафам таблица относится. По этим полям её находят поиском и отбирают в списке — без них таблица видна только тому, кто помнит её название."/>
+
+        <Grid Grid.Row="2" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Производитель ПЧ/УПП:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <!-- Список из справочника (Database.GetParamManufacturers) — тот же, что и у загрузки
+                 файла параметров. Своего списка строкой в коде здесь нет намеренно: справочник
+                 правится в Настройках и ездит общим конфигом, а второй набор имён разошёлся бы с
+                 ним в первую же неделю. -->
+            <ComboBox Grid.Column="1" x:Name="ManufacturerCombo" Height="30"
+                      ToolTip="Чей аппарат: ESQ, Instart, Chint… Список берётся из справочника производителей"/>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Подтипы шкафов:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <!-- ТОТ ЖЕ контрол выбора подтипов, что в форме загрузки прошивки и на странице
+                 «Параметры» (SubtypeMultiSelect): отметки чекбоксами, подтипы из ВСЕХ типов шкафа —
+                 один и тот же аппарат ПЧ стоит в шкафах разных типов. Третий способ выбирать
+                 подтипы здесь не заводится. -->
+            <views:SubtypeMultiSelect Grid.Column="1" x:Name="SubtypesSelect" Height="34"/>
+        </Grid>
+
+        <TextBlock Grid.Row="4" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,4"
+                   Text="Отметить можно сколько угодно: одна и та же таблица параметров обычно подходит нескольким подтипам."/>
+
+        <DockPanel Grid.Row="5" Margin="0,14,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Отмена" IsCancel="True" Style="{StaticResource SecondaryButton}"
+                        Width="110" Margin="0,0,8,0" Click="Cancel_Click"/>
+                <Button Content="Сохранить" Width="130" IsDefault="True" Click="Save_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

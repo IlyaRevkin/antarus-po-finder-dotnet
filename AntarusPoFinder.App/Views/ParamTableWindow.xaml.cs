@@ -139,11 +139,16 @@ public partial class ParamTableWindow : Window
             : "Файл параметров: " + fileLabel;
         if (_standalone)
         {
-            // Привязка к шкафам ВЫВОДИТСЯ из записей файла параметров (ParamTableBinding), а файла
-            // здесь нет — показывать нечего и править нечем. Пустая строка «не привязан» на видном
-            // месте читалась бы как поломка, хотя это штатное состояние документа в бете.
-            BindingLabel.Visibility = Visibility.Collapsed;
+            // У свободной таблицы привязку выводить НЕ ИЗ ЧЕГО (файла нет), поэтому она живёт своим
+            // полем документа и правится здесь же — кнопкой «Свойства…», вместе с производителем.
+            // Кнопка «Подтипы…» рядом не нужна и даже вредна: она правит подтипы ФАЙЛА параметров,
+            // то есть другой записи, которой у свободной таблицы не существует.
+            //
+            // Раньше строка привязки у свободных таблиц была скрыта вовсе — «показывать нечего». Из
+            // этого и выросла жалоба: указать, к каким шкафам относится таблица, было негде, и
+            // найти её там, где ищут, не получалось.
             SubtypesBtn.Visibility = Visibility.Collapsed;
+            PropsBtn.Visibility = Visibility.Visible;
             ImportBtn.Content = "Из файла…";
             NewBtn.Visibility = Visibility.Visible;
         }
@@ -217,8 +222,14 @@ public partial class ParamTableWindow : Window
 
     private void Document_Changed(object sender, SelectionChangedEventArgs e)
     {
+        // WPF поднимает SelectionChanged ПОСРЕДИ InitializeComponent — раньше, чем присвоены поля
+        // окна (тот же случай, что у Purpose_Changed ниже).
+        if (!IsInitialized) return;
         LoadRevisions();
         ShowTags();
+        // Привязка к шкафам у свободной таблицы — СВОЯ у каждого документа, а не общая для окна:
+        // переключились на другой документ — и показывать надо его привязку, а не прежнюю.
+        ShowBinding();
     }
 
     private void LoadRevisions()
@@ -395,7 +406,32 @@ public partial class ParamTableWindow : Window
     /// должно.</summary>
     private void ShowBinding()
     {
-        if (_standalone) return;
+        var canEdit = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
+
+        // СВОБОДНАЯ ТАБЛИЦА — привязка её собственная, из поля документа, а не из записей файла
+        // (см. ParamTableBinding.Of). Пока документа не выбрано, показывать нечего: привязка живёт
+        // у документа, а не у окна.
+        if (_standalone)
+        {
+            _binding = Current is null
+                ? new ParamTableBinding.Result(new(), null)
+                : new ParamTableBinding.Result(ParamTableBinding.Own(_services.Db, Current), null);
+
+            BindingLabel.Visibility = Current is null ? Visibility.Collapsed : Visibility.Visible;
+            BindingLabel.Text = _binding.Links.Count == 0
+                ? "Шкафы не указаны — «Свойства…»"
+                : _binding.Describe();
+            // ⚠️ SetResourceReference, а не FindResource: присвоенная кисть перестала бы меняться
+            // со сменой темы.
+            BindingLabel.SetResourceReference(ForegroundProperty,
+                _binding.Links.Count == 0 ? "WarningBrush" : "TextBrush");
+            BindingLabel.ToolTip = _binding.Links.Count == 0
+                ? "К каким шкафам относится таблица, не указано — поиском по типу шкафа она не найдётся. Укажите в «Свойствах…»"
+                : _binding.Describe();
+
+            PropsBtn.IsEnabled = Current is not null && canEdit;
+            return;
+        }
 
         _binding = ParamTableBinding.For(_services.Db, _diskPath, _filename,
             _services.Hierarchy, _services.Cfg.RootPath());
@@ -412,7 +448,7 @@ public partial class ParamTableWindow : Window
             ? "Файл параметров в базе не значится: он есть на диске, но программа не знает, к какому шкафу он относится. «Подтипы…» это исправит."
             : _binding.Describe();
 
-        SubtypesBtn.IsEnabled = ParamTableEditing.CanEdit(_services.Cfg.CurrentRole());
+        SubtypesBtn.IsEnabled = canEdit;
     }
 
     private void ShowTags()
@@ -497,6 +533,45 @@ public partial class ParamTableWindow : Window
         return file;
     }
 
+    /// <summary>Свойства свободной таблицы — производитель ПЧ/УПП и подтипы шкафов.
+    ///
+    /// Жалоба Ильи: «загружаю из файла таблицу ПЧ/УПП, но не могу указать производителя и к какому
+    /// типу шкафов привязать». Поле производителя у документа было всегда, но заполнялось только
+    /// копией из записи файла параметров — у свободной таблицы файла нет, и спросить его было негде.
+    ///
+    /// Новой ревизии это НЕ заводит: ревизия — снимок значений, а здесь правится шапка.</summary>
+    private void Props_Click(object sender, RoutedEventArgs e) => EditProps(Current);
+
+    /// <summary>Спросить свойства у указанной таблицы и записать их. Отдельным методом, потому что
+    /// зовут его из трёх мест: кнопка «Свойства…» и оба способа завести таблицу — пустую и из
+    /// файла. Спрашивать СРАЗУ ПРИ ЗАВЕДЕНИИ важно: шапка, которую предложат заполнить потом,
+    /// остаётся пустой навсегда — именно так производитель и не заполнялся.</summary>
+    private void EditProps(ParamTable? table)
+    {
+        if (table?.Id is not int tableId) return;
+        if (!ParamTableEditing.CanEdit(_services.Cfg.CurrentRole())) return;
+
+        var dialog = new ParamTablePropsDialog(_services.Db, table.Name, table.Manufacturer,
+            ParamTableBinding.ParseIds(table.SubtypeIds)) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        var subtypes = ParamTableBinding.FormatIds(dialog.ResultSubtypeIds);
+        if (dialog.ResultManufacturer != table.Manufacturer)
+            _services.Db.UpdateParamTable(tableId, table.Name, dialog.ResultManufacturer);
+        if (subtypes != table.SubtypeIds)
+            _services.Db.UpdateParamTableSubtypes(tableId, subtypes);
+
+        LoadDocuments(tableId);
+        ShowBinding();
+
+        var parts = new List<string>();
+        if (dialog.ResultManufacturer.Length > 0) parts.Add("производитель: " + dialog.ResultManufacturer);
+        parts.Add(_binding.Links.Count == 0
+            ? "шкафы не указаны"
+            : "шкафы: " + string.Join(", ", _binding.Links.Select(l => l.Display)));
+        Announce($"Свойства таблицы «{table.Name}» — {string.Join("; ", parts)}");
+    }
+
     private void Tags_Click(object sender, RoutedEventArgs e)
     {
         if (Current?.Id is not int tableId) return;
@@ -568,6 +643,7 @@ public partial class ParamTableWindow : Window
 
         LoadDocuments(tableId);
         Announce($"Заведена таблица параметров «{dialog.ResultName}»: строк {dialog.ResultRows.Count}");
+        AskPropsOnCreate(tableId);
     }
 
     private void Import_Click(object sender, RoutedEventArgs e)
@@ -605,6 +681,18 @@ public partial class ParamTableWindow : Window
 
         LoadDocuments(tableId);
         Announce($"Заведена таблица параметров «{dialog.ResultName}»: строк {dialog.ResultRows.Count}");
+        AskPropsOnCreate(tableId);
+    }
+
+    /// <summary>Спросить шапку у только что заведённой СВОБОДНОЙ таблицы — производителя и шкафы.
+    ///
+    /// Сразу после заведения, а не «когда-нибудь потом из кнопки»: именно так эти поля и оставались
+    /// пустыми. У таблицы при файле не спрашивается вовсе — там и производитель, и шкафы берутся от
+    /// самого файла.</summary>
+    private void AskPropsOnCreate(int tableId)
+    {
+        if (!_standalone) return;
+        EditProps(_services.Db.GetParamTable(tableId));
     }
 
     /// <summary>В бете «Править…» превращается в карандаш.

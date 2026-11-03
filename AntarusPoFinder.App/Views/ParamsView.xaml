@@ -159,7 +159,7 @@
                                 ToolTip="Отвязать от файлов сразу все таблицы: значения, ревизии и теги остаются, пропадает только привязка к .par на диске"/>
                         <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="16,0,6,0"/>
                         <TextBox x:Name="TableSearchInput" Width="200" VerticalContentAlignment="Center"
-                                 ToolTip="Название, производитель или тег" TextChanged="TableSearch_Changed"/>
+                                 ToolTip="Название, производитель, тип шкафа или тег" TextChanged="TableSearch_Changed"/>
                         <TextBlock x:Name="TablesCountLabel" Text="Таблиц: 0" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     </StackPanel>
 
@@ -171,6 +171,12 @@
                             <DataGridTextColumn Header="Название" Binding="{Binding Name}" Width="*" MinWidth="200"
                                                 ElementStyle="{StaticResource DataGridCellText}"/>
                             <DataGridTextColumn Header="Производитель" Binding="{Binding Manufacturer}" Width="Auto" MinWidth="110"
+                                                ElementStyle="{StaticResource DataGridCellText}"/>
+                            <!-- К каким шкафам таблица относится. У свободной таблицы это её
+                                 собственная привязка, у таблицы при файле — выведенная из записей
+                                 файла (ParamTableBinding.Of). Колонка нужна затем же, зачем и само
+                                 поле: таблицу ищут по шкафу, а не по названию документа. -->
+                            <DataGridTextColumn Header="Шкафы" Binding="{Binding SubtypesDisplay}" Width="Auto" MinWidth="140"
                                                 ElementStyle="{StaticResource DataGridCellText}"/>
                             <DataGridTextColumn Header="Теги" Binding="{Binding TagsDisplay}" Width="Auto" MinWidth="130"
                                                 ElementStyle="{StaticResource DataGridCellText}"/>
