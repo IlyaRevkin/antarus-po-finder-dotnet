@@ -164,4 +164,209 @@ public class MobileSiteTests
         var parsed = MobileSite.ParseQuery("?q=%&ok=1");
         Assert.Equal("1", parsed["ok"]);
     }
+
+    // ── Параметры ПЧ/УПП ─────────────────────────────────────────────────────
+    //
+    // Жалоба Ильи: «я моб версию посмотрел, там нет поиска параметров упп ПЧ, а это важно».
+    // Проверяется то, на чём это ломается молча: поиск по коду настройки, состояния значения
+    // («снимается по месту» вместо «onsite»), правило отбора «неразмеченная строка видна всегда»
+    // и экранирование текста, который пишут руками.
+
+    private static ParamTableRow Row(string code, string title, string value = "",
+        string purpose = "", string description = "", string applicability = "") => new()
+    {
+        Kind = ParamRowKind.Param,
+        Code = code,
+        Title = title,
+        Value = value,
+        ValueState = value.Length > 0 ? ParamValueState.Set : ParamValueState.OnSite,
+        Purpose = purpose,
+        Description = description,
+        Applicability = applicability,
+        GroupName = ParamGroupCatalog.Main,
+    };
+
+    private static int SeedTable(Database db, string name, params ParamTableRow[] rows)
+    {
+        var id = db.AddParamTable(new ParamTable
+        {
+            DiskPath = @"Z:\ПО\Параметры\ESQ",
+            Filename = "ESQ-230.par",
+            Name = name,
+            Manufacturer = "ESQ",
+        });
+        ParamTableEditing.SaveRevision(db, id, rows.ToList(), "первая", "Ilia");
+        return id;
+    }
+
+    /// <summary>Главный случай: наладчик помнит код настройки, а не название документа. И ответ
+    /// без строки, из-за которой документ нашёлся, заставляет открывать его и искать глазами.</summary>
+    [Fact]
+    public void ParamSearch_FindsTableByParameterCode_AndShowsTheMatchingRow()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-02", "Выбор канала команды запуска", "2"),
+            Row("P0-10", "Максимальная частота", "55"));
+
+        var page = MobileSite.Render(db, "p", "?q=" + System.Uri.EscapeDataString("P0-10"), Base);
+
+        Assert.Equal(200, page.Status);
+        Assert.Contains($"{Base}/t/{id}", page.Html);
+        Assert.Contains("P0-10", page.Html);
+        // Весь блок P0-xx в выдачу попадать не должен — иначе поиск по коду теряет смысл.
+        Assert.DoesNotContain("P0-02", page.Html);
+    }
+
+    /// <summary>Ищут и по названию параметра — на объекте код помнят не всегда.</summary>
+    [Fact]
+    public void ParamSearch_FindsTableByParameterTitle()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus", Row("P0-10", "Максимальная частота", "55"));
+
+        var page = MobileSite.Render(db, "p", "?q=" + System.Uri.EscapeDataString("максимальная частота"), Base);
+
+        Assert.Contains($"{Base}/t/{id}", page.Html);
+    }
+
+    /// <summary>Строка таблицы на телефоне обязана читаться целиком: код, название, значение.</summary>
+    [Fact]
+    public void TablePage_ShowsCodeTitleAndValue()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus", Row("P0-10", "Максимальная частота", "55"));
+
+        var page = MobileSite.Render(db, $"t/{id}", "", Base);
+
+        Assert.Equal(200, page.Status);
+        Assert.Contains("P0-10", page.Html);
+        Assert.Contains("Максимальная частота", page.Html);
+        Assert.Contains("55", page.Html);
+    }
+
+    /// <summary>«Снимается по месту» обязано читаться словами. Пустая ячейка здесь читалась бы как
+    /// «ноль», а код состояния («onsite») — вообще никак.</summary>
+    [Fact]
+    public void TablePage_SpellsOutValueStates()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Двигатель", Row("P1-02", "Номинальный ток двигателя"));
+
+        var page = MobileSite.Render(db, $"t/{id}", "", Base);
+
+        Assert.DoesNotContain(ParamValueState.OnSite, page.Html);
+        Assert.Contains("по месту", page.Html);
+    }
+
+    /// <summary>Применимость — подзаголовок над строками, а не поле строки. Потерять её на телефоне
+    /// значит выставить параметр не тому аппарату.</summary>
+    [Fact]
+    public void TablePage_KeepsApplicabilityAsAHeading()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-10", "Максимальная частота", "55", applicability: "Только для ПЧ №1"));
+
+        var page = MobileSite.Render(db, $"t/{id}", "", Base);
+
+        Assert.Contains("Только для ПЧ №1", page.Html);
+    }
+
+    /// <summary>Отбор «для наладки» показывает размеченное наладкой и прячет размеченное только
+    /// сервисом.</summary>
+    [Fact]
+    public void TablePage_PurposeFilter_HidesTheOtherPurpose()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-02", "Выбор канала команды запуска", "2", ParamRowPurpose.Commissioning),
+            Row("P1-02", "Номинальный ток двигателя", "12", ParamRowPurpose.Service));
+
+        var page = MobileSite.Render(db, $"t/{id}", "?f=" + ParamRowPurpose.Commissioning, Base);
+
+        Assert.Contains("P0-02", page.Html);
+        Assert.DoesNotContain("P1-02", page.Html);
+    }
+
+    /// <summary>ГЛАВНОЕ ПРАВИЛО ОТБОРА: строка без разметки видна при любом наборе. Спрятать её
+    /// значит оставить параметр невыставленным — а разметка у накопленных таблиц пустая.</summary>
+    [Fact]
+    public void TablePage_PurposeFilter_KeepsUnmarkedRowsVisible()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-02", "Выбор канала команды запуска", "2", ParamRowPurpose.Commissioning),
+            Row("P0-07", "Источник задания частоты", "9"));
+
+        var page = MobileSite.Render(db, $"t/{id}", "?f=" + ParamRowPurpose.Service, Base);
+
+        Assert.Contains("P0-07", page.Html);
+        Assert.DoesNotContain("P0-02", page.Html);
+    }
+
+    /// <summary>Опечатка в адресе отбора — это «все строки», а не пустая страница: ссылку правят
+    /// руками, и терять из-за этого таблицу нельзя.</summary>
+    [Fact]
+    public void TablePage_UnknownPurposeShowsEverything()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-02", "Выбор канала команды запуска", "2", ParamRowPurpose.Commissioning),
+            Row("P1-02", "Номинальный ток двигателя", "12", ParamRowPurpose.Service));
+
+        var page = MobileSite.Render(db, $"t/{id}", "?f=чепуха", Base);
+
+        Assert.Contains("P0-02", page.Html);
+        Assert.Contains("P1-02", page.Html);
+    }
+
+    /// <summary>Название параметра и описание пишут руками, и угловая скобка в них не должна
+    /// уезжать в браузер разметкой.</summary>
+    [Fact]
+    public void TablePage_EscapesRowText()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-10", "<script>alert(1)</script>", "55", description: "<b>x</b>"));
+
+        var page = MobileSite.Render(db, $"t/{id}", "", Base);
+
+        Assert.DoesNotContain("<script>", page.Html);
+        Assert.Contains("&lt;script&gt;", page.Html);
+    }
+
+    [Fact]
+    public void ParamSearch_EscapesTheQuery_AndUnknownTableGives404()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var page = MobileSite.Render(db, "p", "?q=" + System.Uri.EscapeDataString("\"><script>x</script>"), Base);
+        Assert.DoesNotContain("<script>", page.Html);
+
+        Assert.Equal(404, MobileSite.Render(db, "t/999999", "", Base).Status);
+    }
+
+    /// <summary>Набранный запрос переносится между разделами: заставлять человека набирать то же
+    /// самое на экранной клавиатуре — худшее, что можно сделать с поиском на телефоне.</summary>
+    [Fact]
+    public void Nav_CarriesTheQueryBetweenSections()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var page = MobileSite.Render(db, "", "?q=" + System.Uri.EscapeDataString("P0-10"), Base);
+
+        Assert.Contains($"{Base}/p?q=P0-10", page.Html);
+    }
 }
