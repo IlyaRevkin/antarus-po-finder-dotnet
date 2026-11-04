@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -48,9 +49,20 @@ public static class MobileSite
         if (trimmed.Length == 0)
             return new Page(200, SearchPage(db, query.GetValueOrDefault("q", ""), linkBase));
 
+        // Параметры ПЧ/УПП живут отдельным адресом, а не вторым режимом того же: закладка на
+        // телефоне одна, а наладчик у шкафа приходит либо за прошивкой, либо за настройками, и
+        // возвращаться хочет туда же, откуда ушёл.
+        if (trimmed == "p")
+            return new Page(200, ParamSearchPage(db, query.GetValueOrDefault("q", ""), linkBase));
+
         if (trimmed.StartsWith("v/", StringComparison.Ordinal) &&
             int.TryParse(trimmed[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             return CardPage(db, id, linkBase);
+
+        if (trimmed.StartsWith("t/", StringComparison.Ordinal) &&
+            int.TryParse(trimmed[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tableId))
+            return ParamTablePage(db, tableId, query.GetValueOrDefault("f", ""),
+                query.GetValueOrDefault("q", ""), linkBase);
 
         return new Page(404, Shell("Не найдено", $"""
             <p class="muted">Такой страницы нет.</p>
@@ -63,12 +75,8 @@ public static class MobileSite
     private static string SearchPage(Database db, string q, string linkBase)
     {
         var body = new StringBuilder();
-        body.Append($"""
-            <form method="get" action="{Esc(linkBase)}/">
-              <input class="q" type="search" name="q" value="{Esc(q)}" placeholder="Шкаф, контроллер, версия">
-              <button class="go" type="submit">Найти</button>
-            </form>
-            """);
+        body.Append(Nav(linkBase, q, paramMode: false));
+        body.Append(SearchForm($"{Esc(linkBase)}/", q, "Шкаф, контроллер, версия"));
 
         if (string.IsNullOrWhiteSpace(q))
         {
@@ -185,7 +193,245 @@ public static class MobileSite
         return new Page(200, Shell(title, body.ToString()));
     }
 
+    // ── Параметры ПЧ/УПП ─────────────────────────────────────────────────────
+    //
+    // Жалоба Ильи дословно: «я моб версию посмотрел, там нет поиска параметров упп ПЧ, а это
+    // важно». Важно потому, что прошивку с телефона смотрят изредка («актуальная ли?»), а
+    // настройки частотника — каждый раз, когда стоят у шкафа с отвёрткой.
+
+    /// <summary>Сколько найденных документов показывать. Меньше, чем прошивок: у каждого документа
+    /// под заголовком идут ещё и совпавшие строки, и тридцать таких карточек — экран, который
+    /// листают дольше, чем набирают уточнённый запрос.</summary>
+    public const int MaxTables = 15;
+
+    /// <summary>Сколько совпавших строк показать прямо в выдаче. Ровно затем, зачем они показаны и
+    /// в программе: ответ «нашёлся документ „Задание Modbus“» без строки, из-за которой он нашёлся,
+    /// заставляет открывать документ и искать глазами заново.</summary>
+    public const int MaxHitRows = 4;
+
+    private static string ParamSearchPage(Database db, string q, string linkBase)
+    {
+        var body = new StringBuilder();
+        body.Append(Nav(linkBase, q, paramMode: true));
+        body.Append(SearchForm($"{Esc(linkBase)}/p", q, "P0-10, частота, шкаф"));
+
+        if (string.IsNullOrWhiteSpace(q))
+        {
+            body.Append("""
+                <p class="muted">Код настройки («P0-10»), название параметра или шкаф — так же, как
+                в программе на компьютере.</p>
+                """);
+            return Shell("Параметры ПЧ/УПП", body.ToString());
+        }
+
+        // ТОТ ЖЕ движок, что и в программе: SearchView.PerformParamTablesSearch зовёт ровно это.
+        // Второй реализации поиска здесь быть не должно — наладчик ищет «P0-10» и по названию
+        // параметра, и правило «строки, совпавшие со всеми словами запроса» (BestMatchingRows)
+        // живёт в Database. Поправка на раскладку — общая (SearchService), без вопроса «это точно
+        // оно?»: на телефоне спрашивать некого, а подмена срабатывает только когда как набрано не
+        // нашлось ничего.
+        var hits = SearchService.SearchWithLayoutFallback(q, false, (query, exact) =>
+            db.SearchParamTablesByTokens(
+                SearchService.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries), exact));
+
+        if (hits.Count == 0)
+        {
+            body.Append("""<p class="muted">Ничего не нашлось.</p>""");
+            return Shell("Параметры ПЧ/УПП", body.ToString());
+        }
+
+        body.Append($"""<p class="muted">Найдено документов: {hits.Count}</p><ul class="list">""");
+        foreach (var hit in hits.Take(MaxTables))
+        {
+            var head = hit.Table.Manufacturer.Length > 0
+                ? $"{hit.Table.Name} [{hit.Table.Manufacturer}]"
+                : hit.Table.Name;
+
+            body.Append($"""<li><a href="{Esc(linkBase)}/t/{hit.Table.Id}">""");
+            body.Append($"""<span class="name">{Esc(head)}</span>""");
+            if (hit.Subtypes.Length > 0)
+                body.Append($"""<span class="sub">{Esc(hit.Subtypes)}</span>""");
+            foreach (var row in hit.Rows.Take(MaxHitRows))
+                body.Append($"""
+                    <span class="hitrow"><b>{Esc(row.Code)}</b> {Esc(row.Title)}
+                    <i>{Esc(row.Kind == ParamRowKind.Note ? "" : row.ValueDisplay)}</i></span>
+                    """);
+            if (hit.Rows.Count > MaxHitRows)
+                body.Append($"""<span class="sub">…и ещё {hit.Rows.Count - MaxHitRows} строк</span>""");
+            body.Append("</a></li>");
+        }
+        body.Append("</ul>");
+        if (hits.Count > MaxTables)
+            body.Append($"""<p class="muted">Показаны первые {MaxTables} — уточните запрос.</p>""");
+
+        return Shell("Параметры ПЧ/УПП", body.ToString());
+    }
+
+    /// <summary>Сам документ: строки последней живой редакции с отбором по назначению.</summary>
+    /// <param name="purpose">Токен назначения из адреса («commissioning», «service», пусто — все).
+    /// В адресе токен, а не подпись: подпись — это текст для человека, он может и поменяться, а
+    /// закладка на «мой набор» переживать правку текста обязана.</param>
+    /// <param name="back">Запрос, с которого сюда пришли, — чтобы «← к поиску» вернуло к выдаче, а
+    /// не к пустому полю: на телефоне набирать «P0-10» заново дороже всего остального.</param>
+    private static Page ParamTablePage(Database db, int tableId, string purpose, string back, string linkBase)
+    {
+        var table = db.GetParamTable(tableId);
+        if (table is null || table.DeletedAt.Length > 0)
+            return new Page(404, Shell("Документ не найден", $"""
+                <p class="muted">Такой таблицы параметров в базе нет.</p>
+                <p><a class="back" href="{Esc(linkBase)}/p">← к поиску параметров</a></p>
+                """));
+
+        var title = table.Name.Length > 0 ? table.Name : "Таблица параметров";
+        var all = db.LatestParamTableRows(tableId);
+
+        // Подпись отбора ищется по токену среди ОПЦИЙ ПРОГРАММЫ, а не собирается здесь: и список
+        // пунктов, и правило отбора («неразмеченная строка видна всегда») живут в ParamPurposes и
+        // проверены тестами. Неизвестный токен в адресе — это «все строки», а не ошибка: ссылку
+        // правят руками, и падать из-за опечатки странице незачем.
+        var option = ParamPurposes.Options()
+            .FirstOrDefault(o => string.Equals(ParamPurposes.TokenOf(o), purpose, StringComparison.Ordinal))
+            ?? ParamPurposes.AnyLabel;
+        var shown = ParamPurposes.Filter(all, option);
+        var ordered = ParamTableEditing.Ordered(shown, db.GetParamGroupOrder());
+        var blocks = ParamTableView.Blocks(ordered);
+
+        var body = new StringBuilder();
+        body.Append($"""<h1>{Esc(title)}</h1>""");
+
+        var head = new List<string>();
+        if (table.Manufacturer.Length > 0) head.Add(table.Manufacturer);
+        var subtypes = string.Join(", ", ParamTableBinding.Of(db, table).Links.Select(l => l.Display));
+        if (subtypes.Length > 0) head.Add(subtypes);
+        if (head.Count > 0) body.Append($"""<p class="muted">{Esc(string.Join(" · ", head))}</p>""");
+
+        // Отбор — ссылками, а не выпадающим списком: список на телефоне требует два касания и
+        // перекрывает содержимое, а здесь это три слова в ряд, и выбранное видно без открывания.
+        body.Append("""<div class="tabs">""");
+        foreach (var opt in ParamPurposes.Options())
+        {
+            var token = ParamPurposes.TokenOf(opt);
+            var href = $"{Esc(linkBase)}/t/{tableId}?f={Esc(token)}" +
+                       (back.Length > 0 ? "&amp;q=" + Esc(Uri.EscapeDataString(back)) : "");
+            var cls = string.Equals(opt, option, StringComparison.Ordinal) ? "tab on" : "tab";
+            body.Append($"""<a class="{cls}" href="{href}">{Esc(opt)}</a>""");
+        }
+        body.Append("</div>");
+
+        var unmarked = ParamPurposes.Unmarked(all);
+        if (ParamPurposes.TokenOf(option).Length > 0 && unmarked > 0)
+            body.Append($"""
+                <p class="muted">Без разметки: {unmarked} — показаны тоже, иначе параметр остался бы
+                невыставленным.</p>
+                """);
+
+        if (ordered.Count == 0)
+            body.Append("""<p class="muted">В этой редакции строк нет.</p>""");
+
+        var group = "";
+        var block = -1;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var row = ordered[i];
+            if (!string.Equals(row.GroupName, group, StringComparison.OrdinalIgnoreCase))
+            {
+                group = row.GroupName;
+                if (group.Length > 0) body.Append($"<h2>{Esc(group)}</h2>");
+            }
+            if (blocks[i].Index != block)
+            {
+                block = blocks[i].Index;
+                // Применимость и условие — подзаголовок над строками, а не поле каждой из них: так
+                // они записаны в исходнике, и так их не потеряешь. «Только для ПЧ №1», пропущенное
+                // на телефоне, — это параметр, выставленный не тому аппарату.
+                if (!blocks[i].IsPlain) body.Append($"""<p class="blk">{Esc(blocks[i].Title)}</p>""");
+            }
+            body.Append(ParamRowCard(row));
+        }
+
+        body.Append($"""
+            <p><a class="back" href="{Esc(linkBase)}/p{(back.Length > 0 ? "?q=" + Esc(Uri.EscapeDataString(back)) : "")}">← к поиску параметров</a></p>
+            """);
+        return new Page(200, Shell(title, body.ToString()));
+    }
+
+    /// <summary>ОДНА СТРОКА ПАРАМЕТРА НА УЗКОМ ЭКРАНЕ — карточкой, а не ячейками таблицы.
+    ///
+    /// <b>Почему не таблица.</b> В документе у строки десять столбцов (группа, код, название,
+    /// значение, заводское, единица, назначение, применимость, условие, описание). На экране
+    /// шириной 360 px это 36 px на столбец — не читается вообще, а горизонтальная прокрутка
+    /// отрывает значение от кода: человек у шкафа держит телефон одной рукой, второй — отвёртку,
+    /// и возить экран вбок ему нечем. Четыре из десяти столбцов при этом сняты ещё до показа:
+    /// группа, применимость и условие стали заголовками (выше), единица приклеена к значению
+    /// (ParamTableRow.ValueDisplay).
+    ///
+    /// <b>Что осталось и как уложено.</b> Три яруса сверху вниз, по убыванию того, ради чего
+    /// строку читают:
+    /// <list type="number">
+    /// <item>КОД слева и ЗНАЧЕНИЕ справа — на одной строке и оба крупные. Это и есть вопрос
+    ///       («что в P0-10?») и ответ на него; по коду же и ведут пальцем, пролистывая;</item>
+    /// <item>название параметра — обычным текстом, с переносом: оно длинное и в ячейку не влезло
+    ///       бы никогда;</item>
+    /// <item>приглушённой строкой — заводское значение и назначение, то есть справка, которую
+    ///       читают, только если первые два яруса не ответили.</item>
+    /// </list>
+    /// Описание идёт отдельным абзацем под ними: в программе оно приклеено к названию через тире
+    /// (ParamTableView.Tail), но там строка длиной в экран, а здесь это второй-третий перенос —
+    /// название растворилось бы в нём.
+    ///
+    /// <b>Пояснение (Kind=Note) показывается текстом без кода и значения</b> — у него их нет, и
+    /// пустая рамка на месте значения читалась бы как «ничего не выставлять».</summary>
+    private static string ParamRowCard(ParamTableRow row)
+    {
+        if (row.Kind == ParamRowKind.Note)
+        {
+            var note = row.Description.Length > 0 ? row.Description : row.Title;
+            return $"""<p class="note">{Esc(note)}</p>""";
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("""<div class="prow">""");
+        sb.Append($"""
+            <div class="top"><span class="code">{Esc(row.Code)}</span>
+            <span class="val">{Esc(row.ValueDisplay)}</span></div>
+            """);
+        if (row.Title.Length > 0) sb.Append($"""<div class="ttl">{Esc(row.Title)}</div>""");
+
+        var marks = new List<string>();
+        if (!string.IsNullOrWhiteSpace(row.Factory)) marks.Add("заводское: " + row.Factory);
+        var purposeLabel = ParamPurposes.Label(row.Purpose);
+        if (purposeLabel.Length > 0) marks.Add(purposeLabel);
+        if (marks.Count > 0) sb.Append($"""<div class="sub">{Esc(string.Join(" · ", marks))}</div>""");
+
+        if (!string.IsNullOrWhiteSpace(row.Description))
+            sb.Append($"""<div class="desc">{Esc(row.Description)}</div>""");
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
     // ── Разметка ─────────────────────────────────────────────────────────────
+
+    /// <summary>Переключатель между прошивками и параметрами. Запрос переносится в ссылку: человек
+    /// набрал слово не в том разделе, и заставлять его набирать то же самое заново на экранной
+    /// клавиатуре — худшее, что можно сделать с поиском на телефоне.</summary>
+    private static string Nav(string linkBase, string q, bool paramMode)
+    {
+        var tail = string.IsNullOrWhiteSpace(q) ? "" : "?q=" + Esc(Uri.EscapeDataString(q));
+        return $"""
+            <div class="tabs">
+            <a class="tab{(paramMode ? "" : " on")}" href="{Esc(linkBase)}/{tail}">Прошивки</a>
+            <a class="tab{(paramMode ? " on" : "")}" href="{Esc(linkBase)}/p{tail}">Параметры ПЧ/УПП</a>
+            </div>
+            """;
+    }
+
+    private static string SearchForm(string action, string q, string placeholder) => $"""
+        <form method="get" action="{action}">
+          <input class="q" type="search" name="q" value="{Esc(q)}" placeholder="{Esc(placeholder)}">
+          <button class="go" type="submit">Найти</button>
+        </form>
+        """;
+
 
     /// <summary>Обёртка страницы. Стили внутри документа и ни одного внешнего файла — намеренно:
     /// телефон в цеху держит связь только с раздающим компьютером, интернета за ним может не быть
@@ -227,6 +473,26 @@ public static class MobileSite
         dd{margin:0;overflow-wrap:anywhere}
         a{color:#8ab4f8}
         .back{display:inline-block;margin-top:18px}
+        .tabs{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}
+        .tab{padding:8px 12px;border-radius:999px;background:#1e2126;color:#9aa0a6;
+             text-decoration:none;font-size:15px}
+        .tab.on{background:#8ab4f8;color:#14161a;font-weight:600}
+        .sub{display:block;margin-top:4px;color:#9aa0a6;font-size:15px}
+        .hitrow{display:block;margin-top:6px;font-size:15px;color:#c8ccd1}
+        .hitrow b{font-family:ui-monospace,Consolas,monospace;color:#e8eaed}
+        .hitrow i{font-style:normal;color:#8ab4f8}
+        .blk{margin:14px 0 6px;padding:6px 10px;border-radius:8px;background:#2a2016;color:#ffd79a;
+             font-size:15px}
+        .note{margin:10px 0;padding:10px 12px;border-radius:10px;background:#1a1d21;color:#c8ccd1}
+        /* Карточка параметра. Крупный код слева и крупное значение справа — см. ParamRowCard о том,
+           почему строку документа на телефоне показывают так, а не ячейками. */
+        .prow{margin:0 0 8px;padding:10px 12px;border-radius:10px;background:#1e2126}
+        .prow .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+        .prow .code{font-family:ui-monospace,Consolas,monospace;font-size:18px;font-weight:600}
+        .prow .val{font-size:19px;font-weight:600;color:#8ab4f8;text-align:right;
+                   overflow-wrap:anywhere}
+        .prow .ttl{margin-top:2px}
+        .prow .desc{margin-top:4px;color:#9aa0a6;font-size:15px}
         </style></head><body>{{body}}</body></html>
         """;
 
