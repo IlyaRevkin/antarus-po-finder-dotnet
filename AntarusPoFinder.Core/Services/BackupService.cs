@@ -228,11 +228,11 @@ public sealed class BackupService
         return path;
     }
 
-    /// <summary>Подпапка по имени машины. База у каждой машины СВОЯ — сваленные в одну папку копии
-    /// трёх компьютеров выглядели бы как история одной, и «восстановить вчерашнюю» привело бы к
-    /// подстановке чужой базы.</summary>
+    /// <summary>Подпапка по имени машины — см. BackupArchive.MachineKey, там же и почему она вообще
+    /// нужна. Папка названа тем же ключом, что и папка в бакете: один и тот же компьютер должен
+    /// узнаваться в обоих местах одинаково.</summary>
     public static string MachineFolder(string folder, string machine) =>
-        Path.Combine(folder, DiskSnapshotStorage.SanitizeMachine(machine));
+        Path.Combine(folder, BackupArchive.MachineKey(machine));
 
     private static void PruneFolder(string dir, int keepDays)
     {

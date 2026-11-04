@@ -79,14 +79,48 @@ public static class BackupArchive
         $"po-finder-{takenAtUtc.ToString(Stamp, CultureInfo.InvariantCulture)}" +
         (encrypted ? EncryptedExtension : PlainExtension);
 
-    /// <summary>Ключ объекта в бакете. Машина в пути — копии разных компьютеров не перетирают друг
-    /// друга (база у каждого своя, в этом вся суть). Имя машины чистится теми же правилами, что и у
-    /// слепка диска, по той же причине: кириллицы в ключах быть не должно.</summary>
-    public static string ObjectKey(string machine, DateTime takenAtUtc) =>
-        $"{RootFolder}/{DiskSnapshotStorage.SanitizeMachine(machine)}/{FileName(takenAtUtc, encrypted: true)}";
+    /// <summary>Имя машины так, как оно попадает в путь, — и в ключ бакета, и в имя подпапки.
+    ///
+    /// База у каждого компьютера СВОЯ, поэтому разделение по машинам здесь не удобство, а условие
+    /// правильности: свалившись в одну кучу, копии трёх компьютеров выглядели бы как история одного,
+    /// уборка старого считала бы их общей очередью, а «восстановить вчерашнюю» подставило бы чужую
+    /// базу.
+    ///
+    /// Правила — те же, что у слепка диска (<see cref="DiskSnapshotStorage.SanitizeMachine"/>):
+    /// только латиница, цифры, дефис и подчёркивание, потому что путь должен одинаково годиться и
+    /// для ключа в бакете, и для имени папки на любой файловой системе.
+    ///
+    /// С ОДНОЙ ДОБАВКОЙ, и она здесь обязательна. Имя компьютера человек задаёт как хочет, и в
+    /// конторе оно запросто целиком кириллическое («КОМП-ИЛЬИ»): такое имя чистится в пустоту, и у
+    /// слепка диска превращается в общее «unknown». Слепку это ничем не грозит — он перетирается и
+    /// нужен поштучно. Резервным копиям грозит прямо: ВСЕ машины с кириллическими именами сложили бы
+    /// копии в одну папку «unknown» и чистили бы там общую очередь, то есть выносили бы копии друг
+    /// друга. Поэтому, когда чистить нечего, в имя идёт короткий устойчивый отпечаток исходного
+    /// имени: он у каждой машины свой и не меняется от запуска к запуску.</summary>
+    public static string MachineKey(string? machine)
+    {
+        var sanitized = DiskSnapshotStorage.SanitizeMachine(machine);
+        if (sanitized != "unknown") return sanitized;
 
-    public static string MachineFolder(string machine) =>
-        $"{RootFolder}/{DiskSnapshotStorage.SanitizeMachine(machine)}/";
+        var original = (machine ?? "").Trim();
+        if (original.Length == 0) return "unknown";
+
+        // FNV-1a: нужна не криптография, а стабильные восемь знаков, одинаковые на этой машине
+        // сегодня и через год (string.GetHashCode рандомизирован между запусками и не годится).
+        uint hash = 2166136261;
+        foreach (var ch in original)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return "pc-" + hash.ToString("x8", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Ключ объекта в бакете.</summary>
+    public static string ObjectKey(string machine, DateTime takenAtUtc) =>
+        $"{RootFolder}/{MachineKey(machine)}/{FileName(takenAtUtc, encrypted: true)}";
+
+    public static string MachineFolder(string machine) => $"{RootFolder}/{MachineKey(machine)}/";
 
     /// <summary>Вытащить из имени файла момент снятия. null — имя не наше: такие файлы в папке копий
     /// не трогаем вовсе (см. <see cref="ToPrune"/>), потому что положить в эту папку что-то своё
