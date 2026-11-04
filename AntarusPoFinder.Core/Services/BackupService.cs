@@ -45,11 +45,21 @@ public sealed record BackupOutcome(
     public static BackupOutcome Fail(string error) => new(false, error, null, false, 0);
 }
 
-/// <summary>Одна лежащая копия — строка списка «Показать копии».</summary>
-public sealed record BackupEntry(string Name, string Location, DateTime TakenUtc, long Bytes, bool Encrypted)
+/// <summary>Одна лежащая копия — строка списка «Показать копии». <paramref name="S3Key"/> не пуст
+/// только у копий из бакета: по нему их можно скачать, чтобы распаковать тем же путём, что и
+/// лежащие в папке.</summary>
+public sealed record BackupEntry(string Name, string Location, DateTime TakenUtc, long Bytes,
+    bool Encrypted, string? S3Key = null)
 {
+    /// <summary>Время показываем МЕСТНОЕ, хотя хранится и в имени файла оно UTC: имя файла читает
+    /// код, а список — человек, и «копия от 06:15» должна совпадать с тем, что было на его часах.</summary>
     public string TakenLocal => TakenUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+
     public string Size => BackupArchive.HumanSize(Bytes);
+
+    public string LockLabel => Encrypted ? "нужен" : "—";
+
+    public bool InCloud => !string.IsNullOrEmpty(S3Key);
 }
 
 /// <summary>ЕЖЕСУТОЧНАЯ РЕЗЕРВНАЯ КОПИЯ.
@@ -297,7 +307,8 @@ public sealed class BackupService
                 .Where(x => x.taken.HasValue)
                 .Select(x => new BackupEntry(
                     Path.GetFileName(x.o.Key.Replace('/', Path.DirectorySeparatorChar)),
-                    "хранилище: " + x.o.Key, x.taken!.Value, x.o.Size, Encrypted: true))
+                    "хранилище на хостинге: " + x.o.Key, x.taken!.Value, x.o.Size,
+                    Encrypted: true, S3Key: x.o.Key))
                 .OrderByDescending(e => e.TakenUtc)
                 .ToList();
         }
@@ -310,6 +321,30 @@ public sealed class BackupService
     }
 
     // ── Распаковать рядом ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>Скачать копию из бакета во временную папку, чтобы её можно было распаковать тем же
+    /// путём, что и лежащую в папке. Отдельным шагом, а не внутри распаковки: скачивание идёт по
+    /// сети и может занять минуту, а распаковка — мгновенная операция над файлом, и мешать их в
+    /// одном методе значит заставлять интерфейс ждать неизвестно чего.</summary>
+    public async Task<(string? File, string? Error)> DownloadAsync(
+        S3Settings s3, string key, CancellationToken ct = default)
+    {
+        var (bytes, error) = await _client.GetBytesAsync(s3, key, ct);
+        if (bytes is null) return (null, error ?? "копии с таким именем в хранилище нет");
+
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "antarus-backup-download");
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, Path.GetFileName(key.Replace('/', Path.DirectorySeparatorChar)));
+            File.WriteAllBytes(file, bytes);
+            return (file, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
 
     public sealed record ExtractResult(bool Ok, string? Error, string? Folder);
 

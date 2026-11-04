@@ -6,6 +6,7 @@ using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -59,6 +60,7 @@ public partial class NetworkSyncView : UserControl
             ConflictStatusText.Text = $"Конфликты синхронизации, требуют решения: {conflictCount}";
 
         SyncVerboseCheck.IsChecked = _services.Cfg.SyncVerbose();
+        LoadBackupSection();
     }
 
     private void SyncVerbose_Click(object sender, RoutedEventArgs e)
@@ -453,5 +455,204 @@ public partial class NetworkSyncView : UserControl
         {
             PushAuthoritativeButton.IsEnabled = true;
         }
+    }
+
+    // ── Резервные копии (бета) ────────────────────────────────────────────────────────────────
+    //
+    // Зачем вообще — см. Core/Services/BackupService. Здесь только ручки, и все они сохраняются
+    // сами, как и остальные поля этой страницы: кнопки «Сохранить» тут нет ни у чего.
+
+    /// <summary>Карточку копий видит администратор и только в бете (функция обкатывается). На
+    /// остальных машинах копирование при этом работает: оно включено по умолчанию и по умолчанию
+    /// кладёт копии в профиль — то есть «не настроили» не означает «нет копий».</summary>
+    private void LoadBackupSection()
+    {
+        BackupSection.Visibility =
+            AppIdentity.IsBeta && _services.Cfg.CurrentRole() == "administrator"
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        if (BackupSection.Visibility != Visibility.Visible) return;
+
+        BackupEnabledCheck.IsChecked = _services.Cfg.BackupEnabled();
+        BackupFolderInput.Text = _services.Cfg.BackupFolder();
+        BackupKeepDaysInput.Text = _services.Cfg.BackupKeepDays().ToString();
+        BackupToS3Check.IsChecked = _services.Cfg.BackupToS3();
+        // Сам пароль в поле НЕ подставляется: PasswordBox не для показа, а подставленные точки
+        // выглядели бы как «пароль введён заново» и перезаписали бы его при уходе фокуса.
+        BackupPasswordInput.Password = "";
+        ShowBackupState();
+    }
+
+    private void ShowBackupState()
+    {
+        var hasPassword = _services.Cfg.BackupPassword().Length > 0;
+        BackupPasswordState.Text = hasPassword
+            ? "Пароль задан. Поле пустое — это нормально: введённый пароль не показывается. Чтобы сменить, введите новый."
+            : "Пароль не задан — выкладка в хранилище выключена (в публично читаемый бакет незашифрованная копия не уходит никогда).";
+
+        var last = DateTime.TryParse(_services.Cfg.Get(ConfigService.BackupLastAtKey), out var at)
+            ? at.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+            : "";
+        BackupStatusText.Text = last.Length == 0 ? "Копий ещё не снималось." : $"Последняя копия: {last}";
+    }
+
+    private void BackupEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        var on = BackupEnabledCheck.IsChecked == true;
+        _services.Cfg.SetBackupEnabled(on);
+        _host.ShowStatus(on ? "Резервное копирование включено" : "Резервное копирование выключено",
+            category: NotificationCategory.Sync);
+    }
+
+    private void BrowseBackupFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Папка для резервных копий" };
+        if (dlg.ShowDialog() != true) return;
+        BackupFolderInput.Text = dlg.FolderName;
+        SaveBackupFolder();
+    }
+
+    private void BackupFolder_LostFocus(object sender, RoutedEventArgs e) => SaveBackupFolder();
+
+    private void BackupFolder_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveBackupFolder();
+    }
+
+    private void SaveBackupFolder()
+    {
+        var path = BackupFolderInput.Text.Trim();
+        if (!SettingsAutoSave.PathChanged(path, _services.Cfg.BackupFolder())) return;
+
+        _services.Cfg.SetBackupFolder(path);
+        // Очищенное поле — это возврат к папке по умолчанию (профиль), а не «никуда не класть»:
+        // показываем сразу, чем оно обернулось, иначе выглядит как «настройка не сохранилась».
+        BackupFolderInput.Text = _services.Cfg.BackupFolder();
+        _host.ShowStatus("Папка резервных копий сохранена", category: NotificationCategory.Sync);
+    }
+
+    private void BackupKeepDays_LostFocus(object sender, RoutedEventArgs e) => SaveBackupKeepDays();
+
+    private void BackupKeepDays_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveBackupKeepDays();
+    }
+
+    private void SaveBackupKeepDays()
+    {
+        var edit = SettingsAutoSave.ParseNumber(BackupKeepDaysInput.Text, _services.Cfg.BackupKeepDays(), min: 0,
+            "Срок хранения копий — целое число суток (0 — не удалять старое)");
+        if (edit.Invalid)
+        {
+            BackupKeepDaysInput.Text = _services.Cfg.BackupKeepDays().ToString();
+            _host.ShowStatus(edit.Message, category: NotificationCategory.Sync);
+            return;
+        }
+        if (!edit.Save) return;
+
+        _services.Cfg.SetBackupKeepDays(edit.Value);
+        _host.ShowStatus(edit.Value == 0
+            ? "Старые копии больше не удаляются"
+            : $"Копии хранятся {edit.Value} суток", category: NotificationCategory.Sync);
+    }
+
+    /// <summary>Выкладка в бакет. Без пароля включить нельзя — и это не придирка интерфейса, а то
+    /// же самое правило, что в BackupTargets.CanUploadToS3: бакет открыт на чтение всему интернету.
+    /// Здесь оно просто объясняется словами, а не молча не срабатывает.</summary>
+    private void BackupToS3_Click(object sender, RoutedEventArgs e)
+    {
+        var on = BackupToS3Check.IsChecked == true;
+        if (on && _services.Cfg.BackupPassword().Length == 0)
+        {
+            BackupToS3Check.IsChecked = false;
+            AppMessageBox.Show(
+                "Сначала задайте пароль шифрования.\n\n" +
+                "Хранилище открыто на чтение всему интернету — по нему работают QR-коды на наклейках. " +
+                "Незашифрованная копия базы там означала бы, что весь каталог предприятия может скачать кто угодно.",
+                "Копия в хранилище", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _services.Cfg.SetBackupToS3(on);
+        _host.ShowStatus(on
+            ? "Копия будет выкладываться в хранилище — зашифрованной"
+            : "Выкладка копий в хранилище выключена", category: NotificationCategory.Sync);
+    }
+
+    private void BackupPassword_LostFocus(object sender, RoutedEventArgs e) => SaveBackupPassword();
+
+    private void BackupPassword_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) SaveBackupPassword();
+    }
+
+    private void SaveBackupPassword()
+    {
+        var typed = BackupPasswordInput.Password;
+        // Пустое поле — «не трогали», а НЕ «стереть пароль»: уход фокуса с нетронутого поля не
+        // должен обнулять шифрование и втихую выключать выкладку.
+        if (typed.Length == 0) return;
+
+        _services.Cfg.SetBackupPassword(typed);
+        BackupPasswordInput.Password = "";
+        ShowBackupState();
+
+        AppMessageBox.Show(
+            "Пароль сохранён.\n\n" +
+            "Запишите его там же, где хранятся остальные пароли конторы: внутри программы его нет, " +
+            "и восстановить копии из хранилища без него будет нечем. Копии в папке паролем не закрыты " +
+            "и открываются обычным архиватором.",
+            "Пароль резервных копий", MessageBoxButton.OK, MessageBoxImage.Information);
+        _host.ShowStatus("Пароль резервных копий сохранён", category: NotificationCategory.Sync);
+    }
+
+    /// <summary>«Сделать копию сейчас» — та же копия, что снимается сама, просто не дожидаясь суток.
+    /// В отличие от фонового тика, здесь о результате ГОВОРЯТ: человек нажал кнопку и имеет право
+    /// знать, чем кончилось. Молчит только автоматика.</summary>
+    private async void BackupNow_Click(object sender, RoutedEventArgs e)
+    {
+        BackupNowButton.IsEnabled = false;
+        BackupStatusText.Text = "Снимаю копию…";
+        try
+        {
+            var targets = _services.Cfg.Backup();
+            var root = _services.Cfg.RootPath();
+            var sharedConfig = string.IsNullOrWhiteSpace(root) ? null : ConfigSyncService.ConfigPathFor(root);
+
+            BackupOutcome outcome;
+            using (_host.BeginSync("резервная копия"))
+                outcome = await Task.Run(() => new BackupService()
+                    .RunAsync(_services.Db, Environment.MachineName, sharedConfig, targets));
+
+            if (outcome.Ok && !outcome.Skipped)
+            {
+                _services.Cfg.Set(ConfigService.BackupLastAtKey, DateTime.UtcNow.ToString("O"));
+                ShowBackupState();
+                var where = outcome.FolderFile is not null ? $"\nФайл: {outcome.FolderFile}" : "";
+                var cloud = outcome.Uploaded ? "\nВ хранилище выложена зашифрованная копия." : "";
+                var partial = outcome.Error is not null ? $"\n\nЧастично не удалось: {outcome.Error}" : "";
+                AppMessageBox.Show($"Копия снята ({BackupArchive.HumanSize(outcome.Bytes)}).{where}{cloud}{partial}",
+                    "Резервная копия", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                BackupStatusText.Text = "Копию снять не удалось";
+                AppMessageBox.Show(
+                    outcome.Skipped
+                        ? "Копию класть некуда: папка не задана, а выкладка в хранилище выключена или без пароля."
+                        : $"Копию снять не удалось:\n{outcome.Error}",
+                    "Резервная копия", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        finally
+        {
+            BackupNowButton.IsEnabled = true;
+        }
+    }
+
+    private void ShowBackups_Click(object sender, RoutedEventArgs e)
+    {
+        new BackupListDialog(_services) { Owner = Application.Current.MainWindow }.ShowDialog();
+        ShowBackupState();
     }
 }

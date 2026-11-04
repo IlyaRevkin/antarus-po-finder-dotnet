@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -217,6 +217,38 @@ public sealed class S3Client
             if (!response.IsSuccessStatusCode)
                 return (null, await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return (await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false), null);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (null, "хранилище не ответило вовремя");
+        }
+        catch (Exception ex)
+        {
+            return (null, Explain(ex));
+        }
+    }
+
+    /// <summary>То же самое, но байтами. Понадобилось резервным копиям: они лежат в бакете
+    /// ЗАШИФРОВАННЫМИ (бакет публичен на чтение), и прогонять шифротекст через строку — это
+    /// гарантированно испорченный архив, потому что произвольные байты не являются текстом ни в
+    /// какой кодировке.
+    ///
+    /// Через подписанный запрос, а не по публичному адресу, по той же причине, что и выше: нужен
+    /// объект, лежащий в бакете прямо сейчас, а не то, что отдаёт кеш хостинга.</summary>
+    public async Task<(byte[]? Bytes, string? Error)> GetBytesAsync(S3Settings s, string key,
+        CancellationToken ct = default)
+    {
+        if (!s.HasAddress) return (null, "не задан адрес хранилища или бакет");
+        if (!s.HasCredentials) return (null, "не заданы ключи доступа");
+
+        try
+        {
+            var request = BuildRequest(s, HttpMethod.Get, key, Array.Empty<byte>(), null, DateTimeOffset.UtcNow);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound) return (null, null);
+            if (!response.IsSuccessStatusCode)
+                return (null, await DescribeFailureAsync(response, ct).ConfigureAwait(false));
+            return (await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false), null);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {

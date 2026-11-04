@@ -114,6 +114,75 @@
                 </StackPanel>
             </Border>
 
+            <!-- РЕЗЕРВНЫЕ КОПИИ (бета). Место выбрано не случайно: копия — это про диски и про
+                 общий конфиг, и стоять она должна рядом с ними, а не в общих настройках среди
+                 темы и акцента. Видна администратору, как и отправка ниже; на остальных машинах
+                 копирование всё равно работает (включено по умолчанию, папка по умолчанию
+                 локальная) — просто без ручек. -->
+            <Border x:Name="BackupSection" Style="{StaticResource CardBorder}" Margin="0,0,0,20" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="РЕЗЕРВНЫЕ КОПИИ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,10"
+                               Text="Раз в сутки, в фоне и молча, программа складывает в архив базу этого компьютера и общий конфиг с сетевого диска. Прошивки в копию не входят — они и так лежат на диске."/>
+
+                    <CheckBox x:Name="BackupEnabledCheck" Click="BackupEnabled_Click" Margin="0,0,0,12"
+                              Content="Делать резервную копию раз в сутки"
+                              ToolTip="Снимается тем же фоновым тиком, что и остальная синхронизация, и только если с прошлой удачной копии прошли сутки."/>
+
+                    <TextBlock Text="КУДА КЛАСТЬ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,6"
+                               Text="По умолчанию — папка в профиле этого компьютера. От испорченной базы и неудачной «эталонной синхронизации» это спасает, от сдохшего диска — нет: лучше указать сетевую папку."/>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="BackupFolderInput" Height="34" Margin="0,0,8,0"
+                                 LostFocus="BackupFolder_LostFocus" KeyDown="BackupFolder_KeyDown"
+                                 ToolTip="Сохраняется само — по уходу из поля или по Enter. Внутри заводится подпапка по имени компьютера: база у каждой машины своя."/>
+                        <Button Grid.Column="1" Content="…" Style="{StaticResource SecondaryButton}" Width="34" Click="BrowseBackupFolder_Click"
+                                ToolTip="Выбрать папку — сохранится сразу"/>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <TextBlock Text="Хранить" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="BackupKeepDaysInput" Width="64" Height="34" Margin="0,0,8,0"
+                                 LostFocus="BackupKeepDays_LostFocus" KeyDown="BackupKeepDays_KeyDown"
+                                 ToolTip="Целое число суток, 0 — не удалять старое вовсе. Самая свежая копия не удаляется никогда, даже если по возрасту уже должна."/>
+                        <TextBlock Text="суток" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Выкладка в бакет отделена рамкой WarningBrush не для красоты: бакет ПУБЛИЧЕН
+                         НА ЧТЕНИЕ (на этом держится QR с наклейки), то есть всё, что туда попадает,
+                         читает кто угодно из интернета. Поэтому копия уходит туда только
+                         зашифрованной паролем, а без пароля переключатель не включается вовсе. -->
+                    <Border BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+                        <StackPanel>
+                            <TextBlock Text="КОПИЯ В ХРАНИЛИЩЕ НА ХОСТИНГЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,6"/>
+                            <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,0,0,10"
+                                       Text="Вторая копия — за пределами офиса, на случай пожара и шифровальщика. Бакет открыт на чтение всему интернету, поэтому туда копия уходит ТОЛЬКО зашифрованной паролем. Пароль задаёте вы, в программе его нет: потеряете — копии в хранилище не откроются ничем."/>
+                            <CheckBox x:Name="BackupToS3Check" Click="BackupToS3_Click" Margin="0,0,0,10"
+                                      Content="Выкладывать копию в хранилище (всегда зашифрованной)"/>
+                            <TextBlock Text="ПАРОЛЬ ШИФРОВАНИЯ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <PasswordBox x:Name="BackupPasswordInput" Height="34" Margin="0,0,0,6"
+                                         LostFocus="BackupPassword_LostFocus" KeyDown="BackupPassword_KeyDown"
+                                         ToolTip="Задаётся на каждом компьютере отдельно и по общему конфигу НЕ разъезжается — иначе защита свелась бы к ключу, лежащему внутри программы. Запишите его там же, где хранятся остальные пароли конторы."/>
+                            <TextBlock x:Name="BackupPasswordState" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                        <Button x:Name="BackupNowButton" Content="Сделать копию сейчас" Style="{StaticResource SecondaryButton}"
+                                Click="BackupNow_Click" Margin="0,0,8,0"
+                                ToolTip="Та же самая копия, что снимается сама, — просто не дожидаясь суток."/>
+                        <Button Content="Показать копии" Style="{StaticResource SecondaryButton}" Click="ShowBackups_Click" Margin="0,0,12,0"
+                                ToolTip="Список снятых копий и «распаковать рядом». Восстановления одной кнопкой здесь нет намеренно."/>
+                        <TextBlock x:Name="BackupStatusText" Style="{StaticResource MutedText}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- Only administrator sees this — everyone else only pulls, see RefreshIfActive() -->
             <Border x:Name="PushSection" Style="{StaticResource CardBorder}" Visibility="Collapsed">
                 <StackPanel>
