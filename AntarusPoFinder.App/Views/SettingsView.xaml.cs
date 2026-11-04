@@ -1134,6 +1134,17 @@ public partial class SettingsView : UserControl
         RenderSubtypeExecutionRows();
     }
 
+    /// <summary>⚠️ ВРЕМЕННО. Осмотр прежней модели исполнений — только показывает, ничего не меняет
+    /// (см. LegacyExecutionScan). Ходит на диск: у каждой версии спрашивает, перестроена ли она, —
+    /// поэтому на сетевой шаре это заметная пауза, и зовётся оно по явному нажатию, а не само.</summary>
+    private void ScanLegacyExecutions_Click(object sender, RoutedEventArgs e)
+    {
+        var result = LegacyExecutionScan.Scan(
+            _services.Db.GetAllFwVersionsWithNames(includeArchived: true),
+            VersionLayout.IsNewLayout);
+        LegacyExecutionScanDialog.Show(Window.GetWindow(this), result);
+    }
+
     private void AddOnDemandWord_Click(object sender, RoutedEventArgs e) => CommitOnDemandWord();
 
     private void OnDemandWordInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)

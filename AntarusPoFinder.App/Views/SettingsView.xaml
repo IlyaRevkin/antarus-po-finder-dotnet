@@ -752,9 +752,15 @@
                             <Button Content="Переименовать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                                     Click="RenameSubtypeExecution_Click"
                                     ToolTip="Папки на диске НЕ переименовываются: у прежних версий исполнение станет несобранным и карточка честно об этом скажет"/>
-                            <Button Content="Убрать" Style="{StaticResource SecondaryButton}"
+                            <Button Content="Убрать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                                     Click="DeleteSubtypeExecution_Click"
                                     ToolTip="Шкаф перестали так выпускать. Файлы уже выпущенных версий не трогаются"/>
+                            <!-- ВРЕМЕННАЯ кнопка: осмотр того, что осталось от прежней модели, где
+                                 исполнение было отдельной прошивкой со своим номером. Только
+                                 показывает; сведение старых записей — ручное решение человека. -->
+                            <Button Content="Осмотр старой раскладки…" Style="{StaticResource SecondaryButton}"
+                                    Click="ScanLegacyExecutions_Click"
+                                    ToolTip="Что осталось от прежней модели исполнений. Ничего не меняет — только показывает и предлагает"/>
                         </StackPanel>
                     </StackPanel>
 
