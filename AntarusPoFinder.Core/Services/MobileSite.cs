@@ -247,7 +247,11 @@ public static class MobileSite
                 ? $"{hit.Table.Name} [{hit.Table.Manufacturer}]"
                 : hit.Table.Name;
 
-            body.Append($"""<li><a href="{Esc(linkBase)}/t/{hit.Table.Id}">""");
+            // Запрос уезжает в ссылку, чтобы «← к поиску параметров» вернуло к той же выдаче:
+            // набирать «P0-10» заново на экранной клавиатуре — самая дорогая операция на телефоне.
+            body.Append($"""
+                <li><a href="{Esc(linkBase)}/t/{hit.Table.Id}?q={Esc(Uri.EscapeDataString(q))}">
+                """);
             body.Append($"""<span class="name">{Esc(head)}</span>""");
             if (hit.Subtypes.Length > 0)
                 body.Append($"""<span class="sub">{Esc(hit.Subtypes)}</span>""");
@@ -385,7 +389,10 @@ public static class MobileSite
     {
         if (row.Kind == ParamRowKind.Note)
         {
-            var note = row.Description.Length > 0 ? row.Description : row.Title;
+            // Текст пояснения лежит в названии: без кода строка параметром быть не может, и разбор
+            // кладёт её текст именно туда (ParamTableEditing.Tidy). Описание, если оно есть,
+            // приклеивается тире — тем же правилом, что и в программе.
+            var note = row.Title + ParamTableView.Tail(row);
             return $"""<p class="note">{Esc(note)}</p>""";
         }
 

@@ -213,7 +213,8 @@ public class MobileSiteTests
         var page = MobileSite.Render(db, "p", "?q=" + System.Uri.EscapeDataString("P0-10"), Base);
 
         Assert.Equal(200, page.Status);
-        Assert.Contains($"{Base}/t/{id}", page.Html);
+        // Запрос уезжает в ссылку — «← к поиску» с карточки обязан вернуть к той же выдаче.
+        Assert.Contains($"{Base}/t/{id}?q=P0-10", page.Html);
         Assert.Contains("P0-10", page.Html);
         // Весь блок P0-xx в выдачу попадать не должен — иначе поиск по коду теряет смысл.
         Assert.DoesNotContain("P0-02", page.Html);
@@ -246,6 +247,10 @@ public class MobileSiteTests
         Assert.Contains("P0-10", page.Html);
         Assert.Contains("Максимальная частота", page.Html);
         Assert.Contains("55", page.Html);
+
+        // И обратная дорога к выдаче, с которой сюда пришли.
+        var fromSearch = MobileSite.Render(db, $"t/{id}", "?q=" + System.Uri.EscapeDataString("P0-10"), Base);
+        Assert.Contains($"{Base}/p?q=P0-10", fromSearch.Html);
     }
 
     /// <summary>«Снимается по месту» обязано читаться словами. Пустая ячейка здесь читалась бы как
@@ -310,6 +315,28 @@ public class MobileSiteTests
 
         Assert.Contains("P0-07", page.Html);
         Assert.DoesNotContain("P0-02", page.Html);
+    }
+
+    /// <summary>Пояснение («в ПЛК выставить частоту 55 Гц») — не параметр: у него нет кода и
+    /// значения, и прятать его отбором нельзя никогда, иначе подгруппа теряет смысл.</summary>
+    [Fact]
+    public void TablePage_ShowsNotes_AndKeepsThemUnderAnyFilter()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var id = SeedTable(db, "Задание Modbus",
+            Row("P0-10", "Максимальная частота", "55", ParamRowPurpose.Commissioning),
+            new ParamTableRow
+            {
+                Kind = ParamRowKind.Note,
+                Title = "В ПЛК выставить частоту 55 Гц",
+                GroupName = ParamGroupCatalog.Main,
+            });
+
+        var page = MobileSite.Render(db, $"t/{id}", "?f=" + ParamRowPurpose.Service, Base);
+
+        Assert.Contains("В ПЛК выставить частоту 55 Гц", page.Html);
+        Assert.DoesNotContain("P0-10", page.Html);
     }
 
     /// <summary>Опечатка в адресе отбора — это «все строки», а не пустая страница: ссылку правят
