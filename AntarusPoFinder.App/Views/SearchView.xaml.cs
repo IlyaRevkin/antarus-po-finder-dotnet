@@ -762,6 +762,13 @@ public partial class SearchView : UserControl
         // на всю выдачу — ровно по той же причине, что и наборы выше. Благодаря этому набору
         // кнопка наклейки остаётся на карточке и когда диск отвалился: код уже сохранён.
         var qrCovered = _services.Db.GetFwQrCoveredIds();
+        // Исполнения шкафов — один запрос на всю выдачу, по той же причине, что и наборы выше.
+        // В рабочей версии не читаем вовсе: карточка всё равно список не покажет (бета).
+        var executionsBySubtype = AppIdentity.IsBeta
+            ? _services.Db.GetSubtypeExecutionRows()
+                .GroupBy(r => r.SubtypeId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(r => r.Name).ToList())
+            : new Dictionary<int, IReadOnlyList<string>>();
         var pending = new List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)>();
         var generation = _searchGeneration;
 
@@ -796,6 +803,9 @@ public partial class SearchView : UserControl
                 SupportsLoader = ControllerLoadMethod.SupportsLoader(result.Controller),
                 ConnectionMode = connectionMode,
                 ConnectionHint = connectionHint,
+                // Справочник исполнений шкафа — из БД, обход диска про него ничего не знает.
+                // Что из них СОБРАНО в этой версии, дорисует фоновый обход (ScanVersionFolder).
+                Executions = executionsBySubtype.GetValueOrDefault(result.SubtypeId, Array.Empty<string>()),
             };
 
             var card = new FirmwareCard();
@@ -804,19 +814,19 @@ public partial class SearchView : UserControl
             // залил в контроллер, скачал локально (см. RecordUsage).
             card.OpenFolderRequested += (s, _) => OpenFirmwareFolder(((FirmwareCard)s!).Result);
             card.OpenServerFolderRequested += (s, _) => OpenServerFolder(((FirmwareCard)s!).Result);
-            card.OpenPlcRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenPlc(((FirmwareCard)s!).Result); };
+            card.OpenPlcRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenPlc((FirmwareCard)s!); };
             card.OpenHmiRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenHmi(((FirmwareCard)s!).Result); };
             card.OpenLfsRequested += (s, _) =>
             {
                 RecordUsage(((FirmwareCard)s!).Result);
-                OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.LfsExtension, "LFS");
+                OpenLoaderFile((FirmwareCard)s!, LoaderFiles.LfsExtension, "LFS");
             };
             card.OpenPslRequested += (s, _) =>
             {
                 RecordUsage(((FirmwareCard)s!).Result);
-                OpenLoaderFile(((FirmwareCard)s!).Result, LoaderFiles.PslExtension, "PSL");
+                OpenLoaderFile((FirmwareCard)s!, LoaderFiles.PslExtension, "PSL");
             };
-            card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader(((FirmwareCard)s!).Result); };
+            card.LoaderRequested += (s, _) => { RecordUsage(((FirmwareCard)s!).Result); OpenLoader((FirmwareCard)s!); };
             card.ConnectionModeChangeRequested += (_, mode) => SaveConnectionMode(mode);
             card.DownloadRequested += (s, e) => { RecordUsage(((FirmwareCard)s!).Result); _ = DownloadFirmwareAsync(((FirmwareCard)s!).Result); };
             card.MapRequested += (s, _) => OpenMap(((FirmwareCard)s!).Result);
@@ -900,7 +910,8 @@ public partial class SearchView : UserControl
     private readonly record struct DiskScan(bool HasLfs, bool HasPsl, bool HasHmi,
         bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
         bool HasInstructionStub, bool HasModbus,
-        string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing);
+        string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing,
+        IReadOnlyList<string> BuiltExecutions);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -913,7 +924,8 @@ public partial class SearchView : UserControl
     /// переименованной папке ещё и перебор соседей с рекурсивным перечислением файлов в каждом).
     /// На сетевом диске компании это и есть та самая «программа задумалась, когда что-то делает в
     /// фоне»: цена одного обращения там на порядки выше локальной.</summary>
-    private static DiskScan ScanVersionFolder(HierarchyResult result, string root, bool netReachable, bool hasLocal)
+    private static DiskScan ScanVersionFolder(HierarchyResult result, string root, bool netReachable, bool hasLocal,
+        IReadOnlyList<string> executionCatalog)
     {
         var net = ResolvedNetworkDir(result);
 
@@ -972,8 +984,19 @@ public partial class SearchView : UserControl
             && !FirmwareDiskPresence.VersionPresentOnDisk(result.FirmwareDir, result.VersionRaw)
             && PathCheckableHere(result, root);
 
+        // Какие исполнения в этой версии реально собраны. Считается здесь, в фоне, и только когда у
+        // шкафа исполнения вообще заведены: это перечисление подпапок «Прошивка\» на сетевом диске,
+        // и делать его у каждой карточки «на всякий случай» значило бы вернуть ровно ту задумчивость,
+        // ради ухода от которой весь этот обход и вынесен из отрисовки.
+        var builtExecutions = executionCatalog.Count == 0
+            ? Array.Empty<string>()
+            : VersionFolders(result, net)
+                .SelectMany(dir => VersionLayout.BuiltExecutions(dir, executionCatalog))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -1038,7 +1061,7 @@ public partial class SearchView : UserControl
             if (generation != _searchGeneration) return;
 
             var hasLocal = baseFlags.HasLocal;
-            var scan = await Task.Run(() => ScanVersionFolder(result, root, netReachable, hasLocal));
+            var scan = await Task.Run(() => ScanVersionFolder(result, root, netReachable, hasLocal, baseFlags.Executions));
             if (generation != _searchGeneration) return;
 
             // Версия, которой нет ни в локальном кэше, ни в папке на доступном сетевом диске — это
@@ -1102,6 +1125,9 @@ public partial class SearchView : UserControl
 
                 PlcOpenExtension = scan.PlcOpenExtension,
                 HmiOpenExtension = scan.HmiOpenExtension,
+                // Что из справочника исполнений в этой версии собрано — до конца обхода список пуст,
+                // и карточка честно пишет «конфигурации нет»; обход договорит.
+                BuiltExecutions = scan.BuiltExecutions,
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
@@ -2124,12 +2150,26 @@ public partial class SearchView : UserControl
     /// смотрим на явно указанный оператором исполняемый файл (работает для любого проекта и для
     /// файлов во вложенных папках), и только если подсказки нет — на старый детект по расширениям,
     /// иначе «первый подходящий файл в папке» может открыть файл панели вместо программы ПЛК.</summary>
-    private void OpenPlc(HierarchyResult result)
+    private void OpenPlc(FirmwareCard card)
     {
+        var result = card.Result;
         // Что именно откроется — решает PlcOpenResolver, тот же, что посчитал расширение для подписи
         // кнопки при обходе диска. Держать эти два решения в одном месте обязательно: разойдись они —
         // на кнопке было бы написано одно расширение, а открывался бы другой файл.
-        var target = PlcOpenResolver.Resolve(PlcSources(result));
+        var sources = PlcSources(result);
+        // Выбрано СОБРАННОЕ исполнение — смотрим только в его папку: открыть базовую сборку там, где
+        // человек выбрал готовую конфигурацию, значит молча подсунуть не тот проект. Когда
+        // конфигурации нет, resolver сам вернул базовые папки, и открывается то же, что и всегда
+        // (а почему — написано на карточке).
+        if (ExecutionTargetFor(card) is { Configured: true } exec && exec.Execution.Length > 0)
+            sources = sources with
+            {
+                CandidateFolders = exec.Folders,
+                VersionFolders = exec.Folders,
+                FilteredFolders = exec.Folders,
+                NetworkFolder = exec.Folders.Count > 0 ? exec.Folders[^1] : sources.NetworkFolder,
+            };
+        var target = PlcOpenResolver.Resolve(sources);
         if (target is null)
         {
             OfferDownload(result, "Открыть");
@@ -2304,9 +2344,24 @@ public partial class SearchView : UserControl
         Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
     }
 
-    private void OpenLoaderFile(HierarchyResult result, string extension, string label)
+    /// <summary>Откуда брать файлы ВЫБРАННОГО на карточке исполнения — один ответ на все действия
+    /// над файлом версии (открыть LFS/PSL, открыть проект ПЛК, залить в контроллер). Решение целиком
+    /// в Core (FirmwareExecutionResolver): выдача только подставляет папки версии и справочник шкафа.
+    ///
+    /// В рабочей версии исполнений нет — справочник пустой, и ответ в точности прежний.</summary>
+    private FirmwareExecutionTarget ExecutionTargetFor(FirmwareCard card)
     {
-        var path = LoaderFiles.ResolvePreferHint(VersionFolders(result), result.ExecutableHint, extension);
+        var catalog = AppIdentity.IsBeta && card.SelectedExecution.Length > 0
+            ? _services.Db.GetSubtypeExecutions(card.Result.SubtypeId)
+            : (IReadOnlyList<string>)Array.Empty<string>();
+        return FirmwareExecutionResolver.Resolve(VersionFolders(card.Result), card.SelectedExecution, catalog);
+    }
+
+    private void OpenLoaderFile(FirmwareCard card, string extension, string label)
+    {
+        var result = card.Result;
+        var target = ExecutionTargetFor(card);
+        var path = LoaderFiles.ResolvePreferHint(target.Folders, result.ExecutableHint, target.SkipFolders, extension);
         if (path is null)
         {
             AppMessageBox.Show($"Файл {label} не найден ни в локальной копии, ни в папке версии на диске.",
@@ -2350,9 +2405,19 @@ public partial class SearchView : UserControl
     /// файл уезжает в папку версии НА ДИСКЕ (LoaderJob.NetworkFolder) — чтобы следующий наладчик на
     /// другой машине увидел готовый .lfs, а не собирал его заново.
     /// Доступность Automation проверяет сам диалог (LoaderDialog.EnsureAvailable) — до открытия окна.</summary>
-    private void OpenLoader(HierarchyResult result)
+    private void OpenLoader(FirmwareCard card)
     {
+        var result = card.Result;
+        // ИСПОЛНЕНИЕ, выбранное на карточке: в ПЛК уходит файл ИМЕННО ЕГО конфигурации. Если её в
+        // этой версии нет — базовая сборка, и об этом уже написано на карточке (заливку это не
+        // блокирует: устаревшая прошивка опаснее несконфигурированной). Имя задания говорит то же
+        // самое, чтобы в журнале заливки (LoaderDiagnostics) осталось, что именно уехало.
+        var exec = ExecutionTargetFor(card);
         var versionName = $"{result.Name} {result.VersionRaw}".Trim();
+        if (exec.Execution.Length > 0)
+            versionName += exec.Configured
+                ? $" — исполнение «{exec.Execution}»"
+                : $" — исполнение «{exec.Execution}»: конфигурации нет, исходная сборка";
 
         // Pixel через Segnetics Loader не заливается — его прошивка это проект SMLogix (.psl), его
         // открывают в SMLogix. Кнопки «Загрузить в ПЛК» для Pixel быть не должно (см. FirmwareCard),
@@ -2364,7 +2429,7 @@ public partial class SearchView : UserControl
                 $"Контроллер {result.Controller} не заливается через Segnetics Loader — его прошивка " +
                 "это проект SMLogix (.psl). Открываю проект в SMLogix; заливать загрузчиком не нужно.",
                 "Загрузка в ПЛК", MessageBoxButton.OK, MessageBoxImage.Information);
-            OpenPlc(result);
+            OpenPlc(card);
             return;
         }
 
@@ -2373,7 +2438,7 @@ public partial class SearchView : UserControl
         // ExecutableHint — выбранный оператором в модерации файл. Он обязателен здесь: в папке версии
         // может лежать пачка прошивок (пожарные шкафы), и «первый найденный .lfs» уезжал в контроллер
         // вместо нужного.
-        var files = LoaderFiles.FindDeploymentFiles(VersionFolders(result), result.ExecutableHint);
+        var files = LoaderFiles.FindDeploymentFiles(exec.Folders, result.ExecutableHint, exec.SkipFolders);
         // ЧТО ИМЕННО УЙДЁТ В ПЛК — решает DeployArtifact, а не «что первым нашлось».
         //
         // Раньше здесь стояло files.LfsPath ?? files.PslPath, то есть предпочтение отдавалось уже

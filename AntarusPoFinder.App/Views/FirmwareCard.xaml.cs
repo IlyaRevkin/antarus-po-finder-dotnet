@@ -123,6 +123,21 @@ public sealed record FirmwareCardFlags
     /// (см. Database.GetPendingSubjectKeys, SearchView заполняет по FwVersionId). Ровно ответ на
     /// вопрос оператора «а этот тег уже синхронизирован или нет».</summary>
     public bool TagsPending { get; init; }
+
+    /// <summary>СПРАВОЧНИК ИСПОЛНЕНИЙ ЭТОГО ШКАФА (Database.GetSubtypeExecutions) — то, из чего
+    /// состоит выбор на карточке. Пусто — у шкафа исполнений нет, и карточка выглядит в точности
+    /// как до этой задачи.
+    ///
+    /// Именно справочник, а не то, какие папки лежат в версии: наладчик обязан увидеть своё
+    /// исполнение, даже когда конфигурации под него в свежей версии не собрали, — иначе он решит,
+    /// что ищет не там, и уйдёт в прошлую версию за устаревшей прошивкой
+    /// (docs/firmware-executions.md).</summary>
+    public IReadOnlyList<string> Executions { get; init; } = Array.Empty<string>();
+
+    /// <summary>Какие из них в ЭТОЙ версии реально собраны — считается фоновым обходом диска
+    /// (SearchView.ScanVersionFolder), поэтому до его конца список пуст и карточка честно пишет,
+    /// что конфигурации нет: обход договорит.</summary>
+    public IReadOnlyList<string> BuiltExecutions { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>One search-result card. Кнопок стало слишком много для одного ряда, поэтому основными
@@ -210,6 +225,85 @@ public partial class FirmwareCard : UserControl
         // карточку (первая отрисовка + досмотр диска), и подписка там копила бы обработчики.
         TagsView.ShowAllRequested += (_, _) => ShowAllTags();
     }
+
+    // ── Исполнение ───────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Что выбрано в списке исполнений — пусто значит «исходная сборка». Поле живёт у
+    /// карточки, а не у выдачи, по той же причине, что и остальное её состояние: Configure зовётся
+    /// на одну карточку несколько раз (первая отрисовка и потом досмотр диска), и выбор человека
+    /// обязан эти перерисовки пережить.</summary>
+    public string SelectedExecution { get; private set; } = "";
+
+    /// <summary>Решение «что отдать по этому выбору» целиком, вместе с текстом предупреждения.
+    /// Выдача берёт отсюда, а не пересчитывает заново: разойдись написанное на карточке с тем, что
+    /// уезжает в контроллер, — и подпись перестанет что-либо гарантировать.</summary>
+    public FirmwareExecutionPick ExecutionPick { get; private set; } = FirmwareExecutionPick.Base;
+
+    /// <summary>Человек сменил исполнение. Выдаче нужно, чтобы пересчитать то, что зависит от
+    /// выбранного файла.</summary>
+    public event EventHandler? ExecutionChanged;
+
+    private IReadOnlyList<string> _builtExecutions = Array.Empty<string>();
+    private bool _fillingExecutions;
+
+    /// <summary>Список исполнений шкафа и честная пометка под ним. Показывается только в бете и
+    /// только у шкафов, где исполнения заведены: остальные карточки остаются прежними до пикселя.</summary>
+    private void ShowExecutions(FirmwareCardFlags flags)
+    {
+        _builtExecutions = flags.BuiltExecutions;
+        var show = AppIdentity.IsBeta && flags.Executions.Count > 0;
+        ExecutionPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show)
+        {
+            SelectedExecution = "";
+            ExecutionPick = FirmwareExecutionPick.Base;
+            ExecutionWarningLabel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _executionChoices = flags.Executions;
+        var choices = FirmwareExecutionPick.Choices(flags.Executions);
+        // Флаг на время заполнения: присваивание ItemsSource/SelectedIndex поднимает
+        // SelectionChanged, и без него перерисовка карточки выглядела бы как выбор человека —
+        // событие ExecutionChanged улетало бы в выдачу на каждый досмотр диска.
+        _fillingExecutions = true;
+        ExecutionCombo.ItemsSource = choices
+            .Select(x => x.Length == 0 ? FwExecution.MainDisplayName : x)
+            .ToList();
+        var at = -1;
+        for (var i = 0; i < choices.Count; i++)
+            if (string.Equals(choices[i], SelectedExecution, StringComparison.OrdinalIgnoreCase)) { at = i; break; }
+        ExecutionCombo.SelectedIndex = at < 0 ? 0 : at;
+        _fillingExecutions = false;
+
+        SelectedExecution = at < 0 ? "" : choices[at];
+        UpdateExecutionWarning();
+    }
+
+    private void UpdateExecutionWarning()
+    {
+        ExecutionPick = FirmwareExecutionPick.Pick(SelectedExecution, _builtExecutions);
+        ExecutionWarningLabel.Text = ExecutionPick.Warning;
+        ExecutionWarningLabel.Visibility = ExecutionPick.Warning.Length > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void Execution_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        if (_fillingExecutions) return;
+        var choices = FirmwareExecutionPick.Choices(_executionChoices);
+        var at = ExecutionCombo.SelectedIndex;
+        SelectedExecution = at > 0 && at < choices.Count ? choices[at] : "";
+        UpdateExecutionWarning();
+        ExecutionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Справочник шкафа, по которому построен список, — чтобы обработчик выбора знал,
+    /// какому пункту соответствует индекс. В ItemsSource лежат ПОДПИСИ (у исходной сборки это
+    /// «основное»), а не сами значения, и восстанавливать значение из подписи было бы угадыванием.</summary>
+    private IReadOnlyList<string> _executionChoices = Array.Empty<string>();
 
     private void ShowAllTags()
     {
@@ -331,6 +425,8 @@ public partial class FirmwareCard : UserControl
         bool showAuthor = false && !string.IsNullOrWhiteSpace(author);
         AuthorLabel.Visibility = showAuthor ? Visibility.Visible : Visibility.Collapsed;
         if (showAuthor) AuthorLabel.Text = $"Автор: {author}";
+
+        ShowExecutions(flags);
 
         ShowFilesLine(result, flags);
         // Строка файлов и контроллер уезжают под значок «i»; на карточке их больше нет.
