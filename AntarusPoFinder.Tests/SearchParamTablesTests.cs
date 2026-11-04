@@ -170,6 +170,36 @@ public class SearchParamTablesTests : IDisposable
         Assert.Contains(group.Name, Assert.Single(Find("максимальная")).Subtypes);
     }
 
+    /// <summary>СВОБОДНАЯ таблица находится по типу и подтипу шкафа — по её собственной привязке.
+    ///
+    /// Раньше привязку здесь выводили из файла, а у свободной таблицы файла нет: колонка «Шкафы» в
+    /// выдаче была пуста всегда, и по шкафу таблица не находилась вовсе. Ровно это и означало
+    /// «таблица не находится там, где её ищут».</summary>
+    [Fact]
+    public void StandaloneTableIsFoundByItsOwnSubtype()
+    {
+        var subtype = _db.GetAllEquipmentSubtypes().First(s => s.Id is not null);
+        var group = _db.GetAllEquipmentGroups().First(g => g.Id == subtype.GroupId);
+        var id = _db.AddParamTable(new ParamTable { Name = "Пуск по месту", Manufacturer = "ESQ" });
+        ParamTableEditing.SaveRevision(_db, id, new[] { P("P0-10", "Максимальная частота") }, "первая", "Ilia");
+        _db.UpdateParamTableSubtypes(id, ParamTableBinding.FormatIds(new[] { subtype.Id!.Value }));
+
+        var hit = Assert.Single(Find(group.Name));
+        Assert.Equal("Пуск по месту", hit.Table.Name);
+        Assert.Contains(group.Name, hit.Subtypes);
+    }
+
+    /// <summary>И по производителю — то самое поле, которое у свободной таблицы было негде
+    /// заполнить.</summary>
+    [Fact]
+    public void StandaloneTableIsFoundByManufacturer()
+    {
+        var id = _db.AddParamTable(new ParamTable { Name = "Пуск по месту", Manufacturer = "Instart" });
+        ParamTableEditing.SaveRevision(_db, id, new[] { P("P0-10", "Максимальная частота") }, "первая", "Ilia");
+
+        Assert.Equal("Пуск по месту", Assert.Single(Find("Instart")).Table.Name);
+    }
+
     [Fact]
     public void NothingMatches_IsAnEmptyList_NotAnError()
     {

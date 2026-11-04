@@ -76,6 +76,13 @@ public partial class ParamsView : UserControl
         public string Manufacturer => string.IsNullOrWhiteSpace(Source.Manufacturer) ? "—" : Source.Manufacturer;
         public string TagsDisplay => string.IsNullOrWhiteSpace(Source.Tags) ? "—" : Source.Tags;
         public bool Standalone => Source.DiskPath.Length == 0 && Source.Filename.Length == 0;
+
+        /// <summary>К каким шкафам таблица относится — одной строкой. Считается при чтении списка
+        /// (ParamTableBinding.Of): у свободной таблицы привязка своя, у таблицы при файле выводится
+        /// из записей файла, и спрашивать надо одно и то же место, а не разбираться здесь заново.</summary>
+        public string Subtypes { get; init; } = "";
+
+        public string SubtypesDisplay => Subtypes.Length == 0 ? "—" : Subtypes;
         public string Origin => Standalone ? "свободная" : Source.Filename;
         public string DateOnly
         {
@@ -91,7 +98,15 @@ public partial class ParamsView : UserControl
 
     private void ReloadTables()
     {
-        _tableRows = _services.Db.GetParamTables().Select(t => new ParamTableRow { Source = t }).ToList();
+        _tableRows = _services.Db.GetParamTables()
+            .Select(t => new ParamTableRow
+            {
+                Source = t,
+                Subtypes = string.Join(", ", ParamTableBinding
+                    .Of(_services.Db, t, _services.Hierarchy, _services.Cfg.RootPath())
+                    .Links.Select(l => l.Display)),
+            })
+            .ToList();
         ApplyTableFilter();
     }
 
@@ -103,7 +118,10 @@ public partial class ParamsView : UserControl
             : _tableRows.Where(r =>
                 r.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || r.Source.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase)
-                || r.Source.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+                || r.Source.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)
+                // Тип и подтип шкафа — наравне с названием: таблицу ищут «по ПЖ 2.0», а не по
+                // имени документа, которого никто не помнит.
+                || r.Subtypes.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         TablesGrid.ItemsSource = shown;
         TablesEmptyHint.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -174,13 +192,18 @@ public partial class ParamsView : UserControl
 
         var answer = AppMessageBox.Show(
             $"Отвязать «{row.Name}» от файла {row.Source.Filename}?" + Environment.NewLine + Environment.NewLine
-            + "Значения, ревизии и теги остаются — пропадает только привязка к файлу на диске, "
-            + "а вместе с ней и привязка к подтипам шкафов, которая из этого файла выводилась.",
+            + "Значения, ревизии и теги остаются. Пропадает привязка к файлу на диске, а подтипы "
+            + "шкафов, которые из этого файла выводились, запишутся самой таблице — дальше они "
+            + "правятся в ней («Свойства…»).",
             "Отвязать от файла", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
 
-        _services.Db.DetachParamTableFromFile(id);
-        _host.PushCatalogChange($"Таблица параметров «{row.Name}» отвязана от файла");
+        // Привязка к шкафам переносится в саму таблицу, а не теряется: до отвязки она выводилась
+        // из записей файла, после — выводить не из чего (см. ParamTableBinding.Detach).
+        var kept = ParamTableBinding.Detach(_services.Db, row.Source, _services.Hierarchy, _services.Cfg.RootPath());
+        _host.PushCatalogChange(kept > 0
+            ? $"Таблица параметров «{row.Name}» отвязана от файла, подтипов сохранено: {kept}"
+            : $"Таблица параметров «{row.Name}» отвязана от файла");
         ReloadTables();
     }
 
@@ -204,14 +227,15 @@ public partial class ParamsView : UserControl
 
         var answer = AppMessageBox.Show(
             $"Отвязать от файлов все таблицы — их {attached.Count}?" + Environment.NewLine + Environment.NewLine
-            + "Значения, ревизии и теги остаются. Пропадает привязка к .par на диске, а вместе с ней "
-            + "и привязка к подтипам шкафов, которая из этого файла выводилась: её после переноса "
-            + "задают в самой таблице.",
+            + "Значения, ревизии и теги остаются. Пропадает привязка к .par на диске, а подтипы "
+            + "шкафов, которые из него выводились, запишутся самим таблицам — дальше они правятся "
+            + "в каждой из них («Свойства…»).",
             "Перенести все", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
 
+        var root = _services.Cfg.RootPath();
         foreach (var row in attached)
-            _services.Db.DetachParamTableFromFile((int)row.Source.Id!);
+            ParamTableBinding.Detach(_services.Db, row.Source, _services.Hierarchy, root);
 
         _host.PushCatalogChange($"Таблицы параметров отвязаны от файлов: {attached.Count}");
         ReloadTables();

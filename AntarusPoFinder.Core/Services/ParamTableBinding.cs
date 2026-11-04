@@ -20,6 +20,14 @@ namespace AntarusPoFinder.Core.Services;
 /// Поэтому привязка ВЫВОДИТСЯ: тот же файл → те же записи param_files → те же подтипы. Правится она
 /// там же, где и у файла (EditParamSubtypesDialog), и правка видна сразу обоим.
 ///
+/// <b>СВОБОДНАЯ таблица — исключение, и единственное.</b> В бете документ заводят без файла вовсе
+/// (disk_path и filename пусты), и выводить привязку тогда неоткуда: param_files для этого документа
+/// не существует и не появится. Там и только там привязка живёт СВОЕЙ записью — полем subtype_ids
+/// самого документа (см. Domain/ParamTable.cs и <see cref="Own"/>). Двух ответов на один вопрос это
+/// не создаёт: у документа либо есть файл (и тогда привязка выводится, а поле не заполняется), либо
+/// файла нет (и выводить не из чего). Какой случай перед нами, решает <see cref="Of"/> — спрашивать
+/// надо его, а не разбираться на каждом экране заново.
+///
 /// Отдельный случай — документ, у которого записи файла нет вовсе (файл на диске есть, а в базе не
 /// значится: удалили запись, приехал документ с машины с другим корнем диска). Тогда привязки нет,
 /// и её надо ЗАВЕСТИ — см. <see cref="Register"/>.</summary>
@@ -75,6 +83,87 @@ public static class ParamTableBinding
                 ReferenceEquals(row, primary)));
 
         return new Result(links, primary);
+    }
+
+    /// <summary>Привязка документа, КАКАЯ БЫ У НЕГО НИ БЫЛА — одна точка входа на оба устройства.
+    ///
+    /// Документ при файле: привязка выводится из записей param_files, как и раньше. Документ
+    /// СВОБОДНЫЙ (disk_path и filename пусты — в бете такие и заводятся): выводить неоткуда, и
+    /// привязка берётся из его собственного поля subtype_ids (см. Domain/ParamTable.cs). Звать
+    /// отсюда, а не разбираться на каждом экране заново: иначе список, окно документа и поиск
+    /// отвечали бы на один вопрос по-разному.</summary>
+    public static Result Of(Database db, ParamTable table,
+        HierarchyService? hierarchy = null, string? rootPath = null)
+    {
+        var standalone = string.IsNullOrWhiteSpace(table.DiskPath) && string.IsNullOrWhiteSpace(table.Filename);
+        return standalone ? new Result(Own(db, table), null) : For(db, table.DiskPath, table.Filename, hierarchy, rootPath);
+    }
+
+    /// <summary>Подтипы, записанные у СВОБОДНОЙ таблицы своим полем. Подтип, которого в справочнике
+    /// уже нет (удалили, не доехал), молча пропускается: показать «шкаф №31» вместо названия значит
+    /// показать не ответ, а внутренний номер.</summary>
+    public static List<Link> Own(Database db, ParamTable table)
+    {
+        var wanted = ParseIds(table.SubtypeIds);
+        if (wanted.Count == 0) return new List<Link>();
+
+        var groups = db.GetAllEquipmentGroups().ToDictionary(g => g.Id ?? 0, g => g.Name);
+        var subtypes = db.GetAllEquipmentSubtypes().Where(s => s.Id is not null).ToDictionary(s => s.Id!.Value);
+
+        var links = new List<Link>();
+        foreach (var id in wanted)
+        {
+            if (!subtypes.TryGetValue(id, out var subtype)) continue;
+            links.Add(new Link(0, id,
+                groups.TryGetValue(subtype.GroupId, out var groupName) ? groupName : "",
+                subtype.Name.Length > 0 ? subtype.Name : subtype.FolderName,
+                // Основного среди них нет и быть не может: основной — это тот подтип, в чьей папке
+                // ЛЕЖИТ ФАЙЛ, а у свободной таблицы файла нет вовсе.
+                IsPrimary: false));
+        }
+        return links;
+    }
+
+    /// <summary>Отвязать документ от файла, СОХРАНИВ привязку к шкафам.
+    ///
+    /// Пока документ при файле, привязка выводится из записей param_files. Отвяжи его просто так —
+    /// и выводить станет не из чего: шкафы пропадали молча, а восстанавливать их приходилось по
+    /// памяти. Поэтому выведенная привязка переписывается в собственное поле документа ровно в
+    /// момент отвязки: ответ остаётся тот же, меняется только то, откуда он берётся.
+    ///
+    /// Возвращает, сколько подтипов удалось сохранить, — чтобы вызывающему было что сказать
+    /// человеку, а не «готово».</summary>
+    public static int Detach(Database db, ParamTable table,
+        HierarchyService? hierarchy = null, string? rootPath = null)
+    {
+        if (table.Id is not int id) return 0;
+
+        var links = For(db, table.DiskPath, table.Filename, hierarchy, rootPath).Links;
+        db.DetachParamTableFromFile(id);
+        if (links.Count > 0)
+            db.UpdateParamTableSubtypes(id, FormatIds(links.Select(l => l.SubtypeId)));
+        return links.Count;
+    }
+
+    /// <summary>«12,30,31» → список id. Пустые и повторяющиеся куски отбрасываются: строка
+    /// собирается программой, но приехать может и из чужого конфига, и из правки руками.</summary>
+    public static List<int> ParseIds(string? raw)
+    {
+        var result = new List<int>();
+        foreach (var part in (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (int.TryParse(part, out var id) && id > 0 && !result.Contains(id))
+                result.Add(id);
+        return result;
+    }
+
+    /// <summary>Список id → «12,30,31». Порядок сохраняется: первым человек отмечает тот подтип,
+    /// про который думает в первую очередь, и переставлять это за него незачем.</summary>
+    public static string FormatIds(IEnumerable<int>? ids)
+    {
+        var kept = new List<int>();
+        foreach (var id in ids ?? Enumerable.Empty<int>())
+            if (id > 0 && !kept.Contains(id)) kept.Add(id);
+        return string.Join(",", kept);
     }
 
     private static ParamFile ResolvePrimary(List<ParamFile> rows, string diskPath,

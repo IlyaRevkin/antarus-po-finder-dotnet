@@ -282,7 +282,30 @@ public class ExportedParamTable
     /// и заводит столбцы по заголовкам, как раньше.</summary>
     [JsonPropertyName("param_columns")] public List<ExportedParamTableColumn>? ParamColumns { get; set; }
 
+    /// <summary>Подтипы шкафов СВОБОДНОЙ таблицы — к каким шкафам она относится. Едут ПЕРЕНОСИМО
+    /// (sync_id подтипа плюс имена запасным ключом), а не местными id, как они лежат в базе: id у
+    /// каждой машины свои, и приехавшая «31» означала бы у получателя чужой шкаф.
+    ///
+    /// null — «отправитель об этом поле не знает» (снимок со старой версии): тогда местный набор не
+    /// трогается вовсе. Пустой список — «у таблицы привязки нет», и это разные вещи: в первом случае
+    /// затирать свою привязку чужим молчанием нельзя.
+    ///
+    /// У таблицы при файле список пуст всегда: там привязка выводится из param_files и ездит
+    /// вместе с ними (см. Services/ParamTableBinding.cs).</summary>
+    [JsonPropertyName("subtypes")] public List<ExportedParamTableSubtype>? Subtypes { get; set; }
+
     [JsonPropertyName("revisions")] public List<ExportedParamTableRevision> Revisions { get; set; } = new();
+}
+
+/// <summary>Один подтип шкафа, к которому привязана свободная таблица параметров. Адресуется ровно
+/// так же, как подтип у файла параметров (ExportedParamFile): sync_id, а запасным ключом — имена
+/// типа и подтипа, по которым две независимо заведённые базы находят друг друга на первом
+/// контакте.</summary>
+public class ExportedParamTableSubtype
+{
+    [JsonPropertyName("subtype_sync_id")] public string SubtypeSyncId { get; set; } = "";
+    [JsonPropertyName("subtype_name")] public string SubtypeName { get; set; } = "";
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = "";
 }
 
 /// <summary>Свой столбец документа. Ключ и заголовок разведены: заголовок переименовывают, а

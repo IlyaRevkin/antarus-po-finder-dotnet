@@ -178,6 +178,10 @@ public partial class Database
                 // «param_columns» — всё, что новее. Убрать первое можно будет, когда 1.74.2 не
                 // останется ни на одной машине, и не раньше.
                 Columns = GetParamTableColumns(table.Id!.Value).Select(c => c.Title).ToList(),
+                // Подтипы свободной таблицы — переносимо: sync_id подтипа и имена запасным ключом.
+                // Местные id наружу не едут (у каждой машины свои), разбор на той стороне —
+                // ImportParamTableSubtypes.
+                Subtypes = ExportParamTableSubtypes(table),
                 ParamColumns = AllParamTableColumnsIncludingDeleted(table.Id.Value)
                     .Select(c => new ExportedParamTableColumn
                     {
@@ -1936,7 +1940,7 @@ public partial class Database
         // ни от какой другой секции не зависят — но идут после param_files намеренно: документ и
         // файл, к которому он относится, обычно приезжают одним снимком, и заводить документ раньше
         // файла незачем.
-        ImportParamTables(data, counts, apply);
+        ImportParamTables(data, subtypeSyncToId, counts, apply);
         // Паспорта из синхронизации убраны: секцию data.Passports эта версия не читает вовсе (см.
         // ExportHierarchyData). Старый клиент мог прислать её заполненной — она просто игнорируется.
 
@@ -2064,7 +2068,54 @@ public partial class Database
     /// </list>
     /// Группа строки в СПРАВОЧНИК не добавляется — ровно как вид доп. материала: осознанно удалённая
     /// группа иначе воскресала бы с каждой приехавшей ревизией. Справочник едет своей секцией.</summary>
-    private void ImportParamTables(HierarchyExportData data, ImportCounts counts, bool apply)
+    /// <summary>Подтипы свободной таблицы ДЛЯ ВЫГРУЗКИ — местные id переводятся в переносимую
+    /// адресацию (sync_id подтипа плюс имена типа и подтипа запасным ключом), ровно как у
+    /// param_files. Подтип, которого в справочнике уже нет, пропускается: слать пустую ссылку
+    /// значит просить получателя гадать.</summary>
+    private List<ExportedParamTableSubtype> ExportParamTableSubtypes(Domain.ParamTable table)
+    {
+        var result = new List<ExportedParamTableSubtype>();
+        var wanted = Services.ParamTableBinding.ParseIds(table.SubtypeIds);
+        if (wanted.Count == 0) return result;
+
+        foreach (var id in wanted)
+            using (var r = ExecuteReader("""
+                SELECT es.sync_id AS subtype_sync_id, es.name AS subtype_name, eg.name AS group_name
+                FROM equipment_subtypes es JOIN equipment_groups eg ON es.group_id = eg.id
+                WHERE es.id=@id
+                """, cmd => cmd.Parameters.AddWithValue("@id", id)))
+                if (r.Read())
+                    result.Add(new ExportedParamTableSubtype
+                    {
+                        SubtypeSyncId = GetString(r, "subtype_sync_id"),
+                        SubtypeName = GetString(r, "subtype_name"),
+                        GroupName = GetString(r, "group_name"),
+                    });
+
+        return result;
+    }
+
+    /// <summary>Подтипы приехавшей свободной таблицы — в местные id. Подтип, которого у получателя
+    /// нет вовсе, пропускается молча: завести его здесь значило бы вырастить справочник шкафов из
+    /// документа, а он едет своей секцией.
+    ///
+    /// Пустая строка на выходе — это «привязки нет», и записывается она так же честно, как
+    /// непустая: отправитель мог привязку СНЯТЬ, и промолчать об этом — оставить её жить вечно.
+    /// Различать «снял» и «не знает о поле» приходится выше по вызову, по null самого списка.</summary>
+    private string ResolveParamTableSubtypes(List<ExportedParamTableSubtype> incoming,
+        Dictionary<string, int> subtypeSyncToId)
+    {
+        var ids = new List<int>();
+        foreach (var s in incoming)
+        {
+            var id = ResolveId("equipment_subtypes", s.SubtypeSyncId, subtypeSyncToId, "name", s.SubtypeName, s.GroupName);
+            if (id is int value) ids.Add(value);
+        }
+        return Services.ParamTableBinding.FormatIds(ids);
+    }
+
+    private void ImportParamTables(HierarchyExportData data, Dictionary<string, int> subtypeSyncToId,
+        ImportCounts counts, bool apply)
     {
         if (data.ParamTables is null) return;
 
@@ -2100,6 +2151,9 @@ public partial class Database
                     Name = inc.Name,
                     Manufacturer = inc.Manufacturer,
                     Tags = inc.Tags,
+                    // Привязка к шкафам приезжает переносимой (sync_id подтипа + имена) и здесь же
+                    // переводится в местные id: чужая «31» у нас означала бы другой шкаф.
+                    SubtypeIds = inc.Subtypes is null ? "" : ResolveParamTableSubtypes(inc.Subtypes, subtypeSyncToId),
                     CreatedAt = inc.CreatedAt,
                     UpdatedAt = inc.UpdatedAt,
                     SyncId = inc.SyncId,
@@ -2118,13 +2172,25 @@ public partial class Database
                 continue;
             }
 
+            // Привязка к шкафам сводится вместе с остальной шапкой и той же отметкой времени.
+            // null — снимок со старой версии: отправитель о поле не знает, и трогать свою привязку
+            // по его молчанию нельзя (тот же принцип, что у param_columns выше).
+            var incomingSubtypes = inc.Subtypes is null
+                ? local.SubtypeIds
+                : ResolveParamTableSubtypes(inc.Subtypes, subtypeSyncToId);
+
             if (string.CompareOrdinal(inc.UpdatedAt, local.UpdatedAt) > 0
-                && (inc.Name != local.Name || inc.Manufacturer != local.Manufacturer || inc.Tags != local.Tags))
+                && (inc.Name != local.Name || inc.Manufacturer != local.Manufacturer || inc.Tags != local.Tags
+                    || incomingSubtypes != local.SubtypeIds))
             {
                 counts.ParamTablesUpdated++;
                 if (apply)
                 {
                     UpdateParamTable(local.Id!.Value, inc.Name, inc.Manufacturer, inc.UpdatedAt);
+                    // Подтипы отдельным вызовом — по той же причине, что и теги: общий метод шапки
+                    // о них не знает, а отметка времени нужна ЧУЖАЯ, иначе применённая правка
+                    // коллеги поехала бы обратно как более свежая.
+                    UpdateParamTableSubtypes(local.Id.Value, incomingSubtypes, inc.UpdatedAt);
                     // Теги отдельным вызовом: их правят из своего окна, и общий метод шапки о них
                     // не знает. Отметка времени та же — иначе применённая правка коллеги поехала бы
                     // обратно как более свежая.
