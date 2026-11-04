@@ -192,7 +192,10 @@ public static class ConfigSyncService
         //     свести всю защиту к ключу, лежащему внутри exe.
         // А вот "backup_enabled", "backup_keep_days" и "backup_to_s3" здесь СОЗНАТЕЛЬНО отсутствуют:
         // это политика предприятия, администратор задаёт её один раз (см. ConfigService.BackupEnabled).
-        "backup_folder", "backup_password", Core.Services.ConfigService.BackupLastAtKey,
+        // Обе отметки (удачи и попытки) — такие же местные watermark'и, как config_last_synced_at:
+        // приехав с чужой машины, свежая отметка отменила бы копию там, где её не снимали ни разу.
+        "backup_folder", "backup_password",
+        Core.Services.ConfigService.BackupLastAtKey, "backup_last_try_at",
         // УБОРКА ЛОКАЛЬНЫХ КОПИЙ ПРОШИВОК — ЦЕЛИКОМ ЛИЧНАЯ, все четыре ключа.
         //
         // Отметка «когда здесь последний раз чистился кэш» была здесь всегда: приехав с чужой

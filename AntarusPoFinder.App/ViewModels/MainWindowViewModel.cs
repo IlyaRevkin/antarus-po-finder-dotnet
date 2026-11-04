@@ -1903,6 +1903,16 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// (копия это страховка, а не журнал изменений), реже — уже обидно терять.</summary>
     internal static TimeSpan BackupInterval { get; set; } = TimeSpan.FromHours(24);
 
+    /// <summary>Сколько ждать после НЕУДАЧНОЙ попытки, прежде чем пробовать снова. Час: шара,
+    /// отвалившаяся на минуту, успеет вернуться за смену, а молотить VACUUM каждые несколько минут
+    /// при недоступном адресате программа не будет.</summary>
+    internal static TimeSpan BackupRetryInterval { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>Отметка ПОПЫТКИ (в отличие от отметки удачи ConfigService.BackupLastAtKey). Местная,
+    /// как и все watermark'и синхронизации, — уехав в общий конфиг, затыкала бы копирование на
+    /// чужих машинах.</summary>
+    private const string BackupLastTryKey = "backup_last_try_at";
+
     /// <summary>ЕЖЕСУТОЧНАЯ РЕЗЕРВНАЯ КОПИЯ (см. Core/Services/BackupService — там же и зачем она
     /// вообще понадобилась, и что внутри).
     ///
@@ -1929,9 +1939,21 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         var last = DateTime.TryParse(_services.Cfg.Get(ConfigService.BackupLastAtKey), out var at) ? at : DateTime.MinValue;
         if (DateTime.UtcNow - last < BackupInterval) return;
 
+        // ПОВТОР ПОСЛЕ НЕУДАЧИ — НЕ ЧАЩЕ ЧЕМ РАЗ В ЧАС, и это не мелочь.
+        //
+        // Отметка удачи выше ставится только на удачу (иначе отвалившаяся на минуту шара отложила бы
+        // копию на сутки). Но тик синхронизации приходит каждые несколько минут, а снятие копии —
+        // это VACUUM INTO по всей базе плюс упаковка. При недоступном бакете или закрытой на запись
+        // папке программа молотила бы впустую весь рабочий день, и «копия не мешает работать»
+        // превратилось бы в прямую ложь. Отдельная отметка ПОПЫТКИ разводит эти два срока.
+        var tried = DateTime.TryParse(_services.Cfg.Get(BackupLastTryKey), out var tryAt) ? tryAt : DateTime.MinValue;
+        if (DateTime.UtcNow - tried < BackupRetryInterval) return;
+
         _backupRunning = true;
         try
         {
+            _services.Cfg.Set(BackupLastTryKey, DateTime.UtcNow.ToString("O"));
+
             // Целиком в фоновый поток: VACUUM INTO на большой базе и упаковка занимают секунды, а
             // поток интерфейса на это время замирать не имеет права.
             var sharedConfig = ConfigSharedFilePath();
