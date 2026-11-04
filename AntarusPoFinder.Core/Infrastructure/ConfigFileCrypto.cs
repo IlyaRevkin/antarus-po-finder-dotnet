@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 
 namespace AntarusPoFinder.Core.Infrastructure;
@@ -118,6 +118,120 @@ public static class ConfigFileCrypto
             return null;
         }
     }
+
+    // ── Шифрование ПАРОЛЕМ ЧЕЛОВЕКА (формат "APOFPWD1") ──────────────────────────────────────
+    //
+    // Всё выше шифруется ключом, который лежит внутри exe: от текстового редактора защищает, от
+    // того, у кого есть программа, — нет. Для общего конфига на внутренней шаре этого хватает.
+    //
+    // Резервной копии, уезжающей в S3, не хватает категорически: бакет ПУБЛИЧЕН НА ЧТЕНИЕ (на этом
+    // держится QR с наклейки), то есть объект там читает кто угодно из интернета. Поэтому у копии
+    // ключ не из программы, а из пароля, который задаёт человек, и в репозитории/в бинарнике его
+    // нет вовсе.
+    //
+    // Схема ТА ЖЕ, что у V2 выше — AES-256-GCM, случайный nonce на каждое шифрование, тег
+    // аутентифицирует всё целиком; второго способа шифровать в этом проекте заводить нельзя.
+    // Отличий ровно два:
+    //   • ключ выводится PBKDF2-HMAC-SHA256 из пароля и СЛУЧАЙНОЙ соли (вместо SHA256 от
+    //     захардкоженной фразы) — соль хранится в самом файле, иначе одинаковые пароли на разных
+    //     машинах дали бы одинаковые ключи, а радужная таблица по словарю паролей стала бы
+    //     осмысленной;
+    //   • работаем с байтами, а не со строкой: внутри zip, а не JSON.
+    //
+    // Формат: [magic "APOFPWD1"][salt 16][iterations int32 LE][nonce 12][tag 16][шифротекст].
+    // Число итераций лежит В ФАЙЛЕ, а не берётся из константы при чтении: когда через несколько лет
+    // его придётся поднять, старые копии обязаны остаться читаемыми — иначе смысл резервной копии
+    // теряется ровно в тот момент, когда она понадобилась.
+
+    private static readonly byte[] MagicHeaderPwd = Encoding.ASCII.GetBytes("APOFPWD1");
+
+    private const int SaltSizeBytes = 16;
+
+    /// <summary>Итераций PBKDF2 для НОВЫХ копий. 210 000 — ориентир OWASP для PBKDF2-HMAC-SHA256;
+    /// считается около четверти секунды и делается раз в сутки в фоне, то есть заметить это
+    /// неоткуда, а перебор пароля дорожает на пять порядков.</summary>
+    public const int PasswordIterations = 210_000;
+
+    private static byte[] DeriveKeyFromPassword(string password, byte[] salt, int iterations) =>
+        Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, iterations, HashAlgorithmName.SHA256, 32);
+
+    /// <summary>Зашифровать произвольные байты паролем человека. Пустой пароль — не ошибка вызова, а
+    /// запрещённое состояние: копия без пароля в публичном бакете это и есть та утечка, от которой
+    /// всё затевалось, поэтому ловим здесь, а не надеемся на проверку у вызывающего.</summary>
+    public static byte[] EncryptWithPassword(byte[] plain, string password)
+    {
+        if (string.IsNullOrEmpty(password))
+            throw new ArgumentException("Пустой пароль: шифровать нечем", nameof(password));
+
+        var salt = RandomNumberGenerator.GetBytes(SaltSizeBytes);
+        var nonce = RandomNumberGenerator.GetBytes(NonceSizeBytes);
+        var key = DeriveKeyFromPassword(password, salt, PasswordIterations);
+        var cipherBytes = new byte[plain.Length];
+        var tag = new byte[TagSizeBytes];
+
+        using (var gcm = new AesGcm(key, TagSizeBytes))
+            gcm.Encrypt(nonce, plain, cipherBytes, tag);
+
+        var iterations = BitConverter.GetBytes(PasswordIterations);
+        if (!BitConverter.IsLittleEndian) Array.Reverse(iterations);
+
+        var result = new byte[MagicHeaderPwd.Length + SaltSizeBytes + 4 + NonceSizeBytes + TagSizeBytes + cipherBytes.Length];
+        var offset = 0;
+        Buffer.BlockCopy(MagicHeaderPwd, 0, result, offset, MagicHeaderPwd.Length); offset += MagicHeaderPwd.Length;
+        Buffer.BlockCopy(salt, 0, result, offset, salt.Length); offset += salt.Length;
+        Buffer.BlockCopy(iterations, 0, result, offset, 4); offset += 4;
+        Buffer.BlockCopy(nonce, 0, result, offset, nonce.Length); offset += nonce.Length;
+        Buffer.BlockCopy(tag, 0, result, offset, tag.Length); offset += tag.Length;
+        Buffer.BlockCopy(cipherBytes, 0, result, offset, cipherBytes.Length);
+        return result;
+    }
+
+    /// <summary>Расшифровать. null — «не тот пароль, не тот формат или файл испорчен»; различать эти
+    /// три случая нечем и не нужно: ответ человеку в любом из них один и тот же — «этим паролем не
+    /// открывается».</summary>
+    public static byte[]? TryDecryptWithPassword(byte[] data, string password)
+    {
+        if (string.IsNullOrEmpty(password)) return null;
+        if (!StartsWith(data, MagicHeaderPwd)) return null;
+
+        var headerLen = MagicHeaderPwd.Length + SaltSizeBytes + 4 + NonceSizeBytes + TagSizeBytes;
+        if (data.Length < headerLen) return null;
+
+        try
+        {
+            var offset = MagicHeaderPwd.Length;
+            var salt = new byte[SaltSizeBytes];
+            Buffer.BlockCopy(data, offset, salt, 0, SaltSizeBytes); offset += SaltSizeBytes;
+
+            var iterBytes = new byte[4];
+            Buffer.BlockCopy(data, offset, iterBytes, 0, 4); offset += 4;
+            if (!BitConverter.IsLittleEndian) Array.Reverse(iterBytes);
+            var iterations = BitConverter.ToInt32(iterBytes, 0);
+            // Мусор в поле итераций — повод отказать, а не считать час или поделить на ноль.
+            if (iterations is < 1000 or > 10_000_000) return null;
+
+            var nonce = new byte[NonceSizeBytes];
+            Buffer.BlockCopy(data, offset, nonce, 0, NonceSizeBytes); offset += NonceSizeBytes;
+            var tag = new byte[TagSizeBytes];
+            Buffer.BlockCopy(data, offset, tag, 0, TagSizeBytes); offset += TagSizeBytes;
+
+            var cipherBytes = new byte[data.Length - headerLen];
+            Buffer.BlockCopy(data, offset, cipherBytes, 0, cipherBytes.Length);
+            var plain = new byte[cipherBytes.Length];
+
+            using var gcm = new AesGcm(DeriveKeyFromPassword(password, salt, iterations), TagSizeBytes);
+            gcm.Decrypt(nonce, cipherBytes, tag, plain); // неверный пароль — несовпадение тега — исключение
+            return plain;
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Похоже ли это на копию, зашифрованную паролем. Нужно одному месту — списку копий,
+    /// который рисует замочек рядом с теми, что без пароля не открыть.</summary>
+    public static bool IsPasswordEncrypted(byte[] head) => StartsWith(head, MagicHeaderPwd);
 
     private static string? TryDecryptV1LegacyCbc(byte[] data)
     {
