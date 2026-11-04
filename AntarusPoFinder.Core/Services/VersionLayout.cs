@@ -328,6 +328,133 @@ public static class VersionLayout
         return SlotFolderNames.Any(slot => SafeDirExists(Path.Combine(above, slot))) ? above : null;
     }
 
+    // ── Исполнения: папки ВНУТРИ «Прошивка\» ────────────────────────────────────────────────────
+
+    /// <summary>ИСПОЛНЕНИЕ как папка внутри «Прошивка\» — заранее сконфигурированная сборка той же
+    /// самой прошивки (docs/firmware-executions.md, решение Ильи от 04.11.2026):
+    ///
+    /// <code>
+    /// ПО\&lt;тип&gt;\&lt;подтип&gt;\&lt;контроллер&gt;\&lt;версия&gt;\
+    ///     Прошивка\                 ← ИСХОДНАЯ (базовая) сборка — есть всегда, как и раньше
+    ///         3 насоса\             ← готовая конфигурация исполнения
+    ///         ПЧ Danfoss\
+    /// </code>
+    ///
+    /// <b>Почему внутрь «Прошивка\», а не рядом с ней.</b> Папки версии перечислены в
+    /// <see cref="IsVersionOwnFolder"/>, и всё, что лежит в корне версии подпапкой, перестройка диска
+    /// считает ЧАСТЬЮ ПРОЕКТА и утаскивает в «Прошивка\». Положи исполнение в корень — его туда же и
+    /// унесёт, только вперемешку с базовой сборкой.
+    ///
+    /// <b>Почему базовая папка не меняется.</b> Программа, которая про исполнения не знает (старая
+    /// версия у коллеги), продолжает видеть прошивку ровно там, где видела: в «Прошивка\» или, у
+    /// неперестроенной версии, прямо в папке версии. Исполнения — ДОПОЛНЕНИЕ, а не замена.
+    ///
+    /// <b>Почему список исполнений сюда не передаётся «сам».</b> Узнать, какие исполнения бывают у
+    /// шкафа, по содержимому папки НЕЛЬЗЯ: внутри «Прошивка\» законно лежат подпапки проекта (plc,
+    /// hmi у KINCO — см. <see cref="IsProjectPartFolder"/>), и от исполнения они по имени не
+    /// отличаются. Поэтому все методы ниже принимают СПРАВОЧНИК исполнений подтипа и считают своей
+    /// только ту папку, чьё имя в нём есть.</summary>
+    public static string ExecutionFolderName(string? execution) => SanitizeFolderName(execution);
+
+    /// <summary>Папка конкретного исполнения внутри версии. Пустое исполнение — сама «Прошивка\»:
+    /// «исходное исполнение» это и есть базовая папка, отдельной папки у него нет.</summary>
+    public static string ExecutionFolder(string versionDir, string? execution)
+    {
+        var name = ExecutionFolderName(execution);
+        var firmware = FirmwareFolder(versionDir);
+        return name.Length == 0 ? firmware : Path.Combine(firmware, name);
+    }
+
+    /// <summary>Куда ПИСАТЬ сборку исполнения. В отличие от <see cref="FirmwareWriteFolder"/> развилки
+    /// «перестроенная версия / прежняя» здесь нет: папка исполнения живёт только внутри «Прошивка\»,
+    /// и у ещё не перестроенной версии она заводится сейчас — пустая «Прошивка\» рядом с файлами,
+    /// лежащими в корне. Читающая сторона от этого не страдает (<see cref="FirmwareFolders(string?)"/>
+    /// отдаёт обе папки), а класть исполнение в корень версии нельзя: перестройка диска считает
+    /// подпапки корня частью проекта и унесла бы его в «Прошивка\» вперемешку с базовой сборкой.</summary>
+    public static string ExecutionWriteFolder(string versionDir, string? execution) =>
+        ExecutionFolder(versionDir, execution);
+
+    /// <summary>Какие исполнения в ЭТОЙ версии реально собраны: папки внутри «Прошивка\», чьё имя
+    /// есть в справочнике <paramref name="catalog"/> и в которых лежит хоть один файл.
+    ///
+    /// Справочник обязателен именно здесь, а не «для порядка»: без него подпапки проекта (plc, hmi)
+    /// выглядели бы исполнениями. И наоборот — исполнение, которого в справочнике нет, не
+    /// «обнаруживается» папкой: справочник ведёт человек, и убранное им исполнение не должно
+    /// воскресать от того, что папка на диске осталась (docs/firmware-executions.md, § «Как
+    /// исполнение исчезает»).
+    ///
+    /// Порядок — как в справочнике. Недоступная папка версии — пустой список.</summary>
+    public static IReadOnlyList<string> BuiltExecutions(string? versionDir, IEnumerable<string> catalog)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(versionDir)) return result;
+        foreach (var execution in catalog)
+            if (HasExecutionBuild(versionDir, execution))
+                result.Add(execution);
+        return result;
+    }
+
+    /// <summary>В этой версии есть собранная конфигурация под это исполнение. Пустая папка не
+    /// считается: «папку завели, файл не положили» — это ровно то состояние, при котором наладчик
+    /// обязан получить базовую сборку с пометкой, а не пустоту.</summary>
+    public static bool HasExecutionBuild(string? versionDir, string? execution)
+    {
+        if (string.IsNullOrWhiteSpace(versionDir)) return false;
+        if (ExecutionFolderName(execution).Length == 0) return false;
+        var folder = ExecutionFolder(versionDir!, execution);
+        return SafeDirExists(folder) && HasFiles(folder);
+    }
+
+    /// <summary>Папки, в которых лежит сборка этого исполнения, по списку папок-кандидатов версии
+    /// (локальная копия раньше сетевой — см. SearchView.VersionFolders). Только реально собранные:
+    /// пустой список означает «в этой версии такой конфигурации нет», и решение, что с этим делать,
+    /// принимает FirmwareExecutionPick, а не этот класс.</summary>
+    public static IReadOnlyList<string> ExecutionFolders(IEnumerable<string?> versionDirs, string? execution)
+    {
+        var result = new List<string>();
+        if (ExecutionFolderName(execution).Length == 0) return result;
+        foreach (var dir in versionDirs)
+            if (HasExecutionBuild(dir, execution))
+                result.Add(ExecutionFolder(dir!, execution));
+        return result;
+    }
+
+    /// <summary>Папки исполнений, которые надо ИСКЛЮЧИТЬ при поиске базовой сборки. Поиск файла
+    /// прошивки спускается во вложенные папки (LoaderFiles.Find — ради проектов, разложенных
+    /// подпапками), и без этого списка базовая сборка, которой в папке почему-то не оказалось, молча
+    /// подменилась бы файлом чужого исполнения. Молчаливая подмена — единственное, чего в этой
+    /// задаче нельзя (docs/firmware-executions.md, требование 3).</summary>
+    public static IReadOnlyList<string> ExecutionFoldersToSkip(IEnumerable<string?> versionDirs, IEnumerable<string> catalog)
+    {
+        var catalogList = catalog as IReadOnlyList<string> ?? catalog.ToList();
+        var result = new List<string>();
+        foreach (var dir in versionDirs)
+        {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            foreach (var execution in catalogList)
+            {
+                if (ExecutionFolderName(execution).Length == 0) continue;
+                var folder = ExecutionFolder(dir!, execution);
+                if (SafeDirExists(folder)) result.Add(folder);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Имя исполнения → имя папки. Недопустимые в имени файла символы заменяются пробелом,
+    /// пробелы схлопываются, точки и пробелы по краям срезаются (Windows молча отбрасывает их в
+    /// конце имени папки, и папка «3 насоса.» нашлась бы как «3 насоса» — или не нашлась бы вовсе).
+    /// Само имя человеку принадлежит: регистр и слова не трогаем.</summary>
+    private static string SanitizeFolderName(string? execution)
+    {
+        if (string.IsNullOrWhiteSpace(execution)) return "";
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new System.Text.StringBuilder(execution!.Length);
+        foreach (var ch in execution!) sb.Append(invalid.Contains(ch) ? ' ' : ch);
+        var parts = sb.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", parts).Trim('.', ' ');
+    }
+
     private static string? SafeParent(string path)
     {
         try { return Path.GetDirectoryName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)); }

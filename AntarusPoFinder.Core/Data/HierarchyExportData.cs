@@ -617,6 +617,13 @@ public class HierarchyExportData
     /// наберёт его руками в другом написании и заведёт третью линейку.</summary>
     [JsonPropertyName("fw_executions")] public List<string>? FwExecutions { get; set; }
 
+    /// <summary>Исполнения ШКАФОВ — новая модель, где исполнение это папка внутри версии, а не
+    /// отдельная прошивка (см. Database.SubtypeExecutions.cs). Строка — ключ
+    /// «&lt;группа&gt;/&lt;подтип&gt;|&lt;исполнение&gt;»: id подтипа на каждой машине свой, и отдать его
+    /// значило бы раздать исполнения чужим шкафам. Исполнение шкафа, которого у получателя нет,
+    /// молча пропускается.</summary>
+    [JsonPropertyName("fw_subtype_executions")] public List<string>? FwSubtypeExecutions { get; set; }
+
     /// <summary>Таблицы параметров ПЧ/УПП (см. ExportedParamTable) — полный список, вместе со
     /// снятыми (они и есть тумбстоуны), с вложенными ревизиями и их строками. Nullable без дефолта
     /// по той же причине, что FwAttachments рядом: снимок со старой версии приложения ключа не
@@ -758,6 +765,11 @@ public class ImportCounts
     public int ExecutionsAdded { get; set; }
     public int ExecutionsRemoved { get; set; }
 
+    /// <summary>Исполнения шкафов (новая модель) — тот же LWW-механизм по ключу
+    /// «группа/подтип|исполнение».</summary>
+    public int SubtypeExecutionsAdded { get; set; }
+    public int SubtypeExecutionsRemoved { get; set; }
+
     public int OnDemandWordsAdded { get; set; }
     public int OnDemandWordsRemoved { get; set; }
 
@@ -851,6 +863,7 @@ public class ImportCounts
         OnDemandWordsAdded + OnDemandWordsRemoved +
         EmailRulesAdded + EmailRulesRemoved +
         ExecutionsAdded + ExecutionsRemoved +
+        SubtypeExecutionsAdded + SubtypeExecutionsRemoved +
         ParamTablesAdded + ParamTablesRemoved + ParamTablesUpdated +
         ParamTableRevisionsAdded + ParamTableRevisionsRemoved +
         ParamGroupsAdded + ParamGroupsRemoved +

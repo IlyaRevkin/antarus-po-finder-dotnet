@@ -107,6 +107,7 @@ public partial class Database
         data.SearchOnDemandWords = GetOnDemandWords();
         data.EmailRules = GetEmailRulesRaw();
         data.FwExecutions = GetExecutionCatalog();
+        data.FwSubtypeExecutions = GetSubtypeExecutionKeys();
         data.AllowedExtensions = GetAllowedExtensions();
         data.AllowedExtensionsHmi = GetAllowedExtensionsHmi();
         data.AllowedExtensionsSchematic = GetAllowedExtensionsSchematic();
@@ -1373,6 +1374,17 @@ public partial class Database
             // как новое — и линейка раздвоится по написанию.
             data.FlatListState, apply, () => GetExecutionCatalog(), AddExecutionToCatalog, DeleteExecutionFromCatalog,
             () => counts.ExecutionsAdded++, () => counts.ExecutionsRemoved++);
+
+        // Исполнения ШКАФОВ (новая модель — исполнение это папка внутри версии, см.
+        // Database.SubtypeExecutions.cs). Тот же механизм, но строка — составной ключ
+        // «группа/подтип|исполнение»: без имени шкафа исполнение не адресуется, а id подтипа на
+        // каждой машине свой. Исполнение шкафа, которого у получателя нет, пропускается молча
+        // (AddSubtypeExecutionByKey) — завести его было бы хуже: оно появилось бы в выборе там, где
+        // шкафа не существует.
+        ImportFlatList(Database.FlatKindSubtypeExecution,
+            data.FwSubtypeExecutions ?? new(),
+            data.FlatListState, apply, GetSubtypeExecutionKeys, AddSubtypeExecutionByKey, DeleteSubtypeExecutionByKey,
+            () => counts.SubtypeExecutionsAdded++, () => counts.SubtypeExecutionsRemoved++);
 
         // Группы параметров ПЧ/УПП — пятый справочник того же устройства. С одной особенностью:
         // главное его содержимое не имена, а ПОРЯДОК («сперва основные значения, сброс до заводских

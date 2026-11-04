@@ -195,6 +195,29 @@ public partial class Database : IDisposable
                  created_at TEXT NOT NULL DEFAULT ''
              );
 
+             -- ИСПОЛНЕНИЯ ПОДТИПА ШКАФА — справочник «какие исполнения у этого шкафа бывают»
+             -- (docs/firmware-executions.md, решение от 04.11.2026). Это НЕ то же самое, что
+             -- fw_executions выше: тот справочник — общий список пометок на ОТДЕЛЬНЫХ прошивках
+             -- (прежняя модель, где исполнение = своя версия со своим номером). Здесь же исполнение
+             -- это папка внутри версии, номер один на всех, и список привязан к шкафу: у ПЖ бывает
+             -- «3 насоса», а у КПЧ было и перестало.
+             --
+             -- Почему отдельная таблица, а не столбец/фильтр над fw_executions: прежние записи
+             -- трогать нельзя (у них свои номера и свои файлы, машина не знает, какие из них на
+             -- самом деле одна прошивка), а новая модель обязана работать рядом с ними.
+             --
+             -- Почему список ведётся, а не выводится из папок на диске: иначе «не успели
+             -- пересобрать» и «больше так не выпускаем» выглядят одинаково, а это разные вещи —
+             -- в первом случае надо выдать базовую сборку с пометкой, во втором не предлагать
+             -- исполнение вовсе. Удаление здесь — явное действие человека.
+             CREATE TABLE IF NOT EXISTS fw_subtype_executions (
+                 subtype_id INTEGER NOT NULL REFERENCES equipment_subtypes(id) ON DELETE CASCADE,
+                 name       TEXT    NOT NULL,
+                 sort_order INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT    NOT NULL DEFAULT '',
+                 PRIMARY KEY (subtype_id, name)
+             );
+
              -- Слова-исключения поиска: см. Database.SearchWords.cs.
              CREATE TABLE IF NOT EXISTS search_on_demand_words (
                  name       TEXT PRIMARY KEY,
