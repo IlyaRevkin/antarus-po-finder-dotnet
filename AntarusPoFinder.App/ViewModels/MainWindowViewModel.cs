@@ -1889,11 +1889,96 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             await CleanupInspectionFolderAsync();
             await CheckForUnknownItemsAsync();
             await PublishDiskSnapshotAsync();
+            await RunDailyBackupAsync();
         }
         finally
         {
             _syncRunning = false;
         }
+    }
+
+    private bool _backupRunning;
+
+    /// <summary>Как часто снимается резервная копия. Сутки — прямое требование; чаще не нужно
+    /// (копия это страховка, а не журнал изменений), реже — уже обидно терять.</summary>
+    internal static TimeSpan BackupInterval { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>Сколько ждать после НЕУДАЧНОЙ попытки, прежде чем пробовать снова. Час: шара,
+    /// отвалившаяся на минуту, успеет вернуться за смену, а молотить VACUUM каждые несколько минут
+    /// при недоступном адресате программа не будет.</summary>
+    internal static TimeSpan BackupRetryInterval { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>Отметка ПОПЫТКИ (в отличие от отметки удачи ConfigService.BackupLastAtKey). Местная,
+    /// как и все watermark'и синхронизации, — уехав в общий конфиг, затыкала бы копирование на
+    /// чужих машинах.</summary>
+    private const string BackupLastTryKey = "backup_last_try_at";
+
+    /// <summary>ЕЖЕСУТОЧНАЯ РЕЗЕРВНАЯ КОПИЯ (см. Core/Services/BackupService — там же и зачем она
+    /// вообще понадобилась, и что внутри).
+    ///
+    /// Сидит в том же тике, что слепок диска и остальная фоновая работа, а не на своём таймере: у
+    /// приложения уже есть одно место, где происходит периодическое, и второе расписание рядом — это
+    /// второй способ что-нибудь не запустить.
+    ///
+    /// СУТКИ СЧИТАЮТСЯ ОТ ПОСЛЕДНЕЙ УДАЧИ, а не по часам: машину включают и выключают, «каждый день
+    /// в 3:00» на рабочем ПК означает «никогда». Отметка ставится только на удачу — иначе первая же
+    /// неудача отодвинула бы повтор на сутки, хотя диск мог отвалиться на минуту.
+    ///
+    /// МОЛЧА — ни окон, ни строки состояния даже при неудаче: копия это работа программы, а не
+    /// работа оператора, и прерывать его сообщением «не смогла» нельзя (правило проекта — службы
+    /// работают без всплывающих окон). След остаётся в журнале (BackupService.LogPath) и в списке
+    /// копий на странице «Сетевые диски».</summary>
+    private async Task RunDailyBackupAsync()
+    {
+        if (_backupRunning) return;
+        if (!_services.Cfg.BackupEnabled()) return;
+
+        var targets = _services.Cfg.Backup();
+        if (!targets.Any) return;
+
+        var last = DateTime.TryParse(_services.Cfg.Get(ConfigService.BackupLastAtKey), out var at) ? at : DateTime.MinValue;
+        if (DateTime.UtcNow - last < BackupInterval) return;
+
+        // ПОВТОР ПОСЛЕ НЕУДАЧИ — НЕ ЧАЩЕ ЧЕМ РАЗ В ЧАС, и это не мелочь.
+        //
+        // Отметка удачи выше ставится только на удачу (иначе отвалившаяся на минуту шара отложила бы
+        // копию на сутки). Но тик синхронизации приходит каждые несколько минут, а снятие копии —
+        // это VACUUM INTO по всей базе плюс упаковка. При недоступном бакете или закрытой на запись
+        // папке программа молотила бы впустую весь рабочий день, и «копия не мешает работать»
+        // превратилось бы в прямую ложь. Отдельная отметка ПОПЫТКИ разводит эти два срока.
+        var tried = DateTime.TryParse(_services.Cfg.Get(BackupLastTryKey), out var tryAt) ? tryAt : DateTime.MinValue;
+        if (DateTime.UtcNow - tried < BackupRetryInterval) return;
+
+        _backupRunning = true;
+        try
+        {
+            _services.Cfg.Set(BackupLastTryKey, DateTime.UtcNow.ToString("O"));
+
+            // Целиком в фоновый поток: VACUUM INTO на большой базе и упаковка занимают секунды, а
+            // поток интерфейса на это время замирать не имеет права.
+            var sharedConfig = ConfigSharedFilePath();
+            var outcome = await Task.Run(() => new BackupService()
+                .RunAsync(_services.Db, Environment.MachineName, sharedConfig, targets));
+
+            if (outcome.Ok && !outcome.Skipped)
+                _services.Cfg.Set(ConfigService.BackupLastAtKey, DateTime.UtcNow.ToString("O"));
+        }
+        catch (Exception ex)
+        {
+            // Сюда попасть почти нечем (RunAsync ловит всё сам), но «почти» в коде резервного
+            // копирования — это именно то слово, из-за которого копий потом не оказывается.
+            BackupService.Log("тик копирования сорвался: " + ex.Message);
+        }
+        finally { _backupRunning = false; }
+    }
+
+    /// <summary>Общий конфиг на сетевом диске — тот самый ОДИН файл, который перезаписывается при
+    /// каждой отправке и истории версий не имеет. Нет корня диска (или он сейчас недоступен) — null,
+    /// и копия уедет без него: база важнее.</summary>
+    private string? ConfigSharedFilePath()
+    {
+        var root = _services.Cfg.RootPath();
+        return string.IsNullOrWhiteSpace(root) ? null : ConfigSyncService.ConfigPathFor(root);
     }
 
     /// <summary>Как часто слепок дерева ПО уезжает в хранилище сам по себе. Сутки — потому что

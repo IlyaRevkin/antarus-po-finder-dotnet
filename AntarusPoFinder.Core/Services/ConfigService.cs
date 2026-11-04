@@ -626,6 +626,103 @@ public class ConfigService
 
     public void SetHostingSizeLimitHard(bool value) => Set("hosting_size_limit_hard", value ? "true" : "false");
 
+    // ── Резервные копии (бета) ───────────────────────────────────────────────────────────────
+    //
+    // До этого у программы не было копий вообще, а каждый кусок состояния жил в одном экземпляре
+    // (подробности — в комментарии BackupService). Здесь только настройки; что именно копируется и
+    // куда — там же.
+    //
+    // ЧТО СИНХРОНИЗИРУЕТСЯ, А ЧТО НЕТ (см. ConfigSyncService.SkipSettingsKeys):
+    //   • backup_enabled / backup_keep_days / backup_to_s3 — ПОЛИТИКА, одинаковая для предприятия:
+    //     администратор включает резервное копирование один раз, и решение доезжает до всех машин,
+    //     ровно как политика единого входа;
+    //   • backup_folder — ПУТЬ, то есть вещь местная (у кого-то шара под Z:, у кого-то её нет
+    //     вовсе), лежит рядом с root_path в списке непереносимых;
+    //   • backup_password — ПАРОЛЬ, и он не уезжает НИКОГДА. Это единственное, что отделяет копию
+    //     базы в публично читаемом бакете от открытого интернета; класть его в общий конфиг, да ещё
+    //     и в тот самый конфиг, который сам попадает в эту копию, — значит свести защиту к ключу,
+    //     который лежит внутри exe. Цена решения честная: пароль задаётся на каждой машине руками.
+
+    /// <summary>Включено ли ежесуточное копирование. ВКЛЮЧЕНО ПО УМОЛЧАНИЮ — и это осознанно:
+    /// функция, которую надо сперва найти и включить, в день аварии оказывается выключенной. Стоит
+    /// она при этом ничего: папка по умолчанию локальная (см. <see cref="BackupFolder"/>), выкладка
+    /// в хранилище без пароля не включается вовсе.</summary>
+    public bool BackupEnabled() => !Get("backup_enabled").Equals("false", StringComparison.OrdinalIgnoreCase);
+    public void SetBackupEnabled(bool value) => Set("backup_enabled", value ? "true" : "false");
+
+    /// <summary>Папка для копий. Пустая настройка — НЕ «никуда не класть», а подпапка Backups в
+    /// профиле: копия на том же диске спасает от испорченной базы, от неудачной «эталонной
+    /// синхронизации» и от человеческой ошибки — то есть от большинства случаев, ради которых всё
+    /// затевалось. От сдохшего диска она не спасает, и поэтому на странице прямо предлагается
+    /// указать сетевую папку.</summary>
+    public string BackupFolder()
+    {
+        var stored = Get("backup_folder").Trim();
+        return stored.Length > 0 ? stored : DefaultBackupFolder;
+    }
+
+    public static readonly string DefaultBackupFolder = Path.Combine(AppData, "Backups");
+
+    public void SetBackupFolder(string path) => Set("backup_folder", (path ?? "").Trim());
+
+    /// <summary>Сколько суток держать копии. 30 по умолчанию: месяц — это горизонт, на котором ещё
+    /// помнят, «когда всё было нормально». 0 — не чистить вовсе (сознательный выбор того, у кого
+    /// место не кончается). Самая свежая копия не удаляется никогда, см. BackupArchive.ToPrune.</summary>
+    public int BackupKeepDays() =>
+        int.TryParse(Get("backup_keep_days"), out var v) && v >= 0 ? v : BackupArchive.DefaultKeepDays;
+
+    public void SetBackupKeepDays(int days) => Set("backup_keep_days", Math.Max(0, days).ToString());
+
+    /// <summary>Выкладывать ли копию ещё и в хранилище на хостинге. ВЫКЛЮЧЕНО по умолчанию: это
+    /// единственный адресат, который выносит данные предприятия за его периметр, и включать такое
+    /// за человека нельзя. Без пароля не включится в любом случае (BackupTargets.CanUploadToS3).</summary>
+    public bool BackupToS3() => Get("backup_to_s3").Equals("true", StringComparison.OrdinalIgnoreCase);
+    public void SetBackupToS3(bool value) => Set("backup_to_s3", value ? "true" : "false");
+
+    /// <summary>Пароль, которым шифруется копия перед выкладкой в хранилище. В базе лежит под тем же
+    /// префиксом "enc:", что и секретный ключ S3 — от взгляда в файл базы. От того, у кого есть exe,
+    /// это не защищает (ключ внутри программы, см. ConfigFileCrypto), и защищать не должно: смысл
+    /// пароля в другом — САМ АРХИВ в публичном бакете зашифрован ключом, выведенным из пароля
+    /// PBKDF2, и внутри программы этого ключа нет.
+    ///
+    /// Поэтому же пароль нужно где-то записать отдельно, по-человечески: потерянный пароль означает
+    /// нечитаемые копии в бакете, и восстановить его неоткуда — в этом вся суть.</summary>
+    public string BackupPassword()
+    {
+        var stored = Get("backup_password");
+        if (string.IsNullOrEmpty(stored)) return "";
+        if (!stored.StartsWith(EncryptedPrefix, StringComparison.Ordinal)) return stored;
+        try
+        {
+            return ConfigFileCrypto.TryDecrypt(Convert.FromBase64String(stored[EncryptedPrefix.Length..])) ?? "";
+        }
+        catch (FormatException)
+        {
+            return ""; // испорченное значение ведёт себя как незаданное: выкладка выключится, окон не будет
+        }
+    }
+
+    public void SetBackupPassword(string password)
+    {
+        var value = (password ?? "").Trim();
+        Set("backup_password", value.Length == 0
+            ? ""
+            : EncryptedPrefix + Convert.ToBase64String(ConfigFileCrypto.Encrypt(value)));
+    }
+
+    /// <summary>Все условия копирования одним значением — чтобы «настроено ли» считалось одинаково
+    /// и в интерфейсе, и в фоновом тике.</summary>
+    public BackupTargets Backup() => new(
+        Folder: BackupFolder(),
+        ToS3: BackupToS3(),
+        Password: BackupPassword(),
+        KeepDays: BackupKeepDays(),
+        S3: S3());
+
+    /// <summary>Когда копия снималась в последний раз (UTC, ISO). Пишется только на удачу — иначе
+    /// первая же неудача отодвинула бы следующую попытку на сутки.</summary>
+    public const string BackupLastAtKey = "backup_last_at";
+
     /// <summary>Три макета страниц-заглушек и общий блок контактов сервиса (см.
     /// <see cref="StubLayoutSet"/>).
     ///
