@@ -2397,21 +2397,15 @@ public partial class SearchView : UserControl
         };
         if (dlg.ShowDialog() != true) return;
 
-        var outcome = FirmwareExecutionBuild.Place(versionDir, execution, dlg.FileNames);
-        if (outcome is { Ok: false, NeedsReplaceConfirmation: true })
-        {
-            if (AppMessageBox.Show(
-                    outcome.Error + Environment.NewLine + Environment.NewLine
-                    + "Заменить их выбранными? Старые файлы этой конфигурации будут удалены.",
-                    "Конфигурация исполнения", MessageBoxButton.YesNo, MessageBoxImage.Question,
-                    MessageBoxResult.No) != MessageBoxResult.Yes) return;
-            outcome = FirmwareExecutionBuild.Place(versionDir, execution, dlg.FileNames, replaceExisting: true);
-        }
+        // Вопрос про непустую папку исполнения — общий с формой загрузки (ExecutionBuildPlacement):
+        // двух разных ответов на «перезаписать ли то, что уедет в шкаф» быть не должно.
+        var outcome = ExecutionBuildPlacement.Place(versionDir, execution, dlg.FileNames);
+        if (outcome is null) return; // отказались заменять — это не ошибка
 
         if (!outcome.Ok)
         {
             AppMessageBox.Show(outcome.Error ?? "Не получилось положить конфигурацию.",
-                "Конфигурация исполнения", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ExecutionBuildPlacement.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 

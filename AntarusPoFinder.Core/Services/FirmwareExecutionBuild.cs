@@ -32,6 +32,35 @@ public static class FirmwareExecutionBuild
         public bool NeedsReplaceConfirmation { get; init; }
     }
 
+    /// <summary>Куда ляжет конфигурация и почему это сейчас нельзя — БЕЗ единой записи на диск.
+    ///
+    /// Нужен предпросмотру («куда ляжет») формы загрузки. Считать путь второй раз, своим
+    /// Path.Combine, ему нельзя: разойдись предпросмотр с тем, что реально делает <see cref="Place"/>,
+    /// — и человек увидит один путь, а файл уедет по другому. Поэтому обе стороны спрашивают здесь.</summary>
+    public sealed record Plan(string Folder, string? Error)
+    {
+        public bool Ok => Error is null;
+    }
+
+    /// <inheritdoc cref="Plan"/>
+    /// <param name="versionDir">Папка версии, в которую кладём.</param>
+    /// <param name="execution">Исполнение из справочника шкафа.</param>
+    /// <param name="sourceFiles">null — файлы ещё не выбраны и проверять их не надо (предпросмотр
+    /// показывает папку уже тогда, когда источник ещё не перетащили).</param>
+    public static Plan Prepare(string? versionDir, string? execution, IEnumerable<string>? sourceFiles)
+    {
+        if (string.IsNullOrWhiteSpace(versionDir) || !SafeDirExists(versionDir))
+            return new Plan("", "Папка версии не найдена на диске.");
+
+        if (VersionLayout.ExecutionFolderName(execution).Length == 0)
+            return new Plan("", "Не выбрано исполнение.");
+
+        var folder = VersionLayout.ExecutionWriteFolder(versionDir!, execution);
+        if (sourceFiles is not null && !sourceFiles.Any(f => !string.IsNullOrWhiteSpace(f) && File.Exists(f)))
+            return new Plan(folder, "Не выбрано ни одного файла конфигурации.");
+        return new Plan(folder, null);
+    }
+
     /// <summary>Скопировать файлы конфигурации в «&lt;версия&gt;\Прошивка\&lt;исполнение&gt;\».</summary>
     /// <param name="versionDir">Папка версии на диске — та самая, в которой лежит базовая сборка.</param>
     /// <param name="execution">Исполнение из справочника шкафа.</param>
@@ -41,19 +70,13 @@ public static class FirmwareExecutionBuild
     public static Result Place(string? versionDir, string? execution, IEnumerable<string> sourceFiles,
         bool replaceExisting = false)
     {
-        if (string.IsNullOrWhiteSpace(versionDir) || !SafeDirExists(versionDir))
-            return new Result(false, "", "Папка версии не найдена на диске.", Array.Empty<string>());
-
-        var name = VersionLayout.ExecutionFolderName(execution);
-        if (name.Length == 0)
-            return new Result(false, "", "Не выбрано исполнение.", Array.Empty<string>());
-
         var files = sourceFiles?.Where(f => !string.IsNullOrWhiteSpace(f) && File.Exists(f)).ToList()
                     ?? new List<string>();
-        if (files.Count == 0)
-            return new Result(false, "", "Не выбрано ни одного файла конфигурации.", Array.Empty<string>());
 
-        var folder = VersionLayout.ExecutionWriteFolder(versionDir!, execution);
+        // Проверки и путь — те же, что показал предпросмотр: один расчёт на обе стороны.
+        var plan = Prepare(versionDir, execution, files);
+        if (!plan.Ok) return new Result(false, plan.Folder, plan.Error, Array.Empty<string>());
+        var folder = plan.Folder;
         try
         {
             if (SafeDirExists(folder) && Directory.EnumerateFileSystemEntries(folder).Any() && !replaceExisting)
