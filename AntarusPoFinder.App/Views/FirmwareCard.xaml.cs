@@ -243,6 +243,9 @@ public partial class FirmwareCard : UserControl
     /// выбранного файла.</summary>
     public event EventHandler? ExecutionChanged;
 
+    /// <summary>«Положить конфигурацию этого исполнения в эту версию» — пункт меню «Ещё».</summary>
+    public event EventHandler? ExecutionBuildRequested;
+
     private IReadOnlyList<string> _builtExecutions = Array.Empty<string>();
     private bool _fillingExecutions;
 
@@ -603,6 +606,20 @@ public partial class FirmwareCard : UserControl
         if (flags.CanEditTags)
             AddMenuItem("Модерация прошивки", () => ModerationRequested?.Invoke(this, EventArgs.Empty),
                 "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
+
+        // КОНФИГУРАЦИЯ ИСПОЛНЕНИЯ — второй из двух выходов, названных в предупреждении на карточке
+        // («создайте конфигурацию, либо уберите исполнение»). Первый — убрать исполнение у шкафа —
+        // живёт в иерархии: это решение про шкаф целиком, а не про одну версию.
+        //
+        // Прав модерации требуем те же, что и на правку прошивки: положить конфигурацию — значит
+        // решить, что уедет в контроллер.
+        if (AppIdentity.IsBeta && flags.CanEditTags && flags.Executions.Count > 0)
+            AddMenuItem(
+                SelectedExecution.Length == 0
+                    ? "Конфигурация исполнения…"
+                    : $"Конфигурация исполнения «{SelectedExecution}»…",
+                () => ExecutionBuildRequested?.Invoke(this, EventArgs.Empty),
+                "Положить готовый файл конфигурации в эту версию. Номер ПО не меняется: прошивка та же.");
 
         var moreBtn = MakeActionButton("Ещё ▾", (_, _) => ToggleMore());
         moreBtn.ToolTip = "Файлы версии (папка, LFS, PSL), документация, история, модерация";

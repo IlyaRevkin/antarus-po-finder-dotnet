@@ -712,6 +712,52 @@
                                 ToolTip="Убрать из справочника. У уже загруженных прошивок пометка сохранится"/>
                     </StackPanel>
 
+                    <!-- ИСПОЛНЕНИЯ ШКАФА — новая модель (docs/firmware-executions.md): исполнение это
+                         ПАПКА внутри версии, прошивка и её номер одни и те же. Список свой у каждого
+                         шкафа и ведётся руками: у ПЖ бывает «3 насоса», а у КПЧ было и перестало.
+                         Выводить его из того, какие папки лежат в версии, нельзя — тогда «не успели
+                         пересобрать» и «больше так не выпускаем» выглядят одинаково.
+
+                         Блок виден только в бете (см. RenderSubtypeExecutions). Верхний список
+                         ИСПОЛНЕНИЙ — прежняя модель, где исполнение было отдельной прошивкой со своим
+                         номером; он остаётся на месте ради уже заведённых записей. -->
+                    <StackPanel x:Name="SubtypeExecutionsBlock" Visibility="Collapsed">
+                        <TextBlock Text="ИСПОЛНЕНИЯ ШКАФА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                   Text="Готовые конфигурации ОДНОЙ И ТОЙ ЖЕ прошивки: номер ПО один, а файлы лежат папками внутри версии. Выберите шкаф и заведите его исполнения. Убирать отсюда — когда шкаф перестали так выпускать: исполнение исчезнет из выбора, а файлы уже выпущенных версий останутся нетронутыми."/>
+                        <ComboBox x:Name="SubtypeExecutionSubtype" Height="34" Margin="0,0,0,6"
+                                  SelectionChanged="SubtypeExecutionSubtype_Changed"
+                                  ToolTip="Шкаф, у которого ведётся список исполнений"/>
+                        <DataGrid x:Name="SubtypeExecutionsGrid" Height="140" AutoGenerateColumns="False" Margin="0,0,0,4"
+                                  Style="{StaticResource RoomyDataGrid}"
+                                  PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"
+                                  MouseDoubleClick="SubtypeExecutionsGrid_MouseDoubleClick">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Исполнение" Binding="{Binding Name}" Width="2*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
+                                <DataGridTextColumn Header="Заведено" Binding="{Binding CreatedText}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}" HeaderStyle="{StaticResource CenteredColumnHeader}"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" x:Name="SubtypeExecutionInput" Height="34" Margin="0,0,8,0"
+                                     KeyDown="SubtypeExecutionInput_KeyDown"
+                                     ToolTip="Название исполнения, например «3 насоса». Так же будет называться папка внутри «Прошивка\». Enter — добавить."/>
+                            <Button Grid.Column="1" Content="Добавить" Style="{StaticResource SecondaryButton}"
+                                    Click="AddSubtypeExecution_Click"/>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Button Content="Переименовать" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                                    Click="RenameSubtypeExecution_Click"
+                                    ToolTip="Папки на диске НЕ переименовываются: у прежних версий исполнение станет несобранным и карточка честно об этом скажет"/>
+                            <Button Content="Убрать" Style="{StaticResource SecondaryButton}"
+                                    Click="DeleteSubtypeExecution_Click"
+                                    ToolTip="Шкаф перестали так выпускать. Файлы уже выпущенных версий не трогаются"/>
+                        </StackPanel>
+                    </StackPanel>
+
                     <TextBlock Text="ПРОИЗВОДИТЕЛИ ПЧ/УПП" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <ListBox x:Name="ManufList" Height="130" Margin="0,0,0,4" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel"/>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">

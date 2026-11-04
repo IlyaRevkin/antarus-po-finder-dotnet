@@ -591,7 +591,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnGeneral) GeneralTab.Visibility = Visibility.Visible;
         // Исполнения теперь живут ВНУТРИ «Иерархии» (бета 2.0), поэтому и перерисовываются вместе
         // с ней: отдельной вкладки, по заходу на которую это делалось, больше нет.
-        else if (sender == TabBtnHierarchy) { HierarchyTab.Visibility = Visibility.Visible; RenderExecutions(); }
+        else if (sender == TabBtnHierarchy) { HierarchyTab.Visibility = Visibility.Visible; RenderExecutions(); RenderSubtypeExecutions(); }
         else if (sender == TabBtnFirmware) FirmwareTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnModeration) { ModerationTab.Visibility = Visibility.Visible; LoadModerationTab(); }
         else if (sender == TabBtnReservations) { ReservationsTab.Visibility = Visibility.Visible; LoadReservationsTab(); }
@@ -1013,6 +1013,125 @@ public partial class SettingsView : UserControl
 
         _services.Db.DeleteExecutionFromCatalog(row.Name);
         RenderExecutions();
+    }
+
+    // ── Исполнения ШКАФА (новая модель: исполнение — папка внутри версии) ────────────────────────
+
+    /// <summary>Строка таблицы исполнений шкафа. Состояния «включено» здесь нет намеренно: у этого
+    /// списка только два осмысленных положения — шкаф так выпускают или не выпускают, и второе
+    /// называется «убрать». Третье состояние («заведено, но пока не предлагаем») означало бы, что
+    /// наладчик своего исполнения не видит, а видеть он его обязан: иначе уйдёт в прошлую версию за
+    /// устаревшей прошивкой.</summary>
+    private sealed record SubtypeExecutionRowView(string Name, string CreatedAt)
+    {
+        public string CreatedText => string.IsNullOrEmpty(CreatedAt) ? "—" : CreatedAt;
+    }
+
+    private sealed record SubtypeChoice(int Id, string Title)
+    {
+        public override string ToString() => Title;
+    }
+
+    private SubtypeExecutionRowView? SelectedSubtypeExecution =>
+        SubtypeExecutionsGrid?.SelectedItem as SubtypeExecutionRowView;
+
+    private int? SelectedExecutionSubtypeId =>
+        (SubtypeExecutionSubtype?.SelectedItem as SubtypeChoice)?.Id;
+
+    /// <summary>Список шкафов и их исполнений. Блок целиком — только в бете: новая модель обкатывается
+    /// там, а рабочая версия про неё пока не знает.</summary>
+    private void RenderSubtypeExecutions()
+    {
+        if (SubtypeExecutionsBlock is null) return;
+        SubtypeExecutionsBlock.Visibility = AntarusPoFinder.Core.Domain.AppIdentity.IsBeta
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!AntarusPoFinder.Core.Domain.AppIdentity.IsBeta) return;
+
+        var groups = _services.Db.GetAllEquipmentGroups().ToDictionary(g => g.Id!.Value, g => g.Name);
+        var choices = _services.Db.GetAllEquipmentSubtypes()
+            .Select(s => new SubtypeChoice(s.Id!.Value,
+                $"{(groups.TryGetValue(s.GroupId, out var g) ? g : "")} / {s.Name}".Trim()))
+            .ToList();
+
+        var keep = SelectedExecutionSubtypeId;
+        SubtypeExecutionSubtype.ItemsSource = choices;
+        SubtypeExecutionSubtype.SelectedItem = choices.FirstOrDefault(c => c.Id == keep) ?? choices.FirstOrDefault();
+        RenderSubtypeExecutionRows();
+    }
+
+    private void RenderSubtypeExecutionRows()
+    {
+        if (SubtypeExecutionsGrid is null) return;
+        SubtypeExecutionsGrid.ItemsSource = SelectedExecutionSubtypeId is { } id
+            ? _services.Db.GetSubtypeExecutionRows(id)
+                .Select(r => new SubtypeExecutionRowView(r.Name, r.CreatedAt))
+                .ToList()
+            : new List<SubtypeExecutionRowView>();
+    }
+
+    private void SubtypeExecutionSubtype_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        RenderSubtypeExecutionRows();
+    }
+
+    private void SubtypeExecutionInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        e.Handled = true;
+        CommitSubtypeExecution();
+    }
+
+    private void AddSubtypeExecution_Click(object sender, RoutedEventArgs e) => CommitSubtypeExecution();
+
+    private void CommitSubtypeExecution()
+    {
+        if (SelectedExecutionSubtypeId is not { } id) return;
+        var name = AntarusPoFinder.Core.Domain.FwExecution.Normalize(SubtypeExecutionInput.Text);
+        if (name.Length == 0) return;
+        _services.Db.AddSubtypeExecution(id, name);
+        SubtypeExecutionInput.Clear();
+        RenderSubtypeExecutionRows();
+    }
+
+    private void SubtypeExecutionsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        RenameSubtypeExecution_Click(sender, e);
+
+    private void RenameSubtypeExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedExecutionSubtypeId is not { } id) return;
+        if (SelectedSubtypeExecution is not { } row) return;
+        var next = TextPromptDialog.Prompt(Window.GetWindow(this), "Переименовать исполнение",
+            "Новое название исполнения:", row.Name);
+        if (next is null) return;
+        if (!_services.Db.RenameSubtypeExecution(id, row.Name, next))
+        {
+            AppMessageBox.Show(
+                "Такое исполнение у этого шкафа уже есть — склеивать два исполнения переименованием нельзя.",
+                "Исполнения шкафа", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        AppMessageBox.Show(
+            "Папки на диске не переименованы: они принадлежат уже выпущенным версиям. У прежних версий "
+            + "это исполнение теперь считается несобранным, и карточка честно скажет, что конфигурации нет.",
+            "Исполнения шкафа", MessageBoxButton.OK, MessageBoxImage.Information);
+        RenderSubtypeExecutionRows();
+    }
+
+    private void DeleteSubtypeExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedExecutionSubtypeId is not { } id) return;
+        if (SelectedSubtypeExecution is not { } row) return;
+        if (AppMessageBox.Show(
+                $"Убрать исполнение «{row.Name}» у этого шкафа?" + Environment.NewLine + Environment.NewLine
+                + "Оно перестанет предлагаться в карточке и при загрузке. Файлы уже выпущенных версий "
+                + "не трогаются — история по ним читается.",
+                "Исполнения шкафа", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+            != MessageBoxResult.Yes) return;
+
+        _services.Db.DeleteSubtypeExecution(id, row.Name);
+        RenderSubtypeExecutionRows();
     }
 
     private void AddOnDemandWord_Click(object sender, RoutedEventArgs e) => CommitOnDemandWord();

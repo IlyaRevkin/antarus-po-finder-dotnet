@@ -154,6 +154,47 @@ public class FirmwareExecutionFolderTests
         Assert.Empty(VersionLayout.BuiltExecutions(version, new[] { "3 насоса" }));
     }
 
+    /// <summary>Положить конфигурацию исполнения в СУЩЕСТВУЮЩУЮ версию: новой версии и нового
+    /// номера не появляется, базовая сборка не трогается — ради этого всё и затевалось.</summary>
+    [Fact]
+    public void Конфигурация_кладётся_в_ту_же_версию_и_не_трогает_базовую()
+    {
+        using var root = new TempRoot();
+        var version = Path.Combine(root.Path, "1.0.0005.0001");
+        var baseFile = Touch(VersionLayout.FirmwareFolder(version), "base.lfs");
+        var source = Touch(Path.Combine(root.Path, "src"), "pumps3.lfs");
+
+        var placed = FirmwareExecutionBuild.Place(version, "3 насоса", new[] { source });
+
+        Assert.True(placed.Ok);
+        Assert.Equal(VersionLayout.ExecutionFolder(version, "3 насоса"), placed.Folder);
+        Assert.True(File.Exists(Path.Combine(placed.Folder, "pumps3.lfs")));
+        Assert.True(File.Exists(baseFile));
+        Assert.Equal(new[] { "3 насоса" }, VersionLayout.BuiltExecutions(version, new[] { "3 насоса" }));
+        // Папка версии осталась одна: исполнение версию не создаёт.
+        Assert.Single(Directory.GetDirectories(root.Path).Where(d => Path.GetFileName(d) == "1.0.0005.0001"));
+    }
+
+    /// <summary>Непустая папка исполнения не перезаписывается молча: это то, что уедет в шкаф.</summary>
+    [Fact]
+    public void Существующая_конфигурация_не_затирается_без_согласия()
+    {
+        using var root = new TempRoot();
+        var version = Path.Combine(root.Path, "1.0.0005.0001");
+        Touch(VersionLayout.ExecutionFolder(version, "3 насоса"), "старая.lfs");
+        var source = Touch(Path.Combine(root.Path, "src"), "новая.lfs");
+
+        var first = FirmwareExecutionBuild.Place(version, "3 насоса", new[] { source });
+        Assert.False(first.Ok);
+        Assert.True(first.NeedsReplaceConfirmation);
+        Assert.True(File.Exists(Path.Combine(first.Folder, "старая.lfs")));
+
+        var second = FirmwareExecutionBuild.Place(version, "3 насоса", new[] { source }, replaceExisting: true);
+        Assert.True(second.Ok);
+        Assert.False(File.Exists(Path.Combine(second.Folder, "старая.lfs")));
+        Assert.True(File.Exists(Path.Combine(second.Folder, "новая.lfs")));
+    }
+
     /// <summary>В выборе на карточке — ВЕСЬ справочник шкафа, а не только собранное. Показывать
     /// лишь собранное значило бы, что наладчик не находит своего исполнения и идёт за прошлой
     /// версией — то есть получает устаревшую прошивку, ровно то, чего избегаем.</summary>

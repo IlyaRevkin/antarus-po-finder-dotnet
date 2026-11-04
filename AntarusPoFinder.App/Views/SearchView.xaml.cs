@@ -843,6 +843,7 @@ public partial class SearchView : UserControl
             card.CopyNameRequested += (s, _) => CopyName(((FirmwareCard)s!).Result);
             card.TagsEditRequested += (s, _) => EditFwTags(((FirmwareCard)s!).Result);
             card.ModerationRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
+            card.ExecutionBuildRequested += (s, _) => PlaceExecutionBuild((FirmwareCard)s!);
             card.FwBugRequested += (s, _) => ReportFwBug(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
@@ -2355,6 +2356,69 @@ public partial class SearchView : UserControl
             ? _services.Db.GetSubtypeExecutions(card.Result.SubtypeId)
             : (IReadOnlyList<string>)Array.Empty<string>();
         return FirmwareExecutionResolver.Resolve(VersionFolders(card.Result), card.SelectedExecution, catalog);
+    }
+
+    /// <summary>Положить готовую конфигурацию исполнения в ЭТУ версию — второй из двух выходов,
+    /// названных в предупреждении на карточке.
+    ///
+    /// Новой версии и нового номера ПО здесь не появляется: файл ложится в «Прошивка\&lt;исполнение&gt;\»
+    /// той же самой версии (FirmwareExecutionBuild). Ради этого всё и затевалось — «прошивка одна и
+    /// та же, номер один».
+    ///
+    /// Кладём на СЕТЕВОЙ диск, а не в локальную копию: конфигурацию собирают для всех, и лежащая
+    /// только у себя она не помогает никому, кроме того, кто её положил.</summary>
+    private void PlaceExecutionBuild(FirmwareCard card)
+    {
+        var result = card.Result;
+        var execution = card.SelectedExecution;
+        if (execution.Length == 0)
+        {
+            AppMessageBox.Show(
+                "Сначала выберите исполнение в карточке — то, для которого кладёте конфигурацию.\n\n"
+                + "Исходная сборка кладётся обычной загрузкой прошивки.",
+                "Конфигурация исполнения", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var versionDir = ResolvedNetworkDir(result);
+        if (string.IsNullOrEmpty(versionDir) || !Directory.Exists(versionDir))
+        {
+            AppMessageBox.Show(
+                "Папка версии на сетевом диске не найдена — положить конфигурацию некуда.",
+                "Конфигурация исполнения", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Файлы конфигурации «{execution}»",
+            Multiselect = true,
+            Filter = "Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var outcome = FirmwareExecutionBuild.Place(versionDir, execution, dlg.FileNames);
+        if (outcome is { Ok: false, NeedsReplaceConfirmation: true })
+        {
+            if (AppMessageBox.Show(
+                    outcome.Error + Environment.NewLine + Environment.NewLine
+                    + "Заменить их выбранными? Старые файлы этой конфигурации будут удалены.",
+                    "Конфигурация исполнения", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                    MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            outcome = FirmwareExecutionBuild.Place(versionDir, execution, dlg.FileNames, replaceExisting: true);
+        }
+
+        if (!outcome.Ok)
+        {
+            AppMessageBox.Show(outcome.Error ?? "Не получилось положить конфигурацию.",
+                "Конфигурация исполнения", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _host.ShowStatus($"Конфигурация «{execution}» положена в {result.VersionRaw}: файлов {outcome.Copied.Count}");
+        // Перестроить выдачу: пока карточка не узнала, что конфигурация появилась, она продолжает
+        // честно писать, что её нет, — а это уже неправда.
+        _host.InvalidateSearchResults();
     }
 
     private void OpenLoaderFile(FirmwareCard card, string extension, string label)
