@@ -66,8 +66,16 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding UnknownItemsBannerText}" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
+                <!-- Текст плашки — ТОЖЕ кнопка. Жалоба: «непонятное нахождение клавиши „показать"
+                     (как будто должно быть кликабельно)». Человек видит сообщение и жмёт по нему, а
+                     не ищет глазами кнопку в правом углу; раз выглядит нажимаемым — пусть нажимается.
+                     Кнопка справа остаётся: по ней приходят те, кто уже привык. -->
+                <Button Grid.Column="0" Command="{Binding ShowUnknownItemsDetailsCommand}"
+                        Style="{StaticResource BannerTextButton}" HorizontalContentAlignment="Left"
+                        ToolTip="Показать подробности">
+                    <TextBlock Text="{Binding UnknownItemsBannerText}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextOnAccentBrush}" VerticalAlignment="Center"/>
+                </Button>
                 <Button Grid.Column="1" Content="Показать" Margin="12,0,8,0"
                         Command="{Binding ShowUnknownItemsDetailsCommand}"/>
                 <Button Grid.Column="2" Content="Скрыть" Style="{StaticResource SecondaryButton}"

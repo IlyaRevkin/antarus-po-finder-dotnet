@@ -323,6 +323,33 @@
         </Style.Triggers>
     </Style>
 
+    <!-- Текст плашки, работающий как кнопка: выглядит обычным текстом, но нажимается. Нужен там,
+         где человек жмёт по самому сообщению, а не ищет кнопку сбоку (жалоба «непонятное нахождение
+         клавиши „показать", как будто должно быть кликабельно»). Подчёркивание под курсором — всё,
+         чем он себя выдаёт: рамка и заливка на цветной плашке выглядели бы вторым элементом. -->
+    <Style x:Key="BannerTextButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="TextBlock.TextDecorations" Value="Underline"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Icon-only square button -->
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="Width" Value="28"/>

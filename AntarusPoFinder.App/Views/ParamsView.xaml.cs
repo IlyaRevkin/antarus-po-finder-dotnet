@@ -124,6 +124,10 @@ public partial class ParamsView : UserControl
                 || r.Subtypes.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         TablesGrid.ItemsSource = shown;
+        // Первая строка выбирается сама: кнопки над списком обязаны работать сразу, а не после
+        // того, как человек догадается щёлкнуть по строке. Это и есть жалоба «не интуитивно
+        // понятно, что нужно кликнуть на сам файл, прежде чем нажать „открыть"».
+        if (shown.Count > 0 && TablesGrid.SelectedIndex < 0) TablesGrid.SelectedIndex = 0;
         TablesEmptyHint.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         TablesEmptyHint.Text = _tableRows.Count > 0 && shown.Count == 0
             ? "По запросу ничего не нашлось."
@@ -151,10 +155,15 @@ public partial class ParamsView : UserControl
 
     private void OpenSelectedTable()
     {
+        // Ругаться на человека за то, что он не угадал порядок действий, — худший из ответов.
+        // Жалоба дословно: «не интуитивно понятно, что нужно кликнуть на сам файл, прежде чем
+        // нажать „открыть"». Поэтому: строка выбирается сама при загрузке списка (см. ReloadTables),
+        // кнопка гаснет, когда выбирать нечего, а это окно остаётся только на случай, когда список
+        // вообще пуст — там и правда открывать нечего.
         if (TablesGrid.SelectedItem is not ParamTableRow row)
         {
-            AppMessageBox.Show("Выберите таблицу.", "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            if (TablesGrid.Items.Count > 0) { TablesGrid.SelectedIndex = 0; row = (ParamTableRow)TablesGrid.SelectedItem; }
+            else return;
         }
 
         // Таблица при файле открывается В СВОЁМ, файловом окне: там у неё есть привязка к подтипам

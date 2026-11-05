@@ -454,8 +454,25 @@ public partial class InstructionLabelWindow : Window
     /// Windows-API подключённых дисков и живёт в приложении.</summary>
     private static string ToUnc(string path) => NetworkPathHelper.TryResolveUnc(path) ?? path;
 
+    /// <summary>Печать уже идёт. Второе нажатие в это время — не второе задание, а то же самое,
+    /// повторённое человеком, который не дождался реакции.</summary>
+    private bool _printing;
+
+    /// <summary>Сколько кнопка остаётся недоступной ПОСЛЕ печати.
+    ///
+    /// Жалоба дословно: «нажал на кнопку, так как комп обрабатывал процесс, окно печати сразу не
+    /// вылезло — он нажал вторую, и напечаталось 2 этикетки». Между нажатием и появлением окна
+    /// печати проходит заметное время, и всё это время кнопка выглядит живой. Трёх секунд хватает,
+    /// чтобы человек увидел результат первого нажатия; больше — начнёт мешать тому, кому наклейка
+    /// нужна во втором экземпляре.</summary>
+    private static readonly TimeSpan PrintCooldown = TimeSpan.FromSeconds(3);
+
     private void Print_Click(object sender, RoutedEventArgs e)
     {
+        // Защёлка на случай, если нажатие уже стояло в очереди ввода, пока окно не отвечало:
+        // отключённая кнопка такой клик не получит, но проверка здесь дешевле веры в это.
+        if (_printing) return;
+
         if (string.IsNullOrEmpty(_qrContent))
         {
             AppMessageBox.Show("Печатать нечего: файл инструкции не найден.", "QR и этикетка",
@@ -463,13 +480,45 @@ public partial class InstructionLabelWindow : Window
             return;
         }
 
-        // Печатаем СВЕЖИЙ визуал, а не тот, что показан в окне: показанный уже «занят» деревом
-        // предпросмотра, и печать чужого визуального родителя в WPF не работает.
-        var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(), $"Этикетка — {_title}", _layout);
-        _host.ShowStatus(outcome.Message, category: NotificationCategory.General);
-        ShowPrintState(outcome);
-        if (!outcome.Ok)
-            AppMessageBox.Show(outcome.Message, "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);
+        _printing = true;
+        PrintBtn.IsEnabled = false;
+
+        // Печать идёт синхронно и держит поток интерфейса, поэтому отложенным вызовом даём окну
+        // перерисоваться: иначе человек не увидит, что кнопка погасла, и это и есть та самая
+        // причина второго нажатия.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                // Печатаем СВЕЖИЙ визуал, а не тот, что показан в окне: показанный уже «занят»
+                // деревом предпросмотра, и печать чужого визуального родителя в WPF не работает.
+                var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(),
+                    $"Этикетка — {_title}", _layout);
+                _host.ShowStatus(outcome.Message, category: NotificationCategory.General);
+                ShowPrintState(outcome);
+                if (!outcome.Ok)
+                    AppMessageBox.Show(outcome.Message, "QR и этикетка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                ReleasePrintLockAfterCooldown();
+            }
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>Вернуть кнопку в строй не сразу, а переждав <see cref="PrintCooldown"/>: задание уже
+    /// у спулера, но бумага ещё не выехала, и именно в этот промежуток жмут второй раз.</summary>
+    private void ReleasePrintLockAfterCooldown()
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = PrintCooldown };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _printing = false;
+            // Окно могло закрыться, пока ждали, — тогда трогать кнопку уже нечего.
+            if (IsLoaded) PrintBtn.IsEnabled = true;
+        };
+        timer.Start();
     }
 
     /// <summary>Ответ на «нажал печать — и ничего не произошло».
