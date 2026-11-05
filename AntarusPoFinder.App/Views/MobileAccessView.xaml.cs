@@ -80,7 +80,8 @@ public partial class MobileAccessView : UserControl
             _server ??= new MobileAccessServer(
                 _services.Cfg.MobileServerPort(),
                 _services.Cfg.MobileAccessToken(),
-                Render);
+                Render,
+                IoMap);
         }
         catch (System.Net.Sockets.SocketException)
         {
@@ -104,13 +105,26 @@ public partial class MobileAccessView : UserControl
     {
         try
         {
-            return Dispatcher.Invoke(() => MobileSite.Render(_services.Db, path, query, "/" + _server!.Token));
+            return Dispatcher.Invoke(() => MobileSite.Render(_services.Db, path, query, "/" + _server!.Token, IoMap));
         }
         catch (System.Exception ex)
         {
             return new MobileSite.Page(500,
                 $"<!doctype html><meta charset=\"utf-8\"><p>Ошибка: {MobileSite.Esc(ex.Message)}</p>");
         }
+    }
+
+    /// <summary>Карта ВВ версии — для страницы и для выдачи самого файла.
+    ///
+    /// Через Dispatcher по той же причине, что и отрисовка: поиск файла начинается с чтения записи
+    /// версии, то есть с того самого единственного соединения SQLite. Сам поход на диск при этом
+    /// происходит уже в потоке интерфейса — карта лежит на сетевой шаре, и при отвалившейся сети
+    /// это секунды ожидания. Терпимо ровно потому, что запросов с телефона единицы и приходят они
+    /// по одному; альтернатива (второе соединение к базе) стоит дороже, чем лечит.</summary>
+    private IoMapDoc? IoMap(int fwVersionId)
+    {
+        try { return Dispatcher.Invoke(() => IoMapDocs.For(_services.Db, fwVersionId)); }
+        catch (System.Exception) { return null; }
     }
 
     private void ShowQr(string url)

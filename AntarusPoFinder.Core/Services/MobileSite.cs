@@ -41,7 +41,12 @@ public static class MobileSite
     /// <param name="queryString">То, что после «?», как пришло с провода.</param>
     /// <param name="linkBase">Префикс, с которого начинаются все ссылки страницы («/&lt;токен&gt;»).
     /// Токен не константа и меняется от машины к машине, зашивать его в разметку здесь нельзя.</param>
-    public static Page Render(Database db, string? path, string? queryString, string linkBase)
+    /// <param name="ioMap">Карта ВВ версии — отдельным вызовом, а не чтением с диска прямо здесь: в
+    /// этом классе нет ни одного обращения к файловой системе, и заводить первое ради карты значило
+    /// бы, что страницу больше не проверить без настоящего диска. Передаётся
+    /// <see cref="IoMapDocs.For"/>; null — раздел карты на карточке просто не появится.</param>
+    public static Page Render(Database db, string? path, string? queryString, string linkBase,
+        Func<int, IoMapDoc?>? ioMap = null)
     {
         var trimmed = (path ?? "").Trim('/');
         var query = ParseQuery(queryString);
@@ -57,7 +62,11 @@ public static class MobileSite
 
         if (trimmed.StartsWith("v/", StringComparison.Ordinal) &&
             int.TryParse(trimmed[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
-            return CardPage(db, id, linkBase);
+            return CardPage(db, id, linkBase, ioMap);
+
+        if (trimmed.StartsWith("io/", StringComparison.Ordinal) &&
+            int.TryParse(trimmed[3..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ioId))
+            return IoMapPage(db, ioId, linkBase, ioMap);
 
         if (trimmed.StartsWith("t/", StringComparison.Ordinal) &&
             int.TryParse(trimmed[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tableId))
@@ -115,7 +124,7 @@ public static class MobileSite
 
     // ── Карточка версии ──────────────────────────────────────────────────────
 
-    private static Page CardPage(Database db, int id, string linkBase)
+    private static Page CardPage(Database db, int id, string linkBase, Func<int, IoMapDoc?>? ioMap)
     {
         var row = db.GetFwVersionById(id);
         if (row is null)
@@ -189,9 +198,113 @@ public static class MobileSite
         if (!string.IsNullOrWhiteSpace(row.Description))
             body.Append($"""<h2>Описание</h2><p>{Esc(row.Description)}</p>""");
 
+        // Карта ВВ — ссылкой, а не прямо здесь: лист на триста строк посреди карточки похоронил бы
+        // ответ на вопрос «актуальная ли версия», ради которого карточку и открывают. Ссылки нет
+        // вовсе, когда карты нет: пункт «Карта ВВ», ведущий на «ничего не нашлось», у шкафа читается
+        // как «карта есть, но программа её потеряла» — ровно та жалоба, из-за которой на карточке в
+        // программе признаки документов считаются обходом диска, а не заполненным полем в базе.
+        if (ioMap is not null && ioMap(id) is not null)
+            body.Append($"""
+                <p><a class="action" href="{Esc(linkBase)}/io/{id}">Карта входов-выходов →</a></p>
+                """);
+
         body.Append($"""<p><a class="back" href="{Esc(linkBase)}/">← к поиску</a></p>""");
         return new Page(200, Shell(title, body.ToString()));
     }
+
+    // ── Карта входов-выходов ─────────────────────────────────────────────────
+    //
+    // Из тикета Ильи: «посмотереть … входа выхода». Разбор того, ПОЧЕМУ книга Excel показывается
+    // страницей, а всё прочее отдаётся файлом, — в IoMapDocs; здесь только разметка обеих веток.
+
+    /// <summary>Хвост адреса, по которому отдаётся САМ файл карты (не страница). Константой здесь, а
+    /// не строкой в двух местах: ссылку печатает разметка, а отдаёт файл транспорт
+    /// (MobileAccessServer), и разойдись они — ссылка на карту вела бы в 404.</summary>
+    public static string FileRoute(int fwVersionId) => $"io/{fwVersionId}/f";
+
+    /// <summary>Обратный разбор <see cref="FileRoute"/> — для транспорта, который обязан узнать этот
+    /// адрес ДО отрисовки страницы: ответом на него идут байты файла, а не HTML.</summary>
+    public static bool TryParseFileRoute(string? tail, out int fwVersionId)
+    {
+        fwVersionId = 0;
+        var trimmed = (tail ?? "").Trim('/');
+        if (!trimmed.StartsWith("io/", StringComparison.Ordinal)) return false;
+        if (!trimmed.EndsWith("/f", StringComparison.Ordinal)) return false;
+        var middle = trimmed[3..^2];
+        return int.TryParse(middle, NumberStyles.Integer, CultureInfo.InvariantCulture, out fwVersionId);
+    }
+
+    private static Page IoMapPage(Database db, int id, string linkBase, Func<int, IoMapDoc?>? ioMap)
+    {
+        var doc = ioMap?.Invoke(id);
+        if (doc is null)
+            return new Page(404, Shell("Карта ВВ", $"""
+                <p class="muted">У этой версии карты входов-выходов нет — ни у самой версии, ни в
+                общей папке. Если она должна быть, её кладут с компьютера, как и раньше.</p>
+                <p><a class="back" href="{Esc(linkBase)}/v/{id}">← к версии</a></p>
+                """));
+
+        var body = new StringBuilder();
+        body.Append("<h1>Карта входов-выходов</h1>");
+        body.Append($"""<p class="muted">{Esc(doc.FileName)} · {Esc(Size(doc.SizeBytes))} · {Esc(Modified(doc))}</p>""");
+
+        // Ссылка на исходный файл есть ВСЕГДА, даже когда лист показан страницей: страница — это
+        // пересказ (без цветов, объединённых ячеек и примечаний), и человек, которому этого не
+        // хватило, обязан иметь возможность открыть подлинник, а не ехать за ним в офис.
+        body.Append($"""
+            <p><a class="action" href="{Esc(linkBase)}/{FileRoute(id)}">Открыть исходный файл</a></p>
+            """);
+
+        if (!doc.HasGrid)
+        {
+            body.Append("""
+                <p class="muted">Файл показан ссылкой, а не страницей: страницей разбирается только
+                книга Excel (xlsx). PDF телефон откроет сам, остальное отдаст своему приложению.</p>
+                """);
+        }
+
+        foreach (var sheet in doc.Sheets)
+        {
+            if (doc.Sheets.Count > 1 || sheet.Name.Length > 0)
+                body.Append($"<h2>{Esc(sheet.Name)}</h2>");
+
+            // Сетка остаётся сеткой, и это сознательно НЕ то, что сделано со строками параметров
+            // (см. ParamRowCard). Там известно, что значит каждый столбец, и строку можно пересобрать
+            // карточкой. Здесь неизвестно ничего: карта ВВ — произвольный лист, который человек
+            // нарисовал в Excel, и «догадливая» перекладка столбцов местами превратила бы клемму в
+            // подпись к сигналу. Поэтому таблица как есть, с боковой прокруткой, но первый столбец
+            // (на практике — клемма или адрес) прибит к краю, чтобы при прокрутке было видно, о
+            // какой именно точке речь.
+            body.Append("""<div class="grid"><table>""");
+            for (var r = 0; r < sheet.Rows.Count; r++)
+            {
+                // Первая строка листа — почти всегда шапка. «Почти» здесь достаточно: ошибка стоит
+                // жирного шрифта на первой строке данных, а не потери содержимого.
+                var tag = r == 0 ? "th" : "td";
+                body.Append("<tr>");
+                foreach (var cell in sheet.Rows[r])
+                    body.Append($"<{tag}>{Esc(cell)}</{tag}>");
+                body.Append("</tr>");
+            }
+            body.Append("</table></div>");
+
+            if (sheet.Truncated)
+                body.Append($"""
+                    <p class="muted">Лист показан не целиком (первые {IoMapDocs.MaxRows} строк и
+                    {IoMapDocs.MaxColumns} столбцов) — остальное в исходном файле по ссылке выше.</p>
+                    """);
+        }
+
+        body.Append($"""<p><a class="back" href="{Esc(linkBase)}/v/{id}">← к версии</a></p>""");
+        return new Page(200, Shell("Карта ВВ", body.ToString()));
+    }
+
+    private static string Size(long bytes) => bytes >= 1024 * 1024
+        ? (bytes / 1024d / 1024d).ToString("0.#", CultureInfo.InvariantCulture) + " МБ"
+        : Math.Max(1, bytes / 1024) + " КБ";
+
+    private static string Modified(IoMapDoc doc) =>
+        doc.Modified == DateTime.MinValue ? "дата неизвестна" : doc.Modified.ToString("dd.MM.yyyy");
 
     // ── Параметры ПЧ/УПП ─────────────────────────────────────────────────────
     //
@@ -500,8 +613,38 @@ public static class MobileSite
                    overflow-wrap:anywhere}
         .prow .ttl{margin-top:2px}
         .prow .desc{margin-top:4px;color:#9aa0a6;font-size:15px}
+        /* Переход-действие (карта ВВ, жучок, отправка) — крупной полосой во всю ширину: пальцем в
+           шкафу попадают по полосе, а не по строчке текста. */
+        .action{display:block;padding:13px;margin:10px 0;border-radius:10px;background:#1e2126;
+                color:#8ab4f8;text-decoration:none;font-weight:600;text-align:center}
+        .action.warn{color:#ffd79a;background:#2a2016}
+        /* Карта ВВ: лист Excel как есть, с боковой прокруткой и прибитым первым столбцом —
+           см. IoMapPage о том, почему здесь, в отличие от параметров, сетка не разбирается. */
+        .grid{overflow-x:auto;margin:0 0 10px;border-radius:10px;background:#1e2126}
+        .grid table{border-collapse:collapse;font-size:14px;white-space:nowrap}
+        .grid th,.grid td{padding:6px 9px;border-bottom:1px solid #2c3035;text-align:left;
+                          vertical-align:top}
+        .grid th{position:sticky;top:0;background:#2a2e34;font-weight:600}
+        .grid td:first-child,.grid th:first-child{position:sticky;left:0;background:#23262b}
+        .grid th:first-child{background:#2a2e34}
+        /* Форма жалобы: поле во всю ширину, кнопка — полосой, как остальные действия. */
+        textarea{width:100%;box-sizing:border-box;min-height:140px;padding:12px;font-size:17px;
+                 font-family:inherit;border-radius:10px;border:1px solid #3c4043;background:#1e2126;
+                 color:#e8eaed}
+        .sevs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+        .sevs label{padding:9px 12px;border-radius:999px;background:#1e2126;font-size:15px}
+        .send{display:block;width:100%;padding:14px;margin-top:12px;font-size:17px;border:0;
+              border-radius:10px;background:#8ab4f8;color:#14161a;font-weight:600}
+        .err{padding:10px 12px;border-radius:10px;background:#4a1f1f;color:#ffd0d0}
+        .ok{padding:10px 12px;border-radius:10px;background:#1e4620;color:#b7f0b9}
         </style></head><body>{{body}}</body></html>
         """;
+
+    /// <summary>Короткий ответ одной фразой, в той же обёртке, что и страницы. Нужен транспорту:
+    /// он сам отвечает на часть запросов (слишком большой файл, слишком частая отправка), а голый
+    /// текст в браузере телефона выглядит как сломавшийся сайт, а не как ответ программы.</summary>
+    public static string Message(string title, string text) =>
+        Shell(title, $"<h1>{Esc(title)}</h1><p class=\"muted\">{Esc(text)}</p>");
 
     /// <summary>Экранирование ВСЕГО, что идёт из базы и из строки запроса. Описания прошивок, теги и
     /// имена пишут руками, и одна угловая скобка в описании ломала бы страницу; а строка запроса,

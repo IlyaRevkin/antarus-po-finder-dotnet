@@ -35,8 +35,15 @@ public sealed class MobileAccessServer : IDisposable
     /// сколько сказано значило бы отдать память первому встречному в той же Wi-Fi сети.</summary>
     private const int MaxBodyBytes = 64 * 1024;
 
+    /// <summary>Сколько байт файла карты ВВ соглашаемся отдать. Карта — это лист Excel или
+    /// несколько страниц PDF, то есть единицы мегабайт; файл на полсотни мегабайт в папке карты
+    /// почти наверняка попал туда по ошибке, а телефон на объекте качал бы его по чужому Wi-Fi
+    /// столько, что успел бы передумать.</summary>
+    private const long MaxFileBytes = 32L * 1024 * 1024;
+
     private readonly TcpListener _listener;
     private readonly Func<string, string, MobileSite.Page> _render;
+    private readonly Func<int, IoMapDoc?>? _ioMap;
     private volatile bool _running;
 
     public int Port { get; }
@@ -59,9 +66,15 @@ public sealed class MobileAccessServer : IDisposable
 
     /// <param name="render">Путь после токена и query-строка → страница. Вызывается ИЗ ПОТОКА
     /// СЕРВЕРА: вызывающий обязан сам перебросить это туда, где живёт база.</param>
-    public MobileAccessServer(int port, string token, Func<string, string, MobileSite.Page> render)
+    /// <param name="ioMap">Карта ВВ версии. Нужна здесь, а не только отрисовке: по адресу
+    /// <see cref="MobileSite.FileRoute"/> отдаётся САМ файл, то есть байты с диска, а разметка
+    /// байтов отдавать не умеет и не должна. Вызывается так же, как <paramref name="render"/>, —
+    /// из потока сервера, и перебросить это к базе обязан вызывающий.</param>
+    public MobileAccessServer(int port, string token, Func<string, string, MobileSite.Page> render,
+        Func<int, IoMapDoc?>? ioMap = null)
     {
         _render = render;
+        _ioMap = ioMap;
         Token = token;
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
@@ -139,6 +152,16 @@ public sealed class MobileAccessServer : IDisposable
             }
 
             var tail = path.Length > pathToken.Length ? path[(pathToken.Length + 1)..] : "";
+
+            // Файл карты ВВ — единственный ответ не HTML-ом, поэтому он разбирается ДО отрисовки.
+            if (MobileSite.TryParseFileRoute(tail, out var fileId))
+            {
+                WriteIoMapFile(stream, fileId);
+                Interlocked.Increment(ref _served);
+                Request?.Invoke();
+                return;
+            }
+
             var page = _render(tail, query);
             Write(stream, page.Status, "text/html; charset=utf-8", page.Html);
 
@@ -147,6 +170,68 @@ public sealed class MobileAccessServer : IDisposable
         }
         catch { /* best-effort на соединение, как и в PhotoUploadServer */ }
     }
+
+    /// <summary>Отдать телефону сам файл карты ВВ. Читается целиком в память и только потом
+    /// пишется в сокет: файл лежит на сетевом диске, и отдавать его поблочно означало бы держать
+    /// открытым хэндл к шаре всё время медленной передачи на телефон, а размер здесь ограничен
+    /// <see cref="MaxFileBytes"/> — лишней памяти это не стоит.</summary>
+    private void WriteIoMapFile(NetworkStream stream, int fwVersionId)
+    {
+        var doc = _ioMap?.Invoke(fwVersionId);
+        if (doc is null)
+        {
+            Write(stream, 404, "text/html; charset=utf-8",
+                MobileSite.Message("Карта ВВ", "Файла карты больше нет — возможно, его убрали с диска."));
+            return;
+        }
+        if (doc.SizeBytes > MaxFileBytes)
+        {
+            Write(stream, 413, "text/html; charset=utf-8", MobileSite.Message("Карта ВВ",
+                $"Файл слишком большой для телефона ({doc.SizeBytes / 1024 / 1024} МБ) — откройте его с компьютера."));
+            return;
+        }
+
+        byte[] bytes;
+        try { bytes = File.ReadAllBytes(doc.FullPath); }
+        catch (Exception)
+        {
+            Write(stream, 404, "text/html; charset=utf-8",
+                MobileSite.Message("Карта ВВ", "Файл сейчас не читается — сетевой диск недоступен или занят."));
+            return;
+        }
+
+        try
+        {
+            // inline, а не attachment: PDF и картинку телефон обязан показать сам, не кладя в
+            // «Загрузки». Книгу Excel он всё равно отдаст приложению — для неё разницы нет.
+            // Имя файла русское, поэтому только filename* (RFC 5987): голый filename= с кириллицей
+            // браузеры читают по-разному, и имя приезжало бы крокозябрами.
+            var header = Encoding.ASCII.GetBytes(
+                $"HTTP/1.1 200 OK\r\nContent-Type: {ContentType(doc.FileName)}\r\n" +
+                $"Content-Disposition: inline; filename*=UTF-8''{Uri.EscapeDataString(doc.FileName)}\r\n" +
+                $"Cache-Control: no-store\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
+            stream.Write(header, 0, header.Length);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush();
+        }
+        catch { /* best-effort: телефон ушёл из сети посреди передачи */ }
+    }
+
+    private static string ContentType(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
+    {
+        ".pdf" => "application/pdf",
+        ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xlsm" => "application/vnd.ms-excel.sheet.macroEnabled.12",
+        ".xls" => "application/vnd.ms-excel",
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc" => "application/msword",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".txt" => "text/plain; charset=utf-8",
+        // Неизвестное расширение отдаём потоком байт, а не угадываем: угаданный неверно тип —
+        // это телефон, пытающийся нарисовать архив картинкой.
+        _ => "application/octet-stream",
+    };
 
     /// <summary>Путь без ведущих слэшей и query-строка отдельно. Отдельным методом (и публичным)
     /// ради тестов: «/токен», «/токен/», «/токен/v/7?q=1» обязаны разбираться одинаково.</summary>
