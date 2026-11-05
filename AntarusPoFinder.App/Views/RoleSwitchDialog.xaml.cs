@@ -2,6 +2,7 @@
 using AntarusPoFinder.App.Services;
 using AntarusPoFinder.App.ViewModels;
 using AntarusPoFinder.Core.Data;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
@@ -194,9 +195,13 @@ public partial class RoleSwitchDialog : Window
     {
         try
         {
-            var user = services.Db.TouchOrCreateAppUser(normalizedLogin);
-            if (user.Id is not null && !string.Equals(user.Role, role, StringComparison.Ordinal))
-                services.Db.SetAppUserRole(user.Id.Value, role);
+            // Источник роли — «домен»: иначе эта же роль выглядела бы в таблице как решение
+            // администратора, и сверка с доменом («Обновить из домена») не отличала бы
+            // подтверждённую группой строку от выставленной руками.
+            var user = services.Db.TouchOrCreateAppUser(normalizedLogin, roleSource: AppUserRoleSource.Domain);
+            if (user.Id is not null && (!string.Equals(user.Role, role, StringComparison.Ordinal)
+                                        || user.RoleSource != AppUserRoleSource.Domain))
+                services.Db.SetAppUserRole(user.Id.Value, role, AppUserRoleSource.Domain);
 
             try { ConfigSyncService.PushAppUsersOnly(services, cfg.RootPath(), $"{shownLogin} ({RolesConfig.RoleLabel(role)})"); }
             catch { /* диск недоступен — уедет со следующим входом или ручной отправкой */ }

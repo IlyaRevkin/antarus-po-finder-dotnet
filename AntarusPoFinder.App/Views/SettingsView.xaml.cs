@@ -2958,6 +2958,10 @@ public partial class SettingsView : UserControl
         public AppUser Record { get; init; } = null!;
         public string AdLogin => Record.AdLogin;
         public string RoleLabel => RolesConfig.RoleLabel(Record.Role);
+        /// <summary>«Откуда роль» — см. AppUserRoleSource. Именно этого столбца не хватало, чтобы
+        /// по таблице можно было ответить на вопрос «почему роль не та».</summary>
+        public string RoleSourceLabel => AppUserRoleSource.Label(Record);
+        public string DomainCheckLabel => AppUserRoleSource.CheckLabel(Record);
         public string FirstLoginAt => Record.FirstLoginAt;
         public string LastLoginAt => Record.LastLoginAt;
     }
@@ -2983,13 +2987,113 @@ public partial class SettingsView : UserControl
             ? _allUsersData
             : _allUsersData.Where(u =>
                     u.AdLogin.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                    u.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    u.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    // Фильтр обязан ловить и «откуда роль»: «не найден» и «вручную» — это как раз
+                    // те выборки, ради которых администратор сюда и заходит.
+                    u.RoleSourceLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 .ToList();
     }
 
     private void UsersFilter_Changed(object sender, TextChangedEventArgs e) => ApplyUsersFilter();
 
     private void RefreshUsers_Click(object sender, RoutedEventArgs e) => LoadUsersTab();
+
+    /// <summary>«ОБНОВИТЬ ИЗ ДОМЕНА» — получить правду, не дожидаясь, пока все перелогинятся.
+    ///
+    /// <b>Что чинит.</b> Ростер наполняется фактом входа. Значит, кто ни разу не входил на этой
+    /// инсталляции — того в списке нет вовсе, а у кого роль записалась давним первым входом — у
+    /// того она и висит, пока он не войдёт заново (а при «не переспрашивать никогда» это может не
+    /// случиться очень долго, см. AdSessionService). Перечисление состава групп закрывает оба
+    /// случая разом — см. AdGroupMembers (поход в домен) и AdRosterSync (правила применения).
+    ///
+    /// <b>Почему так много текста в ответе.</b> Домен бывает недоступен, прав бывает мало, группа
+    /// бывает не настроена — и каждый из этих случаев обязан сказать, ЧТО именно не вышло. Молчаливое
+    /// «готово, изменено 0» — это ровно та беда, из-за которой Илья спрашивает второй раз.</summary>
+    private async void RefreshUsersFromDomain_Click(object sender, RoutedEventArgs e)
+    {
+        var cfg = _services.Cfg;
+        var dlg = new AdRosterRefreshDialog(cfg.Get("ad_domain"), _services.CurrentAdLogin ?? "")
+        {
+            Owner = Window.GetWindow(this),
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var domain = dlg.Domain;
+        var login = dlg.Login;
+        var password = dlg.Password;
+
+        RefreshFromDomainButton.IsEnabled = false;
+        _host.ShowStatus("Спрашиваем домен о составе групп…");
+        try
+        {
+            // Обход групп — сеть, и на большой группе он не мгновенный: держать на нём поток
+            // интерфейса значило бы повесить окно настроек. Сама база трогается уже обратно в
+            // потоке интерфейса (SQLite-соединение здесь одно на приложение).
+            var scan = await Task.Run(() => AdGroupMembers.Enumerate(cfg, domain, login, password));
+
+            if (scan.FatalError is not null)
+            {
+                AppMessageBox.Show(scan.FatalError, "Обновить из домена", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _host.ShowStatus("Домен не ответил — список не изменён");
+                return;
+            }
+            if (!scan.AnyConfigured)
+            {
+                AppMessageBox.Show(
+                    "Ни одна AD-группа не настроена, поэтому спрашивать у домена нечего." + Environment.NewLine + Environment.NewLine +
+                    "Названия групп задаются в «Настройки → Подключение» — по одной на роль.",
+                    "Обновить из домена", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var result = AdRosterSync.Apply(_services.Db, scan.Members, scan.Complete, DateTime.Now);
+            LoadUsersTab();
+
+            // Правда должна доехать до остальных машин, иначе сверку пришлось бы делать на каждой.
+            // Best-effort, как и везде в этом файле: недоступная шара не отменяет уже сделанного.
+            var pushNote = "";
+            try { ConfigSyncService.PushAppUsersOnly(_services, cfg.RootPath(), $"сверка с доменом ({domain})"); }
+            catch (Exception ex) { pushNote = Environment.NewLine + Environment.NewLine + $"На общий диск список не уехал: {ex.Message}. Уедет со следующей отправкой конфига."; }
+
+            AppMessageBox.Show(DescribeScan(scan, result) + pushNote, "Обновить из домена",
+                MessageBoxButton.OK, scan.Complete ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            _host.ShowStatus($"Сверка с доменом: добавлено {result.Added}, ролей изменено {result.RoleChanged}");
+        }
+        finally
+        {
+            RefreshFromDomainButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>Человеческий отчёт о сверке: сначала построчно по каждой группе (включая ненастроенные
+    /// и непрочитанные — с причиной), потом итог. Отдельной строкой — предупреждение о неполной
+    /// сверке: при ней пометка «в домене не найден» НЕ ставится никому, и об этом надо сказать, иначе
+    /// администратор решит, что все нашлись.</summary>
+    private static string DescribeScan(AdGroupScan scan, AdRosterSyncResult result)
+    {
+        var lines = new List<string>();
+        foreach (var p in scan.Probes)
+        {
+            var role = RolesConfig.RoleLabel(p.Role);
+            if (!p.Configured) { lines.Add($"• {role}: группа не настроена"); continue; }
+            lines.Add(p.Ok
+                ? $"• {role} («{p.GroupName}»): {p.Logins.Count} чел."
+                : $"• {role} («{p.GroupName}»): НЕ ПРОЧИТАНА — {p.Error}");
+        }
+
+        lines.Add("");
+        lines.Add($"Заведено новых: {result.Added}");
+        lines.Add($"Ролей исправлено: {result.RoleChanged}");
+        lines.Add($"Подтверждено прежних: {result.Confirmed}");
+
+        if (scan.Complete)
+            lines.Add($"В домене не найдено (оставлены как были): {result.NotFoundInDomain}");
+        else
+            lines.Add("Часть групп прочитать не удалось, поэтому никому не проставлена пометка " +
+                      "«в домене не найден»: по неполному ответу домена этого утверждать нельзя.");
+
+        return string.Join(Environment.NewLine, lines);
+    }
 
     /// <summary>Быстрый путь к смене роли по образцу двойного клика в других таблицах Настроек
     /// (Иерархия — HierarchyGrid_MouseDoubleClick). Смена роли — не текстовое поле вроде описания/

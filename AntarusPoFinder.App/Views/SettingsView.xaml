@@ -1915,9 +1915,9 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Те, кто вошёл по AD, но не входит ни в одну настроенную группу (вкладка «Подключение»). Первый вход получает роль «Наладчик» — здесь её можно изменить."
+            <TextBlock Grid.Row="0" Text="Кто работает в программе и откуда у него роль. Список наполняется входами по AD и кнопкой «Обновить из домена» (перечисляет состав групп, настроенных на вкладке «Подключение»). Вход по общим паролям ролей в список не попадает — там нет личности."
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
-                       ToolTip="Вход по AD-группе и вход по общим паролям ролей в этот список не попадают."/>
+                       ToolTip="Столбец «Откуда роль» отвечает на вопрос «почему роль не та»: из домена, выставлена вручную или досталась от первого входа."/>
             <TextBox Grid.Row="1" x:Name="UsersFilterInput" Height="34" Margin="0,0,0,10"
                      ToolTip="Фильтр по AD-логину или роли…" TextChanged="UsersFilter_Changed"/>
             <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"
@@ -1925,6 +1925,13 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="AD-логин" Binding="{Binding AdLogin}" Width="*" MinWidth="160" ElementStyle="{StaticResource DataGridCellText}"/>
                     <DataGridTextColumn Header="Роль" Binding="{Binding RoleLabel}" Width="Auto" MinWidth="120" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <!-- Главный ответ на жалобу «роль не та»: по одной роли понять, откуда она
+                         взялась, было нельзя. «Из домена» — членство в настроенной AD-группе,
+                         «Вручную» — решение администратора здесь же, «С первого входа» — умолчание
+                         для того, под кого группу никто не завёл, «Неизвестно» — запись старше
+                         этого столбца. -->
+                    <DataGridTextColumn Header="Откуда роль" Binding="{Binding RoleSourceLabel}" Width="Auto" MinWidth="170" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Сверка с доменом" Binding="{Binding DomainCheckLabel}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="Auto" MinWidth="160" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                 </DataGrid.Columns>
@@ -1940,7 +1947,10 @@
                         ToolTip="Назначить выбранному в таблице пользователю роль из списка слева"/>
             </Grid>
             <StackPanel Grid.Row="4" Orientation="Horizontal">
-                <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshUsers_Click"/>
+                <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshUsers_Click"
+                        ToolTip="Перечитать список из базы этой машины"/>
+                <Button x:Name="RefreshFromDomainButton" Content="Обновить из домена" Margin="0,0,8,0" Click="RefreshUsersFromDomain_Click"
+                        ToolTip="Перечислить состав настроенных AD-групп: завести тех, кого в списке нет, и привести роли к тому, что реально в домене. Никто не удаляется."/>
                 <Button Content="Удалить пользователя" Style="{StaticResource SecondaryButton}" Click="DeleteUser_Click"
                         ToolTip="Убрать из ростера. При следующем входе по AD он заведётся заново с ролью «Наладчик»"/>
             </StackPanel>
