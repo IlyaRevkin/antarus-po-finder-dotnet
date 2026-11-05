@@ -608,13 +608,59 @@ public partial class Database
           AND {NotDeleted("fv")} AND {NotConfig("fv")} AND {NotSuperseded("fv")}
         """;
 
-    public int GetUnreleasedFwVersionsCount()
+    /// <summary>Цифра на бейдже сайдбара и на вкладке Настроек. Считает ровно то же, что показывает
+    /// список, — СТРОКИ, а не записи: одна прошивка, заведённая на пять подтипов шкафа, это одна
+    /// строка в очереди и одна единица в счётчике (см. Core/Services/ModerationQueue). Разойдись
+    /// они — и «Модерация (8)» снова открывалась бы на трёх строках, то есть ровно та жалоба, с
+    /// которой всё началось.</summary>
+    public int GetUnreleasedFwVersionsCount() => GetModerationQueue().Count;
+
+    /// <summary>Сколько ЗАПИСЕЙ (а не прошивок) стоит в очереди. Человеку это число не показывается
+    /// нигде: оно нужно только диагностике (ModerationSlices), чтобы было видно, сколько строк
+    /// схлопнулось — то есть насколько сильно у этой машины размножены записи по подтипам.</summary>
+    public int GetUnreleasedFwVersionRowCount()
     {
         var result = ExecuteScalar($"""
             SELECT COUNT(*)
             {UnreleasedFromWhere()}
             """);
         return result is long l ? (int)l : 0;
+    }
+
+    /// <summary>Очередь модерации так, как её видит человек: одна прошивка — одна строка, со всеми
+    /// своими записями под разные подтипы шкафов внутри. Единственный источник и для списка, и для
+    /// счётчика.</summary>
+    public List<ModerationQueueItem> GetModerationQueue() =>
+        Services.ModerationQueue.Group(GetUnreleasedFwVersionsWithNames());
+
+    /// <summary>Вывести из модерации ВСЮ группу — все записи одной прошивки разом.
+    ///
+    /// Почему не хватает одного MarkFwVersionReleasedWithLinked по главной записи: родство
+    /// транзитивно (A делит папку с B, C — копия A), и один вызов обходит только прямых родичей
+    /// переданной записи. Строка же в списке показывает всю связную группу, и человек, нажимая
+    /// «В релиз», выпускает именно её. Пройти по всем членам — и дешевле, и честнее, чем городить
+    /// рекурсию в SQL: пометка идёт в одну сторону (0 → 1), повторный проход по уже выпущенной
+    /// записи ничего не портит.
+    ///
+    /// Обмену между машинами это ничем не грозит: уезжает та же самая монотонная отметка
+    /// released = 1 по каждой записи отдельно (Database.ConfigExchange), и у получателя она
+    /// применяется к тем записям, которые есть У НЕГО. Своих подтипов ему заводить не требуется.</summary>
+    public void ReleaseModerationGroup(IEnumerable<int> versionIds)
+    {
+        foreach (var id in versionIds.Distinct())
+            MarkFwVersionReleasedWithLinked(id);
+    }
+
+    /// <summary>id, которые должны уехать коллегам после выпуска группы: каждая запись группы плюс
+    /// её собственные родичи (GetFwVersionIdsSharingFiles). Объединение, без повторов — журнал
+    /// доставки пишется по каждому id, и дубли там только мусор.</summary>
+    public List<int> GetModerationGroupDeliveryIds(IEnumerable<int> versionIds)
+    {
+        var ids = new SortedSet<int>();
+        foreach (var id in versionIds.Distinct())
+            foreach (var related in GetFwVersionIdsSharingFiles(id))
+                ids.Add(related);
+        return ids.ToList();
     }
 
     /// <summary>Marks a version as released from moderation — set only after the user explicitly
