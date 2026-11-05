@@ -1133,6 +1133,10 @@ public partial class UploadView : UserControl
         SourceNamePanel.Visibility = exec || !FirmwareUploadService.SourceNameRequired
             ? Visibility.Collapsed : Visibility.Visible;
         ReserveVersionBtn.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        // HMI-проект прикладывается к ВЕРСИИ, а конфигурация исполнения версии не заводит — выбранный
+        // здесь, он молча никуда бы не уехал. Галочку поэтому убираем, а не оставляем бесполезной.
+        HmiCheck.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        HmiSection.Visibility = !exec && HmiCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RollbackBtn.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
         if (exec) ReservationPanel.Visibility = Visibility.Collapsed;
 
