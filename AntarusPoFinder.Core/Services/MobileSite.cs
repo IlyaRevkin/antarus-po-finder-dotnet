@@ -25,7 +25,7 @@ namespace AntarusPoFinder.Core.Services;
 /// без блокировок, поэтому <see cref="Render"/> обязан звать тот же поток, который работает с базой
 /// в приложении (страница заворачивает вызов в Dispatcher). Навязать это отсюда нельзя — отметка
 /// затем, чтобы следующий вызывающий не решил, что сюда можно ходить из пула потоков.</summary>
-public static class MobileSite
+public static partial class MobileSite
 {
     /// <summary>Сколько находок показывать. На телефоне длинный список бесполезен — листать его в
     /// шкафу некому, уточнить запрос дешевле.</summary>
@@ -63,6 +63,12 @@ public static class MobileSite
         if (trimmed.StartsWith("v/", StringComparison.Ordinal) &&
             int.TryParse(trimmed[2..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
             return CardPage(db, id, linkBase, ioMap);
+
+        // Единственная страница, с которой с телефона что-то УХОДИТ в базу. Сама по себе она
+        // по-прежнему чтение: это бланк, а приём заполненного — отдельный вход (SubmitBug), и
+        // попасть в него можно только POST-ом, который разбирает транспорт.
+        if (trimmed == "bug")
+            return BugFormPage(db, Int(query.GetValueOrDefault("v", "")), linkBase, "", "", "");
 
         if (trimmed.StartsWith("io/", StringComparison.Ordinal) &&
             int.TryParse(trimmed[3..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ioId))
@@ -207,6 +213,12 @@ public static class MobileSite
             body.Append($"""
                 <p><a class="action" href="{Esc(linkBase)}/io/{id}">Карта входов-выходов →</a></p>
                 """);
+
+        // Жалоба — внизу карточки. Жалуются после того, как убедились, какая версия стоит, а не до:
+        // сверху эта полоса перехватывала бы внимание у статуса, ради которого карточку и открыли.
+        body.Append($"""
+            <p><a class="action warn" href="{Esc(linkBase)}/bug?v={id}">Сообщить о баге прошивки</a></p>
+            """);
 
         body.Append($"""<p><a class="back" href="{Esc(linkBase)}/">← к поиску</a></p>""");
         return new Page(200, Shell(title, body.ToString()));

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using AntarusPoFinder.App.Services;
+using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
 using QRCoder;
 
@@ -81,7 +82,8 @@ public partial class MobileAccessView : UserControl
                 _services.Cfg.MobileServerPort(),
                 _services.Cfg.MobileAccessToken(),
                 Render,
-                IoMap);
+                IoMap,
+                SubmitBug);
         }
         catch (System.Net.Sockets.SocketException)
         {
@@ -125,6 +127,50 @@ public partial class MobileAccessView : UserControl
     {
         try { return Dispatcher.Invoke(() => IoMapDocs.For(_services.Db, fwVersionId)); }
         catch (System.Exception) { return null; }
+    }
+
+    /// <summary>Приём жалобы на прошивку с телефона — единственное, что отсюда пишется в базу.
+    ///
+    /// <b>Тикет заводится ТЕМ ЖЕ вызовом, что и жучок на карточке в программе</b>
+    /// (<see cref="TicketSyncService.CreateTicket(AppServices,string,string,string,string,string)"/>):
+    /// автор, роль, строка в базе, событие в исходящей очереди на сетевой диск и запись в
+    /// автовыгрузку — всё это уже внутри него. Соберись тикет здесь руками, он остался бы виден
+    /// только на этой машине и не доехал бы ни до коллег, ни до того, кто правит прошивки.
+    ///
+    /// <b>Разбор тела — в Core</b> (MobileSite.SubmitBug): тип тикета там прошит константой, и
+    /// подменить его запросом нечем. Сюда возвращается уже проверенная заготовка.
+    ///
+    /// Через Dispatcher — по той же причине, что отрисовка: соединение SQLite одно.</summary>
+    private (MobileSite.Page Page, bool Created) SubmitBug(string body)
+    {
+        var created = false;
+        try
+        {
+            var page = Dispatcher.Invoke(() => MobileSite.SubmitBug(
+                _services.Db, body, "/" + _server!.Token, _services.CurrentUserName,
+                draft =>
+                {
+                    try
+                    {
+                        TicketSyncService.CreateTicket(_services, TicketType.FwBug, draft.Text,
+                            draft.Severity, draft.FwSyncId, draft.FwLabel);
+                        created = true;
+                        return true;
+                    }
+                    catch (System.Exception)
+                    {
+                        // Отказ базы или диска не должен выглядеть на телефоне как «отправлено»:
+                        // человек у шкафа решил бы, что жалоба уехала, и больше к ней не вернулся.
+                        return false;
+                    }
+                }));
+            return (page, created);
+        }
+        catch (System.Exception ex)
+        {
+            return (new MobileSite.Page(500, MobileSite.Message("Баг прошивки",
+                "Не удалось принять жалобу: " + ex.Message)), false);
+        }
     }
 
     private void ShowQr(string url)
