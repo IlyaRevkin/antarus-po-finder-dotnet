@@ -498,7 +498,13 @@ public partial class Database : IDisposable
                  first_login_at  TEXT    NOT NULL DEFAULT '',
                  last_login_at   TEXT    NOT NULL DEFAULT '',
                  role_updated_at TEXT    NOT NULL DEFAULT '',
-                 sync_id         TEXT    NOT NULL DEFAULT ''
+                 sync_id         TEXT    NOT NULL DEFAULT '',
+                 -- Откуда роль и когда её последний раз сверяли с составом AD-групп — см.
+                 -- Domain/AppUserRoleSource.cs и EnsureColumnsExist ниже (там же ALTER TABLE
+                 -- для уже установленных баз: сид применяется только к НОВОЙ).
+                 role_source       TEXT    NOT NULL DEFAULT '',
+                 domain_checked_at TEXT    NOT NULL DEFAULT '',
+                 domain_found      INTEGER NOT NULL DEFAULT 0
              );
 
              -- Журнал явных переписываний hw модификаций контроллеров (напр. PIXEL2 044 → 1321),
@@ -868,6 +874,17 @@ public partial class Database : IDisposable
         // read by every fw_versions SELECT below (kept out of every normal listing/search) and by
         // ExportHierarchyData/ImportHierarchyDataCore (kept IN the sync payload so the deletion itself
         // reaches every other machine, not just this one).
+        // Ростер «Пользователи»: откуда у строки роль и когда её сверяли с доменом. Обязательно
+        // миграцией, а не только в CREATE TABLE выше — беду видит администратор на УЖЕ
+        // установленной копии, где таблица давно создана и CREATE TABLE IF NOT EXISTS ничего не
+        // добавит. Умолчания ('' / 0) означают ровно «неизвестно» и «не сверялась»: ни одна
+        // существующая роль от миграции не меняется, меняется только то, что о ней можно
+        // рассказать. См. Domain/AppUserRoleSource.cs и Services/AdRosterSync.cs.
+        AddColumnsIfMissing("app_users",
+            ("role_source", "TEXT NOT NULL DEFAULT ''"),
+            ("domain_checked_at", "TEXT NOT NULL DEFAULT ''"),
+            ("domain_found", "INTEGER NOT NULL DEFAULT 0"));
+
         AddColumnsIfMissing("fw_versions", ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
 
         // sync_id: переносимый идентификатор строки прошивки — ровно тот же приём, что у

@@ -365,6 +365,18 @@ public class ExportedAppUser
     [JsonPropertyName("first_login_at")] public string FirstLoginAt { get; set; } = "";
     [JsonPropertyName("last_login_at")] public string LastLoginAt { get; set; } = "";
     [JsonPropertyName("role_updated_at")] public string RoleUpdatedAt { get; set; } = "";
+
+    /// <summary>Откуда роль (см. Domain/AppUserRoleSource) — едет вместе с самой ролью и
+    /// побеждает/проигрывает слияние тем же сравнением role_updated_at. Снимок, сделанный версией
+    /// приложения старше этого поля, его не содержит — там останется пустая строка, то есть честное
+    /// «неизвестно», а не выдуманный источник.</summary>
+    [JsonPropertyName("role_source")] public string RoleSource { get; set; } = "";
+
+    /// <summary>Когда строку последний раз сверяли с составом настроенных AD-групп и нашлась ли
+    /// она там. В отличие от роли, это НЕ решение человека, а наблюдение: при слиянии побеждает
+    /// просто более поздняя сверка — её делают с одной машины, а знать результат должны все.</summary>
+    [JsonPropertyName("domain_checked_at")] public string DomainCheckedAt { get; set; } = "";
+    [JsonPropertyName("domain_found")] public bool DomainFound { get; set; }
 }
 
 /// <summary>Одно переписывание hw модификации контроллера (напр. PIXEL2 044 → 1321), сделанное

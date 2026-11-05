@@ -7,7 +7,7 @@ namespace AntarusPoFinder.Core.Data;
 public partial class Database
 {
     private const string AppUserSelectCols =
-        "id, ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id";
+        "id, ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id, role_source, domain_checked_at, domain_found";
 
     public AppUser? FindAppUserByLogin(string normalizedLogin)
     {
@@ -19,8 +19,13 @@ public partial class Database
     /// <summary>First time this AD login is seen locally: creates it with the default role
     /// (Наладчик) so the operator can go straight to work — see AppUser class doc. An already-known
     /// login just gets last_login_at bumped; its role is left untouched here (see SetAppUserRole for
-    /// the only thing that changes it locally).</summary>
-    public AppUser TouchOrCreateAppUser(string normalizedLogin, string defaultRole = "naladchik")
+    /// the only thing that changes it locally).
+    ///
+    /// <paramref name="roleSource"/> описывает ТОЛЬКО новосозданную строку — «эта роль не решение
+    /// человека и не состав группы, это умолчание первого входа» (см. AppUserRoleSource). У уже
+    /// существующей строки источник роли не трогается: вход — это не решение о роли.</summary>
+    public AppUser TouchOrCreateAppUser(string normalizedLogin, string defaultRole = "naladchik",
+        string roleSource = AppUserRoleSource.FirstLogin)
     {
         var now = NowIso();
         var existing = FindAppUserByLogin(normalizedLogin);
@@ -28,8 +33,8 @@ public partial class Database
         {
             var syncId = Guid.NewGuid().ToString();
             ExecuteNonQuery("""
-                INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id)
-                VALUES(@l, @r, @f, @la, @ru, @sy)
+                INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id, role_source)
+                VALUES(@l, @r, @f, @la, @ru, @sy, @src)
                 """, cmd =>
             {
                 cmd.Parameters.AddWithValue("@l", normalizedLogin);
@@ -38,6 +43,7 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@la", now);
                 cmd.Parameters.AddWithValue("@ru", now);
                 cmd.Parameters.AddWithValue("@sy", syncId);
+                cmd.Parameters.AddWithValue("@src", roleSource);
             });
             return FindAppUserByLogin(normalizedLogin)!;
         }
@@ -51,6 +57,29 @@ public partial class Database
         return existing;
     }
 
+    /// <summary>Заводит строку ростера, НЕ отмечая её входом: человека перечислили в составе
+    /// AD-группы («Обновить из домена»), а не увидели вошедшим. Поэтому first_login_at/last_login_at
+    /// остаются пустыми — иначе в таблице появилась бы выдуманная дата входа, и колонки «первый/
+    /// последний вход» перестали бы значить то, что написано. Ровно это и чинит вторую половину
+    /// жалобы: «кто не входил — тех в списке нет вовсе».</summary>
+    public AppUser CreateAppUserFromDomain(string normalizedLogin, string role, string checkedAt)
+    {
+        ExecuteNonQuery("""
+            INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id,
+                                  role_source, domain_checked_at, domain_found)
+            VALUES(@l, @r, '', '', @ru, @sy, @src, @dc, 1)
+            """, cmd =>
+        {
+            cmd.Parameters.AddWithValue("@l", normalizedLogin);
+            cmd.Parameters.AddWithValue("@r", role);
+            cmd.Parameters.AddWithValue("@ru", NowIso());
+            cmd.Parameters.AddWithValue("@sy", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@src", AppUserRoleSource.Domain);
+            cmd.Parameters.AddWithValue("@dc", checkedAt);
+        });
+        return FindAppUserByLogin(normalizedLogin)!;
+    }
+
     public List<AppUser> GetAppUsers()
     {
         var result = new List<AppUser>();
@@ -62,13 +91,36 @@ public partial class Database
     /// <summary>Administrator changing a user's role from Настройки → Пользователи. Bumps
     /// role_updated_at so this change wins the last-writer-wins merge the next time configs are
     /// exchanged between machines (see Database.ConfigExchange's app_users merge below), even
-    /// against a role changed earlier elsewhere.</summary>
-    public void SetAppUserRole(int id, string role)
+    /// against a role changed earlier elsewhere. Источник роли при этом становится «вручную» — см.
+    /// перегрузку ниже.</summary>
+    public void SetAppUserRole(int id, string role) => SetAppUserRole(id, role, AppUserRoleSource.Manual);
+
+    /// <summary>То же самое, но с явным указанием, ОТКУДА роль (см. AppUserRoleSource).
+    /// role_updated_at поднимается и тогда, когда поменялся только источник: источник едет
+    /// синхронизацией вместе с ролью и по тому же правилу последней записи, значит без свежей
+    /// отметки времени правда «эта роль из домена» не доехала бы до остальных машин.</summary>
+    public void SetAppUserRole(int id, string role, string roleSource)
     {
-        ExecuteNonQuery("UPDATE app_users SET role=@r, role_updated_at=@ru WHERE id=@id", cmd =>
+        ExecuteNonQuery("UPDATE app_users SET role=@r, role_source=@src, role_updated_at=@ru WHERE id=@id", cmd =>
         {
             cmd.Parameters.AddWithValue("@r", role);
+            cmd.Parameters.AddWithValue("@src", roleSource);
             cmd.Parameters.AddWithValue("@ru", NowIso());
+            cmd.Parameters.AddWithValue("@id", id);
+        });
+    }
+
+    /// <summary>Отметить факт сверки строки с составом настроенных AD-групп, НЕ трогая саму роль и
+    /// role_updated_at. Нужна для тех, кого в домене не нашли: их роль остаётся прежней (удаление —
+    /// отдельное осознанное действие администратора, см. DeleteAppUser), но в таблице обязано быть
+    /// видно, что последняя сверка их не подтвердила. Бить по role_updated_at здесь нельзя: это
+    /// сделало бы «мы на него посмотрели» более свежим решением, чем чужая настоящая правка роли.</summary>
+    public void MarkAppUserDomainChecked(int id, bool found, string checkedAt)
+    {
+        ExecuteNonQuery("UPDATE app_users SET domain_checked_at=@dc, domain_found=@df WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@dc", checkedAt);
+            cmd.Parameters.AddWithValue("@df", found ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", id);
         });
     }
@@ -86,13 +138,17 @@ public partial class Database
     /// falling back to login for first contact. Role is last-writer-wins by role_updated_at IN EITHER
     /// DIRECTION — unlike reservations/fw_versions this is not a one-way "only ever advances" state
     /// machine, an administrator can promote OR demote — so a role changed more recently must win
-    /// regardless of which side (local vs incoming) made the more recent change. first_login_at keeps
-    /// whichever side's is earlier (a historical fact, never moved backwards); last_login_at keeps
-    /// whichever is later (most recent login witnessed by any machine). Nobody is ever removed from
-    /// the roster via sync. Shared by the full hierarchy import AND by <see cref="MergeAppUsersOnly"/>
-    /// — the latter lets a non-administrator machine contribute its own roster entry to the shared
-    /// config without the (admin-only) risk of pushing a full hierarchy snapshot, see
-    /// ConfigSyncService.PushAppUsersOnly.</summary>
+    /// regardless of which side (local vs incoming) made the more recent change. role_source едет
+    /// вместе с ролью и тем же решением: «какая роль» и «откуда она» — это один факт, разъехавшись,
+    /// они врали бы администратору в точности так же, как врала таблица без источника вовсе.
+    /// first_login_at keeps whichever side's is earlier (a historical fact, never moved backwards);
+    /// last_login_at keeps whichever is later (most recent login witnessed by any machine).
+    /// domain_checked_at/domain_found — ОТДЕЛЬНОЕ решение, не связанное с LWW по роли: берётся более
+    /// свежая сверка с доменом, чья бы машина её ни делала (сверку делают с одной машины, а видеть
+    /// результат должны все). Nobody is ever removed from the roster via sync. Shared by the full
+    /// hierarchy import AND by <see cref="MergeAppUsersOnly"/> — the latter lets a non-administrator
+    /// machine contribute its own roster entry to the shared config without the (admin-only) risk of
+    /// pushing a full hierarchy snapshot, see ConfigSyncService.PushAppUsersOnly.</summary>
     private void MergeAppUsersInto(List<ExportedAppUser> incoming, ImportCounts counts, bool apply)
     {
         foreach (var u in incoming)
@@ -107,13 +163,17 @@ public partial class Database
                 {
                     var sync = string.IsNullOrEmpty(u.SyncId) ? Guid.NewGuid().ToString() : u.SyncId;
                     ExecuteNonQuery("""
-                        INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id)
-                        VALUES(@l,@r,@f,@la,@ru,@sy)
+                        INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id,
+                                              role_source, domain_checked_at, domain_found)
+                        VALUES(@l,@r,@f,@la,@ru,@sy,@src,@dc,@df)
                         """, cmd =>
                     {
                         cmd.Parameters.AddWithValue("@l", u.AdLogin); cmd.Parameters.AddWithValue("@r", u.Role);
                         cmd.Parameters.AddWithValue("@f", u.FirstLoginAt); cmd.Parameters.AddWithValue("@la", u.LastLoginAt);
                         cmd.Parameters.AddWithValue("@ru", u.RoleUpdatedAt); cmd.Parameters.AddWithValue("@sy", sync);
+                        cmd.Parameters.AddWithValue("@src", u.RoleSource ?? "");
+                        cmd.Parameters.AddWithValue("@dc", u.DomainCheckedAt ?? "");
+                        cmd.Parameters.AddWithValue("@df", u.DomainFound ? 1 : 0);
                     });
                 }
                 continue;
@@ -121,23 +181,36 @@ public partial class Database
 
             var incomingRoleWins = string.CompareOrdinal(u.RoleUpdatedAt, existing.RoleUpdatedAt) > 0;
             var wantRole = incomingRoleWins ? u.Role : existing.Role;
+            var wantRoleSource = incomingRoleWins ? (u.RoleSource ?? "") : existing.RoleSource;
             var wantRoleUpdatedAt = incomingRoleWins ? u.RoleUpdatedAt : existing.RoleUpdatedAt;
             var wantFirst = string.IsNullOrEmpty(existing.FirstLoginAt) ||
                 (!string.IsNullOrEmpty(u.FirstLoginAt) && string.CompareOrdinal(u.FirstLoginAt, existing.FirstLoginAt) < 0)
                 ? u.FirstLoginAt : existing.FirstLoginAt;
             var wantLast = string.CompareOrdinal(u.LastLoginAt, existing.LastLoginAt) > 0 ? u.LastLoginAt : existing.LastLoginAt;
+            // Сверка с доменом: побеждает более поздняя, независимо от решения по роли.
+            var incomingCheckWins = string.CompareOrdinal(u.DomainCheckedAt ?? "", existing.DomainCheckedAt) > 0;
+            var wantCheckedAt = incomingCheckWins ? (u.DomainCheckedAt ?? "") : existing.DomainCheckedAt;
+            var wantFound = incomingCheckWins ? u.DomainFound : existing.DomainFound;
             var adoptSyncId = !string.IsNullOrEmpty(u.SyncId) && u.SyncId != existing.SyncId;
 
-            var changed = wantRole != existing.Role || wantFirst != existing.FirstLoginAt || wantLast != existing.LastLoginAt || adoptSyncId;
+            var changed = wantRole != existing.Role || wantRoleSource != existing.RoleSource
+                || wantFirst != existing.FirstLoginAt || wantLast != existing.LastLoginAt
+                || wantCheckedAt != existing.DomainCheckedAt || wantFound != existing.DomainFound || adoptSyncId;
             if (!changed) continue;
 
             if (wantRole != existing.Role) counts.AppUsersUpdated++;
             if (!apply) continue;
 
-            ExecuteNonQuery("UPDATE app_users SET role=@r, first_login_at=@f, last_login_at=@la, role_updated_at=@ru, sync_id=@sy WHERE id=@id", cmd =>
+            ExecuteNonQuery("""
+                UPDATE app_users SET role=@r, role_source=@src, first_login_at=@f, last_login_at=@la,
+                                     role_updated_at=@ru, sync_id=@sy, domain_checked_at=@dc, domain_found=@df
+                WHERE id=@id
+                """, cmd =>
             {
-                cmd.Parameters.AddWithValue("@r", wantRole); cmd.Parameters.AddWithValue("@f", wantFirst);
+                cmd.Parameters.AddWithValue("@r", wantRole); cmd.Parameters.AddWithValue("@src", wantRoleSource);
+                cmd.Parameters.AddWithValue("@f", wantFirst);
                 cmd.Parameters.AddWithValue("@la", wantLast); cmd.Parameters.AddWithValue("@ru", wantRoleUpdatedAt);
+                cmd.Parameters.AddWithValue("@dc", wantCheckedAt); cmd.Parameters.AddWithValue("@df", wantFound ? 1 : 0);
                 cmd.Parameters.AddWithValue("@id", existing.Id!.Value);
                 cmd.Parameters.AddWithValue("@sy", adoptSyncId ? u.SyncId : existing.SyncId);
             });
@@ -178,5 +251,8 @@ public partial class Database
         LastLoginAt = GetString(r, "last_login_at"),
         RoleUpdatedAt = GetString(r, "role_updated_at"),
         SyncId = GetString(r, "sync_id"),
+        RoleSource = GetString(r, "role_source"),
+        DomainCheckedAt = GetString(r, "domain_checked_at"),
+        DomainFound = GetInt(r, "domain_found") != 0,
     };
 }

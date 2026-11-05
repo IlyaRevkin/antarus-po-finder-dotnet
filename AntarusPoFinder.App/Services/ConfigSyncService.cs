@@ -1030,6 +1030,10 @@ public static class ConfigSyncService
         {
             SyncId = u.SyncId, AdLogin = u.AdLogin, Role = u.Role,
             FirstLoginAt = u.FirstLoginAt, LastLoginAt = u.LastLoginAt, RoleUpdatedAt = u.RoleUpdatedAt,
+            // Откуда роль и результат последней сверки с доменом — ровно как в полном экспорте
+            // (Database.ConfigExchange): узкий канал обязан нести тот же факт, иначе сверка с
+            // доменом, сделанная на машине администратора, до остальных бы не доехала.
+            RoleSource = u.RoleSource, DomainCheckedAt = u.DomainCheckedAt, DomainFound = u.DomainFound,
         }).ToList();
 
         rootNode["app_users"] = JsonSerializer.SerializeToNode(mergedUsers);
