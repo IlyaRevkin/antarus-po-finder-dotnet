@@ -1224,6 +1224,19 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
     }
 
+    /// <summary>Поставить обновление, которое отложили из-за работы с контроллером или диском.
+    ///
+    /// Молча и без вопросов — ровно так же, как оно поставилось бы сразу, не окажись человек в этот
+    /// момент за заливкой. Вопрос «ставить ли теперь?» был бы странным: решение уже принято
+    /// настройкой автообновления, а отсрочка — не новое решение, а техника безопасности.</summary>
+    private async Task TryInstallDeferredUpdate()
+    {
+        if (!_updateDeferred || _pendingUpdate is null) return;
+        if (_services.Operations.RestartBlockReason() is not null) return;
+
+        await InstallUpdate();
+    }
+
     // Same class of bug as the config-push one fixed earlier: when AppAutoUpdate is on but the
     // AppUpdates notification category is off, CheckForAppUpdatesAsync below never turns
     // UpdateBannerVisible on before calling this — so a failure here (download dropped mid-stream,
@@ -1231,10 +1244,36 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     // which nothing was displaying, and never touched the notification history either. Always
     // forcing the banner visible and always logging to history here means an install failure is
     // never quieter than the "new version available" notice was, regardless of that toggle.
+    /// <summary>Обновление найдено, но ставить его сейчас нельзя — идёт операция, обрыв которой
+    /// что-то испортит. Ждём её конца и ставим само (см. TryInstallDeferredUpdate).</summary>
+    private bool _updateDeferred;
+
     [RelayCommand]
     private async Task InstallUpdate()
     {
         if (_pendingUpdate is null) return;
+
+        // ⚠️ НЕ ПЕРЕЗАПУСКАЕМ ПРОГРАММУ ПОСРЕДИ ЗАЛИВКИ В ПЛК.
+        //
+        // Установка обновления закрывает процесс, а вместе с ним обрывается Segnetics Loader
+        // Automation, который в этот момент пишет прошивку в контроллер. Жалоба наладчика дословно:
+        // «автоматический перезапуск Finder для обновления происходит при заливке прошивки в
+        // контроллер, что может привести к окирпичиванию контроллера».
+        //
+        // Спрашивать подтверждение здесь НЕЛЬЗЯ, и это важнее, чем кажется: человек в этот момент
+        // смотрит на контроллер, а не на экран, и окно с кнопкой «Перезапустить» он закроет не
+        // глядя. Поэтому обновление просто откладывается до конца операции и ставится само.
+        if (_services.Operations.RestartBlockReason() is { } busy)
+        {
+            _updateDeferred = true;
+            UpdateBannerText = $"Обновление {_pendingUpdate.Version} отложено — {busy}. "
+                             + "Программа обновится сама, как только операция закончится.";
+            UpdateBannerVisible = true;
+            UpdateActionEnabled = true;
+            return;
+        }
+
+        _updateDeferred = false;
         UpdateActionEnabled = false;
         UpdateBannerText = $"Установка версии {_pendingUpdate.Version}…";
         UpdateBannerVisible = true;
@@ -1590,6 +1629,11 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// can check whenever they care, rather than being interrupted by it.</summary>
     private async Task CheckForConfigUpdateAsync()
     {
+        // Отложенное обновление: операция, из-за которой его не поставили, могла уже закончиться.
+        // Проверяем тем же фоновым тиком, а не по событию реестра, — нам не нужна точность до
+        // секунды, нужна гарантия, что отложенное не зависнет навсегда.
+        _ = TryInstallDeferredUpdate();
+
         // Тикеты тянем тем же фоном (независимо от гейта конфига ниже — у SyncTicketsNow свой
         // guard): раньше о новом тикете узнавали, только зайдя на страницу «Тикеты».
         SyncTicketsNow();

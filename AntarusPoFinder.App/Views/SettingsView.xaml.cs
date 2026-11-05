@@ -2777,6 +2777,20 @@ public partial class SettingsView : UserControl
     /// Вызывается как «пустил и не жду» тем же `_ = …`, что и остальные такие места в проекте.</summary>
     private async Task InstallAppVersionAsync(UpdateRelease release)
     {
+        // Ручная установка тоже закрывает программу — значит она так же опасна посреди заливки в
+        // ПЛК, как и автоматическая (см. MainWindowViewModel.InstallUpdate и
+        // LongOperationRules.BlocksAppRestart). Разница лишь в том, что здесь человек ждёт ответа
+        // от программы, поэтому ему прямо говорят, почему сейчас нельзя, а не откладывают молча.
+        if (_services.Operations.RestartBlockReason() is { } busy)
+        {
+            AppMessageBox.Show(
+                $"Сейчас {busy}." + Environment.NewLine + Environment.NewLine
+                + "Установка закроет программу и оборвёт эту операцию — контроллер может остаться "
+                + "без рабочей прошивки. Дождитесь окончания и повторите.",
+                "Установка версии", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         var current = AppUpdateService.CurrentVersion;
         var direction = release.Version > current ? "Обновить" : release.Version < current ? "Откатить" : "Переустановить";
         var reply = AppMessageBox.Show(

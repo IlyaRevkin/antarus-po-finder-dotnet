@@ -105,6 +105,37 @@ public static class LongOperationRules
     public static bool TouchesWholeDisk(LongOperationKind kind) =>
         kind is LongOperationKind.DiskRebuild or LongOperationKind.DiskCleanup;
 
+    /// <summary>Можно ли перезапускать ПРОГРАММУ, пока идёт эта операция.
+    ///
+    /// ⚠️ ЭТО ПРО ОКИРПИЧИВАНИЕ КОНТРОЛЛЕРА, А НЕ ПРО УДОБСТВО. Жалоба наладчика дословно:
+    /// «автоматический перезапуск Finder для обновления происходит при заливке прошивки в
+    /// контроллер, что может привести к окирпичиванию контроллера». Автообновление ставит новую
+    /// версию и закрывает процесс — а вместе с ним обрывается Segnetics Loader Automation, который
+    /// в этот момент пишет в ПЛК. Контроллер остаётся без рабочей прошивки, и чинится это уже не
+    /// программой.
+    ///
+    /// Поэтому перезапуск запрещает ЛЮБАЯ операция, обрыв которой оставляет что-то в недописанном
+    /// виде: заливка и сборка — потому что на том конце контроллер и файл на сетевом диске;
+    /// перестройка и перенос — потому что они двигают файлы и половина уже переехала.
+    ///
+    /// Очистка диска сюда НЕ входит: она удаляет уже ненужное поштучно, и прерывание оставляет
+    /// просто меньше удалённого.</summary>
+    public static bool BlocksAppRestart(LongOperationKind kind) =>
+        kind is LongOperationKind.PlcDeploy or LongOperationKind.LfsBuild
+            or LongOperationKind.DiskRebuild or LongOperationKind.LegacyImport;
+
+    /// <summary>Почему сейчас нельзя перезапускать программу. null — можно.
+    ///
+    /// Текст готов к показу: он называет операцию, потому что «обновление отложено» без причины
+    /// выглядит как зависшая программа.</summary>
+    public static string? RestartBlockReason(IEnumerable<LongOperation> active)
+    {
+        var blocker = active?.FirstOrDefault(o => BlocksAppRestart(o.Kind));
+        return blocker is null
+            ? null
+            : $"идёт {blocker.Caption.ToLowerInvariant()}: {blocker.Title}";
+    }
+
     /// <summary>Можно ли безопасно оборвать операцию на полпути. Форматирование проекта и обновление
     /// ядра ПЛК — нельзя: контроллер остаётся без рабочей прошивки, и это надо СКАЗАТЬ, а не тихо
     /// погасить кнопку (см. <see cref="CancelWarning"/>).</summary>
@@ -250,6 +281,12 @@ public sealed class LongOperationRegistry
         lease = new Lease(this, candidate);
         Changed?.Invoke();
         return true;
+    }
+
+    /// <summary>Почему сейчас нельзя перезапускать программу (обновление). null — можно.</summary>
+    public string? RestartBlockReason()
+    {
+        lock (_gate) return LongOperationRules.RestartBlockReason(_active);
     }
 
     /// <summary>Почему версию сейчас нельзя трогать. null — можно.</summary>
