@@ -100,6 +100,16 @@ public partial class UploadView : UserControl
         // Исходное название спрашиваем там же, где оно обязательно, — одно правило на форму и на
         // проверку (FirmwareUploadService.SourceNameRequired), чтобы звёздочка и отказ не разъехались.
         if (FirmwareUploadService.SourceNameRequired) SourceNamePanel.Visibility = Visibility.Visible;
+        // ⚠️ РАЗВИЛКА «новая версия / конфигурация исполнения» — ТОЛЬКО В БЕТЕ. В рабочей версии
+        // панели нет, ModeExecutionRadio невыбран, ExecutionBuildMode всегда false, и форма работает
+        // ровно как до задачи — вместе со старым полем «Исполнение», которое заводит отдельную версию.
+        if (Core.Domain.AppIdentity.IsBeta)
+        {
+            UploadModePanel.Visibility = Visibility.Visible;
+            // Старое поле «Исполнение» и новая развилка противоречат друг другу: одно заводит
+            // отдельную версию, другая кладёт конфигурацию в существующую. В бете остаётся второе.
+            LegacyExecutionPanel.Visibility = Visibility.Collapsed;
+        }
 
         _ioMapSlot = new FileSlotController(IoMapSlot, IoMapSlotText, IoMapSlotClear, IoMapInput, "+ файл",
             fileDialogTitle: "Выбрать файл — карта ВВ", folderDialogTitle: "Выбрать папку — карта ВВ");
@@ -459,6 +469,17 @@ public partial class UploadView : UserControl
         UpdateKeepSwVersionAvailability();
         RefreshExecutionPicker();
         RefreshOpcBasePicker();
+        // Второй режим формы зависит от той же тройки подтип/контроллер/HW — пересчитываем здесь же.
+        RefreshExecutionBuildPickers();
+
+        // Резерв номера — про заведение НОВОЙ версии; в режиме «конфигурация исполнения» номер не
+        // выдаётся вовсе, и предложенный резерв обещал бы то, чего не случится.
+        if (ExecutionBuildMode)
+        {
+            ReservationPanel.Visibility = Visibility.Collapsed;
+            ReservationCombo.ItemsSource = null;
+            return;
+        }
 
         if (SubtypesSelect.MainSubtype is not EquipmentSubType subtype || CtrlCombo.SelectedItem is not ControllerModification mod)
         {
@@ -738,6 +759,24 @@ public partial class UploadView : UserControl
         // просто не открыть. Первый же полный предпросмотр всё равно будет вызван из конструктора
         // после InitializeComponent, поэтому ранний выход ничего не теряет.
         if (PreviewLabel is null || InheritedTagsHint is null) return;
+
+        // Конфигурация исполнения: путь считает ТОТ ЖЕ код, который потом и кладёт файлы
+        // (FirmwareExecutionBuild.Prepare — см. PlaceExecutionBuild). Своего Path.Combine здесь нет
+        // намеренно: разойдись предпросмотр с делом, человек увидел бы один путь, а файл уехал бы по
+        // другому, причём в папку, которая уедет в шкаф.
+        if (ExecutionBuildMode)
+        {
+            InheritedTagsHint.Visibility = Visibility.Collapsed;
+            var files = ExecutionSourceFiles();
+            var plan = FirmwareExecutionBuild.Prepare(ExecutionTargetDir(),
+                ExecutionPickCombo?.SelectedItem as string, files.Count == 0 ? null : files);
+            PreviewLabel.Text = plan.Ok
+                ? plan.Folder + (files.Count == 0
+                    ? "\n(файлы ещё не выбраны)"
+                    : "\n" + string.Join("\n", files.Select(Path.GetFileName)))
+                : plan.Error;
+            return;
+        }
 
         if (GroupCombo.SelectedItem is not EquipmentGroup group ||
             SubtypesSelect.MainSubtype is not EquipmentSubType subtype ||
@@ -1051,6 +1090,211 @@ public partial class UploadView : UserControl
 
     private void ClearData_Click(object sender, RoutedEventArgs e) => ResetForm();
 
+    // ── Конфигурация исполнения для существующей версии (бета) ───────────────
+
+    /// <summary>Строка списка «Версия, в которую кладём»: подпись для человека и сама запись —
+    /// папку на диске берём из неё (DiskPath + FirmwareDiskPresence, папку могли переименовать).</summary>
+    private record ExecutionTargetOption(string Label, FwVersionRecord Version);
+
+    /// <summary>Второй режим формы: кладём конфигурацию в существующую версию, новой не заводим.
+    /// В рабочей версии недостижим — панели выбора режима там нет вовсе, и
+    /// <see cref="ModeExecutionRadio"/> остаётся невыбранным.</summary>
+    private bool ExecutionBuildMode => ModeExecutionRadio?.IsChecked == true;
+
+    private void UploadMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        ApplyUploadMode();
+    }
+
+    private void ExecutionBuildTarget_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        UpdatePreview();
+    }
+
+    /// <summary>Показать ровно те поля, которые относятся к выбранному режиму.
+    ///
+    /// У конфигурации исполнения нет ни номера версии, ни описания изменений, ни тегов, ни типа
+    /// пуска: новой записи не заводится, и всё это уже записано у той версии, в которую кладём.
+    /// Оставленные на экране, эти поля обещали бы, что их значения куда-то поедут, — а они бы
+    /// молча пропали.</summary>
+    private void ApplyUploadMode()
+    {
+        if (ExecutionBuildPanel is null) return;
+        bool exec = ExecutionBuildMode;
+
+        ExecutionBuildPanel.Visibility = exec ? Visibility.Visible : Visibility.Collapsed;
+        DescPanel.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        ExtrasExpander.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        LaunchTypesHeader.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        LaunchTypesPanel.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        // Исходное название и резерв номера — про ЗАВЕДЕНИЕ версии; здесь версия уже заведена.
+        SourceNamePanel.Visibility = exec || !FirmwareUploadService.SourceNameRequired
+            ? Visibility.Collapsed : Visibility.Visible;
+        ReserveVersionBtn.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        RollbackBtn.Visibility = exec ? Visibility.Collapsed : Visibility.Visible;
+        if (exec) ReservationPanel.Visibility = Visibility.Collapsed;
+
+        UploadBtn.Content = exec ? "Положить конфигурацию исполнения" : "Загрузить прошивку";
+        UploadBtn.ToolTip = exec
+            ? "Скопировать выбранные файлы в папку исполнения выбранной версии. Номер ПО не изменится, новой версии не появится — путь показан в предпросмотре слева."
+            : "Скопировать файлы на общий диск и завести версию — путь и имя показаны в предпросмотре выше";
+
+        RefreshExecutionBuildPickers();
+        UpdatePreview();
+    }
+
+    /// <summary>Версии, в которые можно положить конфигурацию, и справочник исполнений шкафа.
+    ///
+    /// Версии — те же кандидаты, что у «базовой версии» ОПЦ (Database.GetOpcBaseCandidates): живые,
+    /// не-ОПЦ, ровно этой связки «подтип + контроллер + HW», от свежих к старым. По умолчанию самая
+    /// свежая: конфигурацию почти всегда собирают под текущую прошивку, а положить её в прошлую —
+    /// осознанный выбор, а не промах.</summary>
+    private void RefreshExecutionBuildPickers()
+    {
+        if (ExecutionVersionCombo is null || ExecutionPickCombo is null) return;
+
+        var subtypeId = SubtypesSelect.MainSubtype?.Id;
+        var mod = CtrlCombo.SelectedItem as ControllerModification;
+
+        var versions = subtypeId is int sid && mod is not null
+            ? _services.Db.GetOpcBaseCandidates(sid, mod.ControllerId, mod.HwVersion)
+            : new List<FwVersionRecord>();
+        var keepVersionId = (ExecutionVersionCombo.SelectedItem as ExecutionTargetOption)?.Version.Id;
+        var options = versions
+            .Select((v, i) => new ExecutionTargetOption(i == 0 ? $"{v.VersionRaw}  —  самая свежая" : v.VersionRaw, v))
+            .ToList();
+        ExecutionVersionCombo.ItemsSource = options;
+        ExecutionVersionCombo.SelectedItem = options.FirstOrDefault(o => o.Version.Id == keepVersionId)
+                                             ?? options.FirstOrDefault();
+
+        var keepExecution = ExecutionPickCombo.SelectedItem as string;
+        var catalog = subtypeId is int id ? _services.Db.GetSubtypeExecutions(id) : new List<string>();
+        ExecutionPickCombo.ItemsSource = catalog;
+        ExecutionPickCombo.SelectedItem = catalog.FirstOrDefault(
+            x => string.Equals(x, keepExecution, StringComparison.OrdinalIgnoreCase));
+
+        ExecutionVersionHint.Visibility = Visibility.Collapsed;
+        if (!ExecutionBuildMode) return;
+        if (options.Count == 0)
+        {
+            ExecutionVersionHint.Text = subtypeId is null || mod is null
+                ? "Укажите тип шкафа, подтип и контроллер — тогда станет видно, в какие версии можно положить конфигурацию."
+                : "У этой связки шкаф/контроллер/HW ещё нет ни одной версии — класть конфигурацию некуда. Сначала загрузите саму прошивку новой версией.";
+            ExecutionVersionHint.Visibility = Visibility.Visible;
+        }
+        else if (catalog.Count == 0)
+        {
+            ExecutionVersionHint.Text = "У этого шкафа пока не заведено ни одного исполнения — заведите кнопкой «+ исполнение».";
+            ExecutionVersionHint.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>Завести исполнение прямо отсюда — как заводят тег. Оно попадает в справочник ШКАФА
+    /// (fw_subtype_executions), то есть сразу становится видно и в карточке, и у коллег после обмена
+    /// конфигом. Убирают его в другом месте и другим решением (Настройки → Иерархия): «больше так не
+    /// выпускаем» — это не то же самое, что «в этой версии не собрали».</summary>
+    private void AddExecution_Click(object sender, RoutedEventArgs e)
+    {
+        if (SubtypesSelect.MainSubtype?.Id is not int subtypeId)
+        {
+            AppMessageBox.Show("Сначала выберите тип шкафа и подтип — исполнение заводится у шкафа.",
+                ExecutionBuildPlacement.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var raw = TextPromptDialog.Prompt(Window.GetWindow(this), "Новое исполнение шкафа",
+            "Название исполнения (например «3 насоса» или «ПЧ Danfoss»):");
+        var name = FwExecution.Normalize(raw);
+        if (name.Length == 0) return;
+
+        _services.Db.AddSubtypeExecution(subtypeId, name);
+        RefreshExecutionBuildPickers();
+        // Выбираем именно ту строку, что лежит в справочнике: повторное заведение в другом регистре
+        // ничего не добавляет, и выбрать надо уже существующую (Database.AddSubtypeExecution).
+        ExecutionPickCombo.SelectedItem = (ExecutionPickCombo.ItemsSource as IEnumerable<string>)?
+            .FirstOrDefault(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+        UpdatePreview();
+    }
+
+    /// <summary>Что копируем в папку исполнения. Источник тот же, что и у обычной загрузки
+    /// (перетащенный файл, набор файлов или папка), — отдельной зоны для конфигурации нет: это те же
+    /// файлы прошивки, просто заранее настроенные.
+    ///
+    /// Из папки берутся файлы ВЕРХНЕГО уровня: FirmwareExecutionBuild.Place кладёт всё в одну папку,
+    /// и утащить туда дерево подпапок значило бы склеить разные файлы с одинаковыми именами в один.
+    /// О пропущенных подпапках предупреждаем явно (см. Upload_Click), а не умалчиваем.</summary>
+    private IReadOnlyList<string> ExecutionSourceFiles()
+    {
+        if (string.IsNullOrWhiteSpace(_srcPath)) return Array.Empty<string>();
+        try
+        {
+            if (File.Exists(_srcPath)) return new[] { _srcPath! };
+            if (Directory.Exists(_srcPath))
+                return Directory.GetFiles(_srcPath!, "*", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception) { /* недоступный источник — просто «нечего класть» */ }
+        return Array.Empty<string>();
+    }
+
+    /// <summary>Папка выбранной версии на диске — та, в которой лежит её базовая сборка. Папку могли
+    /// переименовать прямо на диске (откат, правка hw), поэтому не доверяем disk_path вслепую, а
+    /// спрашиваем FirmwareDiskPresence — тем же способом, что и карточка в выдаче.</summary>
+    private string? ExecutionTargetDir() =>
+        (ExecutionVersionCombo?.SelectedItem as ExecutionTargetOption)?.Version is { } v
+            ? FirmwareDiskPresence.ResolveVersionDir(v.DiskPath, v.VersionRaw) ?? v.DiskPath
+            : null;
+
+    /// <summary>Положить конфигурацию — вторая половина Upload_Click. Ни Prepare, ни Register здесь
+    /// нет: записи в базе не появляется (docs/firmware-executions.md, § 6).</summary>
+    private void PlaceExecutionBuild()
+    {
+        var execution = ExecutionPickCombo.SelectedItem as string ?? "";
+        var files = ExecutionSourceFiles();
+        var plan = FirmwareExecutionBuild.Prepare(ExecutionTargetDir(), execution, files);
+        if (!plan.Ok)
+        {
+            AppMessageBox.Show(plan.Error!, ExecutionBuildPlacement.DialogTitle,
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Подпапки источника молча не теряем: оператор должен знать, что уедет только верхний уровень.
+        if (Directory.Exists(_srcPath) && SafeSubfolderCount(_srcPath!) > 0
+            && AppMessageBox.Show(
+                "В выбранной папке есть вложенные папки — в конфигурацию исполнения уедут только файлы верхнего уровня.\n\n"
+                + "Продолжить?", ExecutionBuildPlacement.DialogTitle,
+                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+
+        var outcome = ExecutionBuildPlacement.Place(ExecutionTargetDir(), execution, files);
+        if (outcome is null) return; // отказались заменять непустую папку — это не ошибка
+        if (!outcome.Ok)
+        {
+            AppMessageBox.Show(outcome.Error ?? "Не получилось положить конфигурацию.",
+                ExecutionBuildPlacement.DialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var version = (ExecutionVersionCombo.SelectedItem as ExecutionTargetOption)!.Version;
+        _host.RefreshDiskStatus();
+        // Карточка выдачи, пока не перестроена, продолжает честно писать «конфигурации нет» — а это
+        // уже неправда (тот же порядок, что и в SearchView.PlaceExecutionBuild).
+        _host.InvalidateSearchResults();
+        AppMessageBox.Show(
+            $"Конфигурация «{execution}» положена в версию {version.VersionRaw}:\n{outcome.Folder}\n\n"
+            + $"Файлов: {outcome.Copied.Count}. Номер ПО не изменился, новой версии не заведено.",
+            "Готово", MessageBoxButton.OK, MessageBoxImage.Information);
+        ResetForm();
+    }
+
+    private static int SafeSubfolderCount(string dir)
+    {
+        try { return Directory.GetDirectories(dir).Length; }
+        catch (Exception) { return 0; }
+    }
+
     // ── Upload ────────────────────────────────────────────────────────────────
 
     /// <summary>Асинхронная: копирование прошивки и вложений на сетевой диск (единственная долгая
@@ -1059,6 +1303,14 @@ public partial class UploadView : UserControl
     /// стояло колом всё время копирования, без единого признака, что что-то происходит.</summary>
     private async void Upload_Click(object sender, RoutedEventArgs e)
     {
+        // Второй режим формы: кладём конфигурацию в существующую версию — ни номера, ни записи, ни
+        // копирования гигабайтами, поэтому и асинхронности здесь не нужно.
+        if (ExecutionBuildMode)
+        {
+            PlaceExecutionBuild();
+            return;
+        }
+
         if (string.IsNullOrEmpty(_srcPath))
         {
             // HMI is versioned as an attachment to a firmware upload (see the "{fwv.Raw}_hmi" naming

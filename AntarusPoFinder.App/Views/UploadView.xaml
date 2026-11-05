@@ -168,6 +168,31 @@
             <!-- Right column: metadata form -->
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
+                    <!-- ЧТО ЗАГРУЖАЕМ — развилка новой модели исполнений (docs/firmware-executions.md).
+                         Раньше форма умела только одно: завести НОВУЮ версию, и поле «Исполнение»
+                         заводило отдельную версию со своим номером — ровно то, на что была жалоба
+                         «не могу сделать одну и ту же прошивку в разных исполнениях, только путём
+                         увеличения версии sw». Второй пункт кладёт файлы в «Прошивка\<исполнение>\»
+                         УЖЕ СУЩЕСТВУЮЩЕЙ версии: номер не растёт, записи не заводится.
+                         Панель только в бете (UploadView ctor, AppIdentity.IsBeta) — в рабочей версии
+                         форма ведёт себя в точности как до задачи, вместе со старым полем «Исполнение». -->
+                    <StackPanel x:Name="UploadModePanel" Visibility="Collapsed" Margin="0,0,0,12">
+                        <TextBlock Text="ЧТО ЗАГРУЖАЕМ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Border Background="{DynamicResource BgCardBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                                BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <StackPanel>
+                                <RadioButton x:Name="ModeNewVersionRadio" GroupName="UploadMode" IsChecked="True"
+                                             Content="Новая версия прошивки" Checked="UploadMode_Changed"/>
+                                <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="20,2,0,8"
+                                           Text="Номер ПО вырастет, заведётся новая запись версии, файлы лягут в её папку «Прошивка»."/>
+                                <RadioButton x:Name="ModeExecutionRadio" GroupName="UploadMode"
+                                             Content="Конфигурация исполнения для существующей версии" Checked="UploadMode_Changed"/>
+                                <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="20,2,0,0"
+                                           Text="Прошивка та же, просто заранее сконфигурированная. Номер ПО НЕ вырастет и новой записи версии не появится: файлы лягут в «Прошивка\имя исполнения» выбранной ниже версии."/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
                     <TextBlock Text="МЕТАДАННЫЕ" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
 
                     <!-- Ширина колонки-подписи — 100, ровно как у «Карта in/out»/«Карта modbus»/
@@ -277,8 +302,43 @@
                                  ToolTip="Как эта сборка называется у программиста. Подставлено из имени файла — поправьте, если на самом деле называется иначе."/>
                     </StackPanel>
 
-                    <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
-                    <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    <!-- КУДА КЛАДЁМ КОНФИГУРАЦИЮ — видно только во втором режиме (ExecutionBuildPanel,
+                         см. UploadView.ApplyUploadMode). Версия выбирается из уже существующих у этой
+                         связки «подтип + контроллер + HW», самая свежая по умолчанию; исполнение — из
+                         СПРАВОЧНИКА шкафа, а не набирается строкой: по справочнику и только по нему
+                         папка внутри «Прошивка» опознаётся как исполнение (Core/Services/
+                         FirmwareExecutionResolver), и набранное второй раз иначе завело бы папку,
+                         которую никто не считает исполнением. -->
+                    <StackPanel x:Name="ExecutionBuildPanel" Visibility="Collapsed">
+                        <TextBlock Text="Версия, в которую кладём *:" Margin="0,10,0,4"/>
+                        <ComboBox x:Name="ExecutionVersionCombo" Height="34" DisplayMemberPath="Label"
+                                  SelectionChanged="ExecutionBuildTarget_Changed"
+                                  ToolTip="Уже заведённые версии этого шкафа/контроллера/HW, от свежих к старым. Номер версии не меняется — файлы просто лягут в её папку исполнения."/>
+                        <TextBlock x:Name="ExecutionVersionHint" Style="{StaticResource MutedText}" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
+
+                        <TextBlock Text="Исполнение *:" Margin="0,10,0,4"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" x:Name="ExecutionPickCombo" Height="34"
+                                      SelectionChanged="ExecutionBuildTarget_Changed"
+                                      ToolTip="Исполнения этого шкафа — тот же справочник, из которого выбирают в карточке."/>
+                            <Button Grid.Column="2" x:Name="AddExecutionBtn" Content="+ исполнение"
+                                    Style="{StaticResource SecondaryButton}" Click="AddExecution_Click"
+                                    ToolTip="Завести новое исполнение у этого шкафа. Оно попадёт в справочник и будет предлагаться везде — в карточке и здесь."/>
+                        </Grid>
+                        <TextBlock Style="{StaticResource MutedText}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Text="Нужного исполнения нет — заведите его кнопкой справа. Убирают исполнение там же, где и заводят справочник: Настройки → Иерархия → «Исполнения шкафа»."/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="DescPanel">
+                        <TextBlock Text="Изменения в этой версии *:" Margin="0,10,0,4"/>
+                        <TextBox x:Name="DescInput" Height="60" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    </StackPanel>
 
                     <!-- Единый свёрнутый по умолчанию раздел "ДОП. ФАЙЛЫ И ДОП. НАСТРОЙКИ" — объединяет
                          то, что раньше было тремя разными местами на странице (свой Expander "ОПЦИИ
@@ -348,19 +408,27 @@
                                  редактируемый: уже заведённые исполнения предлагаются выбором, потому
                                  что сравниваются они ТОЧНО, без игнора регистра (Core/Domain/
                                  FwExecution.cs), и набранное второй раз иначе завело бы третью линейку. -->
-                            <Grid Margin="0,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Исполнение:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox Grid.Column="1" x:Name="ExecutionCombo" IsEditable="True" Height="34"
-                                          SelectionChanged="Execution_Changed" LostFocus="Execution_Changed"
-                                          ToolTip="Поле для ввода: впишите название исполнения прямо сюда. Список пуст, пока ни одного исполнения не заведено; заведённые будут предлагаться выбором. Пусто — обычная прошивка."/>
-                            </Grid>
-                            <TextBlock x:Name="ExecutionHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
-                                       Margin="0,0,0,10" FontSize="11"
-                                       Text="Впишите своё название прямо в поле — например «3 насоса» или «ПЧ Danfoss»; со второго раза оно будет предлагаться списком. Пусто — обычная прошивка. Разные исполнения одного шкафа друг друга не заменяют."/>
+                            <!-- СТАРАЯ модель исполнений: это поле заводит ОТДЕЛЬНУЮ версию со своим
+                                 номером ПО. Ровно то, на что была жалоба, — поэтому в бете панель
+                                 прячется целиком (UploadView ctor), а её место занимает развилка
+                                 «ЧТО ЗАГРУЖАЕМ» выше. В рабочей версии всё остаётся как было: модель
+                                 там старая, и убрать единственный способ завести исполнение значило
+                                 бы отнять работающее до того, как приедет замена. -->
+                            <StackPanel x:Name="LegacyExecutionPanel">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Исполнение:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox Grid.Column="1" x:Name="ExecutionCombo" IsEditable="True" Height="34"
+                                              SelectionChanged="Execution_Changed" LostFocus="Execution_Changed"
+                                              ToolTip="Поле для ввода: впишите название исполнения прямо сюда. Список пуст, пока ни одного исполнения не заведено; заведённые будут предлагаться выбором. Пусто — обычная прошивка."/>
+                                </Grid>
+                                <TextBlock x:Name="ExecutionHint" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                                           Margin="0,0,0,10" FontSize="11"
+                                           Text="Впишите своё название прямо в поле — например «3 насоса» или «ПЧ Danfoss»; со второго раза оно будет предлагаться списком. Пусто — обычная прошивка. Разные исполнения одного шкафа друг друга не заменяют."/>
+                            </StackPanel>
 
                             <!-- Оба поля ОПЦ живут в одной панели и показываются/прячутся вместе с
                                  галочкой. Подсказка под ними краснеет, пока оба пусты, — чтобы отказ
