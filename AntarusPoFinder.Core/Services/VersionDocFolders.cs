@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 
 namespace AntarusPoFinder.Core.Services;
 
@@ -158,5 +158,21 @@ public static class VersionDocFolders
         // возвращается лишь тогда, когда прежнего места не существует вовсе: пусть путь ведёт туда,
         // куда эта запись пишет, — там и появится заглушка «Инструкция в разработке».
         return asBefore ?? own;
+    }
+
+    /// <summary>Папка документа (слота) КОНКРЕТНОЙ записи версии, когда на руках только путь папки
+    /// версии и имена иерархии самой записи, — то есть и поправка на запись-ссылку, и развилка
+    /// «перестроенная версия / общая папка контроллера» одним вызовом.
+    ///
+    /// Заведено затем, чтобы два читателя документов не собирали этот путь каждый по-своему: карточка
+    /// поиска (SearchView.FindSiblingFolder) и мобильная страница (<see cref="IoMapDocs"/>) обязаны
+    /// открывать ОДИН И ТОТ ЖЕ файл — иначе человек у шкафа и человек за компьютером спорили бы о
+    /// карте ВВ, глядя в разные документы. Недоступная папка версии — null, искать нечего.</summary>
+    public static string? ReadFolderFor(string? versionDir, string? groupName, string? subtypeName,
+        string? controllerName, string slot)
+    {
+        if (string.IsNullOrWhiteSpace(versionDir) || !Directory.Exists(versionDir)) return null;
+        var own = OwnControllerFolderNear(versionDir, groupName, subtypeName, controllerName);
+        return BestReadFolder(versionDir, own, slot);
     }
 }

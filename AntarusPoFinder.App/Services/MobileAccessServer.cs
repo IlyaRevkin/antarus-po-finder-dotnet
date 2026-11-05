@@ -20,9 +20,11 @@ namespace AntarusPoFinder.App.Services;
 /// телефон добавляет закладку один раз. Это прямая просьба Ильи «чтобы без qr»; то, что компьютер
 /// при этом всё равно должен быть включён, этим не лечится и вынесено развилкой в план.
 ///
-/// <b>Только GET и только чтение.</b> Ни одной записи, ни одного файла с диска наружу: первый слой
-/// отвечает на вопрос «актуальна ли прошивка», а не выдаёт прошивку. Поэтому и разбора тела запроса
-/// здесь нет — тело, если оно пришло, вычитывается и выбрасывается.
+/// <b>Чтение — чем угодно, запись — ровно одна.</b> GET и HEAD отдают страницы и файл карты ВВ;
+/// POST принимается РОВНО по одному адресу (<c>/&lt;токен&gt;/bug</c>) и заводит ровно тикет «баг
+/// прошивки» — см. <see cref="HandlePost"/> и MobileSite.SubmitBug. Всё остальное, что пришло не
+/// тем методом или не по тому адресу, получает 405 независимо от токена: прошивку сервер по-прежнему
+/// не выдаёт и базу с телефона не правит.
 ///
 /// <b>База читается чужим потоком.</b> <see cref="Database"/> держит одно соединение SQLite без
 /// блокировок, поэтому сервер не ходит в базу сам: он зовёт <see cref="_render"/>, а страница,
@@ -35,8 +37,22 @@ public sealed class MobileAccessServer : IDisposable
     /// сколько сказано значило бы отдать память первому встречному в той же Wi-Fi сети.</summary>
     private const int MaxBodyBytes = 64 * 1024;
 
+    /// <summary>Сколько байт файла карты ВВ соглашаемся отдать. Карта — это лист Excel или
+    /// несколько страниц PDF, то есть единицы мегабайт; файл на полсотни мегабайт в папке карты
+    /// почти наверняка попал туда по ошибке, а телефон на объекте качал бы его по чужому Wi-Fi
+    /// столько, что успел бы передумать.</summary>
+    private const long MaxFileBytes = 32L * 1024 * 1024;
+
+    /// <summary>Потолок тела ПРИНИМАЕМОГО бланка жалобы. Восемь килобайт — это вчетверо больше, чем
+    /// влезает в поле (MobileSite.MaxBugChars), и всё равно ничто по сравнению с памятью: предел
+    /// нужен не ради байтов, а ради того, чтобы запись с телефона имела известный размер.</summary>
+    private const int MaxFormBytes = 8 * 1024;
+
     private readonly TcpListener _listener;
     private readonly Func<string, string, MobileSite.Page> _render;
+    private readonly Func<int, IoMapDoc?>? _ioMap;
+    private readonly Func<string, (MobileSite.Page Page, bool Created)>? _submitBug;
+    private readonly BugLimiter _bugs = new();
     private volatile bool _running;
 
     public int Port { get; }
@@ -59,9 +75,21 @@ public sealed class MobileAccessServer : IDisposable
 
     /// <param name="render">Путь после токена и query-строка → страница. Вызывается ИЗ ПОТОКА
     /// СЕРВЕРА: вызывающий обязан сам перебросить это туда, где живёт база.</param>
-    public MobileAccessServer(int port, string token, Func<string, string, MobileSite.Page> render)
+    /// <param name="ioMap">Карта ВВ версии. Нужна здесь, а не только отрисовке: по адресу
+    /// <see cref="MobileSite.FileRoute"/> отдаётся САМ файл, то есть байты с диска, а разметка
+    /// байтов отдавать не умеет и не должна. Вызывается так же, как <paramref name="render"/>, —
+    /// из потока сервера, и перебросить это к базе обязан вызывающий.</param>
+    /// <param name="submitBug">Приём заполненного бланка жалобы: на входе тело POST-запроса, на
+    /// выходе страница ответа и признак «тикет действительно заведён» (по нему считается частота —
+    /// см. <see cref="BugLimiter"/>). null — приём выключен, и POST отвечает 405: сервер,
+    /// поднятый без этого, обязан остаться читающим.</param>
+    public MobileAccessServer(int port, string token, Func<string, string, MobileSite.Page> render,
+        Func<int, IoMapDoc?>? ioMap = null,
+        Func<string, (MobileSite.Page Page, bool Created)>? submitBug = null)
     {
         _render = render;
+        _ioMap = ioMap;
+        _submitBug = submitBug;
         Token = token;
         _listener = new TcpListener(IPAddress.Any, port);
         _listener.Start();
@@ -118,18 +146,36 @@ public sealed class MobileAccessServer : IDisposable
                 if (line[..idx].Trim().Equals("content-length", StringComparison.OrdinalIgnoreCase))
                     int.TryParse(line[(idx + 1)..].Trim(), out contentLength);
             }
-            // Тело здесь не нужно никому, но оставить его непрочитанным в сокете значит с большой
-            // вероятностью отдать клиенту TCP RST вместо ответа — он увидит обрыв связи вместо
-            // текста. Поэтому вычитываем и выбрасываем; всё, что длиннее предела, отбрасываем вместе
-            // с соединением, не выделяя под него ничего.
+            // Тело нужно ровно одному адресу — бланку жалобы; всем остальным оно не нужно, но
+            // оставить его непрочитанным в сокете значит с большой вероятностью отдать клиенту TCP
+            // RST вместо ответа: он увидит обрыв связи вместо текста. Поэтому вычитываем всегда, а
+            // то, что длиннее предела, отбрасываем вместе с соединением, не выделяя под него ничего.
             if (contentLength > MaxBodyBytes) return;
-            if (contentLength > 0) Drain(stream, contentLength);
+            var isPost = string.Equals(method, "POST", StringComparison.Ordinal);
+            var body = "";
+            if (contentLength > 0)
+            {
+                if (isPost && contentLength <= MaxFormBytes) body = ReadBody(stream, contentLength);
+                else Drain(stream, contentLength);
+            }
 
             var (path, query) = SplitPath(rawPath);
             var pathToken = path.Split('/', 2)[0];
+            // Токен проверяется ПЕРВЫМ и одинаково для чтения и для записи: без него ни страница, ни
+            // приём жалобы не отвечают ничем, кроме отказа.
             if (!string.Equals(pathToken, Token, StringComparison.Ordinal))
             {
                 Write(stream, 403, "text/plain; charset=utf-8", "Доступ запрещён.");
+                return;
+            }
+
+            var tail = path.Length > pathToken.Length ? path[(pathToken.Length + 1)..] : "";
+
+            if (isPost)
+            {
+                HandlePost(stream, tail, body, contentLength);
+                Interlocked.Increment(ref _served);
+                Request?.Invoke();
                 return;
             }
             if (method != "GET" && method != "HEAD")
@@ -138,7 +184,15 @@ public sealed class MobileAccessServer : IDisposable
                 return;
             }
 
-            var tail = path.Length > pathToken.Length ? path[(pathToken.Length + 1)..] : "";
+            // Файл карты ВВ — единственный ответ не HTML-ом, поэтому он разбирается ДО отрисовки.
+            if (MobileSite.TryParseFileRoute(tail, out var fileId))
+            {
+                WriteIoMapFile(stream, fileId);
+                Interlocked.Increment(ref _served);
+                Request?.Invoke();
+                return;
+            }
+
             var page = _render(tail, query);
             Write(stream, page.Status, "text/html; charset=utf-8", page.Html);
 
@@ -147,6 +201,169 @@ public sealed class MobileAccessServer : IDisposable
         }
         catch { /* best-effort на соединение, как и в PhotoUploadServer */ }
     }
+
+    /// <summary>ЕДИНСТВЕННЫЙ ПРИЁМ ЗАПИСИ С ТЕЛЕФОНА — заполненный бланк жалобы на прошивку.
+    ///
+    /// Рамки здесь транспортные, смысловые — в <see cref="MobileSite.SubmitBug"/>:
+    /// <list type="number">
+    /// <item><description>адрес ровно один. Любой другой POST — 405, даже с верным токеном: «с
+    ///       телефона можно завести баг» не должно однажды превратиться в «с телефона можно
+    ///       что-нибудь ещё» просто потому, что приём уже написан;</description></item>
+    /// <item><description>тело длиннее <see cref="MaxFormBytes"/> не читается вовсе — оно уже
+    ///       выброшено выше, и сюда приходит пустым;</description></item>
+    /// <item><description>частота ограничена <see cref="BugLimiter"/>. Сервер слушает локальную
+    ///       сеть, и устройство в той же сети с нашим токеном не должно иметь возможности ни забить
+    ///       базу тикетами, ни занять собой поток приложения.</description></item>
+    /// </list></summary>
+    private void HandlePost(NetworkStream stream, string tail, string body, int declaredLength)
+    {
+        if (_submitBug is null || !string.Equals(tail.Trim('/'), "bug", StringComparison.Ordinal))
+        {
+            Write(stream, 405, "text/html; charset=utf-8", MobileSite.Message("Мобильный доступ",
+                "С телефона заводится только жалоба на прошивку — больше отсюда ничего не меняется."));
+            return;
+        }
+        if (declaredLength > MaxFormBytes)
+        {
+            Write(stream, 413, "text/html; charset=utf-8", MobileSite.Message("Баг прошивки",
+                "Слишком длинная жалоба — опишите коротко: что, где и когда."));
+            return;
+        }
+        if (!_bugs.Allow(DateTime.UtcNow, out var why))
+        {
+            Write(stream, 429, "text/html; charset=utf-8", MobileSite.Message("Баг прошивки", why));
+            return;
+        }
+
+        var (page, created) = _submitBug(body);
+        if (created) _bugs.Note(DateTime.UtcNow);
+        Write(stream, page.Status, "text/html; charset=utf-8", page.Html);
+    }
+
+    /// <summary>СКОЛЬКО ЖАЛОБ С ТЕЛЕФОНА СОГЛАШАЕМСЯ ПРИНЯТЬ.
+    ///
+    /// Считаются только ЗАВЕДЁННЫЕ тикеты, а не попытки: человек, отправивший пустой бланк и тут же
+    /// исправивший его, не должен упираться в отказ — он единственный, кто здесь ведёт себя
+    /// правильно. Поток же с чужого устройства упирается после первого удачного.
+    ///
+    /// Два предела, потому что они про разное: пауза защищает от «нажал пять раз, не понял, что
+    /// отправилось», а часовой потолок — от устройства, которое никуда не спешит.</summary>
+    private sealed class BugLimiter
+    {
+        /// <summary>Пауза между двумя заведёнными жалобами. Десять секунд — это заметно меньше, чем
+        /// человек набирает следующую, и заметно больше, чем нужно скрипту.</summary>
+        public static readonly TimeSpan MinGap = TimeSpan.FromSeconds(10);
+
+        /// <summary>Сколько жалоб за час. Двадцать — это втрое больше, чем бывает за рабочий день у
+        /// всей конторы; упереться в этот предел по-честному нельзя.</summary>
+        public const int MaxPerHour = 20;
+
+        private readonly List<DateTime> _accepted = new();
+
+        public bool Allow(DateTime nowUtc, out string why)
+        {
+            lock (_accepted)
+            {
+                _accepted.RemoveAll(t => nowUtc - t > TimeSpan.FromHours(1));
+                if (_accepted.Count >= MaxPerHour)
+                {
+                    why = "С этого доступа за час заведено слишком много жалоб. Остальные — с компьютера.";
+                    return false;
+                }
+                if (_accepted.Count > 0 && nowUtc - _accepted[^1] < MinGap)
+                {
+                    why = "Предыдущая жалоба только что заведена — подождите несколько секунд.";
+                    return false;
+                }
+            }
+            why = "";
+            return true;
+        }
+
+        public void Note(DateTime nowUtc)
+        {
+            lock (_accepted) _accepted.Add(nowUtc);
+        }
+    }
+
+    private static string ReadBody(NetworkStream stream, int length)
+    {
+        var buffer = new byte[length];
+        var read = 0;
+        try
+        {
+            while (read < length)
+            {
+                var n = stream.Read(buffer, read, length - read);
+                if (n <= 0) break;
+                read += n;
+            }
+        }
+        catch { /* оборвалось на середине — разберём то, что успели получить */ }
+        return Encoding.UTF8.GetString(buffer, 0, read);
+    }
+
+    /// <summary>Отдать телефону сам файл карты ВВ. Читается целиком в память и только потом
+    /// пишется в сокет: файл лежит на сетевом диске, и отдавать его поблочно означало бы держать
+    /// открытым хэндл к шаре всё время медленной передачи на телефон, а размер здесь ограничен
+    /// <see cref="MaxFileBytes"/> — лишней памяти это не стоит.</summary>
+    private void WriteIoMapFile(NetworkStream stream, int fwVersionId)
+    {
+        var doc = _ioMap?.Invoke(fwVersionId);
+        if (doc is null)
+        {
+            Write(stream, 404, "text/html; charset=utf-8",
+                MobileSite.Message("Карта ВВ", "Файла карты больше нет — возможно, его убрали с диска."));
+            return;
+        }
+        if (doc.SizeBytes > MaxFileBytes)
+        {
+            Write(stream, 413, "text/html; charset=utf-8", MobileSite.Message("Карта ВВ",
+                $"Файл слишком большой для телефона ({doc.SizeBytes / 1024 / 1024} МБ) — откройте его с компьютера."));
+            return;
+        }
+
+        byte[] bytes;
+        try { bytes = File.ReadAllBytes(doc.FullPath); }
+        catch (Exception)
+        {
+            Write(stream, 404, "text/html; charset=utf-8",
+                MobileSite.Message("Карта ВВ", "Файл сейчас не читается — сетевой диск недоступен или занят."));
+            return;
+        }
+
+        try
+        {
+            // inline, а не attachment: PDF и картинку телефон обязан показать сам, не кладя в
+            // «Загрузки». Книгу Excel он всё равно отдаст приложению — для неё разницы нет.
+            // Имя файла русское, поэтому только filename* (RFC 5987): голый filename= с кириллицей
+            // браузеры читают по-разному, и имя приезжало бы крокозябрами.
+            var header = Encoding.ASCII.GetBytes(
+                $"HTTP/1.1 200 OK\r\nContent-Type: {ContentType(doc.FileName)}\r\n" +
+                $"Content-Disposition: inline; filename*=UTF-8''{Uri.EscapeDataString(doc.FileName)}\r\n" +
+                $"Cache-Control: no-store\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
+            stream.Write(header, 0, header.Length);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush();
+        }
+        catch { /* best-effort: телефон ушёл из сети посреди передачи */ }
+    }
+
+    private static string ContentType(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
+    {
+        ".pdf" => "application/pdf",
+        ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xlsm" => "application/vnd.ms-excel.sheet.macroEnabled.12",
+        ".xls" => "application/vnd.ms-excel",
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc" => "application/msword",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".txt" => "text/plain; charset=utf-8",
+        // Неизвестное расширение отдаём потоком байт, а не угадываем: угаданный неверно тип —
+        // это телефон, пытающийся нарисовать архив картинкой.
+        _ => "application/octet-stream",
+    };
 
     /// <summary>Путь без ведущих слэшей и query-строка отдельно. Отдельным методом (и публичным)
     /// ради тестов: «/токен», «/токен/», «/токен/v/7?q=1» обязаны разбираться одинаково.</summary>

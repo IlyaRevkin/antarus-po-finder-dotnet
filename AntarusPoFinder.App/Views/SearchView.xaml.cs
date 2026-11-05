@@ -2076,16 +2076,14 @@ public partial class SearchView : UserControl
     /// одинаково. Заодно чинится ОПЦ новой раскладки: её родитель — папка «ОПЦ», а не контроллер,
     /// и прежний Directory.GetParent искал документы внутри «ОПЦ» (ControllerFolderOf знает про
     /// лишний уровень).</summary>
-    private static string? FindSiblingFolder(HierarchyResult result, string versionDir, string folderName)
-    {
-        if (!Directory.Exists(versionDir)) return null;
-        // Папка контроллера считается по именам иерархии САМОЙ записи, а не по её пути на диске: у
-        // прошивки, привязанной сразу к нескольким подтипам шкафа, путь ведёт в папку основного
-        // подтипа, и карточка «ПЖ / FD» показывала документы «ПЖ / 2.0» (см. VersionDocFolders).
-        var own = VersionDocFolders.OwnControllerFolderNear(
-            versionDir, result.EquipmentType, result.SubtypeName, result.Controller);
-        return VersionDocFolders.BestReadFolder(versionDir, own, folderName);
-    }
+    ///
+    /// Сам подбор папки переехал в VersionDocFolders.ReadFolderFor: ту же карту ВВ открывает ещё и
+    /// мобильная страница (IoMapDocs), а два читателя одного документа обязаны смотреть в одну
+    /// папку — иначе человек у шкафа и человек за компьютером спорили бы о карте, глядя в разные
+    /// файлы.
+    private static string? FindSiblingFolder(HierarchyResult result, string versionDir, string folderName) =>
+        VersionDocFolders.ReadFolderFor(versionDir, result.EquipmentType, result.SubtypeName,
+            result.Controller, folderName);
 
     // ── Card actions ──────────────────────────────────────────────────────
 
