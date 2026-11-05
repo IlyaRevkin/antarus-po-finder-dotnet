@@ -50,6 +50,21 @@ public static class PlcOpenResolver
     /// этого формата живёт ПАПКОЙ, знает <see cref="HmiProjectFormat"/>.</summary>
     public static readonly string[] HmiExtensions = { ".dpj", ".emt", ".emtp", ".emsln", ".fsprj" };
 
+    /// <summary>Этот файл — проект панели. Отдельным методом, потому что список выше нужен не только
+    /// тому, кто ОТКРЫВАЕТ проект, но и тому, кто решает «есть ли у версии панель вообще» (карточка
+    /// поиска, SearchView.ScanVersionFolder).
+    ///
+    /// ⚠️ Второго такого списка в программе быть не должно, и вот почему. У карточки он был свой —
+    /// «KincoHmiExts» из четырёх расширений KINCO, без <c>.fsprj</c>: список завели, когда панели
+    /// были только кинковские, а когда .fsprj добавили сюда, про второе место не вспомнили. Итог:
+    /// версия, у которой панель лежит проектом FStudio прямо в папке версии и не записана в
+    /// <c>hmi_path</c>, на карточке честно считалась «без HMI» — ни строки «HMI ✓», ни кнопки, — при
+    /// том что нажми её кто-нибудь, <see cref="HmiOpenResolver"/> тот же файл нашёл бы по этому же
+    /// списку. Правило простое: расширения панели спрашивают ЗДЕСЬ.</summary>
+    public static bool IsHmiProjectFile(string? path) =>
+        !string.IsNullOrEmpty(path)
+        && HmiExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Сопроводительные файлы — открывать их вместо проекта бессмысленно.</summary>
     private static readonly string[] DocExtensions = { ".md", ".txt", ".log" };
 

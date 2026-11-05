@@ -35,9 +35,10 @@ public partial class SearchView : UserControl
     private string? _lastLayoutFallbackResolvedKey;
     private bool _lastLayoutFallbackResolvedYes;
 
-    // Расширения программы ПЛК переехали в PlcOpenResolver (там же, где решается, что открывать);
-    // здесь остались только расширения панели — по ним карточка понимает, что HMI вообще есть.
-    private static readonly string[] KincoHmiExts = { ".dpj", ".emt", ".emtp", ".emsln" };
+    // Расширения панели жили здесь своим списком («KincoHmiExts») — и разошлись с тем, по которому
+    // проект панели реально ОТКРЫВАЕТСЯ: .fsprj добавили в PlcOpenResolver.HmiExtensions, а сюда нет.
+    // Версия с проектом FStudio в папке версии получалась «без HMI» на карточке, хотя кнопка «Открыть
+    // HMI проект» этот же файл нашла бы. Теперь список один — см. PlcOpenResolver.IsHmiProjectFile.
 
     /// <summary>Exposes specific named controls to OnboardingOverlay (MainWindow.ShowOnboarding) —
     /// x:Name fields are private to this partial class by default, so the tour can't reach them
@@ -942,7 +943,7 @@ public partial class SearchView : UserControl
                     var ext = Path.GetExtension(file).ToLowerInvariant();
                     if (ext == LoaderFiles.LfsExtension) lfs = true;
                     else if (ext == LoaderFiles.PslExtension) psl = true;
-                    else if (KincoHmiExts.Contains(ext)) hmiFile = true;
+                    else if (PlcOpenResolver.HmiExtensions.Contains(ext)) hmiFile = true;
                 }
             }
             catch (Exception) { /* недоступная папка — просто «не нашли», см. LoaderFiles.Find */ }
