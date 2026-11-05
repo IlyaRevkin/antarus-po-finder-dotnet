@@ -24,7 +24,17 @@
                   MouseDoubleClick="RecentGrid_MouseDoubleClick">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="80" ElementStyle="{StaticResource DataGridCellText}"/>
-                <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="100" ElementStyle="{StaticResource DataGridCellText}"/>
+                <!-- ПОДТИПЫ, во множественном числе. Одна прошивка заводится на несколько подтипов
+                     шкафа отдельными записями, в очереди она теперь одна строка, и «В релиз»
+                     выпускает их все — значит состав группы обязан быть виден в строке, а не
+                     угадываться. Полный список — в подсказке, там ничего не обрезано. -->
+                <DataGridTextColumn Header="Подтипы" Binding="{Binding SubtypeName}" Width="160">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource DataGridCellText}">
+                            <Setter Property="ToolTip" Value="{Binding SubtypesTooltip}"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="120" ElementStyle="{StaticResource DataGridCellText}"/>
                 <DataGridTemplateColumn Header="Версия" Width="160">
                     <DataGridTemplateColumn.CellTemplate>
