@@ -175,6 +175,41 @@ public class FirmwareExecutionFolderTests
         Assert.Single(Directory.GetDirectories(root.Path).Where(d => Path.GetFileName(d) == "1.0.0005.0001"));
     }
 
+    /// <summary>Предпросмотр формы загрузки («куда ляжет») и сама укладка считают путь ОДНИМ и тем
+    /// же кодом — FirmwareExecutionBuild.Prepare. Разойдись они, человек увидел бы один путь, а файл
+    /// уехал бы по другому, причём в папку, которая уедет в шкаф.</summary>
+    [Fact]
+    public void Предпросмотр_показывает_ту_же_папку_куда_реально_ляжет()
+    {
+        using var root = new TempRoot();
+        var version = Path.Combine(root.Path, "1.0.0005.0001");
+        Touch(VersionLayout.FirmwareFolder(version), "base.lfs");
+        var source = Touch(Path.Combine(root.Path, "src"), "pumps3.lfs");
+
+        // Файлы ещё не выбраны — путь уже известен и показывается как есть.
+        var preview = FirmwareExecutionBuild.Prepare(version, "3 насоса", null);
+        Assert.True(preview.Ok);
+
+        var placed = FirmwareExecutionBuild.Place(version, "3 насоса", new[] { source });
+        Assert.True(placed.Ok);
+        Assert.Equal(preview.Folder, placed.Folder);
+        Assert.True(File.Exists(Path.Combine(preview.Folder, "pumps3.lfs")));
+    }
+
+    /// <summary>Предпросмотр не врёт и когда класть НЕКУДА: версия без папки на диске и невыбранное
+    /// исполнение названы ошибкой, а не показаны правдоподобным путём.</summary>
+    [Fact]
+    public void Предпросмотр_называет_причину_вместо_выдуманного_пути()
+    {
+        using var root = new TempRoot();
+        var version = Path.Combine(root.Path, "1.0.0005.0001");
+        Directory.CreateDirectory(version);
+
+        Assert.False(FirmwareExecutionBuild.Prepare(Path.Combine(root.Path, "нет такой"), "3 насоса", null).Ok);
+        Assert.False(FirmwareExecutionBuild.Prepare(version, "", null).Ok);
+        Assert.True(FirmwareExecutionBuild.Prepare(version, "3 насоса", null).Ok);
+    }
+
     /// <summary>Непустая папка исполнения не перезаписывается молча: это то, что уедет в шкаф.</summary>
     [Fact]
     public void Существующая_конфигурация_не_затирается_без_согласия()
