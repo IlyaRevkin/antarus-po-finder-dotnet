@@ -21,6 +21,10 @@ public class FwVersionRecord
     /// а именно по нему прошивку опознаёт тот, кто её собрал. Пусто у версий, загруженных до
     /// появления столбца.</summary>
     public string SourceName { get; set; } = "";
+
+    /// <summary>Когда последний раз правили «откуда прошивка» — исходное название или автора.
+    /// По ней обмен решает, чьё значение свежее (см. Database.cs, origin_changed_at).</summary>
+    public string OriginChangedAt { get; set; } = "";
     public string DiskPath { get; set; } = "";
     public string LocalPath { get; set; } = "";
     public string Description { get; set; } = "";

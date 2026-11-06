@@ -1062,6 +1062,17 @@ public partial class Database : IDisposable
         // ему и не мешает существующим WHERE (status IS NULL OR status='active') фильтрам.
         AddColumnsIfMissing("fw_versions", ("manual_current", "INTEGER NOT NULL DEFAULT 0"));
 
+        // Когда последний раз правили «откуда эта прошивка» — исходное название и автора.
+        //
+        // ⚠️ Без этой отметки правка НЕ ДОЕЗЖАЛА до коллег вовсе: обмен обновлял существующую
+        // запись узким списком полей, и source_name с author_name в него не входили. Заполнялись они
+        // только при первичной вставке, поэтому у всех, у кого прошивка уже была, имя оставалось
+        // пустым навсегда — ровно жалоба «исходное название будто бы не синхронизируется».
+        //
+        // Отметка нужна именно времени, а не флага «непусто»: имя правят через модерацию, и
+        // исправление опечатки обязано побеждать прежнее значение, а не отбиваться им.
+        AddColumnsIfMissing("fw_versions", ("origin_changed_at", "TEXT NOT NULL DEFAULT ''"));
+
         // Отпечаток выложенного файла (см. CREATE TABLE выше): у установленных копий таблица уже
         // есть, и CREATE TABLE IF NOT EXISTS её не трогает.
         AddColumnsIfMissing("hosting_checks", ("fingerprint", "TEXT NOT NULL DEFAULT ''"));

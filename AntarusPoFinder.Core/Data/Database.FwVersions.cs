@@ -97,7 +97,15 @@ public partial class Database
         // добавить старым прошивкам (у них поле пустое: заполняться оно начало только сейчас), ни
         // исправить опечатку наладчика, который заливал за программиста. Ради этого поле и заведено:
         // наладчик ищет сборку по тому имени, которое ему назвал программист.
-        if (sourceName is not null) { sets.Add("source_name=@source_name"); values.Add(("@source_name", sourceName)); }
+        if (sourceName is not null)
+        {
+            sets.Add("source_name=@source_name");
+            values.Add(("@source_name", sourceName));
+            // Отметка времени — то, по чему обмен решит, чьё значение свежее (см. Database.cs,
+            // origin_changed_at). Без неё правка осталась бы местной.
+            sets.Add("origin_changed_at=@origin_at");
+            values.Add(("@origin_at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")));
+        }
         // Отметка времени правки подсказок — по ней обмен решает, чьё значение свежее
         // (см. Database.cs, hints_changed_at). Без неё исправление не доезжало до того, у кого в поле
         // уже лежало неверное значение.
@@ -1441,6 +1449,7 @@ public partial class Database
             CopyOf = GetString(r, "copy_of"),
             Execution = GetString(r, "execution"),
             SourceName = GetString(r, "source_name"),
+            OriginChangedAt = GetString(r, "origin_changed_at"),
             AuthorName = GetString(r, "author_name"),
         };
     }

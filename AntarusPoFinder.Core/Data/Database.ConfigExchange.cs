@@ -311,6 +311,7 @@ public partial class Database
                    fv.status, fv.released, fv.hmi_path, fv.executable_hint, fv.hmi_executable_hint,
                    fv.modbus_map_path, fv.deleted_at, fv.sync_id, fv.config_name, fv.copy_of, fv.execution,
                    fv.manual_current, fv.status_changed_at, fv.hints_changed_at, fv.source_name, fv.author_name,
+                   fv.origin_changed_at,
                    eg.name AS group_name, es.name AS subtype_name, es.sync_id AS subtype_sync_id,
                    cm.name AS ctrl_name, cm.sync_id AS controller_sync_id
             FROM fw_versions fv
@@ -336,6 +337,7 @@ public partial class Database
                 ConfigName = GetString(r, "config_name"), CopyOf = GetString(r, "copy_of"),
                 Execution = GetString(r, "execution"),
                 SourceName = GetString(r, "source_name"),
+                OriginChangedAt = GetString(r, "origin_changed_at"),
                 AuthorName = GetString(r, "author_name"),
                 ManualCurrent = GetInt(r, "manual_current") != 0,
                 StatusChangedAt = GetString(r, "status_changed_at"),
@@ -1811,7 +1813,22 @@ public partial class Database
                 // событие с отметкой времени, как и добавление, и выигрывает более позднее.
                 var newTags = rowTags.Merge(existingRow.SyncId, fv.SyncId, localTags, fv.Tags, apply);
 
-                var fieldsChanged = newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
+                // ОТКУДА ПРОШИВКА — исходное название и автор. Побеждает более поздняя правка;
+                // у снимка со старой версии программы отметки нет, и тогда работает единственное
+                // безопасное правило: непустое заполняет пустое, но не затирает чужое непустое.
+                var incomingOrigin = fv.OriginChangedAt ?? "";
+                var localOrigin = existingRow.OriginChangedAt ?? "";
+                var originDecidedByTime = incomingOrigin.Length > 0 || localOrigin.Length > 0;
+                var incomingOriginWins = originDecidedByTime
+                    ? string.CompareOrdinal(incomingOrigin, localOrigin) > 0
+                    : string.IsNullOrWhiteSpace(existingRow.SourceName) && !string.IsNullOrWhiteSpace(fv.SourceName);
+                var newSourceName = incomingOriginWins ? fv.SourceName ?? "" : existingRow.SourceName ?? "";
+                var newAuthorName = incomingOriginWins ? fv.AuthorName ?? "" : existingRow.AuthorName ?? "";
+                var newOriginStamp = incomingOriginWins && incomingOrigin.Length > 0 ? incomingOrigin : localOrigin;
+
+                var fieldsChanged = newSourceName != (existingRow.SourceName ?? "") ||
+                                    newAuthorName != (existingRow.AuthorName ?? "") ||
+                                    newIoMap != localIoMap || newInstr != localInstr || newHmi != localHmi ||
                                     newExecHint != localExecHint || newHmiExecHint != localHmiExecHint || newModbus != localModbus ||
                                     newDesc != localDesc || newLaunchTypes != localLaunchTypes || newTags != localTags ||
                                     newExecution != existingRow.Execution;
@@ -1858,10 +1875,14 @@ public partial class Database
                     UPDATE fw_versions SET status=@st, released=@rel, archived=@arch, io_map_path=@io, instructions_path=@instr,
                         hmi_path=@hmi, executable_hint=@eh, hmi_executable_hint=@heh, modbus_map_path=@mb,
                         description=@desc, launch_types=@lt, tags=@tags, execution=@execution,
-                        status_changed_at=@st_at, hints_changed_at=@hints_at
+                        status_changed_at=@st_at, hints_changed_at=@hints_at,
+                        source_name=@source_name, author_name=@author_name, origin_changed_at=@origin_at
                     WHERE id=@id
                     """, cmd =>
                 {
+                    cmd.Parameters.AddWithValue("@source_name", newSourceName);
+                    cmd.Parameters.AddWithValue("@author_name", newAuthorName);
+                    cmd.Parameters.AddWithValue("@origin_at", newOriginStamp);
                     cmd.Parameters.AddWithValue("@execution", newExecution);
                     cmd.Parameters.AddWithValue("@desc", newDesc);
                     cmd.Parameters.AddWithValue("@lt", newLaunchTypes);
@@ -2545,7 +2566,8 @@ public partial class Database
         string HmiExecutableHint, string ModbusMapPath, string DeletedAt, string DiskPath,
         string Description, string LaunchTypes, string Tags,
         int SubtypeId, int ControllerId, string VersionRaw, string ConfigName, string Execution,
-        bool ManualCurrent, string StatusChangedAt, string HintsChangedAt);
+        bool ManualCurrent, string StatusChangedAt, string HintsChangedAt,
+        string SourceName, string AuthorName, string OriginChangedAt);
 
     /// <summary>«Та же самая» прошивка в локальной базе: СНАЧАЛА по sync_id, и только если его нет
     /// (или строка по нему не нашлась) — по прежнему натуральному ключу подтип+контроллер+version_raw.
@@ -2567,7 +2589,7 @@ public partial class Database
             id, sync_id, status, released, archived, io_map_path, instructions_path, hmi_path,
             executable_hint, hmi_executable_hint, modbus_map_path, deleted_at, disk_path, hints_changed_at,
             description, launch_types, tags, subtype_id, controller_id, version_raw, config_name,
-            execution, manual_current, status_changed_at
+            execution, manual_current, status_changed_at, source_name, author_name, origin_changed_at
             """;
 
         if (!string.IsNullOrEmpty(syncId))
@@ -2607,7 +2629,8 @@ public partial class Database
         GetString(r, "description"), GetString(r, "launch_types", "[]"), GetString(r, "tags"),
         GetInt(r, "subtype_id"), GetInt(r, "controller_id"), GetString(r, "version_raw"), GetString(r, "config_name"),
         GetString(r, "execution"), GetInt(r, "manual_current") != 0, GetString(r, "status_changed_at"),
-        GetString(r, "hints_changed_at"));
+        GetString(r, "hints_changed_at"),
+        GetString(r, "source_name"), GetString(r, "author_name"), GetString(r, "origin_changed_at"));
 
     private (int Id, string Name, int Prefix, int SortOrder, string SyncId, string UpdatedAt)? FindBySyncOrName(string table, string syncId, string nameCol, string name)
     {

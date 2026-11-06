@@ -126,6 +126,10 @@ public class ExportedFwVersion
     /// восстановить прежнее название было бы неоткуда. Пусто в снимке со старой версии программы —
     /// тогда у приехавшей записи его просто нет, как и у всех загруженных до появления столбца.</summary>
     [JsonPropertyName("source_name")] public string SourceName { get; set; } = "";
+
+    /// <summary>Когда последний раз правили исходное название или автора. По ней обмен решает, чьё
+    /// значение свежее; пусто — снимок со старой версии программы.</summary>
+    [JsonPropertyName("origin_changed_at")] public string OriginChangedAt { get; set; } = "";
     /// <summary>Имя автора прошивки (fw_versions.author_name) — строкой, потому что ссылка на
     /// локальную таблицу users у коллеги не значит ничего. Пусто в снимке со старой программы.</summary>
     [JsonPropertyName("author_name")] public string AuthorName { get; set; } = "";
