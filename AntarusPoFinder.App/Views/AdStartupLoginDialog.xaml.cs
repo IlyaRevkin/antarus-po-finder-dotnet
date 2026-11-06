@@ -36,7 +36,11 @@ public partial class AdStartupLoginDialog : Window
         _cfg = services.Cfg;
         _injectedValidator = adValidator;
 
-        AdDomainInput.Text = _cfg.Get("ad_domain");
+        // Домен подставляем сами: настройкой, если она задана, иначе — доменом этого компьютера
+        // (MachineDomainProbe). Под полем — чей это домен и откуда это известно.
+        var configuredDomain = _cfg.Get("ad_domain");
+        AdDomainInput.Text = MachineDomainProbe.Suggest(configuredDomain);
+        DetectedDomainText.Text = MachineDomain.Hint(MachineDomainProbe.Current(), configuredDomain);
         AdHttpUrlInput.Text = _cfg.AdHttpUrl();
 
         RememberCombo.ItemsSource = RememberOptions.All(_cfg.AdRequireLoginDefaultDays());

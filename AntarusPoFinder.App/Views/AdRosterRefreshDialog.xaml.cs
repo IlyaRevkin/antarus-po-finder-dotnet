@@ -1,4 +1,6 @@
 using System.Windows;
+using AntarusPoFinder.App.Services;
+using AntarusPoFinder.Core.Services;
 
 namespace AntarusPoFinder.App.Views;
 
@@ -25,8 +27,22 @@ public partial class AdRosterRefreshDialog : Window
     public AdRosterRefreshDialog(string domain, string suggestedLogin)
     {
         InitializeComponent();
-        DomainInput.Text = domain;
+        // Поле заполняется само: настройкой, если она есть, иначе доменом самого компьютера.
+        // Пустое поле здесь означало вопрос, на который администратор не знает ответа.
+        _detected = MachineDomainProbe.Current();
+        DomainInput.Text = MachineDomainProbe.Suggest(domain);
+        DetectedDomainText.Text = MachineDomain.Hint(_detected, domain);
+        UseDetectedButton.Visibility = _detected.Best.Length > 0 && !MachineDomain.Same(_detected.Best, DomainInput.Text)
+            ? Visibility.Visible : Visibility.Collapsed;
         LoginInput.Text = suggestedLogin;
+    }
+
+    private readonly MachineDomainInfo _detected;
+
+    private void UseDetected_Click(object sender, RoutedEventArgs e)
+    {
+        DomainInput.Text = _detected.Best;
+        UseDetectedButton.Visibility = Visibility.Collapsed;
     }
 
     private void UseCurrentSession_Changed(object sender, RoutedEventArgs e)

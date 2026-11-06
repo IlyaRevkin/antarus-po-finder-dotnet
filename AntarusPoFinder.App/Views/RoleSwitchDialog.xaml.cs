@@ -36,7 +36,9 @@ public partial class RoleSwitchDialog : Window
             RoleCombo.Items.Add(new RoleOption(roleId, label));
         RoleCombo.SelectedValue = currentRole;
 
-        AdDomainInput.Text = _cfg.Get("ad_domain");
+        var configuredDomain = _cfg.Get("ad_domain");
+        AdDomainInput.Text = Services.MachineDomainProbe.Suggest(configuredDomain);
+        DetectedDomainText.Text = MachineDomain.Hint(Services.MachineDomainProbe.Current(), configuredDomain);
 
         RememberCombo.ItemsSource = RememberOptions.All(_cfg.AdRequireLoginDefaultDays());
         RememberCombo.SelectedValuePath = "Key";

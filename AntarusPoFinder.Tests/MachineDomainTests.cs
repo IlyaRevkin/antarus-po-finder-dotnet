@@ -58,6 +58,28 @@ public class MachineDomainTests
         Assert.Contains("USERDNSDOMAIN", info.Source);
     }
 
+    /// <summary>Расхождение «компьютер в одном домене, в настройках другой» обязано быть названо
+    /// вслух: молча оно выглядит как «сверка опять никого не нашла».</summary>
+    [Fact]
+    public void Hint_says_when_configured_domain_differs()
+    {
+        var info = MachineDomain.FromProbe("ELITA", "WS-07", "elita.local", "", "elita.local", null);
+
+        Assert.Contains("другой домен", MachineDomain.Hint(info, "antarus.local"));
+        Assert.DoesNotContain("другой домен", MachineDomain.Hint(info, "ELITA"));
+        Assert.DoesNotContain("другой домен", MachineDomain.Hint(info, ""));
+    }
+
+    [Fact]
+    public void Hint_on_a_machine_outside_the_domain_still_mentions_the_setting()
+    {
+        var info = MachineDomain.FromProbe("WS-07", "WS-07", "", "", "", null);
+        var hint = MachineDomain.Hint(info, "Elita");
+
+        Assert.Contains("не в домене", hint);
+        Assert.Contains("Elita", hint);
+    }
+
     [Theory]
     [InlineData("ELITA", "elita.local", true)]
     [InlineData("elita.local", "ELITA.", true)]

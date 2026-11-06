@@ -2091,6 +2091,7 @@ public partial class SettingsView : UserControl
             // и способ входа, под тем же флагом «идёт заполнение» (иначе LostFocus/Checked при
             // подстановке значений тут же посчитали бы их правкой оператора).
             AdDomainInput.Text = _services.Cfg.Get("ad_domain");
+            ShowDetectedDomain();
             AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
             AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
             AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
@@ -2887,7 +2888,33 @@ public partial class SettingsView : UserControl
         _host.ShowStatus("Пароль программиста убран — роль больше его не спрашивает");
     }
 
-    private void AdSettings_LostFocus(object sender, RoutedEventArgs e) => SaveAdSettings();
+    /// <summary>Показать, В КАКОМ ДОМЕНЕ ЭТОТ КОМПЬЮТЕР, и назвать расхождение с полем «Домен»
+    /// вслух. Поле настройки намеренно не переписывается само: администратор мог указать другой
+    /// домен осознанно (доверенный домен, переезд), и тихая подмена чужого решения — худший способ
+    /// помочь. Кнопка «Подставить найденный домен» рядом — на случай, когда помощь всё же нужна.</summary>
+    private void ShowDetectedDomain()
+    {
+        var detected = MachineDomainProbe.Current();
+        ConnMachineDomainText.Text = MachineDomain.Hint(detected, AdDomainInput.Text);
+        UseDetectedDomainButton.Visibility =
+            detected.Best.Length > 0 && !MachineDomain.Same(detected.Best, AdDomainInput.Text)
+                ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UseDetectedDomain_Click(object sender, RoutedEventArgs e)
+    {
+        AdDomainInput.Text = MachineDomainProbe.Current().Best;
+        SaveAdSettings();
+        ShowDetectedDomain();
+    }
+
+    private void AdSettings_LostFocus(object sender, RoutedEventArgs e)
+    {
+        SaveAdSettings();
+        // Домен могли только что поправить руками — подсказка о расхождении обязана обновиться
+        // сразу, иначе она врёт ровно до следующего открытия настроек.
+        ShowDetectedDomain();
+    }
 
     private void AdSettings_KeyDown(object sender, KeyEventArgs e)
     {
@@ -2999,6 +3026,8 @@ public partial class SettingsView : UserControl
     {
         _allUsersData = _services.Db.GetAppUsers().Select(u => new UserRow { Record = u }).ToList();
         ApplyUsersFilter();
+        // Ответ на «к какому домену отношусь я» — прямо над таблицей, без единого вопроса человеку.
+        UsersMachineDomainText.Text = MachineDomain.Hint(MachineDomainProbe.Current(), _services.Cfg.Get("ad_domain"));
 
         UserRoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
         UserRoleCombo.SelectedValuePath = "RoleId";

@@ -108,6 +108,27 @@ public static class MachineDomain
         return FirstLabel(x) == FirstLabel(y);
     }
 
+    /// <summary>Та же строка для интерфейса, но с оглядкой на то, ЧТО ЗАПИСАНО В НАСТРОЙКАХ.
+    ///
+    /// Расхождение «компьютер в домене A, а в настройках домен B» — не ошибка сама по себе:
+    /// доверенный домен, переезд, несколько доменов в компании. А вот молчать о нём нельзя: именно
+    /// оно и выглядит как «сверка опять никого не нашла», причём без единой подсказки, куда
+    /// смотреть. Поэтому говорим прямо и не трогаем настройку: решать, какой домен правильный, —
+    /// дело администратора, а не программы.</summary>
+    public static string Hint(MachineDomainInfo info, string? configured)
+    {
+        var text = info.Describe();
+        var cfg = (configured ?? "").Trim();
+        if (cfg.Length == 0) return text;
+
+        if (!info.Joined)
+            return text + $" В настройках приложения указан домен «{cfg}» — проверить его отсюда нечем.";
+        if (!Same(cfg, info.Best))
+            return text + $" В настройках приложения указан другой домен — «{cfg}». " +
+                   "Если сверка не находит людей, дело скорее всего в этом.";
+        return text;
+    }
+
     private static string FirstLabel(string normalized)
     {
         var dot = normalized.IndexOf('.');

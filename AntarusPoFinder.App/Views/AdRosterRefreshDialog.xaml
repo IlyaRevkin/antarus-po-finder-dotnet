@@ -10,7 +10,14 @@
                    Text="Программа перечислит состав AD-групп, настроенных на вкладке «Подключение», заведёт в списке тех, кого там ещё нет, и приведёт роли к тому, что реально в домене. Никто не удаляется: кого в группах не окажется, останется с прежней ролью и с пометкой, что в домене его не нашли."/>
 
         <TextBlock Text="Домен" Style="{StaticResource MutedText}" Margin="0,0,0,4"/>
-        <TextBox x:Name="DomainInput" Height="34" Margin="0,0,0,10"/>
+        <TextBox x:Name="DomainInput" Height="34" Margin="0,0,0,4"/>
+        <!-- Домен спрашивать у человека нельзя: он его не знает (жалоба Ильи дословно). Поэтому
+             поле уже заполнено, а под ним написано, в каком домене этот компьютер и откуда это
+             известно. Машина вне домена получает слова, а не пустое поле. -->
+        <TextBlock x:Name="DetectedDomainText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+        <Button x:Name="UseDetectedButton" Content="Подставить найденный" HorizontalAlignment="Left"
+                Style="{StaticResource SecondaryButton}" Margin="0,0,0,10" Click="UseDetected_Click"
+                ToolTip="Вписать в поле домен, определённый по этому компьютеру"/>
 
         <CheckBox x:Name="UseCurrentSessionCheck" IsChecked="True" Margin="0,0,0,10"
                   Content="Под учётной записью текущего сеанса Windows"
