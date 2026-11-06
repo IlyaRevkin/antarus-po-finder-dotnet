@@ -120,7 +120,7 @@ public partial class RoleSwitchDialog : Window
             _services.CurrentAdLogin = normalized;
             // Та же причина, что и в окне входа: роль из группы обязана доехать до ростера, иначе
             // «Настройки → Пользователи» показывают прошлогоднюю правду.
-            RememberGroupRole(_services, _cfg, normalized, groupRole, login);
+            RememberGroupRole(_services, _cfg, normalized, groupRole, login, domain);
             SelectedRole = groupRole;
             DialogResult = true;
             return;
@@ -128,6 +128,8 @@ public partial class RoleSwitchDialog : Window
 
         var isNewUser = _db.FindAppUserByLogin(normalized) is null;
         var user = _db.TouchOrCreateAppUser(normalized);
+        // Тот же факт, что и в окне входа: из какого домена человек вошёл (см. AppUser.LogonDomain).
+        if (user.Id is not null) _db.RecordAppUserLogonDomain(user.Id.Value, domain);
 
         // Best-effort — see ConfigSyncService.PushAppUsersOnly: this machine may not be an
         // administrator (the only role with a full config push), so without this, a brand new AD
@@ -191,7 +193,7 @@ public partial class RoleSwitchDialog : Window
     ///
     /// Всё best-effort: ростер — это отчёт для администратора, и он не имеет права не пустить
     /// человека в программу, если сеть или диск сейчас недоступны.</summary>
-    private static void RememberGroupRole(AppServices services, ConfigService cfg, string normalizedLogin, string role, string shownLogin)
+    private static void RememberGroupRole(AppServices services, ConfigService cfg, string normalizedLogin, string role, string shownLogin, string domain)
     {
         try
         {
@@ -202,6 +204,9 @@ public partial class RoleSwitchDialog : Window
             if (user.Id is not null && (!string.Equals(user.Role, role, StringComparison.Ordinal)
                                         || user.RoleSource != AppUserRoleSource.Domain))
                 services.Db.SetAppUserRole(user.Id.Value, role, AppUserRoleSource.Domain);
+
+            // Откуда он вошёл — отдельный факт от роли (см. AppUser.LogonDomain).
+            if (user.Id is not null) services.Db.RecordAppUserLogonDomain(user.Id.Value, domain);
 
             try { ConfigSyncService.PushAppUsersOnly(services, cfg.RootPath(), $"{shownLogin} ({RolesConfig.RoleLabel(role)})"); }
             catch { /* диск недоступен — уедет со следующим входом или ручной отправкой */ }

@@ -190,13 +190,16 @@ public partial class AdStartupLoginDialog : Window
             role = groupRole;
             // Роль дала группа — ростер обязан узнать об этом, иначе в «Пользователях» человека
             // либо не видно вовсе, либо он числится с прежней ролью (см. RememberGroupRole).
-            RememberGroupRole(_services, _cfg, normalized, role, login);
+            RememberGroupRole(_services, _cfg, normalized, role, login, domain);
         }
         else
         {
             isNewUser = _services.Db.FindAppUserByLogin(normalized) is null;
             var user = _services.Db.TouchOrCreateAppUser(normalized);
             role = user.Role;
+            // Фиксируем домен, ИЗ КОТОРОГО человек вошёл: это единственный способ ответить потом на
+            // «а коллеги к какому домену относятся» — чужой компьютер не спросишь.
+            if (user.Id is not null) _services.Db.RecordAppUserLogonDomain(user.Id.Value, domain);
 
             // Best-effort, same reasoning as RoleSwitchDialog.AdAuth_Click — never blocks login.
             try { ConfigSyncService.PushAppUsersOnly(_services, _cfg.RootPath(), $"{login} ({RolesConfig.RoleLabel(role)})"); }
@@ -336,7 +339,7 @@ public partial class AdStartupLoginDialog : Window
     ///
     /// Всё best-effort: ростер — это отчёт для администратора, и он не имеет права не пустить
     /// человека в программу, если сеть или диск сейчас недоступны.</summary>
-    private static void RememberGroupRole(AppServices services, ConfigService cfg, string normalizedLogin, string role, string shownLogin)
+    private static void RememberGroupRole(AppServices services, ConfigService cfg, string normalizedLogin, string role, string shownLogin, string domain)
     {
         try
         {
@@ -347,6 +350,10 @@ public partial class AdStartupLoginDialog : Window
             if (user.Id is not null && (!string.Equals(user.Role, role, StringComparison.Ordinal)
                                         || user.RoleSource != AppUserRoleSource.Domain))
                 services.Db.SetAppUserRole(user.Id.Value, role, AppUserRoleSource.Domain);
+
+            // Откуда он вошёл — отдельный факт от роли: роль мог дать домен A, а войти человек мог
+            // из домена B через доверительные отношения. Пишем то, что было на самом деле.
+            if (user.Id is not null) services.Db.RecordAppUserLogonDomain(user.Id.Value, domain);
 
             try { ConfigSyncService.PushAppUsersOnly(services, cfg.RootPath(), $"{shownLogin} ({RolesConfig.RoleLabel(role)})"); }
             catch { /* диск недоступен — уедет со следующим входом или ручной отправкой */ }

@@ -1947,6 +1947,11 @@
                          этого столбца. -->
                     <DataGridTextColumn Header="Откуда роль" Binding="{Binding RoleSourceLabel}" Width="Auto" MinWidth="170" ElementStyle="{StaticResource DataGridCellText}"/>
                     <DataGridTextColumn Header="Сверка с доменом" Binding="{Binding DomainCheckLabel}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <!-- Вторая половина ответа на «к какому домену отношусь я и другие»: про этот
+                         компьютер программа отвечает сама (строка над таблицей), а про коллег —
+                         только зафиксированным фактом входа. Разные домены в столбце — не ошибка,
+                         а нормальная жизнь компании с несколькими доменами. -->
+                    <DataGridTextColumn Header="Домен входа" Binding="{Binding LogonDomainLabel}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="Auto" MinWidth="160" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                 </DataGrid.Columns>

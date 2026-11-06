@@ -504,7 +504,12 @@ public partial class Database : IDisposable
                  -- для уже установленных баз: сид применяется только к НОВОЙ).
                  role_source       TEXT    NOT NULL DEFAULT '',
                  domain_checked_at TEXT    NOT NULL DEFAULT '',
-                 domain_found      INTEGER NOT NULL DEFAULT 0
+                 domain_found      INTEGER NOT NULL DEFAULT 0,
+                 -- Из какого домена человек входил в последний раз и когда (Domain/AppUser.cs).
+                 -- Фиксация, а не настройка: это единственный способ ответить на «а другие к какому
+                 -- домену относятся» про тех, чей компьютер мы спросить не можем.
+                 logon_domain      TEXT    NOT NULL DEFAULT '',
+                 logon_domain_at   TEXT    NOT NULL DEFAULT ''
              );
 
              -- Журнал явных переписываний hw модификаций контроллеров (напр. PIXEL2 044 → 1321),
@@ -883,7 +888,11 @@ public partial class Database : IDisposable
         AddColumnsIfMissing("app_users",
             ("role_source", "TEXT NOT NULL DEFAULT ''"),
             ("domain_checked_at", "TEXT NOT NULL DEFAULT ''"),
-            ("domain_found", "INTEGER NOT NULL DEFAULT 0"));
+            ("domain_found", "INTEGER NOT NULL DEFAULT 0"),
+            // Домен последнего входа: у установленных баз столбцов нет, а сид применяется только к
+            // НОВОЙ базе — без этих двух строк правка доехала бы только до свежих установок.
+            ("logon_domain", "TEXT NOT NULL DEFAULT ''"),
+            ("logon_domain_at", "TEXT NOT NULL DEFAULT ''"));
 
         AddColumnsIfMissing("fw_versions", ("deleted_at", "TEXT NOT NULL DEFAULT ''"));
 

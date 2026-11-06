@@ -2982,6 +2982,10 @@ public partial class SettingsView : UserControl
         /// по таблице можно было ответить на вопрос «почему роль не та».</summary>
         public string RoleSourceLabel => AppUserRoleSource.Label(Record);
         public string DomainCheckLabel => AppUserRoleSource.CheckLabel(Record);
+        /// <summary>«Домен входа» — из какого домена этот человек входил в последний раз. Ответ на
+        /// «а другие к какому домену относятся»: про свой компьютер Windows отвечает сама
+        /// (MachineDomain), про чужие — только эта зафиксированная отметка.</summary>
+        public string LogonDomainLabel => AppUserRoleSource.LogonDomainLabel(Record);
         public string FirstLoginAt => Record.FirstLoginAt;
         public string LastLoginAt => Record.LastLoginAt;
     }
@@ -3010,7 +3014,10 @@ public partial class SettingsView : UserControl
                     u.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                     // Фильтр обязан ловить и «откуда роль»: «не найден» и «вручную» — это как раз
                     // те выборки, ради которых администратор сюда и заходит.
-                    u.RoleSourceLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    u.RoleSourceLabel.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    // И по домену входа: «покажи всех, кто входит из такого-то домена» — ровно тот
+                    // вопрос, ради которого столбец и заведён.
+                    u.LogonDomainLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 .ToList();
     }
 

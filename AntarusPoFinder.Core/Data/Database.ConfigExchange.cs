@@ -220,7 +220,7 @@ public partial class Database
         // приёмник (в т.ч. старый клиент — см. ImportHierarchyDataCore) читает это как «отправитель
         // о паспортах не знает», а не «удалить все». Старые записи у коллег лежат мёртвым грузом.
 
-        using (var r = ExecuteReader("SELECT sync_id, ad_login, role, first_login_at, last_login_at, role_updated_at, role_source, domain_checked_at, domain_found FROM app_users ORDER BY ad_login"))
+        using (var r = ExecuteReader("SELECT sync_id, ad_login, role, first_login_at, last_login_at, role_updated_at, role_source, domain_checked_at, domain_found, logon_domain, logon_domain_at FROM app_users ORDER BY ad_login"))
             while (r.Read())
                 data.AppUsers.Add(new ExportedAppUser
                 {
@@ -231,6 +231,7 @@ public partial class Database
                     // таблица «Пользователи» снова показывала бы роль без объяснения, откуда она.
                     RoleSource = GetString(r, "role_source"), DomainCheckedAt = GetString(r, "domain_checked_at"),
                     DomainFound = GetInt(r, "domain_found") != 0,
+                    LogonDomain = GetString(r, "logon_domain"), LogonDomainAt = GetString(r, "logon_domain_at"),
                 });
 
         // Статистика выборов прошивки — вклад этой машины и всё, что она знает о чужих (см.
