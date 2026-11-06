@@ -1056,6 +1056,12 @@ public partial class SearchView : UserControl
     {
         var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
 
+        // Сколько следов «почему нет HMI» эта выдача вправе написать. Каждый из них — ещё один
+        // рекурсивный обход папки версии на сетевом диске, и широкий запрос («найдено 40») не должен
+        // превращаться в сорок таких обходов подряд. Три — это «случай не потеряется»: он всё равно
+        // повторится при следующем поиске, а отсечка по дню держит записи от размножения.
+        var hmiTracesLeft = 3;
+
         // Сетевой диск доступен? Только тогда «папки версии на диске нет» означает «прошивку удалили»,
         // а не «сеть сейчас отвалилась». При недоступном диске ничего не прячем — иначе при обрыве сети
         // выдача схлопнулась бы в ноль (см. #12: «прошивка есть локально, а на диске её нет»).
@@ -1146,7 +1152,7 @@ public partial class SearchView : UserControl
             // Только отрицательный ответ и только у версии, которая на диске есть: у «на диске не
             // найдена» объяснять нечего — там нет вообще ничего, и это отдельная, уже видимая беда.
             // Отсечка «одна версия — одна запись в день с этой машины» живёт в самом докладчике.
-            if (!scan.HasHmi)
+            if (!scan.HasHmi && hmiTracesLeft-- > 0)
                 await Services.HmiLookupDiagnosticsReporter.ReportMissingAsync(_services, result,
                     Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
                     scan.NetDir, () => FindSiblingFolder(result, scan.NetDir, "HMI"));
