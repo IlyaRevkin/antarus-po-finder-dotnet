@@ -35,9 +35,10 @@ public partial class SearchView : UserControl
     private string? _lastLayoutFallbackResolvedKey;
     private bool _lastLayoutFallbackResolvedYes;
 
-    // Расширения программы ПЛК переехали в PlcOpenResolver (там же, где решается, что открывать);
-    // здесь остались только расширения панели — по ним карточка понимает, что HMI вообще есть.
-    private static readonly string[] KincoHmiExts = { ".dpj", ".emt", ".emtp", ".emsln" };
+    // Расширения панели жили здесь своим списком («KincoHmiExts») — и разошлись с тем, по которому
+    // проект панели реально ОТКРЫВАЕТСЯ: .fsprj добавили в PlcOpenResolver.HmiExtensions, а сюда нет.
+    // Версия с проектом FStudio в папке версии получалась «без HMI» на карточке, хотя кнопка «Открыть
+    // HMI проект» этот же файл нашла бы. Теперь список один — см. PlcOpenResolver.IsHmiProjectFile.
 
     /// <summary>Exposes specific named controls to OnboardingOverlay (MainWindow.ShowOnboarding) —
     /// x:Name fields are private to this partial class by default, so the tour can't reach them
@@ -912,7 +913,11 @@ public partial class SearchView : UserControl
         bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
         bool HasInstructionStub, bool HasModbus,
         string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing,
-        IReadOnlyList<string> BuiltExecutions);
+        IReadOnlyList<string> BuiltExecutions,
+        // Та папка версии на диске, которую обход РЕАЛЬНО смотрел (см. ResolvedNetworkDir — она не
+        // обязана совпадать с disk_path из базы). Отдаётся наружу, чтобы след «почему нет HMI» писал
+        // про то же самое место, а не вычислял его заново: каждый такой расчёт — поход на шару.
+        string NetDir);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -942,7 +947,7 @@ public partial class SearchView : UserControl
                     var ext = Path.GetExtension(file).ToLowerInvariant();
                     if (ext == LoaderFiles.LfsExtension) lfs = true;
                     else if (ext == LoaderFiles.PslExtension) psl = true;
-                    else if (KincoHmiExts.Contains(ext)) hmiFile = true;
+                    else if (PlcOpenResolver.HmiExtensions.Contains(ext)) hmiFile = true;
                 }
             }
             catch (Exception) { /* недоступная папка — просто «не нашли», см. LoaderFiles.Find */ }
@@ -997,7 +1002,7 @@ public partial class SearchView : UserControl
                 .ToArray();
 
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions, net);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -1050,6 +1055,12 @@ public partial class SearchView : UserControl
     private async Task ScanDiskFlagsAsync(List<(FirmwareCard Card, HierarchyResult Result, FirmwareCardFlags Flags)> cards, int generation)
     {
         var pendingSync = new List<(FirmwareCard Card, HierarchyResult Result)>();
+
+        // Сколько следов «почему нет HMI» эта выдача вправе написать. Каждый из них — ещё один
+        // рекурсивный обход папки версии на сетевом диске, и широкий запрос («найдено 40») не должен
+        // превращаться в сорок таких обходов подряд. Три — это «случай не потеряется»: он всё равно
+        // повторится при следующем поиске, а отсечка по дню держит записи от размножения.
+        var hmiTracesLeft = 3;
 
         // Сетевой диск доступен? Только тогда «папки версии на диске нет» означает «прошивку удалили»,
         // а не «сеть сейчас отвалилась». При недоступном диске ничего не прячем — иначе при обрыве сети
@@ -1132,6 +1143,19 @@ public partial class SearchView : UserControl
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
+
+            // «Панели у этой версии нет» — ровно то решение, из-за которого пришла жалоба Киселёва
+            // («не обнаружил файл HMI»), и единственное место, где оно принимается. Воспроизвести
+            // случай нечем, поэтому оставляем след: какие папки смотрели, что в них лежало, в каком
+            // режиме читалась версия и какое правило сработало (см. HmiLookupDiagnosticsReporter).
+            //
+            // Только отрицательный ответ и только у версии, которая на диске есть: у «на диске не
+            // найдена» объяснять нечего — там нет вообще ничего, и это отдельная, уже видимая беда.
+            // Отсечка «одна версия — одна запись в день с этой машины» живёт в самом докладчике.
+            if (!scan.HasHmi && hmiTracesLeft-- > 0)
+                await Services.HmiLookupDiagnosticsReporter.ReportMissingAsync(_services, result,
+                    Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
+                    scan.NetDir, () => FindSiblingFolder(result, scan.NetDir, "HMI"));
 
             if (baseFlags.AutoSync && !baseFlags.HasLocal) pendingSync.Add((card, result));
         }

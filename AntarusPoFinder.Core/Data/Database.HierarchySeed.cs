@@ -81,7 +81,7 @@ public partial class Database
 
     /// <summary>Тот же одноразовый сид «только для пустой таблицы», что и у ПЛК-расширений выше, но
     /// для отдельного списка HMI-проектов. fsprj — формат Segnetics (см. UploadView.HmiExecutableExts);
-    /// emt/emtp/emsln — форматы редактора KINCO HMI (см. SearchView.KincoHmiExts). Расширение .dpj
+    /// emt/emtp/emsln — форматы редактора KINCO HMI (см. PlcOpenResolver.HmiExtensions). Расширение .dpj
     /// сюда намеренно не добавлено: оно уже входит в дефолтный allowed_extensions (ПЛК) как формат
     /// проекта KINCO PLC — таблицы независимы и коллизии технически не будет, но смешивать одно и то
     /// же расширение в оба списка по умолчанию было бы вводящим в заблуждение.</summary>

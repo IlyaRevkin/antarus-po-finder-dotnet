@@ -228,8 +228,12 @@ public static class ConfigSyncService
         // сегодня». Уехав в общий конфиг, она заткнула бы отправку у ВСЕХ остальных, а снимок нужен
         // как раз с разных машин — в сравнении двух наборов и есть весь смысл (см.
         // App/Services/ModerationDiagnosticsReporter).
+        // "hmi_miss_diag_sent" — ровно та же отметка, только про «у этой версии не нашлась панель»
+        // (App/Services/HmiLookupDiagnosticsReporter): список версий, про которые эта машина сегодня
+        // уже написала. Уехав в общий конфиг, она заткнула бы след у всех остальных — а случай нужен
+        // как раз с той машины, где он виден.
         "current_role", "theme", "accent", "glass_opacity", "keep_archives", "image_server_port",
-        "moderation_diag_sent_at",
+        "moderation_diag_sent_at", "hmi_miss_diag_sent",
         "sync_interval_min", "quick_apps",
         // Мобильный доступ — целиком про КОНКРЕТНЫЙ компьютер. Токен (он же пропуск в базу этой
         // машины) уехав, открыл бы чужие Finder'ы тому, кто узнал одну ссылку; «включён» уехав,
