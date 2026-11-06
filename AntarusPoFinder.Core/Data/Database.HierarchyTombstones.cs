@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace AntarusPoFinder.Core.Data;
@@ -40,10 +40,40 @@ public partial class Database
     ///
     /// Пустой sync_id — не ошибка: строки, заведённые до появления обмена, его не имеют, соотнести
     /// их со входящим снимком всё равно нечем, и надгробие для них бессмысленно.</summary>
+    /// <summary>Ключ надгробия ПО ИМЕНИ: «тип / подтип», приведённое к одному виду.
+    ///
+    /// ⚠️ Одного sync_id оказалось мало, и вот почему. Удаление возвращалось снова даже с
+    /// надгробиями (жалоба: «пять раз удалял из иерархии НГР 2.0, он всё равно возвращается»), и
+    /// причин ровно две, обе про идентификатор:
+    /// <list type="bullet">
+    /// <item>у строки, заведённой до появления обмена, sync_id ПУСТ — надгробие не писалось вовсе,
+    /// и чужой снимок приносил подтип обратно каждый раз;</item>
+    /// <item>на машине коллеги тот же по смыслу подтип мог иметь ДРУГОЙ sync_id (машины по нему
+    /// ещё не сошлись) — надгробие по своему идентификатору к нему не подходило.</item>
+    /// </list>
+    ///
+    /// Поэтому рядом с надгробием по идентификатору кладётся второе — по имени. Оно грубее: если
+    /// подтип однажды удалили, а через месяц завели заново ПОД ТЕМ ЖЕ именем, оно бы его тоже
+    /// отбило. Это лечится тем же правилом, что и у основного надгробия: входящая запись
+    /// возвращается, если её правка СВЕЖЕЕ удаления. То есть заново заведённый подтип приедет
+    /// нормально, а старый, с давней правкой, — нет.</summary>
+    public static string TombstoneNameKey(string? label) =>
+        "name:" + (label ?? "").Trim().ToLowerInvariant().Replace("  ", " ");
+
     public void MarkHierarchyDeleted(string kind, string? syncId, string label, string? deletedAt = null)
     {
+        var stamp = deletedAt ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+        // Надгробие по имени пишется ВСЕГДА, даже когда идентификатора нет: именно случай «sync_id
+        // пуст» и давал бесконечный возврат.
+        if (!string.IsNullOrWhiteSpace(label)) WriteTombstone(kind, TombstoneNameKey(label), label, stamp);
+
         if (string.IsNullOrWhiteSpace(syncId)) return;
 
+        WriteTombstone(kind, syncId!.Trim(), label ?? "", stamp);
+    }
+
+    private void WriteTombstone(string kind, string key, string label, string deletedAt) =>
         ExecuteNonQuery("""
             INSERT INTO hierarchy_tombstones(kind, sync_id, label, deleted_at)
             VALUES(@k, @s, @l, @d)
@@ -51,11 +81,10 @@ public partial class Database
             """, cmd =>
         {
             cmd.Parameters.AddWithValue("@k", kind);
-            cmd.Parameters.AddWithValue("@s", syncId!.Trim());
-            cmd.Parameters.AddWithValue("@l", label ?? "");
-            cmd.Parameters.AddWithValue("@d", deletedAt ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("@s", key);
+            cmd.Parameters.AddWithValue("@l", label);
+            cmd.Parameters.AddWithValue("@d", deletedAt);
         });
-    }
 
     /// <summary>Надгробие снимается, когда запись заводят заново ПОД ТЕМ ЖЕ sync_id. Бывает при
     /// разборе конфликтов: оператор решает «нет, пусть живёт». Без снятия обмен вечно считал бы её

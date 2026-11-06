@@ -279,10 +279,17 @@ public class HierarchyTombstoneTests
             "правка новее удаления — должна побеждать");
     }
 
-    /// <summary>Строки без sync_id надгробий не получают: соотнести их со входящим снимком всё равно
-    /// нечем, а пустой ключ склеил бы в одно надгробие все такие записи разом.</summary>
+    /// <summary>Строка без sync_id получает надгробие ПО ИМЕНИ — и это сознательная смена поведения.
+    ///
+    /// Раньше такие строки надгробий не получали вовсе: «соотнести их со входящим снимком всё равно
+    /// нечем». Довод оказался неверным, и цена ошибки — та самая жалоба «пять раз удалял НГР 2.0, он
+    /// всё равно возвращается»: у строк, заведённых до появления обмена, sync_id пуст, и чужой
+    /// снимок заводил подтип заново каждый раз.
+    ///
+    /// Опасение «пустой ключ склеит все записи в одно надгробие» при этом никуда не делось — просто
+    /// ключом стал не пустой sync_id, а имя «тип / подтип»: у каждой записи оно своё.</summary>
     [Fact]
-    public void Без_sync_id_надгробие_не_заводится()
+    public void Без_sync_id_надгробие_заводится_по_имени()
     {
         using var tmp = new TempDb();
         using var db = new Database(tmp.Path);
@@ -290,7 +297,12 @@ public class HierarchyTombstoneTests
         db.MarkHierarchyDeleted(Database.TombstoneSubtype, "", "НГР / без идентификатора");
         db.MarkHierarchyDeleted(Database.TombstoneSubtype, null, "НГР / тоже без");
 
-        Assert.Empty(db.GetHierarchyTombstones());
+        var keys = db.GetHierarchyTombstones().Select(t => t.SyncId).ToList();
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(Database.TombstoneNameKey("НГР / без идентификатора"), keys);
+        Assert.Contains(Database.TombstoneNameKey("НГР / тоже без"), keys);
+        // Пустого ключа, который склеил бы записи в одну, по-прежнему нет.
+        Assert.DoesNotContain("", keys);
     }
 
     /// <summary>Удаление типа шкафа кладёт надгробия и на его подтипы: они уходят вместе с ним

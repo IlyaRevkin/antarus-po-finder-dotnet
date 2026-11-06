@@ -836,6 +836,12 @@ public partial class Database
             if (apply) MarkHierarchyDeleted(t.Kind, t.SyncId, t.Label, t.DeletedAt);
         }
 
+        // Надгробие ПО ИМЕНИ — вторая попытка узнать удалённое, когда идентификаторы не сошлись
+        // (см. Database.TombstoneNameKey). Именно из-за этого подтип возвращался «пять раз подряд»:
+        // у строки, заведённой до появления обмена, sync_id пуст, а у коллеги на тот же подтип свой.
+        string NameKeyOf(string? groupName, string? name) =>
+            TombstoneNameKey($"{(groupName ?? "").Trim()} / {(name ?? "").Trim()}");
+
         // Удалён ли подтип — по входящему снимку ИЛИ по тому, что эта машина уже знает.
         bool SubtypeDeleted(string? syncId, string? incomingUpdatedAt)
         {
@@ -849,6 +855,24 @@ public partial class Database
             }
 
             return DeletedLaterThan(TombstoneSubtype, syncId, incomingUpdatedAt);
+        }
+
+        // Тот же вопрос, но по имени: «тип / подтип». Правило сравнения ровно то же — входящая
+        // запись возвращается, только если её правка СВЕЖЕЕ удаления. Поэтому заново заведённый
+        // под тем же именем подтип приедет нормально, а давно удалённый — нет.
+        bool SubtypeDeletedByName(string? groupName, string? name, string? incomingUpdatedAt)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            var key = NameKeyOf(groupName, name);
+
+            if (incomingTombstones.TryGetValue(key, out var deletedAt))
+            {
+                if (string.IsNullOrWhiteSpace(incomingUpdatedAt)) return true;
+                if (string.IsNullOrWhiteSpace(deletedAt)) return false;
+                if (string.CompareOrdinal(deletedAt, incomingUpdatedAt) >= 0) return true;
+            }
+
+            return DeletedLaterThan(TombstoneSubtype, key, incomingUpdatedAt);
         }
 
         // ── Subtypes (upsert by sync_id, fallback to (group,name)) ──────────────
@@ -871,7 +895,10 @@ public partial class Database
                 // подтипом остались версии — см. SubtypesSkippedDelete ниже) и прислать подтип
                 // живым. Если удаление позже его последней правки, побеждает удаление; если он
                 // правил подтип ПОСЛЕ удаления — побеждает правка, как и везде в обмене.
-                if (SubtypeDeleted(s.SyncId, s.UpdatedAt))
+                // Спрашиваем ДВАЖДЫ: по идентификатору и по имени. Второе нужно там, где машины
+                // идентификаторами ещё не сошлись или где у строки его нет вовсе, — именно этот
+                // случай и давал «удаляю пятый раз, а оно возвращается».
+                if (SubtypeDeleted(s.SyncId, s.UpdatedAt) || SubtypeDeletedByName(s.GroupName, s.Name, s.UpdatedAt))
                 {
                     counts.SubtypesSkippedResurrect++;
                     continue;
