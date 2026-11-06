@@ -929,7 +929,17 @@
                               MouseDoubleClick="ModGrid_MouseDoubleClick" PreviewMouseWheel="ScrollableChild_PreviewMouseWheel">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
-                            <DataGridTextColumn Header="Подтип" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                            <!-- ПОДТИПЫ, во множественном числе: строка здесь — прошивка целиком, а
+                                 одна прошивка заводится на несколько подтипов шкафа отдельными
+                                 записями, и вывод из модерации касается их всех. Полный состав —
+                                 в подсказке. -->
+                            <DataGridTextColumn Header="Подтипы" Binding="{Binding SubtypeName}" Width="Auto" MinWidth="120">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource DataGridCellTextCentered}">
+                                        <Setter Property="ToolTip" Value="{Binding SubtypesTooltip}"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="Контроллер" Binding="{Binding CtrlName}" Width="Auto" MinWidth="110" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                             <DataGridTemplateColumn Header="Версия" Width="160">
                                 <DataGridTemplateColumn.CellTemplate>

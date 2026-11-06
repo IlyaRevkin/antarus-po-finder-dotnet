@@ -10,11 +10,23 @@ public partial class NewVersionsView : UserControl
     private readonly AppServices _services;
     private readonly IAppHost _host;
 
+    /// <summary>Строка таблицы — ОДНА ПРОШИВКА целиком, а не одна запись в базе. У прошивки,
+    /// заведённой на несколько подтипов шкафа, записей несколько (см. Core/Services/ModerationQueue),
+    /// и до сих пор очередь перечисляла их по одной: у наладчика, заливающего сразу на пять
+    /// подтипов, список распухал до «20+» там, где у соседа было «2–3».</summary>
     private class RecentRow
     {
-        public FwVersionRecord Record { get; init; } = null!;
+        public ModerationQueueItem Item { get; init; } = null!;
+        public FwVersionRecord Record => Item.Primary;
         public string GroupName => Record.GroupName;
-        public string SubtypeName => Record.SubtypeName;
+        /// <summary>Подтипы, которых касается прошивка, — перечислением. Это не украшение: по
+        /// кнопке «В релиз» из модерации выйдут ВСЕ эти записи разом, и человек должен видеть
+        /// объём действия до нажатия, а не узнавать о нём после.</summary>
+        public string SubtypeName => Item.SubtypesDisplay;
+        public string SubtypesTooltip => Item.IsMulti
+            ? $"Одна прошивка на {Item.SubtypeNames.Count} {ModerationQueueItem.Plural(Item.SubtypeNames.Count)}: {Item.SubtypesFull}."
+              + $"\nЗаписей в базе — {Item.RecordCount}; «В релиз» выпустит их все сразу."
+            : Item.SubtypesFull;
         public string CtrlName => Record.CtrlName;
         public string VersionRaw => Record.VersionRaw;
         /// <summary>Кто залил версию. Прочерк вместо пустоты: у прошивок, заведённых до появления
@@ -66,8 +78,8 @@ public partial class NewVersionsView : UserControl
     /// которую уже не поставят, незачем, а список они забивали.</summary>
     private void LoadData()
     {
-        var rows = _services.Db.GetUnreleasedFwVersionsWithNames();
-        RecentGrid.ItemsSource = rows.Select(v => new RecentRow { Record = v }).ToList();
+        var rows = _services.Db.GetModerationQueue();
+        RecentGrid.ItemsSource = rows.Select(v => new RecentRow { Item = v }).ToList();
         // Снимок очереди — раз в сутки, молча (см. ModerationDiagnosticsReporter): причину
         // расхождения «у кого-то 2–3, у меня 20+» иначе не установить, а просить людей переписывать
         // цифры руками — верный способ не узнать ничего.
@@ -91,14 +103,20 @@ public partial class NewVersionsView : UserControl
     {
         if (((FrameworkElement)sender).DataContext is not RecentRow row) return;
 
-        var v = row.Record;
-        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
-        if (AppMessageBox.Show($"Вывести из модерации и сделать релизной?\n\n{title}",
+        var title = TitleOf(row.Item);
+        // Сколько записей выпускается — в самом вопросе, а не мелким шрифтом где-то рядом: действие
+        // задевает несколько подтипов шкафа сразу, и узнать об этом человек должен ДО нажатия.
+        var scope = row.Item.IsMulti
+            ? $"\n\nПрошивка заведена на {row.Item.SubtypeNames.Count} "
+              + $"{ModerationQueueItem.Plural(row.Item.SubtypeNames.Count)}: {row.Item.SubtypesFull}."
+              + $"\nИз модерации выйдут все записи этой прошивки ({row.Item.RecordCount})."
+            : "";
+        if (AppMessageBox.Show($"Вывести из модерации и сделать релизной?\n\n{title}{scope}",
                 "Модерация прошивок", MessageBoxButton.YesNo, MessageBoxImage.Question,
                 MessageBoxResult.Yes) != MessageBoxResult.Yes)
             return;
 
-        Release(v, title);
+        Release(row.Item, title);
         LoadData();
     }
 
@@ -107,10 +125,19 @@ public partial class NewVersionsView : UserControl
         if (DataGridClickGuard.IsOverDataRow(e) && RecentGrid.SelectedItem is RecentRow row) EditTags(row);
     }
 
+    /// <summary>Как прошивка называется в заголовках и сообщениях. Подтип берётся из ГЛАВНОЙ записи
+    /// (оригинала), а не перечислением: в заголовке окна правки нужен короткий опознавательный
+    /// знак, полный состав группы человек видит в самой таблице и в вопросе о выпуске.</summary>
+    private static string TitleOf(ModerationQueueItem item)
+    {
+        var v = item.Primary;
+        return $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+    }
+
     private void EditTags(RecentRow row)
     {
         var v = row.Record;
-        var title = $"{v.GroupName} {v.SubtypeName} {v.CtrlName} {v.VersionRaw}";
+        var title = TitleOf(row.Item);
         var dlg = new EditFirmwareDialog(_services, v, title, _host) { Owner = Window.GetWindow(this) };
         if (dlg.ShowDialog() != true) return;
 
@@ -122,7 +149,7 @@ public partial class NewVersionsView : UserControl
         // Вместе со всеми записями-копиями этой же прошивки под другими подтипами — иначе подтип,
         // отмеченный только что в этом же диалоге, вернул бы версию в модерацию.
         var delivered = false;
-        if (release) delivered = Release(v, title);
+        if (release) delivered = Release(row.Item, title);
 
         // Названием прошивки, а не голым номером версии: по «2.0.0042.0003» невозможно понять, к
         // чему относится сообщение (тикет коллеги — «не номер прошивки, а название её»).
@@ -141,11 +168,14 @@ public partial class NewVersionsView : UserControl
     ///
     /// Узкий канал доставки (ConfigSyncService.PushFirmwareAndModerationOnly) обязателен: страница
     /// модерации доступна и наладчику, а полный экспорт — только администратору.</summary>
-    private bool Release(FwVersionRecord v, string title)
+    private bool Release(ModerationQueueItem item, string title)
     {
-        _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+        // ВСЯ группа, а не выбранная строка: наполовину выпущенная прошивка хуже невыпущенной —
+        // в поиске она уже видна, а в очереди висят её же записи под другими подтипами, и
+        // следующий человек не понимает, выпускать их или нет.
+        _services.Db.ReleaseModerationGroup(item.Ids);
         var delivered = ConfigSyncService.RecordAndPushModeration(_services,
-            _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
+            _services.Db.GetModerationGroupDeliveryIds(item.Ids), _services.CurrentUserName);
 
         _host.ShowStatus($"Версия выведена из модерации: {title}"
             + (delivered ? " (отправлено коллегам)" : ""),

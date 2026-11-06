@@ -71,7 +71,19 @@ public partial class SettingsView : UserControl
     {
         public FwVersionRecord Record { get; init; } = null!;
         public string GroupName => Record.GroupName;
-        public string SubtypeName => Record.SubtypeName;
+        /// <summary>Группа записей одной и той же прошивки — заполняется ТОЛЬКО на вкладке
+        /// «Модерация», где строка таблицы это прошивка целиком, а не отдельная запись (см.
+        /// Core/Services/ModerationQueue). В таблице «Прошивки» рядом перечислены именно записи, и
+        /// там это поле пусто: там как раз нужно видеть каждую.</summary>
+        public ModerationQueueItem? Group { get; init; }
+        public string SubtypeName => Group is not null ? Group.SubtypesDisplay : Record.SubtypeName;
+        /// <summary>Полный состав группы подсказкой — в ней ничего не обрезано, и сразу видно,
+        /// сколько записей заденет выпуск.</summary>
+        public string SubtypesTooltip => Group is null ? Record.SubtypeName
+            : Group.IsMulti
+                ? $"Одна прошивка на {Group.SubtypeNames.Count} {ModerationQueueItem.Plural(Group.SubtypeNames.Count)}: {Group.SubtypesFull}."
+                  + $"\nЗаписей в базе — {Group.RecordCount}; вывод из модерации коснётся их всех."
+                : Group.SubtypesFull;
         public string CtrlName => Record.CtrlName;
         public string VersionRaw => Record.VersionRaw;
         public string Tags => Record.Tags;
@@ -4229,8 +4241,10 @@ public partial class SettingsView : UserControl
 
     private void LoadModerationTab()
     {
-        var data = _services.Db.GetUnreleasedFwVersionsWithNames();
-        ModGrid.ItemsSource = data.Select(v => new FwRow { Record = v }).ToList();
+        // Одна прошивка — одна строка, как и на странице «Модерация прошивок» в сайдбаре: обе
+        // таблицы показывают одно и то же, и расходиться им нельзя.
+        var data = _services.Db.GetModerationQueue();
+        ModGrid.ItemsSource = data.Select(v => new FwRow { Record = v.Primary, Group = v }).ToList();
         Services.ModerationDiagnosticsReporter.ReportOnce(_services, data.Count);
         ModerationCountText.Text = data.Count > 0
             ? $"Версии, ожидающие модерации — {data.Count}"
@@ -4259,18 +4273,28 @@ public partial class SettingsView : UserControl
 
         EditFirmwareDialog.ApplyResult(dlg, _services, _host, v.Id!.Value);
 
+        // Сколько записей выпускается — в самом вопросе: действие задевает все подтипы шкафа,
+        // которым прошивка подходит, и узнать об этом человек должен до нажатия.
+        var group = row.Group;
+        var scope = group is { IsMulti: true }
+            ? $"\n\nПрошивка заведена на {group.SubtypeNames.Count} "
+              + $"{ModerationQueueItem.Plural(group.SubtypeNames.Count)}: {group.SubtypesFull}."
+              + $"\nИз модерации выйдут все её записи ({group.RecordCount})."
+            : "";
         var release = AppMessageBox.Show(
-            "Вывести версию из модерации и сделать релизной?",
+            "Вывести версию из модерации и сделать релизной?" + scope,
             "Модерация", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
-        // Вместе с записями-копиями под другими подтипами — см. Database.MarkFwVersionReleasedWithLinked.
+        // ВСЮ группу разом — см. Database.ReleaseModerationGroup: выпустить одну запись из пяти
+        // значит оставить прошивку наполовину выпущенной, а это хуже невыпущенной.
         var delivered = false;
         if (release)
         {
-            _services.Db.MarkFwVersionReleasedWithLinked(v.Id!.Value);
+            var ids = group?.Ids ?? new List<int> { v.Id!.Value };
+            _services.Db.ReleaseModerationGroup(ids);
             // Узкий канал доставки решения модерации — работает с любой машины, не только с
             // администраторской (см. ConfigSyncService.PushFirmwareAndModerationOnly).
             delivered = ConfigSyncService.RecordAndPushModeration(_services,
-                _services.Db.GetFwVersionIdsSharingFiles(v.Id!.Value), _services.CurrentUserName);
+                _services.Db.GetModerationGroupDeliveryIds(ids), _services.CurrentUserName);
         }
 
         _host.ShowStatus(release
