@@ -320,6 +320,10 @@ public class ConfigService
         // Принтер этикеток — per-machine (у каждой машины свои принтеры). Пусто — печать на принтер
         // Windows по умолчанию.
         ["label_printer"] = "",
+        // Закрывать ли окно этикетки само после отправки на печать. По умолчанию НЕТ: окно после
+        // печати показывает, на какую очередь ушло задание и сколько раз уже печатали, а закрытое
+        // окно этого не расскажет. Кому наклейка нужна поточно — включает и не закрывает руками.
+        ["label_print_auto_close"] = "false",
         // Папка с шаблонами наклеек («Проверено ОТК», «Проверьте перед подключением» и т.п.).
         // Пусто — берётся Конфиг\Наклейки на общем диске (см. StickerTemplates.FolderFor): чтобы
         // это заработало, настраивать ничего не нужно.
@@ -806,6 +810,13 @@ public class ConfigService
     public void SetLabelText(string key, string value) => Set(key, (value ?? "").Trim());
 
     /// <summary>Имя принтера этикеток как его видит Windows. Пусто — принтер по умолчанию.</summary>
+    /// <summary>Закрывать ли окно «QR и этикетка» сразу после отправки на печать. Личная привычка,
+    /// а не политика конторы: один печатает по одной наклейке и смотрит результат, другой гонит
+    /// десяток подряд и каждое окно закрывает руками.</summary>
+    public bool LabelPrintAutoClose() => Get("label_print_auto_close").Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    public void SetLabelPrintAutoClose(bool value) => Set("label_print_auto_close", value ? "true" : "false");
+
     public string LabelPrinter() => Get("label_printer");
     public void SetLabelPrinter(string name) => Set("label_printer", name.Trim());
 

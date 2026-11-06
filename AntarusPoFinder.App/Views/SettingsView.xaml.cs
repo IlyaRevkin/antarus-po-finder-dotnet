@@ -2253,6 +2253,7 @@ public partial class SettingsView : UserControl
             LabelHeadlineInput.Text = labelLayout.HeadlineText;
             LabelShowHeadlineCheck.IsChecked = labelLayout.ShowHeadline;
             LabelHoleTextInput.Text = labelLayout.HoleText;
+            PrintAutoCloseCheck.IsChecked = _services.Cfg.LabelPrintAutoClose();
 
             // Список принтеров перечитывается на каждый заход: принтер могли добавить, пока
             // программа открыта. Сохранённое имя добавляем в список, даже если такого принтера
@@ -2422,6 +2423,13 @@ public partial class SettingsView : UserControl
     {
         var raw = box.Text.Trim().Replace(',', '.');
         return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null;
+    }
+
+    private void PrintAutoClose_Changed(object sender, RoutedEventArgs e)
+    {
+        // Обработчик срабатывает из разметки — до InitializeComponent полей ещё нет.
+        if (!IsInitialized || _printingTabFilling) return;
+        _services.Cfg.SetLabelPrintAutoClose(PrintAutoCloseCheck.IsChecked == true);
     }
 
     private void LabelPrinter_Changed(object sender, SelectionChangedEventArgs e)

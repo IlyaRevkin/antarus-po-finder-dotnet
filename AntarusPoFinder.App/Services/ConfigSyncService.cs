@@ -233,7 +233,10 @@ public static class ConfigSyncService
         // уже написала. Уехав в общий конфиг, она заткнула бы след у всех остальных — а случай нужен
         // как раз с той машины, где он виден.
         "current_role", "theme", "accent", "glass_opacity", "keep_archives", "image_server_port",
-        "moderation_diag_sent_at", "hmi_miss_diag_sent",
+        "moderation_diag_sent_at",
+        // "label_print_auto_close" — привычка человека за этим компьютером, как тема и прозрачность
+        // стекла. Уехав, она закрывала бы окно печати тому, кто об этом не просил.
+        "label_print_auto_close", "hmi_miss_diag_sent",
         "sync_interval_min", "quick_apps",
         // Мобильный доступ — целиком про КОНКРЕТНЫЙ компьютер. Токен (он же пропуск в базу этой
         // машины) уехав, открыл бы чужие Finder'ы тому, кто узнал одну ссылку; «включён» уехав,

@@ -494,6 +494,7 @@ public partial class InstructionLabelWindow : Window
                 // деревом предпросмотра, и печать чужого визуального родителя в WPF не работает.
                 var outcome = LabelPrinter.Print(BuildLabel(), _services.Cfg.LabelPrinter(),
                     $"Этикетка — {_title}", _layout);
+                _lastPrintOk = outcome.Ok;
                 _host.ShowStatus(outcome.Message, category: NotificationCategory.General);
                 ShowPrintState(outcome);
                 if (!outcome.Ok)
@@ -502,9 +503,36 @@ public partial class InstructionLabelWindow : Window
             finally
             {
                 ReleasePrintLockAfterCooldown();
+                CloseAfterPrintIfAsked();
             }
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
+
+    /// <summary>Закрыть окно само, если человек так настроил (Настройки → Печать).
+    ///
+    /// Закрываем с задержкой, а не мгновенно: на экране должна успеть мелькнуть строка «отправлено
+    /// на такую-то очередь». Окно, исчезающее в ту же секунду, выглядит как сбой, а не как
+    /// выполненная работа — и человек жмёт печать ещё раз, то есть мы вернули бы ровно ту беду, от
+    /// которой только что защитились.
+    ///
+    /// Неудачную печать не закрываем НИКОГДА: там на экране причина отказа, и уносить её — значит
+    /// оставить человека с вопросом «почему не напечаталось» и без единой подсказки.</summary>
+    private void CloseAfterPrintIfAsked()
+    {
+        if (!_services.Cfg.LabelPrintAutoClose()) return;
+        if (!_lastPrintOk) return;
+
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (IsLoaded) Close();
+        };
+        timer.Start();
+    }
+
+    /// <summary>Чем кончилась последняя печать — нужно закрытию по настройке (см. выше).</summary>
+    private bool _lastPrintOk;
 
     /// <summary>Вернуть кнопку в строй не сразу, а переждав <see cref="PrintCooldown"/>: задание уже
     /// у спулера, но бумага ещё не выехала, и именно в этот промежуток жмут второй раз.</summary>

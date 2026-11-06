@@ -1552,6 +1552,11 @@
                             <ComboBox x:Name="LabelPrinterCombo" Height="34" Margin="0,0,0,10" SelectionChanged="LabelPrinter_Changed"
                                       ToolTip="«Принтер по умолчанию» — печатать на тот, что выбран в Windows. По сети настройка не разъезжается: у соседа принтер называется иначе."/>
 
+                            <CheckBox x:Name="PrintAutoCloseCheck" Margin="0,0,0,10"
+                                      Content="Закрывать окно печати после отправки"
+                                      ToolTip="Пригодится, когда наклейки печатают поточно: окно закроется само. Выключено — окно остаётся и показывает, на какую очередь ушло задание."
+                                      Checked="PrintAutoClose_Changed" Unchecked="PrintAutoClose_Changed"/>
+
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="Пробная печать" Style="{StaticResource SecondaryButton}" Click="TestPrintLabel_Click"
                                         ToolTip="Напечатать образец этикетки выбранного размера — проверить поля и что принтер вообще тот"/>
