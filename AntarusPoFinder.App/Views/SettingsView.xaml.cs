@@ -3102,7 +3102,9 @@ public partial class SettingsView : UserControl
                 return;
             }
 
-            var result = AdRosterSync.Apply(_services.Db, scan.Members, scan.Complete, DateTime.Now);
+            // Домен передаётся в сверку: по нему видно, кого спрашивать было бессмысленно —
+            // человека, который входит из другого домена, в этих группах нет и быть не должно.
+            var result = AdRosterSync.Apply(_services.Db, scan.Members, scan.Complete, DateTime.Now, domain);
             LoadUsersTab();
 
             // Правда должна доехать до остальных машин, иначе сверку пришлось бы делать на каждой.
@@ -3111,9 +3113,10 @@ public partial class SettingsView : UserControl
             try { ConfigSyncService.PushAppUsersOnly(_services, cfg.RootPath(), $"сверка с доменом ({domain})"); }
             catch (Exception ex) { pushNote = Environment.NewLine + Environment.NewLine + $"На общий диск список не уехал: {ex.Message}. Уедет со следующей отправкой конфига."; }
 
-            AppMessageBox.Show(DescribeScan(scan, result) + pushNote, "Обновить из домена",
+            AppMessageBox.Show(DescribeScan(scan, result, domain) + pushNote, "Обновить из домена",
                 MessageBoxButton.OK, scan.Complete ? MessageBoxImage.Information : MessageBoxImage.Warning);
-            _host.ShowStatus($"Сверка с доменом: добавлено {result.Added}, ролей изменено {result.RoleChanged}");
+            _host.ShowStatus($"Сверка с доменом: добавлено {result.Added}, ролей изменено {result.RoleChanged}" +
+                             (result.OtherDomain > 0 ? $", из другого домена {result.OtherDomain}" : ""));
         }
         finally
         {
@@ -3125,7 +3128,7 @@ public partial class SettingsView : UserControl
     /// и непрочитанные — с причиной), потом итог. Отдельной строкой — предупреждение о неполной
     /// сверке: при ней пометка «в домене не найден» НЕ ставится никому, и об этом надо сказать, иначе
     /// администратор решит, что все нашлись.</summary>
-    private static string DescribeScan(AdGroupScan scan, AdRosterSyncResult result)
+    private static string DescribeScan(AdGroupScan scan, AdRosterSyncResult result, string domain)
     {
         var lines = new List<string>();
         foreach (var p in scan.Probes)
@@ -3147,6 +3150,18 @@ public partial class SettingsView : UserControl
         else
             lines.Add("Часть групп прочитать не удалось, поэтому никому не проставлена пометка " +
                       "«в домене не найден»: по неполному ответу домена этого утверждать нельзя.");
+
+        // Разные домены у разных людей — не ошибка, а факт, и сказать о нём надо прямо: иначе
+        // сверка, сделанная не из того домена, просто «не находит» человека, и это выглядит как
+        // очередная поломка списка.
+        if (result.OtherDomain > 0)
+        {
+            lines.Add("");
+            lines.Add($"Входят из ДРУГОГО домена, поэтому в «{domain}» их не искали ({result.OtherDomain}):");
+            foreach (var who in result.OtherDomainLogins.Take(12)) lines.Add($"• {who}");
+            if (result.OtherDomain > 12) lines.Add($"• …и ещё {result.OtherDomain - 12}");
+            lines.Add("Это не ошибка. Чтобы свериться и по ним, повторите сверку, указав их домен.");
+        }
 
         return string.Join(Environment.NewLine, lines);
     }

@@ -12,7 +12,14 @@ public record AdGroupMember(string Role, string Login);
 /// <summary>Чем кончилась сверка ростера с доменом — ровно те числа, которые показываются человеку.
 /// <paramref name="NotFoundInDomain"/> имеет смысл только при полной сверке (см.
 /// <see cref="AdRosterSync.Apply"/>), иначе он равен нулю.</summary>
-public record AdRosterSyncResult(int Added, int RoleChanged, int Confirmed, int NotFoundInDomain);
+/// <param name="OtherDomainLogins">Те, кого сверка НЕ ТРОГАЛА, потому что они входят из другого
+/// домена (см. <see cref="AdRosterSync.Apply"/>): спрашивать про них домен, в который они не
+/// входят, бессмысленно, а молча пометить «в домене не найден» — соврать.</param>
+public record AdRosterSyncResult(int Added, int RoleChanged, int Confirmed, int NotFoundInDomain,
+    IReadOnlyList<string> OtherDomainLogins)
+{
+    public int OtherDomain => OtherDomainLogins.Count;
+}
 
 /// <summary>ПРИВЕСТИ РОСТЕР «Пользователи» К ТОМУ, ЧТО РЕАЛЬНО В ДОМЕНЕ.
 ///
@@ -37,6 +44,10 @@ public record AdRosterSyncResult(int Added, int RoleChanged, int Confirmed, int 
 ///   прочиталась (нет прав, группа переименована, домен отвалился на середине), объявлять всех
 ///   остальных «в домене нет» — враньё, и именно такое враньё администратор и принял бы за
 ///   очередную поломку списка.</item>
+/// <item>Сверка идёт ИЗ КОНКРЕТНОГО домена, и люди в ростере бывают из разных. Если человек в
+///   последний раз входил из другого домена (AppUser.LogonDomain), то его отсутствие в этих
+///   группах не значит ничего: мы спросили не тот домен. Такие строки не помечаются «в домене не
+///   найден», а называются отдельным списком — «не молча не найти», а сказать прямо.</item>
 /// <item>Роль берётся самая привилегированная из совпавших — как и при входе
 ///   (<see cref="RoleFromGroups.RolesHighestFirst"/>, WindowsGroupAuth.DetectRoleForUser): человек в
 ///   группе админов и в группе наладчиков — администратор.</item>
@@ -71,11 +82,16 @@ public static class AdRosterSync
     /// <summary>Применить состав групп к ростеру. <paramref name="complete"/> — удалось ли
     /// перечислить ВСЕ настроенные группы (см. правило 2 в описании класса): только при true
     /// отсутствующим в домене ставится пометка «не найден».</summary>
-    public static AdRosterSyncResult Apply(Database db, IEnumerable<AdGroupMember> members, bool complete, DateTime now)
+    /// <param name="scanDomain">Домен, у которого спрашивали состав групп. Пусто — проверку «он
+    /// из другого домена» не делаем вовсе: без знания, что именно спрашивали, такое утверждение
+    /// было бы догадкой.</param>
+    public static AdRosterSyncResult Apply(Database db, IEnumerable<AdGroupMember> members, bool complete,
+        DateTime now, string scanDomain = "")
     {
         var resolved = ResolveRoles(members);
         var checkedAt = now.ToString("yyyy-MM-dd HH:mm");
         int added = 0, changed = 0, confirmed = 0, missing = 0;
+        var otherDomain = new List<string>();
 
         foreach (var (login, role) in resolved)
         {
@@ -109,10 +125,20 @@ public static class AdRosterSync
             foreach (var u in db.GetAppUsers())
             {
                 if (resolved.ContainsKey(u.AdLogin)) continue;
+
+                // Человек входит из другого домена — значит мы сейчас спрашивали не про него.
+                // Пометить его «в домене не найден» было бы прямым враньём, а промолчать —
+                // ровно тем поведением, из-за которого список выглядит сломанным.
+                if (scanDomain.Length > 0 && u.LogonDomain.Length > 0 && !MachineDomain.Same(u.LogonDomain, scanDomain))
+                {
+                    otherDomain.Add($"{u.AdLogin} — {u.LogonDomain}");
+                    continue;
+                }
+
                 db.MarkAppUserDomainChecked(u.Id!.Value, found: false, checkedAt);
                 missing++;
             }
 
-        return new AdRosterSyncResult(added, changed, confirmed, missing);
+        return new AdRosterSyncResult(added, changed, confirmed, missing, otherDomain);
     }
 }
