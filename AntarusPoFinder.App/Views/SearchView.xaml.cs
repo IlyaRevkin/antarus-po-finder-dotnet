@@ -913,7 +913,11 @@ public partial class SearchView : UserControl
         bool HasIoMap, bool HasInstructions, bool HasInstructionDocx, bool HasInstructionPrintable,
         bool HasInstructionStub, bool HasModbus,
         string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing,
-        IReadOnlyList<string> BuiltExecutions);
+        IReadOnlyList<string> BuiltExecutions,
+        // Та папка версии на диске, которую обход РЕАЛЬНО смотрел (см. ResolvedNetworkDir — она не
+        // обязана совпадать с disk_path из базы). Отдаётся наружу, чтобы след «почему нет HMI» писал
+        // про то же самое место, а не вычислял его заново: каждый такой расчёт — поход на шару.
+        string NetDir);
 
     /// <summary>Один обход на версию вместо трёх (LFS/PSL + HMI по расширениям): все три признака
     /// вытаскиваются за одно перечисление файлов первой же папки-кандидата, где вообще что-то
@@ -998,7 +1002,7 @@ public partial class SearchView : UserControl
                 .ToArray();
 
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions, net);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -1133,6 +1137,19 @@ public partial class SearchView : UserControl
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
+
+            // «Панели у этой версии нет» — ровно то решение, из-за которого пришла жалоба Киселёва
+            // («не обнаружил файл HMI»), и единственное место, где оно принимается. Воспроизвести
+            // случай нечем, поэтому оставляем след: какие папки смотрели, что в них лежало, в каком
+            // режиме читалась версия и какое правило сработало (см. HmiLookupDiagnosticsReporter).
+            //
+            // Только отрицательный ответ и только у версии, которая на диске есть: у «на диске не
+            // найдена» объяснять нечего — там нет вообще ничего, и это отдельная, уже видимая беда.
+            // Отсечка «одна версия — одна запись в день с этой машины» живёт в самом докладчике.
+            if (!scan.HasHmi)
+                await Services.HmiLookupDiagnosticsReporter.ReportMissingAsync(_services, result,
+                    Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw),
+                    scan.NetDir, () => FindSiblingFolder(result, scan.NetDir, "HMI"));
 
             if (baseFlags.AutoSync && !baseFlags.HasLocal) pendingSync.Add((card, result));
         }
