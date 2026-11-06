@@ -241,7 +241,91 @@ public class AppUsersDbTests
         {
             SyncId = u.SyncId, AdLogin = u.AdLogin, Role = u.Role,
             FirstLoginAt = u.FirstLoginAt, LastLoginAt = u.LastLoginAt, RoleUpdatedAt = u.RoleUpdatedAt,
+            RoleSource = u.RoleSource, DomainCheckedAt = u.DomainCheckedAt, DomainFound = u.DomainFound,
+            LogonDomain = u.LogonDomain, LogonDomainAt = u.LogonDomainAt,
         }).ToList();
+
+    /// <summary>Фиксация домена входа: записали — видно в ростере, роль и её источник не тронуты
+    /// (иначе «он тут входил» перебивало бы настоящее решение о роли при слиянии конфигов).</summary>
+    [Fact]
+    public void RecordAppUserLogonDomain_RemembersDomain_WithoutTouchingRole()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var u = db.TouchOrCreateAppUser("revkin.i");
+            db.SetAppUserRole(u.Id!.Value, "administrator", AppUserRoleSource.Manual);
+            var roleUpdatedAt = db.FindAppUserByLogin("revkin.i")!.RoleUpdatedAt;
+
+            db.RecordAppUserLogonDomain(u.Id.Value, "ELITA", "2026-11-06 09:00:00");
+
+            var reloaded = db.FindAppUserByLogin("revkin.i")!;
+            Assert.Equal("ELITA", reloaded.LogonDomain);
+            Assert.Equal("2026-11-06 09:00:00", reloaded.LogonDomainAt);
+            Assert.Equal("administrator", reloaded.Role);
+            Assert.Equal(AppUserRoleSource.Manual, reloaded.RoleSource);
+            Assert.Equal(roleUpdatedAt, reloaded.RoleUpdatedAt);
+            Assert.Contains("ELITA", AppUserRoleSource.LogonDomainLabel(reloaded));
+        }
+        finally { Cleanup(path); }
+    }
+
+    /// <summary>Пустой домен не стирает уже известный: лучше чуть устаревшая правда, чем пустота
+    /// (вход мог пройти аварийным путём, где домена нет вовсе).</summary>
+    [Fact]
+    public void RecordAppUserLogonDomain_IgnoresEmptyDomain()
+    {
+        var path = NewTempDb();
+        try
+        {
+            using var db = new Database(path);
+            var u = db.TouchOrCreateAppUser("revkin.i");
+            db.RecordAppUserLogonDomain(u.Id!.Value, "ELITA", "2026-11-06 09:00:00");
+            db.RecordAppUserLogonDomain(u.Id.Value, "   ", "2026-11-07 09:00:00");
+
+            Assert.Equal("ELITA", db.FindAppUserByLogin("revkin.i")!.LogonDomain);
+            Assert.Equal("не отмечен", AppUserRoleSource.LogonDomainLabel(new AppUser()));
+        }
+        finally { Cleanup(path); }
+    }
+
+    /// <summary>Домен последнего входа — наблюдение: при слиянии побеждает более ПОЗДНИЙ вход,
+    /// чья бы машина его ни заметила, и домен едет парой со своей отметкой времени.</summary>
+    [Fact]
+    public void Import_LogonDomain_LaterLoginWins_InEitherDirection()
+    {
+        var pathA = NewTempDb();
+        var pathB = NewTempDb();
+        try
+        {
+            using var dbA = new Database(pathA);
+            using var dbB = new Database(pathB);
+
+            var a = dbA.TouchOrCreateAppUser("revkin.i");
+            dbA.RecordAppUserLogonDomain(a.Id!.Value, "ELITA", "2026-11-06 09:00:00");
+
+            // Приехал более свежий вход из другого домена — принимаем его целиком.
+            dbB.MergeAppUsersOnly(ToExported(dbA.GetAppUsers()));
+            var b = dbB.FindAppUserByLogin("revkin.i")!;
+            dbB.RecordAppUserLogonDomain(b.Id!.Value, "antarus.local", "2026-11-07 12:00:00");
+            dbA.MergeAppUsersOnly(ToExported(dbB.GetAppUsers()));
+
+            var merged = dbA.FindAppUserByLogin("revkin.i")!;
+            Assert.Equal("antarus.local", merged.LogonDomain);
+            Assert.Equal("2026-11-07 12:00:00", merged.LogonDomainAt);
+
+            // А более СТАРЫЙ вход обратно ничего не переписывает.
+            dbB.MergeAppUsersOnly(new List<ExportedAppUser>
+            {
+                new() { SyncId = merged.SyncId, AdLogin = "revkin.i", Role = merged.Role,
+                        RoleUpdatedAt = merged.RoleUpdatedAt,
+                        LogonDomain = "ELITA", LogonDomainAt = "2026-11-01 08:00:00" },
+            });
+            Assert.Equal("antarus.local", dbB.FindAppUserByLogin("revkin.i")!.LogonDomain);
+        }
+        finally { Cleanup(pathA, pathB); }
+    }
 
     [Fact]
     public void Import_NeverDeletesAUserEvenIfMissingFromTheIncomingExport()

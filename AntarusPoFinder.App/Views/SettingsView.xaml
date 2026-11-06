@@ -1352,6 +1352,16 @@
                                              ToolTip="Напр. https://disk.antarus.su/cloud — нужен способам «веб-проверка» и «домен, при недоступности — веб-проверка». Пусто — веб-проверка не сработает. Логин/пароль уходят как введены, через Negotiate/NTLM."/>
                                 </Grid>
 
+                                <!-- В каком домене этот компьютер — определяется само (см.
+                                     MachineDomainProbe); здесь же видно расхождение с тем, что
+                                     вписано в поле «Домен» выше. -->
+                                <TextBlock x:Name="ConnMachineDomainText" Style="{StaticResource MutedText}"
+                                           TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <Button x:Name="UseDetectedDomainButton" Content="Подставить найденный домен"
+                                        Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,0,0,10"
+                                        Click="UseDetectedDomain_Click"
+                                        ToolTip="Вписать в поле «Домен» тот домен, в котором состоит этот компьютер"/>
+
                                 <CheckBox x:Name="AdRequireLoginCheck" Content="Требовать вход при запуске приложения" Margin="0,0,0,8"
                                           Checked="AdSettings_Changed" Unchecked="AdSettings_Changed"
                                           ToolTip="Выключено — приложение стартует без запроса входа. Пароль администратора остаётся аварийным входом при проблемах с доменом."/>
@@ -1930,9 +1940,16 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="Кто работает в программе и откуда у него роль. Список наполняется входами по AD и кнопкой «Обновить из домена» (перечисляет состав групп, настроенных на вкладке «Подключение»). Вход по общим паролям ролей в список не попадает — там нет личности."
-                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"
-                       ToolTip="Столбец «Откуда роль» отвечает на вопрос «почему роль не та»: из домена, выставлена вручную или досталась от первого входа."/>
+            <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                <TextBlock Text="Кто работает в программе и откуда у него роль. Список наполняется входами по AD и кнопкой «Обновить из домена» (перечисляет состав групп, настроенных на вкладке «Подключение»). Вход по общим паролям ролей в список не попадает — там нет личности."
+                           Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           ToolTip="Столбец «Откуда роль» отвечает на вопрос «почему роль не та»: из домена, выставлена вручную или досталась от первого входа."/>
+                <!-- «Я не знаю, к какому домену отношусь я, и другие». Про ЭТОТ компьютер отвечает
+                     строка ниже — её программа получает у самой Windows, без вопросов человеку;
+                     про остальных отвечает столбец «Домен входа» в таблице. -->
+                <TextBlock x:Name="UsersMachineDomainText" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                           FontWeight="SemiBold" Margin="0,8,0,0"/>
+            </StackPanel>
             <TextBox Grid.Row="1" x:Name="UsersFilterInput" Height="34" Margin="0,0,0,10"
                      ToolTip="Фильтр по AD-логину или роли…" TextChanged="UsersFilter_Changed"/>
             <DataGrid Grid.Row="2" x:Name="UsersGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"
@@ -1947,6 +1964,11 @@
                          этого столбца. -->
                     <DataGridTextColumn Header="Откуда роль" Binding="{Binding RoleSourceLabel}" Width="Auto" MinWidth="170" ElementStyle="{StaticResource DataGridCellText}"/>
                     <DataGridTextColumn Header="Сверка с доменом" Binding="{Binding DomainCheckLabel}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <!-- Вторая половина ответа на «к какому домену отношусь я и другие»: про этот
+                         компьютер программа отвечает сама (строка над таблицей), а про коллег —
+                         только зафиксированным фактом входа. Разные домены в столбце — не ошибка,
+                         а нормальная жизнь компании с несколькими доменами. -->
+                    <DataGridTextColumn Header="Домен входа" Binding="{Binding LogonDomainLabel}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Первый вход" Binding="{Binding FirstLoginAt}" Width="Auto" MinWidth="150" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                     <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginAt}" Width="Auto" MinWidth="160" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
                 </DataGrid.Columns>

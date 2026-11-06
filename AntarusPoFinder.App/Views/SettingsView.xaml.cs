@@ -2091,6 +2091,7 @@ public partial class SettingsView : UserControl
             // и способ входа, под тем же флагом «идёт заполнение» (иначе LostFocus/Checked при
             // подстановке значений тут же посчитали бы их правкой оператора).
             AdDomainInput.Text = _services.Cfg.Get("ad_domain");
+            ShowDetectedDomain();
             AdGroupAdminInput.Text = _services.Cfg.Get("ad_group_administrator");
             AdGroupProgInput.Text = _services.Cfg.Get("ad_group_programmer");
             AdGroupNaladchikInput.Text = _services.Cfg.Get("ad_group_naladchik");
@@ -2887,7 +2888,33 @@ public partial class SettingsView : UserControl
         _host.ShowStatus("Пароль программиста убран — роль больше его не спрашивает");
     }
 
-    private void AdSettings_LostFocus(object sender, RoutedEventArgs e) => SaveAdSettings();
+    /// <summary>Показать, В КАКОМ ДОМЕНЕ ЭТОТ КОМПЬЮТЕР, и назвать расхождение с полем «Домен»
+    /// вслух. Поле настройки намеренно не переписывается само: администратор мог указать другой
+    /// домен осознанно (доверенный домен, переезд), и тихая подмена чужого решения — худший способ
+    /// помочь. Кнопка «Подставить найденный домен» рядом — на случай, когда помощь всё же нужна.</summary>
+    private void ShowDetectedDomain()
+    {
+        var detected = MachineDomainProbe.Current();
+        ConnMachineDomainText.Text = MachineDomain.Hint(detected, AdDomainInput.Text);
+        UseDetectedDomainButton.Visibility =
+            detected.Best.Length > 0 && !MachineDomain.Same(detected.Best, AdDomainInput.Text)
+                ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UseDetectedDomain_Click(object sender, RoutedEventArgs e)
+    {
+        AdDomainInput.Text = MachineDomainProbe.Current().Best;
+        SaveAdSettings();
+        ShowDetectedDomain();
+    }
+
+    private void AdSettings_LostFocus(object sender, RoutedEventArgs e)
+    {
+        SaveAdSettings();
+        // Домен могли только что поправить руками — подсказка о расхождении обязана обновиться
+        // сразу, иначе она врёт ровно до следующего открытия настроек.
+        ShowDetectedDomain();
+    }
 
     private void AdSettings_KeyDown(object sender, KeyEventArgs e)
     {
@@ -2982,6 +3009,10 @@ public partial class SettingsView : UserControl
         /// по таблице можно было ответить на вопрос «почему роль не та».</summary>
         public string RoleSourceLabel => AppUserRoleSource.Label(Record);
         public string DomainCheckLabel => AppUserRoleSource.CheckLabel(Record);
+        /// <summary>«Домен входа» — из какого домена этот человек входил в последний раз. Ответ на
+        /// «а другие к какому домену относятся»: про свой компьютер Windows отвечает сама
+        /// (MachineDomain), про чужие — только эта зафиксированная отметка.</summary>
+        public string LogonDomainLabel => AppUserRoleSource.LogonDomainLabel(Record);
         public string FirstLoginAt => Record.FirstLoginAt;
         public string LastLoginAt => Record.LastLoginAt;
     }
@@ -2995,6 +3026,8 @@ public partial class SettingsView : UserControl
     {
         _allUsersData = _services.Db.GetAppUsers().Select(u => new UserRow { Record = u }).ToList();
         ApplyUsersFilter();
+        // Ответ на «к какому домену отношусь я» — прямо над таблицей, без единого вопроса человеку.
+        UsersMachineDomainText.Text = MachineDomain.Hint(MachineDomainProbe.Current(), _services.Cfg.Get("ad_domain"));
 
         UserRoleCombo.ItemsSource = RolesConfig.Roles.Select(r => new RoleOption(r.RoleId, r.Label)).ToList();
         UserRoleCombo.SelectedValuePath = "RoleId";
@@ -3010,7 +3043,10 @@ public partial class SettingsView : UserControl
                     u.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
                     // Фильтр обязан ловить и «откуда роль»: «не найден» и «вручную» — это как раз
                     // те выборки, ради которых администратор сюда и заходит.
-                    u.RoleSourceLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    u.RoleSourceLabel.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                    // И по домену входа: «покажи всех, кто входит из такого-то домена» — ровно тот
+                    // вопрос, ради которого столбец и заведён.
+                    u.LogonDomainLabel.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 .ToList();
     }
 
@@ -3066,7 +3102,9 @@ public partial class SettingsView : UserControl
                 return;
             }
 
-            var result = AdRosterSync.Apply(_services.Db, scan.Members, scan.Complete, DateTime.Now);
+            // Домен передаётся в сверку: по нему видно, кого спрашивать было бессмысленно —
+            // человека, который входит из другого домена, в этих группах нет и быть не должно.
+            var result = AdRosterSync.Apply(_services.Db, scan.Members, scan.Complete, DateTime.Now, domain);
             LoadUsersTab();
 
             // Правда должна доехать до остальных машин, иначе сверку пришлось бы делать на каждой.
@@ -3075,9 +3113,10 @@ public partial class SettingsView : UserControl
             try { ConfigSyncService.PushAppUsersOnly(_services, cfg.RootPath(), $"сверка с доменом ({domain})"); }
             catch (Exception ex) { pushNote = Environment.NewLine + Environment.NewLine + $"На общий диск список не уехал: {ex.Message}. Уедет со следующей отправкой конфига."; }
 
-            AppMessageBox.Show(DescribeScan(scan, result) + pushNote, "Обновить из домена",
+            AppMessageBox.Show(DescribeScan(scan, result, domain) + pushNote, "Обновить из домена",
                 MessageBoxButton.OK, scan.Complete ? MessageBoxImage.Information : MessageBoxImage.Warning);
-            _host.ShowStatus($"Сверка с доменом: добавлено {result.Added}, ролей изменено {result.RoleChanged}");
+            _host.ShowStatus($"Сверка с доменом: добавлено {result.Added}, ролей изменено {result.RoleChanged}" +
+                             (result.OtherDomain > 0 ? $", из другого домена {result.OtherDomain}" : ""));
         }
         finally
         {
@@ -3089,7 +3128,7 @@ public partial class SettingsView : UserControl
     /// и непрочитанные — с причиной), потом итог. Отдельной строкой — предупреждение о неполной
     /// сверке: при ней пометка «в домене не найден» НЕ ставится никому, и об этом надо сказать, иначе
     /// администратор решит, что все нашлись.</summary>
-    private static string DescribeScan(AdGroupScan scan, AdRosterSyncResult result)
+    private static string DescribeScan(AdGroupScan scan, AdRosterSyncResult result, string domain)
     {
         var lines = new List<string>();
         foreach (var p in scan.Probes)
@@ -3111,6 +3150,18 @@ public partial class SettingsView : UserControl
         else
             lines.Add("Часть групп прочитать не удалось, поэтому никому не проставлена пометка " +
                       "«в домене не найден»: по неполному ответу домена этого утверждать нельзя.");
+
+        // Разные домены у разных людей — не ошибка, а факт, и сказать о нём надо прямо: иначе
+        // сверка, сделанная не из того домена, просто «не находит» человека, и это выглядит как
+        // очередная поломка списка.
+        if (result.OtherDomain > 0)
+        {
+            lines.Add("");
+            lines.Add($"Входят из ДРУГОГО домена, поэтому в «{domain}» их не искали ({result.OtherDomain}):");
+            foreach (var who in result.OtherDomainLogins.Take(12)) lines.Add($"• {who}");
+            if (result.OtherDomain > 12) lines.Add($"• …и ещё {result.OtherDomain - 12}");
+            lines.Add("Это не ошибка. Чтобы свериться и по ним, повторите сверку, указав их домен.");
+        }
 
         return string.Join(Environment.NewLine, lines);
     }

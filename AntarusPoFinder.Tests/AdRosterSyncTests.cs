@@ -107,6 +107,51 @@ public class AdRosterSyncTests
         Assert.Contains("не найден", AppUserRoleSource.Label(user));
     }
 
+    /// <summary>Сверку делают ИЗ ОДНОГО домена, а люди в ростере бывают из разных. Тот, кто входит
+    /// из другого домена, в этих группах отсутствует по совершенно естественной причине —
+    /// помечать его «в домене не найден» значит соврать, а промолчать значит снова оставить
+    /// администратора с «список опять неверный».</summary>
+    [Fact]
+    public void Apply_PersonFromAnotherDomain_IsNamed_NotMarkedMissing()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var petrov = db.TouchOrCreateAppUser("petrov").Id!.Value;
+        db.RecordAppUserLogonDomain(petrov, "antarus.local");
+        var sidorov = db.TouchOrCreateAppUser("sidorov").Id!.Value;
+        db.RecordAppUserLogonDomain(sidorov, "ELITA");      // тот же домен, короткое имя
+
+        var result = AdRosterSync.Apply(db, new[] { new AdGroupMember("administrator", "revkin.i") },
+            complete: true, Now, scanDomain: "elita.local");
+
+        // Петров — из другого домена: назван списком, пометка не поставлена.
+        Assert.Equal(1, result.OtherDomain);
+        Assert.Contains(result.OtherDomainLogins, x => x.Contains("petrov") && x.Contains("antarus.local"));
+        Assert.Equal("", db.FindAppUserByLogin("petrov")!.DomainCheckedAt);
+
+        // Сидоров входит из ТОГО ЖЕ домена (ELITA = elita.local) — про него вывод честный.
+        Assert.False(db.FindAppUserByLogin("sidorov")!.DomainFound);
+        Assert.Equal(1, result.NotFoundInDomain);
+    }
+
+    /// <summary>Домен сверки не указан — утверждать «он из другого домена» не из чего, и поведение
+    /// остаётся ровно прежним.</summary>
+    [Fact]
+    public void Apply_WithoutScanDomain_BehavesExactlyAsBefore()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+        var petrov = db.TouchOrCreateAppUser("petrov").Id!.Value;
+        db.RecordAppUserLogonDomain(petrov, "antarus.local");
+
+        var result = AdRosterSync.Apply(db, new[] { new AdGroupMember("administrator", "revkin.i") }, complete: true, Now);
+
+        Assert.Equal(0, result.OtherDomain);
+        Assert.Equal(1, result.NotFoundInDomain);
+        Assert.False(db.FindAppUserByLogin("petrov")!.DomainFound);
+    }
+
     [Fact]
     public void Apply_IncompleteScan_NeverClaimsSomebodyIsMissingFromDomain()
     {

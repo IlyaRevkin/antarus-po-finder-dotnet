@@ -1041,6 +1041,10 @@ public static class ConfigSyncService
             // (Database.ConfigExchange): узкий канал обязан нести тот же факт, иначе сверка с
             // доменом, сделанная на машине администратора, до остальных бы не доехала.
             RoleSource = u.RoleSource, DomainCheckedAt = u.DomainCheckedAt, DomainFound = u.DomainFound,
+            // Домен последнего входа — ровно та строка, ради которой узкий канал и существует:
+            // отправляет её обычно НЕ администратор, а та машина, за которой человек только что
+            // вошёл. Без неё «из какого домена входит коллега» знала бы только она одна.
+            LogonDomain = u.LogonDomain, LogonDomainAt = u.LogonDomainAt,
         }).ToList();
 
         rootNode["app_users"] = JsonSerializer.SerializeToNode(mergedUsers);

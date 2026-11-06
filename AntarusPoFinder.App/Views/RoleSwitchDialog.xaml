@@ -42,7 +42,9 @@
         </Popup>
 
         <TextBlock Text="Домен:" Margin="0,0,0,4"/>
-        <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
+        <TextBox x:Name="AdDomainInput" Margin="0,0,0,4"/>
+        <!-- То же, что и в окне входа: домен определяется сам (см. MachineDomainProbe). -->
+        <TextBlock x:Name="DetectedDomainText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
         <TextBlock Text="Логин:" Margin="0,0,0,4"/>
         <TextBox x:Name="AdLoginInput" Margin="0,0,0,10" ToolTip="Например: ivanov.i, ivanov.i@Elita или Elita\ivanov.i"
                  LostFocus="AdLoginInput_LostFocus"/>

@@ -7,7 +7,8 @@ namespace AntarusPoFinder.Core.Data;
 public partial class Database
 {
     private const string AppUserSelectCols =
-        "id, ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id, role_source, domain_checked_at, domain_found";
+        "id, ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id, role_source, " +
+        "domain_checked_at, domain_found, logon_domain, logon_domain_at";
 
     public AppUser? FindAppUserByLogin(string normalizedLogin)
     {
@@ -125,6 +126,36 @@ public partial class Database
         });
     }
 
+    /// <summary>ЗАПОМНИТЬ, ИЗ КАКОГО ДОМЕНА ЧЕЛОВЕК ВОШЁЛ. Вызывается после каждого удачного входа
+    /// по доменной учётной записи (AdStartupLoginDialog, RoleSwitchDialog).
+    ///
+    /// Своего рода журнал наблюдений, а не настройка: роль и её источник этим не трогаются вовсе
+    /// (и role_updated_at не поднимается — иначе «он тут входил» перебило бы чужое настоящее
+    /// решение о роли при слиянии конфигов). Нужно это ровно для одного вопроса, на который
+    /// приложение раньше ответить не могло: «а другие к какому домену относятся». Спросить чужой
+    /// компьютер нельзя — можно только записать факт входа, когда он случился.
+    ///
+    /// Пустой домен игнорируется: лучше честное «неизвестен», чем затёртая пустотой правда.</summary>
+    public void RecordAppUserLogonDomain(int id, string domain, string? whenIso = null)
+    {
+        domain = (domain ?? "").Trim();
+        if (domain.Length == 0) return;
+        ExecuteNonQuery("UPDATE app_users SET logon_domain=@d, logon_domain_at=@at WHERE id=@id", cmd =>
+        {
+            cmd.Parameters.AddWithValue("@d", domain);
+            cmd.Parameters.AddWithValue("@at", string.IsNullOrEmpty(whenIso) ? NowIso() : whenIso);
+            cmd.Parameters.AddWithValue("@id", id);
+        });
+    }
+
+    /// <summary>То же самое по логину — удобство для путей входа, где строка ростера только что
+    /// заведена/обновлена и отдельно её искать незачем.</summary>
+    public void RecordAppUserLogonDomain(string normalizedLogin, string domain)
+    {
+        var user = FindAppUserByLogin(normalizedLogin);
+        if (user?.Id is not null) RecordAppUserLogonDomain(user.Id.Value, domain);
+    }
+
     /// <summary>Administrator removing a stale/mistaken roster entry from Настройки → Пользователи.
     /// Local-only: MergeAppUsersInto never deletes (see its doc — "Nobody is ever removed from the
     /// roster via sync"), so if another machine still has this login in its own local roster, the
@@ -164,8 +195,8 @@ public partial class Database
                     var sync = string.IsNullOrEmpty(u.SyncId) ? Guid.NewGuid().ToString() : u.SyncId;
                     ExecuteNonQuery("""
                         INSERT INTO app_users(ad_login, role, first_login_at, last_login_at, role_updated_at, sync_id,
-                                              role_source, domain_checked_at, domain_found)
-                        VALUES(@l,@r,@f,@la,@ru,@sy,@src,@dc,@df)
+                                              role_source, domain_checked_at, domain_found, logon_domain, logon_domain_at)
+                        VALUES(@l,@r,@f,@la,@ru,@sy,@src,@dc,@df,@ld,@lda)
                         """, cmd =>
                     {
                         cmd.Parameters.AddWithValue("@l", u.AdLogin); cmd.Parameters.AddWithValue("@r", u.Role);
@@ -174,6 +205,8 @@ public partial class Database
                         cmd.Parameters.AddWithValue("@src", u.RoleSource ?? "");
                         cmd.Parameters.AddWithValue("@dc", u.DomainCheckedAt ?? "");
                         cmd.Parameters.AddWithValue("@df", u.DomainFound ? 1 : 0);
+                        cmd.Parameters.AddWithValue("@ld", u.LogonDomain ?? "");
+                        cmd.Parameters.AddWithValue("@lda", u.LogonDomainAt ?? "");
                     });
                 }
                 continue;
@@ -191,11 +224,19 @@ public partial class Database
             var incomingCheckWins = string.CompareOrdinal(u.DomainCheckedAt ?? "", existing.DomainCheckedAt) > 0;
             var wantCheckedAt = incomingCheckWins ? (u.DomainCheckedAt ?? "") : existing.DomainCheckedAt;
             var wantFound = incomingCheckWins ? u.DomainFound : existing.DomainFound;
+            // Домен последнего входа — наблюдение, как и сверка: побеждает более ПОЗДНИЙ вход,
+            // чьей бы машиной он ни был замечен. Человек ходит по нескольким компьютерам, и факт
+            // «в прошлый вторник он входил из ELITA» должен быть виден всем, а не только той
+            // машине, за которой он тогда сидел. Домен и его отметка времени едут строго парой.
+            var incomingLogonWins = string.CompareOrdinal(u.LogonDomainAt ?? "", existing.LogonDomainAt) > 0;
+            var wantLogonDomain = incomingLogonWins ? (u.LogonDomain ?? "") : existing.LogonDomain;
+            var wantLogonAt = incomingLogonWins ? (u.LogonDomainAt ?? "") : existing.LogonDomainAt;
             var adoptSyncId = !string.IsNullOrEmpty(u.SyncId) && u.SyncId != existing.SyncId;
 
             var changed = wantRole != existing.Role || wantRoleSource != existing.RoleSource
                 || wantFirst != existing.FirstLoginAt || wantLast != existing.LastLoginAt
-                || wantCheckedAt != existing.DomainCheckedAt || wantFound != existing.DomainFound || adoptSyncId;
+                || wantCheckedAt != existing.DomainCheckedAt || wantFound != existing.DomainFound
+                || wantLogonDomain != existing.LogonDomain || wantLogonAt != existing.LogonDomainAt || adoptSyncId;
             if (!changed) continue;
 
             if (wantRole != existing.Role) counts.AppUsersUpdated++;
@@ -203,7 +244,8 @@ public partial class Database
 
             ExecuteNonQuery("""
                 UPDATE app_users SET role=@r, role_source=@src, first_login_at=@f, last_login_at=@la,
-                                     role_updated_at=@ru, sync_id=@sy, domain_checked_at=@dc, domain_found=@df
+                                     role_updated_at=@ru, sync_id=@sy, domain_checked_at=@dc, domain_found=@df,
+                                     logon_domain=@ld, logon_domain_at=@lda
                 WHERE id=@id
                 """, cmd =>
             {
@@ -211,6 +253,7 @@ public partial class Database
                 cmd.Parameters.AddWithValue("@f", wantFirst);
                 cmd.Parameters.AddWithValue("@la", wantLast); cmd.Parameters.AddWithValue("@ru", wantRoleUpdatedAt);
                 cmd.Parameters.AddWithValue("@dc", wantCheckedAt); cmd.Parameters.AddWithValue("@df", wantFound ? 1 : 0);
+                cmd.Parameters.AddWithValue("@ld", wantLogonDomain); cmd.Parameters.AddWithValue("@lda", wantLogonAt);
                 cmd.Parameters.AddWithValue("@id", existing.Id!.Value);
                 cmd.Parameters.AddWithValue("@sy", adoptSyncId ? u.SyncId : existing.SyncId);
             });
@@ -254,5 +297,7 @@ public partial class Database
         RoleSource = GetString(r, "role_source"),
         DomainCheckedAt = GetString(r, "domain_checked_at"),
         DomainFound = GetInt(r, "domain_found") != 0,
+        LogonDomain = GetString(r, "logon_domain"),
+        LogonDomainAt = GetString(r, "logon_domain_at"),
     };
 }

@@ -63,7 +63,11 @@
                   ToolTip="Обычно менять не нужно. Измените, только если вход не проходит и IT сообщили другой домен или адрес сервера.">
             <StackPanel Margin="0,8,0,0">
                 <TextBlock Text="Домен:" Margin="0,0,0,4"/>
-                <TextBox x:Name="AdDomainInput" Margin="0,0,0,10"/>
+                <TextBox x:Name="AdDomainInput" Margin="0,0,0,4"/>
+                <!-- В каком домене этот компьютер — спрашивает не человек у IT, а программа у
+                     Windows (см. MachineDomainProbe). Сюда же попадает предупреждение, если в
+                     настройках задан другой домен. -->
+                <TextBlock x:Name="DetectedDomainText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                 <TextBlock Text="Сервер (проверка пароля по HTTP):" Margin="0,0,0,4"/>
                 <TextBox x:Name="AdHttpUrlInput" Margin="0,0,0,4"/>
             </StackPanel>

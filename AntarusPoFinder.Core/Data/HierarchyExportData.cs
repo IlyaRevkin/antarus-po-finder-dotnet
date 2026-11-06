@@ -381,6 +381,13 @@ public class ExportedAppUser
     /// просто более поздняя сверка — её делают с одной машины, а знать результат должны все.</summary>
     [JsonPropertyName("domain_checked_at")] public string DomainCheckedAt { get; set; } = "";
     [JsonPropertyName("domain_found")] public bool DomainFound { get; set; }
+
+    /// <summary>Из какого домена человек входил в последний раз и когда (см. Domain/AppUser.cs).
+    /// Тоже наблюдение, а не решение: при слиянии побеждает просто более поздний вход — ровно
+    /// затем, чтобы на вопрос «а другие к какому домену относятся» отвечала любая машина, а не
+    /// только та, за которой человек тогда сидел.</summary>
+    [JsonPropertyName("logon_domain")] public string LogonDomain { get; set; } = "";
+    [JsonPropertyName("logon_domain_at")] public string LogonDomainAt { get; set; } = "";
 }
 
 /// <summary>Одно переписывание hw модификации контроллера (напр. PIXEL2 044 → 1321), сделанное
