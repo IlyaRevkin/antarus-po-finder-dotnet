@@ -4086,6 +4086,56 @@ public partial class SettingsView : UserControl
     /// продублировать вторым окном.</summary>
     private LegacyImportDialog? _legacyWindow;
 
+    /// <summary>СНЯТЬ СЛЕПОК ДИСКА ПРЯМО СЕЙЧАС (docs/disk-snapshot.md).
+    ///
+    /// Отдельного окна у операции нет намеренно: показывать тут нечего — ни плана, ни выбора, ни
+    /// решений. Поэтому кнопка гаснет, рядом идёт строка хода, а работа уходит в фоновый поток:
+    /// обход сетевого дерева — это тысячи обращений к шаре, и держать на них поток интерфейса
+    /// нельзя.
+    ///
+    /// Право на запуск берётся у LongOperationRegistry, а не «кнопка же погашена»: кнопка гаснет
+    /// только на ЭТОЙ странице, а перестройка диска запускается с другой — и опись, снятая посреди
+    /// переезда файлов, была бы описью половины переезда.</summary>
+    private async void DiskSnapshot_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_services.Operations.TryBegin(LongOperationKind.DiskSnapshot,
+                LongOperationSubject.None, "Слепок диска", out var lease, out var refusal))
+        {
+            MessageBox.Show(Window.GetWindow(this), refusal, "Слепок диска",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        DiskSnapshotBtn.IsEnabled = false;
+        DiskSnapshotStatus.Text = "обхожу диск…";
+        try
+        {
+            var root = _services.Cfg.RootPath();
+            var url = _services.Cfg.DiagnosticsDropUrl();
+            var code = _services.Cfg.DiagnosticsDropCode();
+            // Progress отдаёт отчёт обратно в поток интерфейса сам — он захватывает контекст
+            // синхронизации в момент создания, то есть здесь.
+            var progress = new Progress<string>(text => DiskSnapshotStatus.Text = text);
+
+            var result = await Task.Run(() => DiskSnapshotService.SendToDropAsync(
+                _services.Db, root, System.Environment.MachineName,
+                AppUpdateService.CurrentVersionText, url, code, progress));
+
+            DiskSnapshotStatus.Text = result.Ok
+                ? $"отправлено: {result.FileName}, {result.Bytes / 1024} КБ"
+                : $"не отправлено: {result.Error}";
+        }
+        catch (System.Exception ex)
+        {
+            DiskSnapshotStatus.Text = "сорвалось: " + ex.Message;
+        }
+        finally
+        {
+            lease?.Dispose();
+            DiskSnapshotBtn.IsEnabled = true;
+        }
+    }
+
     private void DiskMigration_Click(object sender, RoutedEventArgs e)
     {
         // Немодально: перестройка идёт минутами, и всё это время программой надо пользоваться.
