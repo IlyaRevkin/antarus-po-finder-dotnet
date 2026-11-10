@@ -36,6 +36,8 @@ db[]        { syncId, group, subtype, controller, version, diskPath, isOpc, requ
               cabinetSn, status, instructionsPath, modbusMapPath, ioMapPath, hmiPath,
               released, archived, swVersion, hwVersion, execution }   — мнение БАЗЫ
 issues[]    { kind, path, detail }      — что не сходится (разбор, см. ниже)
+docsNowhere { "HMI": [ "ПО/ПЖ/2.0/SMH5/1.0.0005.0004", … ], … }
+                                        — папка заведена, документа нет НИГДЕ
 summary     { versionsOnDisk, versionsInDb, newLayout, compatLayout,
               folderCount, bytes, emptySlots{ "HMI": 1400, … } }
 ```
@@ -76,7 +78,21 @@ summary     { versionsOnDisk, versionsInDb, newLayout, compatLayout,
 | `changelog-missing` | Нет журнала изменений. Не беда, а наблюдение: по нему досмотр диска восстанавливает описание и теги |
 | `truncated` | Дыр больше потолка (`DiskAudit.MaxIssues`), показаны первые |
 
-Чего в списке нарочно НЕТ: пустых папок раскладки самих по себе. Перестройка диска заводит все пять
+### Документа нет нигде (`docsNowhere`)
+
+Отдельно от списка дыр — и нарочно. Это случай, когда папка раскладки у версии ЗАВЕДЕНА (значит,
+документ сюда полагался), файлов в ней нет, в общей папке контроллера тоже нет, и база ничего не
+обещала. Расхождения тут нет: база молчит, диск пуст, формально всё согласовано. Но жалоба
+«не найден HMI» выглядела ровно так — ответ «панели нет» был честным, а беда настоящей.
+
+Поэтому такие версии перечислены списком по каждой папке документов (до
+`DiskAudit.MaxNowherePerSlot` на папку), но не вперемешку с расхождениями: законных случаев
+(«у этого шкафа панели и не бывает») здесь сколько угодно, и смешай их с дырами — читать перестали
+бы и то, и другое. Пять версий из диагностики 06.11.2026 попадают сюда, в `docsNowhere["HMI"]`;
+шестая (ХП/SMH5 1.3.0005.0003) — в `issues` как `db-without-disk`, потому что папки версии на диске
+нет вовсе.
+
+Чего в списке дыр нарочно НЕТ: пустых папок раскладки самих по себе. Перестройка диска заводит все пять
 папок у каждой версии и пустыми — человек должен видеть, куда что класть, и пустая «Карта Modbus» у
 шкафа без карты это норма. Ругайся слепок на каждую, список утонул бы в тысячах законных строк и его
 перестали бы читать. Вместо этого пустые папки посчитаны в `summary.emptySlots`: «пустых HMI 1400 из
@@ -143,6 +159,7 @@ ssh home 'ls -la /mnt/data/ticket-drop/diag/ | grep _disk_'
 scp -P 2222 ilia@109.230.156.80:/mnt/data/ticket-drop/diag/'20261106_142000_disk_ilia-pc.zip' .
 unzip -p 20261106_142000_disk_ilia-pc.zip snapshot.json | jq '.summary'
 unzip -p 20261106_142000_disk_ilia-pc.zip snapshot.json | jq -r '.issues[] | "\(.kind)\t\(.path)\t\(.detail)"'
+unzip -p 20261106_142000_disk_ilia-pc.zip snapshot.json | jq -r '.docsNowhere.HMI[]'
 ```
 
 Первым делом смотреть `schema`, `machine` и `takenAt`. Рассуждать о диске по снимку недельной

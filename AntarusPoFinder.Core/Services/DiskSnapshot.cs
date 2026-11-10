@@ -79,6 +79,11 @@ public sealed record DiskSnapshot(
     /// правила раскладки живут в программе.</summary>
     [property: JsonPropertyName("issues")] IReadOnlyList<DiskSnapshotIssue> Issues,
     [property: JsonPropertyName("summary")] DiskSnapshotSummary Summary,
+    /// <summary>По каждой папке документов — версии, у которых папка заведена, а документа нет
+    /// НИГДЕ: ни у версии, ни у контроллера. Расхождением это не считается (база его и не обещала),
+    /// но выглядела жалоба «не найден HMI» именно так, и видеть такое надо списком — см.
+    /// <see cref="DiskAudit.DocsNowhere"/>.</summary>
+    [property: JsonPropertyName("docsNowhere")] IReadOnlyDictionary<string, IReadOnlyList<string>> DocsNowhere,
     /// <summary>Версия программы, снявшей слепок: «на диске не хватает папок» и «программа ещё не
     /// умеет их заводить» — разные диагнозы, и отличить их можно только по версии.</summary>
     [property: JsonPropertyName("appVersion")] string AppVersion)
@@ -151,9 +156,10 @@ public sealed record DiskSnapshot(
         // нет: «в базе есть — на диске нет» про файл, не влезший в потолок, было бы враньём.
         var issues = DiskAudit.Find(kept, dirs, db);
         var summary = DiskAudit.Summarize(kept, dirs, db);
+        var nowhere = DiskAudit.DocsNowhere(kept, dirs, db);
 
         return new DiskSnapshot(CurrentSchema, machine, Stamp(takenAt), root, HierarchyService.FolderPo,
-            all.Count, truncated, kept, db, dirs, issues, summary, appVersion ?? "");
+            all.Count, truncated, kept, db, dirs, issues, summary, nowhere, appVersion ?? "");
     }
 
     /// <summary>Путь внутри слепка — всегда через косую черту и без ведущего разделителя. Диск

@@ -174,6 +174,44 @@ public static class DiskAudit
             empty);
     }
 
+    /// <summary>Сколько версий показывать в списке «документа нет нигде» по каждой папке. Список
+    /// должен отвечать на вопрос «какие именно», а не заменять собой выгрузку всей базы: если таких
+    /// версий больше, это видно по цифре в сводке.</summary>
+    public const int MaxNowherePerSlot = 500;
+
+    /// <summary>ДОКУМЕНТА НЕТ НИГДЕ: папка раскладки у версии заведена (значит, документ сюда
+    /// полагался), файлов в ней нет, и в общей папке контроллера тоже нет.
+    ///
+    /// <b>Почему это не попало в список дыр, а вынесено отдельно.</b> Дыра — это расхождение: база
+    /// обещает, диск не держит. Здесь расхождения нет: база молчит, и диск пуст, — формально всё
+    /// согласовано. Но жалоба «не найден HMI» выглядела именно так: папка <c>HMI\</c> у версии есть,
+    /// файлов в ней нет, у контроллера тоже, в записи пусто — и ответ «панели нет» был честным, а
+    /// беда всё равно настоящей. Такое надо видеть СПИСКОМ, но не вперемешку с расхождениями:
+    /// законных случаев («у этого шкафа панели и не бывает») здесь сколько угодно.</summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> DocsNowhere(
+        IEnumerable<DiskSnapshotEntry> files,
+        IEnumerable<string> folders,
+        IEnumerable<DiskSnapshotDbRow> db)
+    {
+        var tree = new Tree(files, folders);
+        var versions = new SortedSet<string>(tree.VersionFoldersOnDisk(), StringComparer.Ordinal);
+        foreach (var row in db ?? Array.Empty<DiskSnapshotDbRow>())
+        {
+            var path = DiskSnapshot.NormalizePath(row.DiskPath);
+            if (path.Length > 0 && tree.HasFolder(path)) versions.Add(path);
+        }
+
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var slot in VersionLayout.SlotFolderNames)
+        {
+            result[slot] = versions
+                .Where(v => tree.HasFolder(v + "/" + slot) && !HasDoc(tree, v, slot))
+                .Take(MaxNowherePerSlot)
+                .ToList();
+        }
+        return result;
+    }
+
     /// <summary>Что база обещает в каждой из папок документов. Четыре поля записи — ровно те, что
     /// заполняет загрузка; пустое поле означает «документа и не обещали», и спрашивать с диска
     /// за него нельзя.</summary>
