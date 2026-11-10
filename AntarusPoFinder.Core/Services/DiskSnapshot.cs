@@ -27,6 +27,14 @@ public sealed record DiskSnapshotDbRow(
     [property: JsonPropertyName("requestNum")] string RequestNum,
     [property: JsonPropertyName("cabinetSn")] string CabinetSn,
     [property: JsonPropertyName("status")] string Status,
+    // Что база ОБЕЩАЕТ в папках документов. Без этих четырёх полей слепок не умел отличить
+    // «документа и не обещали» (карты Modbus у шкафа просто нет) от «обещали, а на диске пусто» —
+    // а это и есть жалоба «не найден HMI» от 06.11.2026: папка HMI\ у версии ЕСТЬ, файлов в ней
+    // НЕТ. Пути относительные, как и всё остальное в слепке.
+    [property: JsonPropertyName("instructionsPath")] string InstructionsPath,
+    [property: JsonPropertyName("modbusMapPath")] string ModbusMapPath,
+    [property: JsonPropertyName("ioMapPath")] string IoMapPath,
+    [property: JsonPropertyName("hmiPath")] string HmiPath,
     // Состояние МОДЕРАЦИИ. Добавлено по конкретному вопросу: «у коллеги 20 на модерации, а у меня
     // 3». Очередь модерации — это строки с released = 0 (плюс не архивные и не заменённые более
     // свежей), и расхождение между машинами бывает трёх разных пород: решение не доехало, строки
@@ -60,9 +68,25 @@ public sealed record DiskSnapshot(
     [property: JsonPropertyName("fileCount")] int FileCount,
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("files")] IReadOnlyList<DiskSnapshotEntry> Files,
-    [property: JsonPropertyName("db")] IReadOnlyList<DiskSnapshotDbRow> Db)
+    [property: JsonPropertyName("db")] IReadOnlyList<DiskSnapshotDbRow> Db,
+    /// <summary>ВСЕ папки дерева, включая пустые. Казалось бы, лишнее — папки видны по путям файлов;
+    /// но ровно наоборот: папка, в которой файлов НЕТ, в описи файлов не оставляет следа вовсе. А
+    /// жалоба «не найден HMI» (06.11.2026) оказалась именно такой — папка <c>HMI\</c> есть, файлов в
+    /// ней нет. Без этого списка такую дыру по слепку не увидеть.</summary>
+    [property: JsonPropertyName("folders")] IReadOnlyList<string> Folders,
+    /// <summary>Что не сходится — посчитано на машине, которая диск видит (см. <see cref="DiskAudit"/>).
+    /// Считать это можно было бы и при разборе, но тогда каждый читающий считал бы по-своему, а
+    /// правила раскладки живут в программе.</summary>
+    [property: JsonPropertyName("issues")] IReadOnlyList<DiskSnapshotIssue> Issues,
+    [property: JsonPropertyName("summary")] DiskSnapshotSummary Summary,
+    /// <summary>Версия программы, снявшей слепок: «на диске не хватает папок» и «программа ещё не
+    /// умеет их заводить» — разные диагнозы, и отличить их можно только по версии.</summary>
+    [property: JsonPropertyName("appVersion")] string AppVersion)
 {
-    public const int CurrentSchema = 1;
+    /// <summary>2 — добавлены папки (включая пустые), разбор расхождений и версия программы.
+    /// Читающая сторона обязана смотреть на это число: в слепке схемы 1 пустых папок нет вовсе, и
+    /// «дыр не найдено» там означает «их не искали».</summary>
+    public const int CurrentSchema = 2;
 
     /// <summary>Потолок числа файлов в одном слепке. Дерево ПО конторы — тысячи файлов, но на диске
     /// рядом случается и чужое добро; слепок на сотню мегабайт никто читать не станет, а платит за
@@ -76,11 +100,17 @@ public sealed record DiskSnapshot(
     ///
     /// Порядок файлов строго по пути: два слепка подряд должны отличаться ровно тем, чем отличается
     /// диск, а не порядком обхода файловой системы.</summary>
+    /// <param name="folders">Все папки дерева, включая пустые (см. <see cref="Folders"/>). Не
+    /// передали — слепок получится схемы 2 с пустым списком папок, и разбор честно не найдёт
+    /// пустых папок, потому что ему их не показали.</param>
+    /// <param name="appVersion">Версия снявшей слепок программы.</param>
     public static DiskSnapshot Build(
         string machine, DateTime takenAt, string root,
         IEnumerable<(string RelativePath, long Size, DateTime Modified)> files,
         IEnumerable<FwVersionRecord> rows,
-        int maxFiles = MaxFiles)
+        int maxFiles = MaxFiles,
+        IEnumerable<string>? folders = null,
+        string appVersion = "")
     {
         var all = files
             .Select(f => new DiskSnapshotEntry(NormalizePath(f.RelativePath), f.Size, Stamp(f.Modified)))
@@ -98,13 +128,32 @@ public sealed record DiskSnapshot(
                 r.VersionRaw ?? "",
                 NormalizePath(Relative(root, r.DiskPath ?? "")),
                 r.IsOpc, r.RequestNum ?? "", r.CabinetSn ?? "", r.Status ?? "",
+                NormalizePath(Relative(root, r.InstructionsPath ?? "")),
+                NormalizePath(Relative(root, r.ModbusMapPath ?? "")),
+                NormalizePath(Relative(root, r.IoMapPath ?? "")),
+                NormalizePath(Relative(root, r.HmiPath ?? "")),
                 r.Released, r.Archived, r.SwVersion, r.HwVersion, r.Execution ?? ""))
             .OrderBy(r => r.DiskPath, StringComparer.Ordinal)
             .ThenBy(r => r.Version, StringComparer.Ordinal)
             .ToList();
 
+        var dirs = (folders ?? Array.Empty<string>())
+            .Select(NormalizePath)
+            .Where(f => f.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+
+        // Разбор считается ЗДЕСЬ, на машине, которая диск видит. Не потому, что иначе нельзя, а
+        // потому, что правила раскладки живут в программе: посчитай их читающая сторона — и у неё
+        // появилась бы вторая, своя версия этих правил, расходящаяся с первой по мере изменений.
+        // Разбор идёт по УСЕЧЁННОЙ описи (kept), чтобы его выводы не ссылались на то, чего в слепке
+        // нет: «в базе есть — на диске нет» про файл, не влезший в потолок, было бы враньём.
+        var issues = DiskAudit.Find(kept, dirs, db);
+        var summary = DiskAudit.Summarize(kept, dirs, db);
+
         return new DiskSnapshot(CurrentSchema, machine, Stamp(takenAt), root, HierarchyService.FolderPo,
-            all.Count, truncated, kept, db);
+            all.Count, truncated, kept, db, dirs, issues, summary, appVersion ?? "");
     }
 
     /// <summary>Путь внутри слепка — всегда через косую черту и без ведущего разделителя. Диск

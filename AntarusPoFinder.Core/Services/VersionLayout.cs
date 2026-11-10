@@ -309,11 +309,21 @@ public static class VersionLayout
     /// дед, потому что между версией и контроллером стоит ещё «ОПЦ». ОПЦ по старой
     /// (<c>&lt;подтип&gt;\ОПЦ\&lt;версия&gt;</c>): папки контроллера над ней нет вовсе — null, документы у такой
     /// версии ищутся только внутри неё самой.</summary>
-    public static string? ControllerFolderOf(string? versionDir)
+    public static string? ControllerFolderOf(string? versionDir) =>
+        ControllerFolderOf(versionDir, SafeDirExists!);
+
+    /// <summary>То же самое, но БЕЗ обращения к диску: «существует ли такая папка» отвечает
+    /// переданный предикат. Нужно разбору слепка (<see cref="DiskAudit"/>), который работает по уже
+    /// снятой описи и до настоящей шары не достаёт вовсе.
+    ///
+    /// Отдельной копии правила у разбора быть не должно: раскладку знает только этот класс, и две
+    /// разошедшиеся копии «где лежат документы контроллера» давали бы разный ответ на один вопрос —
+    /// слепок говорил бы «документа нет» там, где программа его показывает.</summary>
+    public static string? ControllerFolderOf(string? versionDir, Func<string, bool> folderExists)
     {
         if (string.IsNullOrWhiteSpace(versionDir)) return null;
         var parent = SafeParent(versionDir);
-        if (parent is null) return null;
+        if (parent is null || parent.Length == 0) return null;
         if (!string.Equals(Path.GetFileName(parent), HierarchyFolders.Opc, StringComparison.OrdinalIgnoreCase))
             return parent;
 
@@ -324,8 +334,8 @@ public static class VersionLayout
         // лежат его папки документов, у подтипа — папки контроллеров. Наличие хотя бы одной папки
         // документа — достаточный и дешёвый признак.
         var above = SafeParent(parent);
-        if (above is null) return null;
-        return SlotFolderNames.Any(slot => SafeDirExists(Path.Combine(above, slot))) ? above : null;
+        if (above is null || above.Length == 0) return null;
+        return SlotFolderNames.Any(slot => folderExists(Path.Combine(above, slot))) ? above : null;
     }
 
     // ── Исполнения: папки ВНУТРИ «Прошивка\» ────────────────────────────────────────────────────

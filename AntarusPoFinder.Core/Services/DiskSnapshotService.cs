@@ -43,12 +43,7 @@ public sealed class DiskSnapshotService
         try
         {
             var takenAt = DateTime.UtcNow;
-            var files = EnumerateSoftwareTree(root);
-            // Архивные версии в слепок входят: именно вокруг «куда делась старая прошивка» и бывают
-            // вопросы, а на диске она лежит как ни в чём не бывало.
-            var rows = db.GetAllFwVersionsWithNames(includeArchived: true);
-
-            var snapshot = DiskSnapshot.Build(machine, takenAt, root, files, rows);
+            var snapshot = Collect(db, root, machine, appVersion: "", takenAtUtc: takenAt, ct: ct);
             var payload = Gzip(snapshot.ToJson());
 
             var latest = await _client.PutBytesAsync(_settings, DiskSnapshotStorage.LatestKey(machine),
@@ -70,18 +65,49 @@ public sealed class DiskSnapshotService
         }
     }
 
+    /// <summary>СНЯТЬ слепок, никуда его не отправляя: обход диска плюс строки базы. Отдельно от
+    /// отправки, потому что адресатов у одного и того же слепка двое (страница приёма и бакет), а
+    /// обход диска — самая долгая часть, и делать его дважды было бы странно.
+    ///
+    /// <paramref name="progress"/> — строка для окна хода («обошли 3400 файлов»). Обход сетевого
+    /// диска идёт минутами, и молчащее окно от зависшего не отличить.</summary>
+    public static DiskSnapshot Collect(
+        Database db, string root, string machine, string appVersion, DateTime takenAtUtc,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var folders = new List<string>();
+        var files = EnumerateSoftwareTree(root, folders, progress, ct).ToList();
+
+        // Архивные версии в слепок входят: именно вокруг «куда делась старая прошивка» и бывают
+        // вопросы, а на диске она лежит как ни в чём не бывало.
+        var rows = db.GetAllFwVersionsWithNames(includeArchived: true);
+
+        progress?.Report($"обход закончен: файлов {files.Count}, папок {folders.Count}; сверяю с базой");
+        return DiskSnapshot.Build(machine, takenAtUtc, root, files, rows,
+            folders: folders, appVersion: appVersion);
+    }
+
     /// <summary>Обход дерева ПО. Недоступную папку пропускаем молча и идём дальше: на сетевом диске
-    /// одна закрытая папка — обычное дело, и ронять из-за неё весь слепок незачем.</summary>
-    private static IEnumerable<(string RelativePath, long Size, DateTime Modified)> EnumerateSoftwareTree(string root)
+    /// одна закрытая папка — обычное дело, и ронять из-за неё весь слепок незачем.
+    ///
+    /// Папки собираются ОТДЕЛЬНЫМ списком, а не выводятся из путей файлов. Это не придирка к
+    /// полноте: папка, в которой файлов нет, в описи файлов не оставляет следа вовсе — а жалоба
+    /// «не найден HMI» (06.11.2026) оказалась именно такой, папка <c>HMI\</c> на месте, внутри
+    /// пусто. Ради того, чтобы такие дыры были видны списком, слепок и затевался.</summary>
+    private static IEnumerable<(string RelativePath, long Size, DateTime Modified)> EnumerateSoftwareTree(
+        string root, List<string> folders, IProgress<string>? progress, CancellationToken ct)
     {
         var po = Path.Combine(root, HierarchyService.FolderPo);
         if (!Directory.Exists(po)) yield break;
 
         var stack = new Stack<string>();
         stack.Push(po);
+        var seen = 0;
         while (stack.Count > 0)
         {
+            ct.ThrowIfCancellationRequested();
             var dir = stack.Pop();
+            folders.Add(DiskSnapshot.Relative(root, dir));
 
             string[] subdirs;
             try { subdirs = Directory.GetDirectories(dir); }
@@ -97,9 +123,38 @@ public sealed class DiskSnapshotService
                 FileInfo info;
                 try { info = new FileInfo(file); }
                 catch { continue; }
+                // Отчёт раз в тысячу файлов, а не на каждый: на сетевом диске их десятки тысяч, и
+                // перерисовывать строку состояния чаще, чем человек успевает прочитать, — только
+                // тратить его же время.
+                if (++seen % 1000 == 0) progress?.Report($"обошли файлов: {seen}");
                 yield return (DiskSnapshot.Relative(root, file), info.Length, info.LastWriteTime);
             }
         }
+    }
+
+    /// <summary>СНЯТЬ И ОТПРАВИТЬ через тихий канал диагностики — тот путь, которым слепок доезжает
+    /// до того, кто чинит программу (почему не бакет — см. <see cref="DiskSnapshotDrop"/>).
+    ///
+    /// Статический метод, а не ещё один объект: ключей от хранилища этому пути не нужно вовсе,
+    /// нужны только адрес страницы приёма и код — те же, что у журналов заливок.</summary>
+    public static async Task<DiskSnapshotDrop.Result> SendToDropAsync(
+        Database db, string root, string machine, string appVersion,
+        string dropUrl, string dropCode,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var takenAt = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            return new DiskSnapshotDrop.Result(false, "рабочий диск недоступен", "", 0);
+
+        var snapshot = Collect(db, root, machine, appVersion, takenAt, progress, ct);
+        progress?.Report("упаковываю и отправляю");
+        var result = await DiskSnapshotDrop.SendAsync(snapshot.ToJson(), machine, takenAt,
+            dropUrl, dropCode, ct: ct).ConfigureAwait(false);
+
+        progress?.Report(result.Ok
+            ? $"отправлено: {result.FileName}, {result.Bytes / 1024} КБ, расхождений {snapshot.Issues.Count}"
+            : $"не отправлено: {result.Error}");
+        return result;
     }
 
     private static byte[] Gzip(string text)
