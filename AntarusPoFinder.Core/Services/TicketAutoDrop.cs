@@ -214,29 +214,13 @@ public static class TicketAutoDrop
             try { body = File.ReadAllBytes(file); }
             catch (IOException) { continue; }                       // кто-то держит файл — вернёмся позже
 
-            try
-            {
-                using var form = new MultipartFormDataContent();
-                // Поле «code» идёт ПЕРВЫМ: страница сверяет его до чтения тела файла.
-                form.Add(new StringContent(dropCode), "code");
-                form.Add(new StringContent("тикет (автоматически)"), "comment");
-                // ТИХО: страница приёма не шлёт телеграм-уведомление и кладёт файл в подпапку diag/.
-                // Тикеты заводят пачками, и десяток сообщений о том, чего человек не просил, — это
-                // ровно то «участие», от которого и уходим.
-                form.Add(new StringContent("1"), "silent");
-
-                var part = new ByteArrayContent(body);
-                part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-                form.Add(part, "file", Path.GetFileName(file));
-
-                using var response = await client.PostAsync(dropUrl, form, ct).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                    return new FlushResult(sent, files.Count - sent, $"страница приёма ответила {(int)response.StatusCode}");
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-            {
-                return new FlushResult(sent, files.Count - sent, ex.Message);
-            }
+            // ТИХО (silent=1 внутри DropChannel): страница приёма не шлёт телеграм-уведомление и
+            // кладёт файл в подпапку diag/. Тикеты заводят пачками, и десяток сообщений о том, чего
+            // человек не просил, — это ровно то «участие», от которого и уходим.
+            var outcome = await DropChannel.PostAsync(dropUrl, dropCode, "тикет (автоматически)",
+                Path.GetFileName(file), body, "application/json", client, ct).ConfigureAwait(false);
+            if (!outcome.Ok)
+                return new FlushResult(sent, files.Count - sent, outcome.Error);
 
             try { File.Delete(file); } catch (IOException) { /* удалится в следующий проход */ }
             sent++;

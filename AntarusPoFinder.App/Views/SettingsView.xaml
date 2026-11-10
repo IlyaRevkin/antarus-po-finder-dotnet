@@ -915,6 +915,26 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+
+                    <!-- СЛЕПОК ДИСКА. Опись дерева ПО плюс состояние базы — то, по чему расхождения
+                         «в базе есть, на диске нет» находятся СПИСКОМ, а не по одной жалобе. Повод:
+                         06.11.2026 диагностика по «не найден HMI» показала пять версий, у которых
+                         папка HMI есть, а файлов в ней нет. Содержимого файлов слепок не возит,
+                         только имена, размеры и даты. Подробности — docs/disk-snapshot.md. -->
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel>
+                            <TextBlock Text="СЛЕПОК ДИСКА" Style="{StaticResource MutedText}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Text="Опись дерева ПО и состояния базы — чтобы расхождения между ними находились списком. Содержимое файлов не отправляется: только имена, размеры и даты."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="DiskSnapshotBtn" Content="Снять слепок диска" Style="{StaticResource SecondaryButton}"
+                                        Margin="0,0,8,0" Click="DiskSnapshot_Click"
+                                        ToolTip="Обход всего дерева ПО: идёт минутами, работать в это время можно. Слепок уезжает в тихий канал диагностики; ни одного файла прошивки в нём нет."/>
+                                <TextBlock x:Name="DiskSnapshotStatus" VerticalAlignment="Center"
+                                           Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- ═══════════════════════════ МОДЕРАЦИЯ ═══════════════════════════ -->

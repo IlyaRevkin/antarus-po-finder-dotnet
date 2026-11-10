@@ -134,6 +134,16 @@ public partial class App : Application
             return;
         }
 
+        // Слепок диска по расписанию (см. DiskSnapshotCli). Проверка стоит ДО мьютекса единственного
+        // экземпляра намеренно и по той же причине, что у пасхалки выше: иначе ночной прогон либо
+        // закрылся бы, не сделав ничего, либо разбудил бы окно работающей программы — а фоновая
+        // работа обязана быть не слышна. Окон этот путь не открывает вовсе.
+        if (Services.DiskSnapshotCli.IsRequested(e.Args))
+        {
+            Shutdown(Services.DiskSnapshotCli.Run());
+            return;
+        }
+
         _singleInstanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
