@@ -75,8 +75,23 @@ public sealed class DiskSnapshotService
         Database db, string root, string machine, string appVersion, DateTime takenAtUtc,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        var started = DateTime.Now;
         var folders = new List<string>();
-        var files = EnumerateSoftwareTree(root, folders, progress, ct).ToList();
+        var unreadable = new List<string>();
+        var files = EnumerateSoftwareTree(root, folders, unreadable, progress, ct).ToList();
+
+        // ОШИБКИ РАБОТЫ С СЕТЕВОЙ ПАПКОЙ — в журнал, но ОДНОЙ строкой и с примерами, а не по
+        // строке на папку: закрытых папок на чужой шаре бывают сотни, и журнал из них одних никто
+        // читать не станет. Зато «при обходе пропущено 340 папок» — это уже разговор: столько
+        // закрытых папок означает, что слепок описывает не тот диск, который думает человек.
+        if (unreadable.Count > 0)
+            AppLog.Warn(AppLog.AreaDisk,
+                $"обход {root}: пропущено недоступных папок {unreadable.Count}, например " +
+                string.Join("; ", unreadable.Take(3)));
+
+        AppLog.Debug(AppLog.AreaSnapshot,
+            $"обход закончен за {(int)(DateTime.Now - started).TotalSeconds} с: файлов {files.Count}, " +
+            $"папок {folders.Count}, корень {root}");
 
         // Архивные версии в слепок входят: именно вокруг «куда делась старая прошивка» и бывают
         // вопросы, а на диске она лежит как ни в чём не бывало.
@@ -94,8 +109,11 @@ public sealed class DiskSnapshotService
     /// полноте: папка, в которой файлов нет, в описи файлов не оставляет следа вовсе — а жалоба
     /// «не найден HMI» (06.11.2026) оказалась именно такой, папка <c>HMI\</c> на месте, внутри
     /// пусто. Ради того, чтобы такие дыры были видны списком, слепок и затевался.</summary>
+    /// <param name="unreadable">Папки, в которые обход не смог заглянуть. Собираются списком, а не
+    /// пишутся в журнал на месте: их бывают сотни, и журнал из них одних перестали бы читать.</param>
     private static IEnumerable<(string RelativePath, long Size, DateTime Modified)> EnumerateSoftwareTree(
-        string root, List<string> folders, IProgress<string>? progress, CancellationToken ct)
+        string root, List<string> folders, List<string> unreadable,
+        IProgress<string>? progress, CancellationToken ct)
     {
         var po = Path.Combine(root, HierarchyService.FolderPo);
         if (!Directory.Exists(po)) yield break;
@@ -111,12 +129,12 @@ public sealed class DiskSnapshotService
 
             string[] subdirs;
             try { subdirs = Directory.GetDirectories(dir); }
-            catch { continue; }
+            catch (Exception ex) { Note(unreadable, root, dir, ex); continue; }
             foreach (var sub in subdirs) stack.Push(sub);
 
             string[] entries;
             try { entries = Directory.GetFiles(dir); }
-            catch { continue; }
+            catch (Exception ex) { Note(unreadable, root, dir, ex); continue; }
 
             foreach (var file in entries)
             {
@@ -130,6 +148,14 @@ public sealed class DiskSnapshotService
                 yield return (DiskSnapshot.Relative(root, file), info.Length, info.LastWriteTime);
             }
         }
+    }
+
+    /// <summary>Запомнить недоступную папку — путь ОТНОСИТЕЛЬНЫЙ, как и всё в слепке, и с причиной
+    /// отказа. Потолок в сотню: список нужен как пример, а не как опись.</summary>
+    private static void Note(List<string> unreadable, string root, string dir, Exception ex)
+    {
+        if (unreadable.Count >= 100) return;
+        unreadable.Add($"{DiskSnapshot.Relative(root, dir)} ({ex.GetType().Name})");
     }
 
     /// <summary>СНЯТЬ И ОТПРАВИТЬ через тихий канал диагностики — тот путь, которым слепок доезжает
@@ -155,6 +181,61 @@ public sealed class DiskSnapshotService
             ? $"отправлено: {result.FileName}, {result.Bytes / 1024} КБ, расхождений {snapshot.Issues.Count}"
             : $"не отправлено: {result.Error}");
         return result;
+    }
+
+    /// <summary>Чем кончился автоматический проход.</summary>
+    /// <param name="Ok">Снять удалось (отправка могла и не понадобиться).</param>
+    /// <param name="Sent">Слепок действительно уехал.</param>
+    /// <param name="Hash">Отпечаток содержимого — его вызывающий и запоминает, чтобы в следующий
+    /// раз не отправлять то же самое.</param>
+    public sealed record AutoOutcome(
+        bool Ok, bool Sent, string Hash, string? Error, string FileName, int Bytes, int Issues);
+
+    /// <summary>АВТОМАТИЧЕСКИЙ СЛЕПОК: снять и отправить, ЕСЛИ содержимое изменилось.
+    ///
+    /// Отличие от <see cref="SendToDropAsync"/> (её зовёт кнопка и ключ командной строки) ровно
+    /// одно и главное: здесь слепок может НЕ уехать. Нажатие кнопки — это просьба человека, её
+    /// выполняют буквально; автоматический же проход идёт на шести машинах, смотрящих в один и тот
+    /// же диск, и отправлять с каждой по одинаковой описи в сутки значило бы завалить мусором ту
+    /// самую папку, ради которой всё затевалось (см. <see cref="DiskSnapshotSchedule"/>).
+    ///
+    /// Обход диска при этом делается ВСЕГДА — иначе не с чем сравнивать. Это долго (минуты), и
+    /// звать её надо из фонового потока.</summary>
+    public static async Task<AutoOutcome> SendToDropIfChangedAsync(
+        Database db, string root, string machine, string appVersion,
+        string dropUrl, string dropCode, string? lastHash,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var takenAt = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            return new AutoOutcome(false, false, lastHash ?? "", "рабочий диск недоступен", "", 0, 0);
+
+        var snapshot = Collect(db, root, machine, appVersion, takenAt, progress, ct);
+        var json = snapshot.ToJson();
+        var hash = DiskSnapshot.ContentFingerprint(json);
+
+        if (!DiskSnapshotSchedule.ShouldSend(lastHash, hash))
+        {
+            AppLog.Info(AppLog.AreaSnapshot,
+                $"слепок снят, содержимое не изменилось ({hash[..Math.Min(12, hash.Length)]}) — не отправляю");
+            progress?.Report("без изменений — не отправляю");
+            return new AutoOutcome(true, false, hash, null, "", 0, snapshot.Issues.Count);
+        }
+
+        var result = await DiskSnapshotDrop.SendAsync(json, machine, takenAt, dropUrl, dropCode, ct: ct)
+            .ConfigureAwait(false);
+
+        if (result.Ok)
+            AppLog.Info(AppLog.AreaSnapshot,
+                $"слепок отправлен: {result.FileName}, {result.Bytes / 1024} КБ, " +
+                $"файлов {snapshot.FileCount}, расхождений {snapshot.Issues.Count}");
+        else
+            AppLog.Warn(AppLog.AreaSnapshot, $"слепок не отправлен: {result.Error}");
+
+        // Отпечаток запоминается ТОЛЬКО на удачной отправке: иначе неудавшийся раз выглядел бы как
+        // «уже отправляли», и диск, изменившийся один раз, не уехал бы никогда.
+        return new AutoOutcome(result.Ok, result.Ok, result.Ok ? hash : lastHash ?? "",
+            result.Error, result.FileName, result.Bytes, snapshot.Issues.Count);
     }
 
     private static byte[] Gzip(string text)

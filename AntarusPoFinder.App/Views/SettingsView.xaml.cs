@@ -3231,8 +3231,22 @@ public partial class SettingsView : UserControl
 
     // ── Иерархия ──────────────────────────────────────────────────────────────
 
+    /// <summary>Галочка автоматической диагностики — одна на слепок диска и журнал приложения
+    /// (см. ConfigService.AutoDiagnosticsEnabled). Загружается вместе с остальной вкладкой; флаг
+    /// _loadingGeneral гасит обработчик, чтобы проставление галочки кодом не выглядело как выбор
+    /// человека и не писало настройку обратно.</summary>
+    private void AutoDiagnostics_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingGeneral) return;
+        _services.Cfg.SetAutoDiagnosticsEnabled(AutoDiagnosticsCheck.IsChecked == true);
+    }
+
     private void LoadHierarchy()
     {
+        _loadingGeneral = true;
+        try { AutoDiagnosticsCheck.IsChecked = _services.Cfg.AutoDiagnosticsEnabled(); }
+        finally { _loadingGeneral = false; }
+
         var groups = _services.Db.GetAllEquipmentGroups();
         var hierarchyRows = new List<HierarchyRow>();
         foreach (var g in groups)

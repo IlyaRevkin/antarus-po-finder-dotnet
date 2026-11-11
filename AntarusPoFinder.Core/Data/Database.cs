@@ -21,16 +21,37 @@ public partial class Database : IDisposable
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        _conn = new SqliteConnection($"Data Source={dbPath}");
-        _conn.Open();
-
-        using (var pragma = _conn.CreateCommand())
+        // ОТКРЫТИЕ БАЗЫ — в журнал, и удачное тоже. Первая строка каждого сеанса отвечает на
+        // вопрос, который иначе выясняют по телефону: ТА ЛИ это база. Профилей у программы
+        // бывает два (стабильная и бета ставятся рядом, см. AppIdentity), плюс изолированный
+        // профиль прогонов, и «у меня не видно прошивок» не раз оказывалось «открыта не та».
+        // Заодно видно время: база на сетевом диске открывается секундами, и это тоже диагноз.
+        var started = DateTime.Now;
+        try
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;";
-            pragma.ExecuteNonQuery();
+            _conn = new SqliteConnection($"Data Source={dbPath}");
+            _conn.Open();
+
+            using (var pragma = _conn.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;";
+                pragma.ExecuteNonQuery();
+            }
+
+            Migrate();
+        }
+        catch (Exception ex)
+        {
+            // Записать и бросить дальше: без базы программе делать нечего, и притворяться, что
+            // всё в порядке, нельзя. Но падение «не открылась база» обязано попасть в журнал
+            // здесь — выше его увидит только общий обработчик, которому уже не известно, ЧТО
+            // именно открывали.
+            Services.AppLog.Error(Services.AppLog.AreaDb, $"база {dbPath} не открылась", ex);
+            throw;
         }
 
-        Migrate();
+        Services.AppLog.Debug(Services.AppLog.AreaDb,
+            $"база открыта: {dbPath}, {(int)(DateTime.Now - started).TotalMilliseconds} мс");
     }
 
     private void Migrate()

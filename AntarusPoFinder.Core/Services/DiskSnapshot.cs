@@ -197,4 +197,62 @@ public sealed record DiskSnapshot(
         try { return JsonSerializer.Deserialize<DiskSnapshot>(json, Json); }
         catch { return null; }
     }
+
+    /// <summary>Поля, которые описывают НЕ ДИСК, а того, кто на него смотрел. Из отпечатка
+    /// содержимого они выброшены — см. <see cref="ContentFingerprint"/>.</summary>
+    public static readonly string[] VolatileFields = { "machine", "takenAt", "appVersion", "root" };
+
+    /// <summary>ОТПЕЧАТОК СОДЕРЖИМОГО — «тот же это диск или уже другой».
+    ///
+    /// <b>Зачем.</b> Слепок снимается сам, раз в сутки, на каждой машине, у которой подключён
+    /// диск. Диск при этом ОДИН на всех. Отправляй каждая машина свой слепок ежедневно — в папку
+    /// <c>diag/</c> ложилось бы шесть описей одного и того же дерева в день, и полезное утонуло бы
+    /// в них через неделю. Отпечаток позволяет не отправлять то, что не изменилось.
+    ///
+    /// <b>Почему это работает против ШЕСТИ ОДИНАКОВЫХ ОПИСЕЙ, а не только против повторов с одной
+    /// машины.</b> Потому что считается он строго от СОДЕРЖИМОГО: из слепка выброшены
+    /// <see cref="VolatileFields"/> — имя машины, время съёмки, версия программы и корень диска
+    /// (у одной машины шара под <c>Z:\Software</c>, у другой <c>\\ANT-SRV\WebDisk\Software</c>, и
+    /// это ровно та же шара). Всё остальное в слепке уже приведено к сравнимому виду самим
+    /// <see cref="Build"/>: пути относительные и через косую черту, файлы и строки базы
+    /// отсортированы. Поэтому два слепка одного диска, снятые в разное время с разных машин,
+    /// совпадают побайтно — и второй не отправляется.
+    ///
+    /// Остаток честно назван: мнение БАЗЫ (<see cref="Db"/>) в отпечаток ВХОДИТ, и если у коллеги
+    /// база разъехалась с общей, его слепок уедет отдельно. Это не недостаток, а цель: расхождение
+    /// баз между машинами — одна из тех бед, ради которых слепок и заведён, и прятать её
+    /// дедупликацией было бы ровно наоборот.
+    ///
+    /// Отметка хранится у каждой машины своя и местная. В первые сутки шесть машин всё-таки
+    /// пришлют шесть одинаковых описей — по одной; дальше поедет только то, что изменилось.
+    /// Складывать отпечаток в общий конфиг, чтобы схлопнуть и этот первый раз, НЕЛЬЗЯ: чужая
+    /// отметка заткнула бы съёмку там, где слепок не снимался ни разу, — ровно та ошибка, из-за
+    /// которой все остальные watermark'и синхронизации тоже держат местными.</summary>
+    public static string ContentFingerprint(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return "";
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var property in doc.RootElement.EnumerateObject()
+                         .Where(p => !VolatileFields.Contains(p.Name, StringComparer.Ordinal))
+                         .OrderBy(p => p.Name, StringComparer.Ordinal))
+            {
+                sb.Append(property.Name).Append('=').Append(property.Value.GetRawText()).Append('\n');
+            }
+
+            var hash = System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+        catch (Exception)
+        {
+            // Неразбираемый слепок отпечатка не имеет: пусть лучше уедет лишний раз, чем молча
+            // совпадёт с прошлым и не уедет никогда.
+            return "";
+        }
+    }
 }

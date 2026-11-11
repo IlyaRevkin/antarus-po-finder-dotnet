@@ -79,6 +79,10 @@ public static class DiskSnapshotCli
     {
         try { Console.WriteLine(message); } catch { /* консоли нет — не беда */ }
         Log(message);
+        // И в общий журнал приложения: disk-snapshot.log лежит на машине и читается только
+        // вручную, а общий журнал уезжает сам. Ночной прогон по расписанию — ровно тот случай, за
+        // которым никто не смотрит, и его след полезнее всего именно там.
+        AppLog.Info(AppLog.AreaSnapshot, "по расписанию: " + message);
     }
 
     public static void Log(string message)
