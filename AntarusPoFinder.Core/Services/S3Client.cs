@@ -91,17 +91,31 @@ public sealed class S3Client
             var request = BuildRequest(s, HttpMethod.Put, key, content, contentType, DateTimeOffset.UtcNow);
             using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return Result.Fail(await DescribeFailureAsync(response, ct).ConfigureAwait(false));
+                return Failed(key, content.Length, await DescribeFailureAsync(response, ct).ConfigureAwait(false));
             return Result.Success(PublicUrl(s, key));
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            return Result.Fail("хранилище не ответило вовремя");
+            return Failed(key, content.Length, "хранилище не ответило вовремя");
         }
         catch (Exception ex)
         {
-            return Result.Fail(Explain(ex));
+            return Failed(key, content.Length, Explain(ex));
         }
+    }
+
+    /// <summary>Неудачная ЗАПИСЬ в хранилище — единственное место, через которое проходят все до
+    /// одной выкладки: инструкции, тикеты, резервные копии, слепки. Поэтому строка в журнал
+    /// пишется здесь, а не в десятке вызывающих: «выложить не удалось» молча глотают почти все они
+    /// (выкладка best effort по построению), и до появления журнала отказ был виден только тому,
+    /// кто в этот момент смотрел на экран.
+    ///
+    /// Ключ в журнал идёт, содержимое — нет: ключ это путь в бакете, а содержимое бывает чем
+    /// угодно, вплоть до резервной копии базы.</summary>
+    private static Result Failed(string key, int bytes, string reason)
+    {
+        AppLog.Warn(AppLog.AreaStore, $"не выложено «{key}» ({bytes} Б): {reason}");
+        return Result.Fail(reason);
     }
 
     /// <summary>Пересказать сетевую беду по-человечески.

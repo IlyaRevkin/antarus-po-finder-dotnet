@@ -10,3 +10,15 @@ using Xunit;
 // Serializing test execution avoids it; these are fast in-process SQLite tests, so this costs
 // single-digit seconds overall.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
+
+/// <summary>Единый журнал приложения (AppLog) пишет в профиль пользователя и включён всегда — в
+/// этом его смысл. Но прогон тестов открывает сотни баз, занимает десятки долгих операций и
+/// проваливает выкладку в хранилище НАРОЧНО, и всё это ложилось бы в журнал на машине того, кто
+/// запустил тесты, вперемешку с настоящими событиями его программы. Поэтому на время прогона
+/// журнал глушится, а тесты, которым он нужен, включают его сами на своей временной папке (см.
+/// AppLogTests).</summary>
+internal static class TestLoggingDefaults
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Silence() => AntarusPoFinder.Core.Services.AppLog.Enabled = false;
+}

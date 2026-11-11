@@ -288,11 +288,16 @@ public sealed class LongOperationRegistry
             if (LongOperationRules.Refusal(candidate, _active) is { } reason)
             {
                 refusal = reason;
+                // В журнал — отказы тоже. Жалоба «нажимаю, ничего не происходит» чаще всего
+                // оказывается именно этим: человек не прочитал окно отказа, а второй операции и
+                // не полагалось.
+                AppLog.Info(AppLog.AreaOperation, $"отказ «{candidate.Caption}: {candidate.Title}» — {reason}");
                 return false;
             }
             _active.Add(candidate);
         }
 
+        AppLog.Info(AppLog.AreaOperation, $"начало «{candidate.Caption}: {candidate.Title}»");
         lease = new Lease(this, candidate);
         Changed?.Invoke();
         return true;
@@ -341,7 +346,14 @@ public sealed class LongOperationRegistry
         // сняли бы друг друга.
         int removed;
         lock (_gate) removed = _active.RemoveAll(o => ReferenceEquals(o, operation));
-        if (removed > 0) Changed?.Invoke();
+        if (removed == 0) return;
+
+        // ДЛИТЕЛЬНОСТЬ — ради неё запись и нужна. «Заливка шла 11 секунд» и «заливка шла 40 минут»
+        // это две разные беды, и по жалобе человека их не различить: он помнит «долго».
+        AppLog.Info(AppLog.AreaOperation,
+            $"конец «{operation.Caption}: {operation.Title}», длилось " +
+            $"{(int)(DateTime.Now - operation.StartedAt).TotalSeconds} с");
+        Changed?.Invoke();
     }
 
     private sealed class Lease : ILongOperationLease

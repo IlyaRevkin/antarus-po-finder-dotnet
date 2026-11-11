@@ -157,18 +157,36 @@ public partial class App : Application
             return;
         }
 
+        // НЕОБРАБОТАННЫЕ ИСКЛЮЧЕНИЯ — на всех трёх уровнях сразу, и каждый ловит СВОЁ.
+        //
+        // Dispatcher — всё, что упало в обработчике события интерфейса. AppDomain — падение
+        // любого другого потока; оно процесс уже не спасёт, но записать его обязано. TaskScheduler
+        // — задача, результата которой никто не дождался: такое исключение не всплывает НИКУДА и
+        // до появления журнала уходило в никуда вообще, а это как раз весь фоновый обмен —
+        // синхронизация конфига, выкладка, слепок.
+        //
+        // Все три пишут в единый журнал (AppLog), который уезжает сам. До этого след оставался
+        // только в crash.log на машине человека, то есть ровно там, где его никто не ищет.
         DispatcherUnhandledException += (_, args) =>
         {
-            LogAndShow(args.Exception);
+            LogAndShow(args.Exception, "необработанное исключение в потоке интерфейса");
             args.Handled = true;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            LogAndShow(args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString() ?? "Unknown error"));
+            LogAndShow(args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString() ?? "Unknown error"),
+                "необработанное исключение в домене приложения");
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
-            LogAndShow(args.Exception);
+            // БЕЗ ОКНА: сюда попадает фоновая мелочь, которой человек не заказывал (оборванный
+            // запрос к бакету, отвалившаяся шара), и показывать ему «Произошла ошибка» на каждую
+            // такую — значит приучить закрывать окно не читая. Правило проекта: службы работают
+            // молча. След остаётся в журнале, и его достаточно.
+            AppLog.Error(AppLog.AreaApp, "исключение в фоновой задаче, которую никто не ждал", args.Exception);
             args.SetObserved();
         };
+
+        AppLog.Session(AppUpdateService.CurrentVersionText, Environment.MachineName, Environment.UserName);
+        Exit += (_, args) => AppLog.Info(AppLog.AreaApp, $"выход, код {args.ApplicationExitCode}");
 
         // Applies dark/light title-bar chrome to EVERY window in the app (MainWindow + all
         // dialogs) as soon as it loads, without needing per-window code — Window.SourceInitialized
@@ -290,8 +308,18 @@ public partial class App : Application
         thread.Start();
     }
 
-    private void LogAndShow(Exception ex)
+    private void LogAndShow(Exception ex) => LogAndShow(ex, "необработанное исключение");
+
+    /// <param name="where">Откуда прилетело: поток интерфейса, фоновая задача или домен целиком.
+    /// Это не мелочь — «упало в Dispatcher» и «упала задача, которую никто не ждал» чинятся
+    /// по-разному, а по стеку одного это видно не всегда.</param>
+    private void LogAndShow(Exception ex, string where)
     {
+        // Единый журнал (AppLog) — главный след: по нему падение уезжает в тихий канал само и
+        // находится без жалобы. crash.log остаётся как был — он открывается глазами на самой
+        // машине и существует дольше, чем этот журнал.
+        AppLog.Error(AppLog.AreaApp, where, ex);
+
         try
         {
             Directory.CreateDirectory(ConfigService.AppData);

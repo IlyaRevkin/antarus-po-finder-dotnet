@@ -697,6 +697,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         if (isError) _syncLastError = message;
         else _syncLastError = null;
 
+        // НЕУДАЧИ СИНХРОНИЗАЦИИ — в журнал всегда, независимо от «подробного режима» ниже. Этот
+        // метод — единственное место, через которое проходит итог каждого тика обмена (приём,
+        // отправка, автоотправка), и до журнала неудача жила ровно до следующего тика: пилюля
+        // перекрашивалась обратно, и вопрос «почему у коллеги не видно моих прошивок» снова
+        // оставался без следов.
+        if (isError && !string.IsNullOrEmpty(message)) AppLog.Warn(AppLog.AreaSync, message!);
+
         if (_services.Cfg.SyncVerbose() && !string.IsNullOrEmpty(message))
             ShowStatus((isError ? "⚠ " : "⟳ ") + message, isError ? 8000 : 4000, NotificationCategory.Sync);
 
@@ -1860,6 +1867,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         }
         catch (Exception ex)
         {
+            AppLog.Error(AppLog.AreaSync, "отправка изменений на диск не удалась", ex);
             ShowStatus($"Не удалось отправить изменения: {ex.Message}", 12000, NotificationCategory.Sync);
         }
     }
@@ -1933,6 +1941,8 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             await CleanupInspectionFolderAsync();
             await CheckForUnknownItemsAsync();
             await PublishDiskSnapshotAsync();
+            await RunAutoDiskSnapshotAsync();
+            await SendAppLogAsync();
             await RunDailyBackupAsync();
         }
         finally
@@ -2006,6 +2016,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
 
             if (outcome.Ok && !outcome.Skipped)
                 _services.Cfg.Set(ConfigService.BackupLastAtKey, DateTime.UtcNow.ToString("O"));
+
+            // В общий журнал — коротко и всегда. Подробности остаются в backup.log рядом с самими
+            // копиями; сюда попадает только исход, потому что вопрос «а копии вообще снимаются?»
+            // задают не читая ни одного журнала, и ответ на него должен быть в том единственном,
+            // который уезжает сам.
+            if (!outcome.Ok) AppLog.Warn(AppLog.AreaBackup, "копия не снята: " + outcome.Error);
+            else if (!outcome.Skipped) AppLog.Info(AppLog.AreaBackup, "копия снята");
         }
         catch (Exception ex)
         {
@@ -2073,9 +2090,135 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
             if (outcome.Ok)
                 _services.Cfg.Set(DiskSnapshotLastKey, DateTime.UtcNow.ToString("O"));
         }
-        catch { /* best effort — повторится следующим тиком, как и остальная фоновая работа */ }
+        catch (Exception ex)
+        {
+            // best effort — повторится следующим тиком, как и остальная фоновая работа; но СЛЕД
+            // остаётся: «слепков в бакете нет» без объяснения разбиралось бы заново каждый раз.
+            AppLog.Warn(AppLog.AreaSnapshot, "выкладка слепка в бакет сорвалась: " + ex.Message);
+        }
         finally { _diskSnapshotRunning = false; }
     }
+
+    private bool _autoSnapshotRunning;
+    private bool _appLogSendRunning;
+
+    /// <summary>Сколько ждать после запуска программы, прежде чем затевать обход диска самим.
+    /// Вход человека и первая выдача важнее любой диагностики: пока оператор ищет шкаф, лезть в
+    /// тысячи сетевых папок нельзя — сеть одна на всё, и тормозить будет именно поиск.</summary>
+    internal static TimeSpan AutoSnapshotStartupGrace { get; set; } = TimeSpan.FromMinutes(3);
+
+    private static readonly DateTime AppStartedAtUtc = DateTime.UtcNow;
+
+    /// <summary>АВТОМАТИЧЕСКИЙ СЛЕПОК ДИСКА В ТИХИЙ КАНАЛ (см. DiskSnapshotSchedule и
+    /// Core/Services/DiskSnapshotService.SendToDropIfChangedAsync).
+    ///
+    /// Отдельно от <see cref="PublishDiskSnapshotAsync"/> рядом: та выкладывает слепок в бакет на
+    /// хостинге и работает только там, где есть ключи, а бакет публичен на чтение. Этот путь —
+    /// частный и работает везде, и именно по нему слепок доезжает до того, кто чинит программу.
+    ///
+    /// ПОЧЕМУ НЕ ЖДЁМ ЕГО ВНУТРИ ТИКА. Обход сетевого дерева идёт минутами. Дождись его тик
+    /// синхронизации — и резервная копия, стоящая следующей строкой, не снималась бы, пока идёт
+    /// опись. Поэтому работа уходит в фон целиком, а от второго запуска защищает флаг: ровно так
+    /// же, как у всего остального в этом тике.</summary>
+    private Task RunAutoDiskSnapshotAsync()
+    {
+        if (_autoSnapshotRunning) return Task.CompletedTask;
+        if (DateTime.UtcNow - AppStartedAtUtc < AutoSnapshotStartupGrace) return Task.CompletedTask;
+
+        var root = _services.Cfg.RootPath();
+        var decision = DiskSnapshotSchedule.Decide(
+            _services.Cfg.AutoDiagnosticsEnabled(),
+            !string.IsNullOrWhiteSpace(root) && System.IO.Directory.Exists(root),
+            DateTime.UtcNow,
+            ParseUtc(_services.Cfg.Get(DiskSnapshotSchedule.LastDoneKey)),
+            ParseUtc(_services.Cfg.Get(DiskSnapshotSchedule.LastTryKey)));
+
+        if (decision == DiskSnapshotDecision.NoDisk)
+        {
+            // НЕ ошибка и не повод молчать: «слепков с этой машины нет» и «на этой машине нет
+            // диска» — разные диагнозы, и различить их потом можно только по этой строке.
+            _services.Cfg.Set(DiskSnapshotSchedule.LastTryKey, DateTime.UtcNow.ToString("O"));
+            AppLog.Info(AppLog.AreaSnapshot, "рабочий диск недоступен — слепок пропущен");
+            return Task.CompletedTask;
+        }
+        if (decision != DiskSnapshotDecision.Take) return Task.CompletedTask;
+
+        _autoSnapshotRunning = true;
+        _services.Cfg.Set(DiskSnapshotSchedule.LastTryKey, DateTime.UtcNow.ToString("O"));
+
+        var db = _services.Db;
+        var url = _services.Cfg.DiagnosticsDropUrl();
+        var code = _services.Cfg.DiagnosticsDropCode();
+        var lastHash = _services.Cfg.Get(DiskSnapshotSchedule.LastHashKey);
+
+        // Задача живёт дольше тика и завершается сама; возвращаем выполненную, чтобы тик пошёл
+        // дальше. Результат дописывается в настройки на потоке интерфейса — соединение с базой
+        // одно на программу.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var outcome = await DiskSnapshotService.SendToDropIfChangedAsync(
+                    db, root, Environment.MachineName, AppUpdateService.CurrentVersionText,
+                    url, code, lastHash);
+
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        if (!outcome.Ok) return;
+                        _services.Cfg.Set(DiskSnapshotSchedule.LastDoneKey, DateTime.UtcNow.ToString("O"));
+                        if (outcome.Sent)
+                            _services.Cfg.Set(DiskSnapshotSchedule.LastHashKey, outcome.Hash);
+                    }
+                    catch (Exception ex) { AppLog.Error(AppLog.AreaSnapshot, "не записалась отметка слепка", ex); }
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error(AppLog.AreaSnapshot, "автоматический слепок сорвался", ex);
+            }
+            finally { _autoSnapshotRunning = false; }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>ОТПРАВКА НАКОПЛЕННОГО ЖУРНАЛА (см. Core/Services/AppLogDrop). Раз в сутки, пачкой
+    /// и только если есть что отправлять. Тем же тихим каналом, тем же выключателем, что и слепок:
+    /// это одна и та же вещь — «следы работы программы уезжают туда, где их читают».</summary>
+    private async Task SendAppLogAsync()
+    {
+        if (_appLogSendRunning) return;
+        if (!_services.Cfg.AutoDiagnosticsEnabled()) return;
+
+        var last = ParseUtc(_services.Cfg.Get(ConfigService.AppLogSentAtKey));
+        if (!AppLogDrop.Due(last, DateTime.UtcNow)) return;
+
+        _appLogSendRunning = true;
+        try
+        {
+            var url = _services.Cfg.DiagnosticsDropUrl();
+            var code = _services.Cfg.DiagnosticsDropCode();
+            var result = await Task.Run(() => AppLogDrop.FlushAsync(Environment.MachineName, url, code));
+
+            // Отметка — на любой исход, КРОМЕ ошибки сети: отправлять было нечего — тоже повод
+            // подождать сутки, иначе каждый тик дёргал бы ротацию журнала впустую.
+            if (result.Ok) _services.Cfg.Set(ConfigService.AppLogSentAtKey, DateTime.UtcNow.ToString("O"));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error(AppLog.AreaLog, "отправка журнала сорвалась", ex);
+        }
+        finally { _appLogSendRunning = false; }
+    }
+
+    /// <summary>Отметка времени из настроек. Не разобралась — «никогда»: пропущенная работа
+    /// дешевле, чем работа, которая не запускается из-за испорченной строки.</summary>
+    private static DateTime ParseUtc(string? value) =>
+        DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+            out var at) ? at : DateTime.MinValue;
 
     /// <summary>Досмотр сетевого диска на предмет версий, которых нет в локальной базе.
     ///
@@ -2151,7 +2294,13 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
                 10000, NotificationCategory.FirmwareAndParams);
             RefreshSearchIfActive();
         }
-        catch { /* best effort — повторится на следующем тике, как и остальные шаги RunSync */ }
+        catch (Exception ex)
+        {
+            // best effort — повторится на следующем тике, как и остальные шаги RunSync. В журнал
+            // при этом попадает: досмотр диска — это та самая ветка, из-за которой «позагружал
+            // прошивки на компе коллеги, у себя не вижу», и молчать о её срыве нельзя.
+            AppLog.Warn(AppLog.AreaDisk, "досмотр диска сорвался: " + ex.Message);
+        }
     }
 
     /// <summary>Auto-deletes files older than ConfigService.InspectionAutoCleanupMinutes() from the
