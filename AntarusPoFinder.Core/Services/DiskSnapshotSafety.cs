@@ -79,4 +79,86 @@ public static class DiskSnapshotSafety
         return "Слепок не отправлен: в нём нашлось то, чему там не место — " +
                string.Join(", ", new HashSet<string>(found)) + ".";
     }
+
+    // ── То же самое, но для ПЛОСКОГО ТЕКСТА (журнал приложения, см. AppLogDrop) ──────────────
+    //
+    // Журнал — не json, разобрать его на «имена полей» и «значения» нельзя, а проверять его надо
+    // по тем же правилам и тем же списком: заведи он себе второй список запретных слов, и через
+    // год они разошлись бы — причём молча и в ту сторону, которая дороже.
+    //
+    // Отличие ровно одно и вынужденное. В json имя поля отделено от текста самим форматом, а в
+    // журнале слово «пароль» попадается в совершенно безобидных строках: «пароль не подошёл»,
+    // «смена пароля отменена». Запрещать их — значит затыкать весь журнал машины из-за честного
+    // сообщения об ошибке (отказ касается ВСЕЙ пачки). Поэтому в тексте запретное слово считается
+    // находкой, только если за ним следует ЗНАЧЕНИЕ: «=», «:» или «» со стоящим дальше непробелом.
+    // Это ровно форма «я пишу в журнал содержимое поля», и она же — единственная опасная.
+    //
+    // Два значения (enc: и заголовок PEM) ищутся в тексте как есть, без всяких условий: ни то, ни
+    // другое не бывает ничем, кроме секрета.
+
+    /// <summary>Что нашлось в плоском тексте. Пустой список — отправлять можно.</summary>
+    public static IReadOnlyList<string> ScanText(string? text)
+    {
+        var found = new List<string>();
+        var src = text ?? "";
+        if (src.Length == 0) return found;
+
+        foreach (var part in ForbiddenFieldParts)
+        {
+            var from = 0;
+            while (true)
+            {
+                var at = src.IndexOf(part, from, StringComparison.OrdinalIgnoreCase);
+                if (at < 0) break;
+                from = at + part.Length;
+                if (LooksLikeAssignment(src, from)) { found.Add($"«{part}» со значением"); break; }
+            }
+        }
+
+        foreach (var marker in ForbiddenValueMarkers)
+            if (ContainsAtWordStart(src, marker))
+                found.Add($"значение, начинающееся на «{marker}»");
+
+        return found;
+    }
+
+    /// <summary>Почему журнал отправлять нельзя. null — можно.</summary>
+    public static string? RefusalForText(string? text)
+    {
+        var found = ScanText(text);
+        if (found.Count == 0) return null;
+        return "Журнал не отправлен: в нём нашлось то, чему там не место — " +
+               string.Join(", ", new HashSet<string>(found)) + ".";
+    }
+
+    /// <summary>Приставка найдена С НАЧАЛА СЛОВА. В json это получалось само (значение начиналось
+    /// с неё), а в плоском тексте «enc:» прячется в середине доброй половины английских слов —
+    /// «sequence:», «reference:», «silence:». Отказ отправить журнал из-за слова «sequence» мы
+    /// заметили бы не раньше, чем через месяц полного молчания, поэтому граница слова обязательна.</summary>
+    private static bool ContainsAtWordStart(string text, string marker)
+    {
+        var from = 0;
+        while (true)
+        {
+            var at = text.IndexOf(marker, from, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return false;
+            var before = at == 0 ? ' ' : text[at - 1];
+            if (!char.IsLetterOrDigit(before)) return true;
+            from = at + 1;
+        }
+    }
+
+    /// <summary>За словом идёт его значение: «пароль: 1234», «token=abc», «secret» : "x". Хвост
+    /// вида «пароль не подошёл» значением не считается — см. комментарий выше.</summary>
+    private static bool LooksLikeAssignment(string text, int from)
+    {
+        var i = from;
+        // Закрывающая кавычка имени поля, если текст json-подобный.
+        while (i < text.Length && (text[i] == '"' || text[i] == '\'' || text[i] == '»')) i++;
+        while (i < text.Length && text[i] == ' ') i++;
+        if (i >= text.Length || (text[i] != '=' && text[i] != ':')) return false;
+        i++;
+        while (i < text.Length && (text[i] == ' ' || text[i] == '"' || text[i] == '\'')) i++;
+        return i < text.Length && text[i] != '\n' && text[i] != '\r';
+    }
 }
