@@ -365,8 +365,12 @@ public static class AppLog
         {
             if (!File.Exists(CurrentPath)) return;
             if (!AppLogRotation.NeedsRoll(new FileInfo(CurrentPath).Length, MaxBytes)) return;
-            var target = Path.Combine(Folder, AppLogRotation.RolledName(DateTime.Now));
-            if (!File.Exists(target)) File.Move(CurrentPath, target);
+
+            // Тем же кодом, что и ротация перед отправкой: имя архива даётся с точностью до
+            // секунды, и две ротации в одну секунду (мелкий потолок, быстрый цикл записи) обязаны
+            // сложиться в ОДИН архив, а не потерять вторую — иначе текущий файл продолжил бы расти
+            // как ни в чём не бывало, то есть ровно вопреки ротации.
+            Roll();
             foreach (var doomed in AppLogRotation.ToDelete(Archives(), DateTime.Now, KeepFiles, KeepDays))
                 try { File.Delete(doomed); } catch (IOException) { }
         }
