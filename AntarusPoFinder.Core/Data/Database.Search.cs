@@ -611,7 +611,7 @@ public partial class Database
         // (Database.NotSuperseded), где COLLATE NOCASE по-русски всё равно не работает, — разъехавшись,
         // две стороны считали бы «ПЧ» и «пч» то одним исполнением, то разными. Одинаковое написание
         // обеспечивается на вводе (FwExecution.Normalize + выбор из уже заведённых в форме загрузки).
-        var seen = new Dictionary<(int, int, string), ScoredFwVersion>();
+        var groups = new Dictionary<(int, int, string), List<ScoredFwVersion>>();
 
         foreach (var entry in scored)
         {
@@ -634,20 +634,72 @@ public partial class Database
             var key = (entry.Row.SubtypeId,
                 entry.Row.IsOpc ? -(entry.Row.Id ?? 0) : entry.Row.ControllerId,
                 entry.Row.IsOpc ? "" : FwExecution.Normalize(entry.Row.Execution));
-            if (!seen.TryGetValue(key, out var existing))
-            {
-                seen[key] = entry;
-                continue;
-            }
-
-            var rank = Rank(entry, usageThreshold, usageMultiplier);
-            var existingRank = Rank(existing, usageThreshold, usageMultiplier);
-            if (rank > existingRank ||
-                (rank == existingRank && entry.Row.ConfigName.Length == 0 && existing.Row.ConfigName.Length > 0))
-                seen[key] = entry;
+            if (!groups.TryGetValue(key, out var group)) groups[key] = group = new List<ScoredFwVersion>();
+            group.Add(entry);
         }
 
-        return SortByRank(seen.Values, usageThreshold, usageMultiplier);
+        var picked = new List<ScoredFwVersion>();
+        foreach (var group in groups.Values)
+        {
+            ScoredFwVersion? best = null;
+            var bestRank = 0;
+
+            // Из шкафа выбираем ТОЛЬКО среди ещё актуальных версий (StillCurrent). Ранг решает уже
+            // внутри них: между конфигурациями одной версии и между линейками разного железа.
+            foreach (var entry in StillCurrent(group))
+            {
+                var rank = Rank(entry, usageThreshold, usageMultiplier);
+                if (best is null || rank > bestRank ||
+                    (rank == bestRank && entry.Row.ConfigName.Length == 0 && best.Row.ConfigName.Length > 0))
+                {
+                    best = entry;
+                    bestRank = rank;
+                }
+            }
+
+            if (best is not null) picked.Add(best);
+        }
+
+        return SortByRank(picked, usageThreshold, usageMultiplier);
+    }
+
+    /// <summary>Версии шкафа, которые ещё актуальны, — то же правило «эту версию уже сменила более
+    /// свежая», что и в SQL (<see cref="NotSuperseded"/>) и в метках истории
+    /// (<see cref="FwHistoryStatus.Labels"/>): внутри каждой hw-группы живёт версия с наибольшим
+    /// номером, а если оператор отметил «текущей» другую — отмеченная.
+    ///
+    /// Зачем это схлопыванию выдачи. Тикет от 09.11.2026 (Киселёв, NALADKA1): «поисковый запрос XL
+    /// выводит в поиске устаревшую версию прошивки». «XL» — имя ПОДТИПА (НГР-XL), поэтому запросу
+    /// одинаково подходят все версии этого шкафа и очки у них равны. Победителя выбирал ранг, а в
+    /// ранг входят счётчик открытий и ручной вес: устаревшую версию выбирали месяцами, счётчик у неё
+    /// набрался — и она обходила свежую, которую ещё никто не открывал. Свежая при этом не просто
+    /// стояла ниже, её не было в выдаче вовсе: схлопывание оставляет по шкафу одну строку. Теперь
+    /// популярность двигает выдачу только среди актуального и не умеет воскресить заменённую версию.
+    ///
+    /// Возвращаются ВСЕ строки с лучшим номером, а не одна: конфигурации шкафа (config_name) — это
+    /// копии одной и той же версии с теми же sw_version/dt_str и разными тегами, и отбросить лишние
+    /// значило бы выдать наладчику чужую комплектацию вместо той, чьи теги совпали с запросом.
+    ///
+    /// Разное ЖЕЛЕЗО — разные линейки (версия под SMH5 не заменяет версию под другую модификацию),
+    /// поэтому кандидат берётся от каждой hw-группы отдельно; какая из них покажется, решает, как и
+    /// раньше, ранг. Исполнение сюда не входит: оно уже часть ключа схлопывания.</summary>
+    private static IEnumerable<ScoredFwVersion> StillCurrent(List<ScoredFwVersion> group)
+    {
+        foreach (var hwGroup in group.GroupBy(e => e.Row.HwVersion))
+        {
+            // Ручная отметка «текущая» (Database.SetFwVersionManualCurrent) — единственный законный
+            // способ показать не самую свежую версию: более новую забраковали, но откатывать её
+            // формально не стали. В группе она не более чем одна, см. сам метод.
+            var current = hwGroup.FirstOrDefault(e => e.Row.ManualCurrent)
+                ?? hwGroup.OrderByDescending(e => e.Row.SwVersion)
+                          .ThenByDescending(e => e.Row.DtStr, StringComparer.Ordinal)
+                          .First();
+
+            foreach (var entry in hwGroup)
+                if (entry.Row.SwVersion == current.Row.SwVersion &&
+                    string.Equals(entry.Row.DtStr, current.Row.DtStr, StringComparison.Ordinal))
+                    yield return entry;
+        }
     }
 
     /// <summary>Порядок выдачи — один и тот же и для схлопнутой, и для полной (галочка «показывать
