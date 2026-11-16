@@ -127,6 +127,27 @@ public static class TicketAutoDrop
     public static string QueueFolder(string appDataFolder) =>
         Path.Combine(appDataFolder, "tickets", "pending");
 
+    /// <summary>Пометка в начале имени файла, по которой ТИКЕТ отличается от журнала заливки.
+    ///
+    /// Зачем. Имена были один в один как у <see cref="LoaderDiagnostics"/>
+    /// (<c>yyyyMMdd-HHmmssfff-&lt;guid&gt;.json</c>), а приезжают оба потока в одну и ту же папку
+    /// на принимающей стороне. В списке из сотен файлов тикет от журнала заливки не отличался
+    /// никак: на этом уже ошиблись и доложили, что новых тикетов нет, хотя их было пятнадцать.
+    ///
+    /// Пометка стоит ПЕРЕД датой, а не после: смысл её в том, чтобы тикеты собирались в одну кучу
+    /// в обычном «ls», — ради этого она и нужна. Порядок по дате внутри самих тикетов от этого не
+    /// страдает: за пометкой сразу идёт дата, и она у всех одной длины. Уже лежащие файлы старого
+    /// образца начинаются с цифры и при сортировке по имени оказываются ПЕРЕД помеченными — то
+    /// есть ровно там, где им и место: они старше всего, что будет записано дальше. Поэтому и
+    /// отправка (<see cref="FlushAsync"/>), и вытеснение (<see cref="Trim"/>) продолжают работать
+    /// со смешанной очередью правильно, без разбора имён.</summary>
+    public const string FilePrefix = "ticket-";
+
+    /// <summary>Имя файла очереди. Отдельным методом, чтобы его можно было проверить тестом, не
+    /// угадывая по содержимому папки.</summary>
+    public static string FileName(DateTime at, Guid id) =>
+        $"{FilePrefix}{at:yyyyMMdd-HHmmssfff}-{id:N}.json";
+
     /// <summary>Положить событие в очередь. Ничего не бросает: автовыгрузка не имеет права помешать
     /// самому заведению тикета — человек жаловался не на неё.</summary>
     public static string? Enqueue(string appDataFolder, Entry entry)
@@ -136,9 +157,7 @@ public static class TicketAutoDrop
             var dir = QueueFolder(appDataFolder);
             Directory.CreateDirectory(dir);
 
-            // Имя начинается с даты: по нему и строится порядок очереди, и день в имени виден на
-            // той стороне, куда файл приедет.
-            var name = $"{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.json";
+            var name = FileName(DateTime.Now, Guid.NewGuid());
             var path = Path.Combine(dir, name);
             File.WriteAllText(path, JsonSerializer.Serialize(entry, Json), new UTF8Encoding(false));
             Trim(dir);
