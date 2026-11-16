@@ -18,7 +18,20 @@ public record ChangelogContent(string Description, List<string> LaunchTypes)
     /// и это НЕ то же самое, что «в очереди»: файл мог быть написан старой версией программы, и
     /// принять её молчание за «не выпущена» значило бы снимать чужие решения.</summary>
     public FwModerationMark? Moderation { get; init; }
+
+    /// <summary>РУЧНЫЕ ЗАМЕНЫ ФАЙЛА ПРОШИВКИ в этой версии, от старой к новой. Пустой список —
+    /// замен не было (или файл написан версией программы, которая про них не знала).</summary>
+    public List<FwFileReplacement> Replacements { get; init; } = new();
 }
+
+/// <summary>Одна ручная замена файла прошивки в УЖЕ ВЫПУЩЕННОЙ версии: кто, когда, какой файл
+/// заменил и как называется сохранённый прежний.
+///
+/// Живёт на диске, в CHANGELOG.md папки версии, по той же причине, что и отметка модерации выше:
+/// общий диск — единственный канал, который между машинами точно работает, а замена файла в чужой
+/// выпущенной версии — ровно то событие, про которое коллега обязан узнать независимо от того,
+/// доехал ли до него обмен конфигом.</summary>
+public record FwFileReplacement(string At, string By, string File, string Backup);
 
 /// <summary>Отметка модерации из CHANGELOG.md: выпущена ли версия, не в архиве ли она, когда и кем
 /// решено.
@@ -112,6 +125,7 @@ public static class ChangelogFile
         var launchTypes = new List<string>();
         var tags = new List<string>();
         var descLines = new List<string>();
+        var replacements = new List<FwFileReplacement>();
         FwModerationMark? moderation = null;
         bool inBody = false;
 
@@ -138,6 +152,16 @@ public static class ChangelogFile
                     moderation = ParseModeration(line[ModerationPrefix.Length..]);
                     continue;
                 }
+                if (line.StartsWith(ReplacementPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Строк замены может быть СКОЛЬКО УГОДНО, в отличие от одной строки модерации:
+                    // там источник истины — последнее решение, здесь каждая строка это отдельное
+                    // событие, и затирать предыдущую означало бы терять историю ровно того, ради
+                    // чего запись и заводилась.
+                    if (ParseReplacement(line[ReplacementPrefix.Length..]) is { } replacement)
+                        replacements.Add(replacement);
+                    continue;
+                }
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 inBody = true;
             }
@@ -153,7 +177,81 @@ public static class ChangelogFile
         {
             Tags = tags,
             Moderation = moderation,
+            Replacements = replacements,
         };
+    }
+
+    /// <summary>Шапка строки о ручной замене файла прошивки. Отдельной константой по той же причине,
+    /// что и <see cref="ModerationPrefix"/>: по ней идёт и разбор, и дописывание.</summary>
+    public const string ReplacementPrefix = "Замена файла:";
+
+    /// <summary>Строка вида «Замена файла: 2026-11-16T12:10:00; Киселёв; 1.1.0004.0005.lfs;
+    /// сохранён: Предыдущие\1.1.0004.0005_20261116_1210.lfs.old». Разбор снисходительный к тому же,
+    /// к чему и остальной файл: потерянная дата не должна отменять сам факт замены, поэтому
+    /// отсутствующие части остаются пустыми, а строка всё равно считается записью.</summary>
+    private static FwFileReplacement? ParseReplacement(string tail)
+    {
+        var parts = tail.Split(';', StringSplitOptions.TrimEntries);
+        // Хотя бы что-то должно быть написано: пустая строка «Замена файла:» не говорит ничего и
+        // выдавать её за событие нельзя.
+        if (parts.Length == 0 || parts.All(string.IsNullOrWhiteSpace)) return null;
+
+        var backup = parts.Length > 3 ? parts[3] : "";
+        if (backup.StartsWith(BackupWord, StringComparison.OrdinalIgnoreCase))
+            backup = backup[BackupWord.Length..].Trim();
+
+        return new FwFileReplacement(
+            parts.Length > 0 ? parts[0] : "",
+            parts.Length > 1 ? parts[1] : "",
+            parts.Length > 2 ? parts[2] : "",
+            backup);
+    }
+
+    private const string BackupWord = "сохранён:";
+
+    private static string FormatReplacement(FwFileReplacement r) =>
+        $"{ReplacementPrefix} {r.At}; {r.By}; {r.File}; {BackupWord} {r.Backup}";
+
+    /// <summary>Дописать в CHANGELOG.md запись о ручной замене файла прошивки. Строка встаёт в
+    /// шапку, после уже имеющихся шапочных полей и прошлых замен, — описание при этом не
+    /// разрывается.
+    ///
+    /// ⚠️ ФАЙЛА НЕТ — СОЗДАЁМ, в отличие от <see cref="TryMarkModeration"/>, которая в таком случае
+    /// молчит. Решение разное, потому что разная цена ошибки: пропущенная отметка модерации
+    /// доедет следующим обменом конфига, а запись «кто подменил файл на боевом сервере» взять
+    /// больше неоткуда — её никто не восстановит. Пустое описание ничего не ломает: сканирование
+    /// диска подставляет вместо него свою заглушку (см. HierarchyService), а вот замену без следа
+    /// разбирать потом будет некому.
+    ///
+    /// false — записать не удалось (нет прав на шаре, диск отвалился). Вызывающий решает сам; саму
+    /// замену файла из-за этого откатывать не надо, но сказать человеку — надо.</summary>
+    public static bool TryAppendReplacement(string versionFolder, FwFileReplacement replacement)
+    {
+        var path = Path.Combine(versionFolder, FileName);
+        List<string> lines;
+        try
+        {
+            lines = File.Exists(path)
+                ? File.ReadAllLines(path).ToList()
+                : new List<string> { "# " + Path.GetFileName(versionFolder.TrimEnd(Path.DirectorySeparatorChar)) };
+        }
+        catch { return false; }
+
+        // Место вставки — сразу после последней шапочной строки (включая прошлые замены и отметку
+        // модерации), то есть перед пустой строкой и телом описания.
+        var at = 0;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!IsHeadLine(lines[i])
+                && !lines[i].StartsWith(ModerationPrefix, StringComparison.OrdinalIgnoreCase)
+                && !lines[i].StartsWith(ReplacementPrefix, StringComparison.OrdinalIgnoreCase)) break;
+            at = i + 1;
+        }
+        lines.Insert(at, FormatReplacement(replacement));
+
+        try { File.WriteAllText(path, string.Join("\n", lines), new UTF8Encoding(false)); }
+        catch { return false; }
+        return true;
     }
 
     /// <summary>Шапка строки с решением модерации. Отдельной константой, потому что по ней идёт и

@@ -138,6 +138,16 @@ public sealed record FirmwareCardFlags
     /// (SearchView.ScanVersionFolder), поэтому до его конца список пуст и карточка честно пишет,
     /// что конфигурации нет: обход договорит.</summary>
     public IReadOnlyList<string> BuiltExecutions { get; init; } = Array.Empty<string>();
+
+    /// <summary>Этой роли можно заменить файл прошивки в версии на сервере (см.
+    /// FirmwareFileReplace.CanReplace). Отдельно от CanEditTags: правка тегов — это про то, как
+    /// прошивку НАЙТИ, а замена — про то, что уедет в шкаф.</summary>
+    public bool CanReplaceFirmware { get; init; }
+
+    /// <summary>«Кто и когда в последний раз заменил файл прошивки вручную» — строка, прочитанная
+    /// фоновым обходом из CHANGELOG.md папки версии (FirmwareFileReplace.LastReplacementNote).
+    /// Пусто — замен не было либо обход ещё не дошёл.</summary>
+    public string ReplacementNote { get; init; } = "";
 }
 
 /// <summary>One search-result card. Кнопок стало слишком много для одного ряда, поэтому основными
@@ -245,6 +255,11 @@ public partial class FirmwareCard : UserControl
 
     /// <summary>«Положить конфигурацию этого исполнения в эту версию» — пункт меню «Ещё».</summary>
     public event EventHandler? ExecutionBuildRequested;
+
+    /// <summary>«Заменить файл прошивки…» — наладчик пересобрал .lfs руками и кладёт его вместо
+    /// того, что лежит на сервере (тикет Киселёва от 11.11.2026). Делает замену SearchView: карточка
+    /// про сетевой диск и права не знает.</summary>
+    public event EventHandler? ReplaceFirmwareRequested;
 
     private IReadOnlyList<string> _builtExecutions = Array.Empty<string>();
     private bool _fillingExecutions;
@@ -437,7 +452,8 @@ public partial class FirmwareCard : UserControl
             ? FilesLabel.Text["Файлы: ".Length..]
             : FilesLabel.Text;
         FilesLabel.Visibility = Visibility.Collapsed;
-        FillInfoPopup(result, uploadDate, result.Controller ?? "", filesText, string.Join(", ", tags));
+        FillInfoPopup(result, uploadDate, result.Controller ?? "", filesText, string.Join(", ", tags),
+            flags.ReplacementNote);
 
         ActionsPanel.Children.Clear();
         MorePanel.Children.Clear();
@@ -606,6 +622,19 @@ public partial class FirmwareCard : UserControl
         if (flags.CanEditTags)
             AddMenuItem("Модерация прошивки", () => ModerationRequested?.Invoke(this, EventArgs.Empty),
                 "Описание, теги, типы пуска, подтипы шкафов, доп. файлы — то же окно, что в разделе «Модерация прошивок»");
+
+        // ЗАМЕНА ФАЙЛА ПРОШИВКИ НА СЕРВЕРЕ. Тикет Киселёва от 11.11.2026: наладчик пересобрал .lfs
+        // руками и хочет, чтобы коллеги брали уже исправленный. Пункт в разделе «Версия», а не
+        // «Файлы версии», намеренно: это решение о судьбе выпущенной версии, соседнее с модерацией,
+        // а не «открыть ещё один файл».
+        //
+        // Пункта нет у ролей без права (FirmwareFileReplace.CanReplace) и у версии без папки на
+        // сетевом диске: заменять там нечего.
+        if (flags.CanReplaceFirmware && !string.IsNullOrEmpty(result.FirmwareDir))
+            AddMenuItem("Заменить файл прошивки на сервере…",
+                () => ReplaceFirmwareRequested?.Invoke(this, EventArgs.Empty),
+                "Положить пересобранный вручную LFS вместо того, что лежит в этой версии на диске. "
+                + "Номер ПО не меняется, прежний файл сохраняется рядом.");
 
         // КОНФИГУРАЦИЯ ИСПОЛНЕНИЯ — второй из двух выходов, названных в предупреждении на карточке
         // («создайте конфигурацию, либо уберите исполнение»). Первый — убрать исполнение у шкафа —
@@ -1143,13 +1172,13 @@ public partial class FirmwareCard : UserControl
     /// Пустых строк здесь нет вовсе (см. FwCardMeta.Details): «Автор: —» не отвечает ни на какой
     /// вопрос, а место занимает. Если показывать нечего, значок не появляется.</summary>
     private void FillInfoPopup(HierarchyResult result, string uploadDate,
-        string controller = "", string files = "", string tags = "")
+        string controller = "", string files = "", string tags = "", string replacement = "")
     {
         var rows = FwCardMeta.Details(
             result.EquipmentType, result.WorkType, uploadDate, result.UsageCount,
             result.SourceName ?? "", result.AuthorName ?? "", hardware: "",
             result.IsOpc ? result.RequestNum : "", result.IsOpc ? result.CabinetSn : "",
-            controller, files, tags);
+            controller, files, tags, replacement);
 
         InfoPopupPanel.Children.Clear();
         foreach (var (label, value) in rows)

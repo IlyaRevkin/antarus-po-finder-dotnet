@@ -89,11 +89,15 @@ public static class FwCardMeta
     public static List<(string Label, string Value)> Details(
         string equipmentType, string workType, string uploadDate, int usageCount,
         string sourceName, string author, string hardware, string requestNum, string cabinetSn,
-        string controller = "", string files = "", string tags = "")
+        string controller = "", string files = "", string tags = "", string replacement = "")
     {
         var rows = new List<(string, string)>();
         Add("Исходное название", sourceName);
         Add("Автор", author);
+        // КТО И КОГДА ПОДМЕНИЛ ФАЙЛ в этой версии (FirmwareFileReplace). Стоит сразу под автором, и
+        // это осознанно: автор отвечает на вопрос «чья это сборка», а строка замены — на вопрос
+        // «а та ли это сборка, которую он выложил». Второй вопрос без первого не задают.
+        Add("Файл заменён", replacement);
         // Контроллер, список файлов и теги раньше стояли на самой карточке и занимали по строке
         // каждый. В столбике одинаковых карточек это и было «избыточной информацией»: нужны они,
         // когда разбираются с ОДНОЙ версией, а не когда просматривают выдачу.

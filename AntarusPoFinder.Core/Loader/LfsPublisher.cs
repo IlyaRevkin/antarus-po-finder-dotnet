@@ -52,7 +52,12 @@ public static class LfsPublisher
         Existing(versionFolder) is { } dir ? VersionLayout.FirmwareWriteFolder(dir) : null;
 
     /// <summary>Кладёт файл в папку через временное имя. Возвращает итоговый путь.</summary>
-    public static string Publish(string builtFile, string destDir)
+    /// <param name="fileName">Под каким именем положить. null — под своим собственным, как было
+    /// всегда. Задаётся ручной заменой файла в выпущенной версии
+    /// (<see cref="Services.FirmwareFileReplace"/>): там новый файл обязан занять место прежнего под
+    /// ЕГО именем — на диске файл прошивки назван номером версии, а пересобранный у наладчика
+    /// называется как ему удобно.</param>
+    public static string Publish(string builtFile, string destDir, string? fileName = null)
     {
         if (string.IsNullOrWhiteSpace(builtFile))
             throw new ArgumentException("Не указан собранный файл.", nameof(builtFile));
@@ -62,7 +67,8 @@ public static class LfsPublisher
             throw new ArgumentException("Не указана папка публикации.", nameof(destDir));
 
         Directory.CreateDirectory(destDir);
-        var final = Path.Combine(destDir, Path.GetFileName(builtFile));
+        var final = Path.Combine(destDir,
+            string.IsNullOrWhiteSpace(fileName) ? Path.GetFileName(builtFile) : fileName!);
         var temp = final + TempSuffix;
         try
         {
