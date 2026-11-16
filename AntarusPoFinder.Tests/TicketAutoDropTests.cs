@@ -168,6 +168,56 @@ public class TicketAutoDropTests
         Assert.NotEqual(TicketAutoDrop.QueueFolder(dir.Path), LoaderDiagnostics.QueueFolder(dir.Path));
     }
 
+    /// <summary>Имя файла говорит, что это ТИКЕТ. Оба потока — тикеты и журналы заливок — приезжают
+    /// в одну папку на принимающей стороне, и раньше имена были один в один: в списке из сотен файлов
+    /// отличить одно от другого было нельзя (на этом уже ошиблись и доложили «новых тикетов нет»,
+    /// хотя их было пятнадцать).</summary>
+    [Fact]
+    public void Имя_файла_отличает_тикет_от_журнала_заливки()
+    {
+        using var dir = new TempDir();
+
+        TicketAutoDrop.Enqueue(dir.Path, Entry());
+        var name = System.IO.Path.GetFileName(
+            TicketAutoDrop.Pending(TicketAutoDrop.QueueFolder(dir.Path)).Single());
+
+        Assert.StartsWith(TicketAutoDrop.FilePrefix, name);
+        // Журнал заливки так не называется — иначе пометка не различала бы ничего.
+        Assert.False(char.IsDigit(name[0]));
+    }
+
+    /// <summary>Пометка не ломает порядок очереди: за ней сразу идёт дата одной и той же длины,
+    /// поэтому сортировка по имени — это по-прежнему сортировка по времени.</summary>
+    [Fact]
+    public void Порядок_по_дате_сохраняется()
+    {
+        var at = new DateTime(2026, 11, 9, 12, 0, 0);
+        var earlier = TicketAutoDrop.FileName(at, Guid.NewGuid());
+        var later = TicketAutoDrop.FileName(at.AddMilliseconds(5), Guid.NewGuid());
+
+        Assert.True(string.CompareOrdinal(earlier, later) < 0);
+    }
+
+    /// <summary>Файлы, записанные ДО появления пометки, из очереди никуда не деваются: они
+    /// отправляются и вытесняются наравне с новыми, и уезжают первыми — они старше.</summary>
+    [Fact]
+    public async Task Файлы_старого_образца_всё_ещё_уезжают()
+    {
+        using var dir = new TempDir();
+        var queue = TicketAutoDrop.QueueFolder(dir.Path);
+        Directory.CreateDirectory(queue);
+        File.WriteAllText(System.IO.Path.Combine(queue, "20261101-120000000-старый.json"), "{\"old\":1}");
+        TicketAutoDrop.Enqueue(dir.Path, Entry());
+
+        var drop = new FakeDrop();
+        var result = await TicketAutoDrop.FlushAsync(dir.Path, "https://example.test/drop", "код",
+            new HttpClient(drop));
+
+        Assert.Equal(2, result.Sent);
+        Assert.Contains("\"old\":1", drop.Bodies[0]);
+        Assert.Empty(TicketAutoDrop.Pending(queue));
+    }
+
     /// <summary>Реплика едет вместе с тикетом: обсуждение без ответа той стороны — половина
     /// разговора.</summary>
     [Fact]
