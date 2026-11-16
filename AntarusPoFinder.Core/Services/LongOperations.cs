@@ -18,6 +18,12 @@ public enum LongOperationKind
     /// <summary>Сборка .lfs из .psl изолированным SMLogix, без подключения к ПЛК.</summary>
     LfsBuild,
 
+    /// <summary>Ручная замена файла прошивки в уже выпущенной версии на сетевом диске (см.
+    /// <see cref="FirmwareFileReplace"/>): наладчик пересобрал .lfs сам и кладёт его вместо
+    /// прежнего. Долгая по той же причине, что и сборка, — пишет файлы в папку версии на шаре
+    /// компании, которая отвечает через раз.</summary>
+    FirmwareReplace,
+
     /// <summary>Разовая перестройка раскладки уже накопленного диска.</summary>
     DiskRebuild,
 
@@ -96,6 +102,7 @@ public static class LongOperationRules
     {
         LongOperationKind.PlcDeploy => "Загрузка в ПЛК",
         LongOperationKind.LfsBuild => "Сборка LFS",
+        LongOperationKind.FirmwareReplace => "Замена файла прошивки",
         LongOperationKind.DiskRebuild => "Перестройка структуры диска",
         LongOperationKind.DiskCleanup => "Очистка диска",
         LongOperationKind.LegacyImport => "Перенос со старого диска",
@@ -132,7 +139,11 @@ public static class LongOperationRules
     /// (новую версию программы) на неважное (опись, которая снимется завтра).</summary>
     public static bool BlocksAppRestart(LongOperationKind kind) =>
         kind is LongOperationKind.PlcDeploy or LongOperationKind.LfsBuild
-            or LongOperationKind.DiskRebuild or LongOperationKind.LegacyImport;
+            or LongOperationKind.DiskRebuild or LongOperationKind.LegacyImport
+            // Замена файла — тот же случай, что сборка: на том конце файл в папке версии на шаре, и
+            // обрыв посреди неё оставляет версию с прежним файлом в «Предыдущие\», а на его месте —
+            // недописанный .part.
+            or LongOperationKind.FirmwareReplace;
 
     /// <summary>Почему сейчас нельзя перезапускать программу. null — можно.
     ///

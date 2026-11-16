@@ -790,6 +790,10 @@ public partial class SearchView : UserControl
                 // запросом на выдачу, и не ждут фонового обхода папки версии.
                 ExtraFilesCount = attachmentCounts.GetValueOrDefault(result.FwVersionId),
                 CanEditTags = canEditTags,
+                // Право на замену файла на сервере — шире, чем на правку тегов: его имеет тот, кто
+                // модерирует (наладчик и администратор), см. FirmwareFileReplace.CanReplace.
+                // Роль известна сразу, обхода диска не требует.
+                CanReplaceFirmware = FirmwareFileReplace.CanReplace(_services.Cfg.CurrentRole()),
                 AutoSync = autoSync,
                 LoaderConnected = loaderConnected,
                 TagsPending = pendingSubjects.Contains(result.FwVersionId.ToString()),
@@ -845,6 +849,7 @@ public partial class SearchView : UserControl
             card.TagsEditRequested += (s, _) => EditFwTags(((FirmwareCard)s!).Result);
             card.ModerationRequested += (s, _) => EditTags(((FirmwareCard)s!).Result);
             card.ExecutionBuildRequested += (s, _) => PlaceExecutionBuild((FirmwareCard)s!);
+            card.ReplaceFirmwareRequested += (s, e) => { _ = ReplaceFirmwareFileAsync((FirmwareCard)s!); };
             card.FwBugRequested += (s, _) => ReportFwBug(((FirmwareCard)s!).Result);
             ResultsPanel.Children.Add(card);
 
@@ -914,6 +919,10 @@ public partial class SearchView : UserControl
         bool HasInstructionStub, bool HasModbus,
         string? PlcOpenExtension, string? HmiOpenExtension, bool NetworkAlive, bool DiskMissing,
         IReadOnlyList<string> BuiltExecutions,
+        // «Кто и когда вручную заменил файл прошивки» — читается из CHANGELOG.md папки версии тем
+        // же обходом, что и всё остальное: это ещё одно обращение к сетевой шаре, и делать его в
+        // отрисовке нельзя.
+        string ReplacementNote,
         // Та папка версии на диске, которую обход РЕАЛЬНО смотрел (см. ResolvedNetworkDir — она не
         // обязана совпадать с disk_path из базы). Отдаётся наружу, чтобы след «почему нет HMI» писал
         // про то же самое место, а не вычислял его заново: каждый такой расчёт — поход на шару.
@@ -1001,8 +1010,18 @@ public partial class SearchView : UserControl
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
+        // Запись о ручной замене живёт в папке версии НА СЕТЕВОМ ДИСКЕ: она про то, что видят
+        // коллеги. В локальной копии она тоже окажется после следующей синхронизации, но источником
+        // истины остаётся диск — поэтому спрашиваем сначала его.
+        var replacements = FirmwareFileReplace.History(net);
+        if (replacements.Count == 0)
+            replacements = FirmwareFileReplace.History(
+                Path.Combine(ConfigService.LocalFw, SanitizeName(result.Name), result.VersionRaw));
+        var replacement = FirmwareFileReplace.LastReplacementNote(replacements);
+
         return new DiskScan(lfs, psl, hasHmi, hasIoMap, hasInstructions, hasInstrDocx, hasInstrPrintable,
-            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions, net);
+            hasInstrStub, hasModbus, plcExt, hmiExt, networkAlive, diskMissing, builtExecutions,
+            replacement, net);
     }
 
     /// <summary>Папки, по которым PlcOpenResolver ищет файл проекта ПЛК — см. его комментарий про
@@ -1140,6 +1159,7 @@ public partial class SearchView : UserControl
                 // Что из справочника исполнений в этой версии собрано — до конца обхода список пуст,
                 // и карточка честно пишет «конфигурации нет»; обход договорит.
                 BuiltExecutions = scan.BuiltExecutions,
+                ReplacementNote = scan.ReplacementNote,
                 DiskScanPending = false,
                 IsSegnetics = SegneticsProject.IsRelevant(result.Controller, result.ExecutableHint, scan.HasLfs, scan.HasPsl),
             });
@@ -2434,6 +2454,127 @@ public partial class SearchView : UserControl
         _host.ShowStatus($"Конфигурация «{execution}» положена в {result.VersionRaw}: файлов {outcome.Copied.Count}");
         // Перестроить выдачу: пока карточка не узнала, что конфигурация появилась, она продолжает
         // честно писать, что её нет, — а это уже неправда.
+        _host.InvalidateSearchResults();
+    }
+
+    private const string ReplaceDialogTitle = "Замена файла прошивки";
+
+    /// <summary>ЗАМЕНИТЬ ФАЙЛ ПРОШИВКИ В ЭТОЙ ВЕРСИИ НА СЕРВЕРЕ (тикет Киселёва от 11.11.2026,
+    /// версия 2.2.4): «добавить функционал для публикации пересобранной вручную LFS в общий доступ
+    /// (замена на сервере)».
+    ///
+    /// Что здесь важно и почему именно так:
+    /// <list type="bullet">
+    /// <item>право проверяется ЗАНОВО, а не «пункт же показан»: роль могли сменить, пока выдача
+    ///       висит на экране (RoleSwitchDialog), и карточка об этом не знает;</item>
+    /// <item>работа уходит в фоновый поток под правом LongOperationRegistry — это запись файла в
+    ///       папку версии на шаре компании, то есть ровно та операция, посреди которой нельзя ни
+    ///       перезапускать программу (обновление), ни заливать эту же версию в ПЛК;</item>
+    /// <item>подтверждение показывается ПО ПЛАНУ, посчитанному ядром, а не по догадке интерфейса:
+    ///       человек видит то самое имя файла, которое будет заменено, и то самое, под которым
+    ///       прежний ляжет рядом.</item>
+    /// </list></summary>
+    private async Task ReplaceFirmwareFileAsync(FirmwareCard card)
+    {
+        var result = card.Result;
+        var role = _services.Cfg.CurrentRole();
+        if (!FirmwareFileReplace.CanReplace(role))
+        {
+            AppMessageBox.Show(
+                "Заменять файл прошивки на сервере может тот, кто модерирует прошивки — наладчик или "
+                + "администратор. Ваша роль: " + ViewModels.RolesConfig.RoleLabel(role) + ".\n\n"
+                + "Исправленную сборку можно выложить обычной загрузкой прошивки — она получит свой номер.",
+                ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var versionDir = ResolvedNetworkDir(result);
+        if (string.IsNullOrEmpty(versionDir) || !Directory.Exists(versionDir))
+        {
+            AppMessageBox.Show(
+                "Папка версии на сетевом диске не найдена — заменять нечего и негде. "
+                + "Проверьте, виден ли диск.",
+                ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Пересобранный файл прошивки для {result.Name} {result.VersionRaw}".Trim(),
+            Filter = "Прошивка LFS (*.lfs)|*.lfs|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var now = DateTime.Now;
+        var plan = FirmwareFileReplace.Prepare(versionDir, dlg.FileName, now);
+        if (!plan.Ok)
+        {
+            AppMessageBox.Show(plan.Error!, ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var who = $"{_services.CurrentUserName} ({ViewModels.RolesConfig.RoleLabel(role)})";
+        var question =
+            $"Версия: {result.Name} {result.VersionRaw}\n\n"
+            + $"Будет заменён файл:\n{plan.TargetFile}\n\n"
+            + $"Новый файл:\n{dlg.FileName}\n\n"
+            + $"Прежний сохранится рядом:\n{plan.BackupFile}\n\n"
+            + "Номер ПО не изменится: это та же версия с пересобранным файлом. "
+            + $"Запись о замене («{who}») останется в журнале версии на диске.\n\n"
+            + "Заменить?";
+        if (AppMessageBox.Show(question, ReplaceDialogTitle, MessageBoxButton.YesNo,
+                MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+
+        if (!_services.Operations.TryBegin(LongOperationKind.FirmwareReplace,
+                LongOperationSubject.Folder(versionDir), $"{ReplaceDialogTitle}: {result.Name} {result.VersionRaw}".Trim(),
+                out var lease, out var refusal))
+        {
+            AppMessageBox.Show(refusal, ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        FirmwareFileReplace.Result outcome;
+        try
+        {
+            _host.ShowStatus($"Заменяю файл прошивки в {result.VersionRaw}…");
+            var source = dlg.FileName;
+            outcome = await Task.Run(() => FirmwareFileReplace.Replace(versionDir, source, who, now));
+        }
+        finally
+        {
+            lease?.Dispose();
+        }
+
+        if (!outcome.Ok)
+        {
+            AppMessageBox.Show(
+                (outcome.Error ?? "Не получилось заменить файл.")
+                + "\n\nВерсия осталась с прежним файлом.",
+                ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (outcome.NoteMissing)
+            AppMessageBox.Show(
+                "Файл заменён, но записать «кто и когда» в журнал версии на диске не удалось — "
+                + "скорее всего, нет прав на запись в эту папку.\n\n"
+                + "Скажите об этом администратору: без записи замена выглядит как правка файлов руками.",
+                ReplaceDialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+
+        _host.ShowStatus($"Файл прошивки {result.VersionRaw} заменён; прежний — в «{VersionLayout.ReplacedFolderName}»");
+
+        // ⚠️ ЛОКАЛЬНЫЕ КОПИИ КОЛЛЕГ ЭТИМ НЕ ОБНОВЛЯЮТСЯ, и сделать это отсюда нечем: проверка
+        // «нужно ли обновить локальную копию» сравнивает НОМЕРА версий (FirmwareUpdateService,
+        // LocalFirmwareCache.HasVersion — есть папка с таким номером, значит копия свежая), а номер
+        // здесь как раз и не меняется. У того, кто уже скачал эту версию, на диске останется старый
+        // файл, пока он сам не нажмёт «Обновить локальную копию с диска». См. отчёт по тикету.
+        //
+        // СВОЮ копию обновляем сразу: иначе человек заменит файл на сервере и тут же зальёт в ПЛК
+        // старый — из собственного кэша.
+        if (LocalFirmwareCache.HasVersion(result.Name, result.VersionRaw))
+            await DownloadFirmwareAsync(result);
+
+        // Перерисовать выдачу: карточка обязана показать запись о замене (значок «i»).
         _host.InvalidateSearchResults();
     }
 
