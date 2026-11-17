@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
@@ -76,6 +76,47 @@ public class SearchStaleVersionTests
 
         Assert.Equal(new[] { newer }, found);
         Assert.DoesNotContain(older, found);
+    }
+
+    /// <summary>Случай с живого диска (18.11.2026, НГР-КНС SMH4, слепок с DESKTOP-LQE4J68).
+    ///
+    /// В базе лежали ЧЕТЫРЕ записи одного шкафа: 2.1.0004.0001 откатана, 2.1.0004.0002 активна и
+    /// ПРОДУБЛИРОВАНА (две строки с разными sync_id), 2.1.0004.0003 активна. На диске при этом
+    /// осталась папка только у .0003 — у остальных папки исчезли, и карточка честно писала «на
+    /// диске по сохранённому пути не найдена».
+    ///
+    /// Выдача показывала .0002 — живую в базе, но мёртвую на диске. Человек получал прошивку,
+    /// которую нельзя ни открыть, ни залить, и шёл вручную выключать все прежние версии, чтобы
+    /// добраться до свежей.
+    ///
+    /// Проверяем ровно эту расстановку: дубликаты и откатанная соседка не должны мешать показать
+    /// самую свежую.</summary>
+    [Fact]
+    public void Дубликаты_и_откатанная_версия_не_мешают_показать_самую_свежую()
+    {
+        using var dbFile = new TempDb();
+        using var db = new Database(dbFile.Path);
+
+        var rolledBack = AddVersion(db, sw: 1);
+        var duplicateA = AddVersion(db, sw: 2);
+        var duplicateB = AddVersion(db, sw: 2);
+        var newest = AddVersion(db, sw: 3);
+
+        db.RollbackFwVersion(rolledBack);
+
+        // Обе копии .0002 успели набрать популярность — именно так старая версия и выигрывала.
+        for (var i = 0; i < 10; i++)
+        {
+            db.RecordFwUsage(SearchService.UsageKey("XL"), duplicateA);
+            db.RecordFwUsage(SearchService.UsageKey("XL"), duplicateB);
+        }
+
+        var found = Search(db);
+
+        Assert.Contains(newest, found);
+        Assert.DoesNotContain(duplicateA, found);
+        Assert.DoesNotContain(duplicateB, found);
+        Assert.DoesNotContain(rolledBack, found);
     }
 
     /// <summary>То же самое ручным весом: оператор, поставивший вес старой версии под этот запрос,
