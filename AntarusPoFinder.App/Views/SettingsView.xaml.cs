@@ -374,7 +374,7 @@ public partial class SettingsView : UserControl
     {
         TabBtnGeneral, TabBtnHierarchy, TabBtnFirmware, TabBtnModeration, TabBtnReservations,
         TabBtnTags, TabBtnTickets, TabBtnHosting, TabBtnEmail, TabBtnQuickApps, TabBtnLoader, TabBtnConnection, TabBtnPrinting, TabBtnUsers,
-        TabBtnCleanup,
+        TabBtnSessions, TabBtnCleanup,
     };
 
     /// <summary>РАЗДЕЛЫ НАСТРОЕК ПО СМЫСЛУ — порядок и группировка бокового списка в бете.
@@ -397,6 +397,10 @@ public partial class SettingsView : UserControl
         ("", TabBtnQuickApps),
         ("СЕРВИС", TabBtnTickets),
         ("", TabBtnHosting),
+        // «Сеансы» — сервисное и доступно всем: свои сеансы человек смотрит сам, чужие видит и
+        // завершает только администратор (AppSessions.Visible / TerminationRefusal). Поэтому не в
+        // «АДМИНИСТРИРОВАНИИ»: иначе у наладчика висел бы заголовок ради одной строки.
+        ("", TabBtnSessions),
         ("ОБОРУДОВАНИЕ", TabBtnLoader),
         ("", TabBtnConnection),
         ("", TabBtnPrinting),
@@ -590,6 +594,7 @@ public partial class SettingsView : UserControl
         EmailTab.Visibility = Visibility.Collapsed;
         QuickAppsTab.Visibility = Visibility.Collapsed;
         ConnectionsTab.Visibility = Visibility.Collapsed;
+        SessionsTab.Visibility = Visibility.Collapsed;
         UsersTab.Visibility = Visibility.Collapsed;
         LoaderTab.Visibility = Visibility.Collapsed;
         ConnectionTab.Visibility = Visibility.Collapsed;
@@ -613,6 +618,7 @@ public partial class SettingsView : UserControl
         else if (sender == TabBtnEmail) { EmailTab.Visibility = Visibility.Visible; LoadEmailTab(); }
         else if (sender == TabBtnQuickApps) QuickAppsTab.Visibility = Visibility.Visible;
         else if (sender == TabBtnConnections) { ConnectionsTab.Visibility = Visibility.Visible; LoadConnectionsTab(); }
+        else if (sender == TabBtnSessions) { SessionsTab.Visibility = Visibility.Visible; LoadSessionsTab(); }
         else if (sender == TabBtnUsers) { UsersTab.Visibility = Visibility.Visible; LoadUsersTab(); }
     }
 
@@ -657,6 +663,13 @@ public partial class SettingsView : UserControl
         TabBtnFirmware.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // Список подключений — инструмент администратора: наладчику там нечего решать.
         TabBtnConnections.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+        // «Сеансы» — ВСЕМ, в отличие от соседних «Подключений». Это прямая просьба: «обычный
+        // пользователь только свои сессии залогиненые видит». Урезается не вкладка, а содержимое
+        // (AppSessions.Visible) и кнопка завершения ниже: решать, что показать, по роли внутри
+        // надёжнее, чем прятать вход, — спрятанный вход пришлось бы повторять в каждом новом месте,
+        // откуда на страницу можно попасть.
+        TabBtnSessions.Visibility = Visibility.Visible;
+        EndSessionBtn.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         TabBtnUsers.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
         // «Чистка диска» переименовывает, переносит и безвозвратно удаляет файлы на общем диске, то
         // есть чужую работу. Была единственной администраторской СТРАНИЦЕЙ (RolesConfig.RoleAccess) —
@@ -4568,6 +4581,169 @@ public partial class SettingsView : UserControl
         }
         _services.Db.ForgetParticipant(row.OriginId);
         LoadConnectionsTab();
+    }
+
+    // ── Сеансы ────────────────────────────────────────────────────────────
+    //
+    // Просьба дословно: «сделай вкладку где можно сессию смотреть и доступ супер админа, чтобы я мог
+    // управлять сессиями всеми через него, а обычный пользователь только свои сессии залогиненые
+    // видит (так можно будет убивать старые версии или те кто мусор записывают)».
+    //
+    // Правила (кто живой, кто что видит, кому можно завершать) живут в Core/Services/AppSessions.cs
+    // и покрыты тестами без WPF — здесь только отрисовка и нажатия.
+
+    /// <summary>Строка таблицы сеансов. Состояние считается при каждой сборке списка, а не
+    /// хранится: «живой» зависит от текущего времени, и запомненный ответ разошёлся бы с ним через
+    /// полчаса — ровно та же причина, что и у ConnectionRow выше.</summary>
+    private sealed class SessionRow
+    {
+        public string UserLogin { get; init; } = "";
+        public string MachineName { get; init; } = "";
+        public string AppVersion { get; init; } = "";
+        public string Channel { get; init; } = "";
+        public string Started { get; init; } = "";
+        public string Heartbeat { get; init; } = "";
+        public string State { get; init; } = "";
+        public bool IsOwn { get; init; }
+        public bool Outdated { get; init; }
+        public bool Live { get; init; }
+        public Core.Domain.AppSession Record { get; init; } = new();
+    }
+
+    /// <summary>Что видно этому человеку — уже отобранное по роли. Фильтры версии/машины работают
+    /// поверх него, а не поверх всей базы: иначе наладчик, выбрав чужую машину в списке, узнал бы
+    /// из пустоты ровно то, что ему знать не полагалось.</summary>
+    private List<Core.Domain.AppSession> _sessionsData = new();
+
+    private void LoadSessionsTab()
+    {
+        var role = _services.Cfg.CurrentRole();
+        var isAdmin = Core.Services.AppSessions.IsAdmin(role);
+
+        SessionsHintText.Text = isAdmin
+            ? "Все запущенные копии программы: кто, с какой машины и под какой версией работает. " +
+              "Сеанс можно завершить — программа на той машине выйдет сама при ближайшей проверке. " +
+              "Если там идёт заливка в ПЛК или другая долгая операция, выход подождёт её окончания: " +
+              "оборвать её значит оставить контроллер без рабочей прошивки."
+            : "Ваши сеансы работы: где вы сейчас залогинены и когда программа последний раз подавала " +
+              "признаки жизни. Чужие сеансы и завершение доступны администратору.";
+
+        _sessionsData = Core.Services.AppSessions.Visible(
+            _services.Db.GetSessions(), role, _services.CurrentUserName);
+
+        FillSessionFilter(SessionVersionFilterCombo, _sessionsData.Select(s => s.AppVersion), "Любая");
+        FillSessionFilter(SessionMachineFilterCombo, _sessionsData.Select(s => s.MachineName), "Любой");
+
+        ApplySessionFilter();
+    }
+
+    /// <summary>Пересобрать список значений фильтра, сохранив выбранное. Пересобирается, а не
+    /// дополняется: вкладку открывают по многу раз за сеанс (экземпляр страницы живёт в кэше), и
+    /// дополнение означало бы ту же версию в списке трижды — на этом уже обжигались в блоке
+    /// локальных копий выше.</summary>
+    private static void FillSessionFilter(ComboBox combo, IEnumerable<string> values, string anyLabel)
+    {
+        var previous = combo.SelectedItem as string;
+        combo.Items.Clear();
+        combo.Items.Add(anyLabel);
+        foreach (var v in values.Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().OrderBy(v => v, StringComparer.OrdinalIgnoreCase))
+            combo.Items.Add(v);
+        var index = previous is null ? 0 : combo.Items.IndexOf(previous);
+        combo.SelectedIndex = index >= 0 ? index : 0;
+    }
+
+    private void SessionFilter_Changed(object sender, RoutedEventArgs e)
+    {
+        // Прилетает и во время наполнения списков (Items.Clear сбрасывает выбор) — пока таблицы
+        // ещё нет, рисовать нечего.
+        if (SessionsGrid is null) return;
+        ApplySessionFilter();
+    }
+
+    private void ApplySessionFilter()
+    {
+        var now = DateTime.Now;
+        var ownSessionId = _services.SessionId;
+        var minimum = _services.Cfg.MinAppVersion();
+
+        IEnumerable<Core.Domain.AppSession> rows = _sessionsData;
+        if (SessionVersionFilterCombo.SelectedIndex > 0 && SessionVersionFilterCombo.SelectedItem is string version)
+            rows = rows.Where(s => s.AppVersion == version);
+        if (SessionMachineFilterCombo.SelectedIndex > 0 && SessionMachineFilterCombo.SelectedItem is string machine)
+            rows = rows.Where(s => s.MachineName == machine);
+        if (SessionOnlyLiveCheck.IsChecked == true)
+            rows = rows.Where(s => Core.Services.AppSessions.IsLive(s, now));
+
+        SessionsGrid.ItemsSource = rows
+            .Select(s => new SessionRow
+            {
+                UserLogin = s.UserLogin.Length > 0 ? s.UserLogin : "(не представился)",
+                MachineName = s.MachineName.Length > 0 ? s.MachineName : "(не представилась)",
+                AppVersion = s.AppVersion.Length > 0 ? s.AppVersion : "неизвестна",
+                Channel = s.Channel,
+                Started = ShortStamp(s.StartedAt),
+                Heartbeat = ShortStamp(s.HeartbeatAt),
+                State = Core.Services.AppSessions.StateLabel(s, now),
+                IsOwn = string.Equals(s.SessionId, ownSessionId, StringComparison.Ordinal),
+                // Подсвечиваем устаревшую версию по той же планке, что и «Подключения»: это и есть
+                // тот случай, ради которого просили завершение — «убивать старые версии».
+                Outdated = !Core.Services.VersionGate.IsTrusted(s.AppVersion, minimum),
+                Live = Core.Services.AppSessions.IsLive(s, now),
+                Record = s,
+            })
+            .ToList();
+    }
+
+    /// <summary>«2026-11-17 14:03» — секунды и доли в таблице не нужны, а полная отметка ломает
+    /// ширину столбца.</summary>
+    private static string ShortStamp(string stamp) =>
+        stamp.Length >= 16 ? stamp[..16].Replace('T', ' ') : stamp;
+
+    private void RefreshSessions_Click(object sender, RoutedEventArgs e) => LoadSessionsTab();
+
+    /// <summary>«Завершить сеанс» — ЗАПИСЬ ПРОСЬБЫ, а не убийство процесса. Программа на той машине
+    /// увидит её своим тиком (MainWindowViewModel.SessionTick) и выйдет сама, дождавшись окончания
+    /// долгой операции. Грубо снимать процесс нельзя: на том конце может идти заливка в ПЛК, и
+    /// обрыв оставит контроллер без рабочей прошивки.
+    ///
+    /// Просьба доезжает до чужой машины обычным обменом общего конфига: это ДОПИСАННОЕ ПОЛЕ
+    /// (ended_at), а не удаление строки, — а удаления синхронизация не переносит (см. CLAUDE.md и
+    /// AppSessions.Merge, где разобран случай «администратор пометил, коллега в это же время
+    /// отметился живым»).</summary>
+    private void EndSession_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionsGrid.SelectedItem is not SessionRow row)
+        {
+            AppMessageBox.Show("Выберите сеанс в списке.", "Сеансы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var refusal = Core.Services.AppSessions.TerminationRefusal(
+            _services.Cfg.CurrentRole(), row.Record, _services.SessionId, DateTime.Now);
+        if (refusal is not null)
+        {
+            AppMessageBox.Show(refusal, "Сеансы", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var answer = AppMessageBox.Show(
+            $"Завершить сеанс: {row.UserLogin} на {row.MachineName} (версия {row.AppVersion})?" + Environment.NewLine + Environment.NewLine +
+            "Программа там закроется при ближайшей проверке — обычно в течение нескольких минут. " +
+            "Если идёт заливка в ПЛК или другая долгая операция, выход подождёт её окончания.",
+            "Завершить сеанс", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        _services.Db.RequestEndSession(row.Record.SessionId, _services.CurrentUserName);
+
+        // Отправить сразу, а не ждать очередного тика: смысл кнопки в том, чтобы человек перестал
+        // писать в общие данные СЕЙЧАС, и лишние полчаса ожидания обмена отменяют половину смысла.
+        // Не доехало — правка осталась в накопителе и видна на плашке, как любая другая.
+        _host.PushCatalogChange(
+            $"Завершён сеанс: {row.UserLogin} на {row.MachineName}", "", NotificationCategory.Sync);
+        _host.ShowStatus($"Сеанс {row.UserLogin} на {row.MachineName} помечен на завершение. " +
+                         "Программа там закроется, когда увидит отметку.",
+            category: NotificationCategory.Sync);
+        LoadSessionsTab();
     }
 
     private void RefreshFirmware_Click(object sender, RoutedEventArgs e) => LoadFirmwareTab();

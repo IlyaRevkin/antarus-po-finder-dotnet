@@ -268,6 +268,20 @@ public partial class Database
                 })
                 .ToList();
 
+        // Сеансы работы — тем же порядком и по той же причине, что подписи машин выше: пересылаем
+        // и чужие. Здесь это важнее вдвойне: именно так просьба администратора завершить чужой
+        // сеанс (ended_at) доезжает до машины, которая с ним самим никогда напрямую не обменивалась.
+        data.Sessions =
+            GetSessions()
+                .Select(s => new ExportedSession
+                {
+                    SessionId = s.SessionId, OriginId = s.OriginId, MachineName = s.MachineName,
+                    UserLogin = s.UserLogin, AppVersion = s.AppVersion, Channel = s.Channel,
+                    StartedAt = s.StartedAt, HeartbeatAt = s.HeartbeatAt,
+                    EndedAt = s.EndedAt, EndedBy = s.EndedBy, ClosedAt = s.ClosedAt,
+                })
+                .ToList();
+
         // Явные переписывания hw модификаций (см. ExportedHwRewrite / Database.HwRewriteLog.cs) —
         // журнал последних операций, чтобы приёмник проиграл ещё не применённое как переименование,
         // а не завёл дубликаты из-за смены version_raw.
@@ -1582,6 +1596,19 @@ public partial class Database
             {
                 OriginId = p.OriginId, MachineName = p.MachineName, UserName = p.UserName,
                 AppVersion = p.AppVersion, Channel = p.Channel, LastSeenAt = p.LastSeenAt,
+            }));
+
+        // ── Сеансы (Database.AppSessions.cs). В counts НЕ учитываются осознанно, по той же причине,
+        //    что статистика и подписи машин: отметка живого сеанса обновляется у каждого коллеги раз
+        //    в несколько минут, и попади она в TotalChanges — плашка «Поступили изменения» горела бы
+        //    не переставая. Слияние построчное и по полям, см. AppSessions.Merge.
+        if (apply && data.Sessions is not null)
+            MergeSessions(data.Sessions.Select(s => new Domain.AppSession
+            {
+                SessionId = s.SessionId, OriginId = s.OriginId, MachineName = s.MachineName,
+                UserLogin = s.UserLogin, AppVersion = s.AppVersion, Channel = s.Channel,
+                StartedAt = s.StartedAt, HeartbeatAt = s.HeartbeatAt,
+                EndedAt = s.EndedAt, EndedBy = s.EndedBy, ClosedAt = s.ClosedAt,
             }));
 
         if (apply && data.FwUsage is not null)

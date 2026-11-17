@@ -512,6 +512,30 @@ public class ExportedParticipant
     [JsonPropertyName("last_seen_at")] public string LastSeenAt { get; set; } = "";
 }
 
+/// <summary>Один сеанс работы программы в общем конфиге — см. Core/Domain/AppSession.cs.
+///
+/// Едет рядом с подписями машин и по тем же правилам: машина пересылает и ЧУЖИЕ сеансы тоже, иначе
+/// выгрузивший только свои стёр бы в снимке остальных, и администратор увидел бы ровно тех, кто
+/// синхронизировался последним.
+///
+/// ⚠️ ended_at здесь — то самое, ради чего список вообще едет: просьба администратора завершить
+/// сеанс доезжает до чужой машины ДОПИСАННЫМ ПОЛЕМ, а не удалением строки (удаления общий конфиг
+/// не переносит).</summary>
+public class ExportedSession
+{
+    [JsonPropertyName("session_id")] public string SessionId { get; set; } = "";
+    [JsonPropertyName("origin_id")] public string OriginId { get; set; } = "";
+    [JsonPropertyName("machine_name")] public string MachineName { get; set; } = "";
+    [JsonPropertyName("user_login")] public string UserLogin { get; set; } = "";
+    [JsonPropertyName("app_version")] public string AppVersion { get; set; } = "";
+    [JsonPropertyName("channel")] public string Channel { get; set; } = "";
+    [JsonPropertyName("started_at")] public string StartedAt { get; set; } = "";
+    [JsonPropertyName("heartbeat_at")] public string HeartbeatAt { get; set; } = "";
+    [JsonPropertyName("ended_at")] public string EndedAt { get; set; } = "";
+    [JsonPropertyName("ended_by")] public string EndedBy { get; set; } = "";
+    [JsonPropertyName("closed_at")] public string ClosedAt { get; set; } = "";
+}
+
 public class HierarchyExportData
 {
     /// <summary>Кто собрал ЭТОТ снимок и на какой версии. Пусто у снимка со старой версии
@@ -523,6 +547,10 @@ public class HierarchyExportData
     /// <summary>Кто и на какой версии работает с этим конфигом. Пусто у снимка, собранного старой
     /// версией программы — это «источник о них не знает», а не «никого нет».</summary>
     [JsonPropertyName("participants")] public List<ExportedParticipant>? Participants { get; set; }
+
+    /// <summary>Сеансы работы программы — см. <see cref="ExportedSession"/>. Пусто у снимка со
+    /// старой версии: «источник про сеансы не знает», а не «никто не работает».</summary>
+    [JsonPropertyName("sessions")] public List<ExportedSession>? Sessions { get; set; }
 
     [JsonPropertyName("equipment_groups")] public List<ExportedGroup> EquipmentGroups { get; set; } = new();
     [JsonPropertyName("equipment_subtypes")] public List<ExportedSubType> EquipmentSubtypes { get; set; } = new();

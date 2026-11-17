@@ -90,6 +90,13 @@
                     Visibility="Collapsed" Click="Tab_Click">
                 <TextBlock Text="Подключения" Style="{StaticResource NavButtonContentText}"/>
             </Button>
+            <!-- КТО РАБОТАЕТ ПРЯМО СЕЙЧАС. В отличие от «Подключений» рядом, вкладка видна ВСЕМ:
+                 обычный человек видит в ней только свои сеансы (это ответ на «я где-то ещё
+                 залогинен?»), администратор — все и может их завершать. Что именно показано,
+                 решает AppSessions.Visible, а не видимость кнопки. -->
+            <Button x:Name="TabBtnSessions" Style="{StaticResource NavButton}" Padding="16,8" Margin="0,0,4,0" Click="Tab_Click">
+                <TextBlock Text="Сеансы" Style="{StaticResource NavButtonContentText}"/>
+            </Button>
             <!-- «Чистка диска» была отдельным пунктом бокового меню и переехала сюда намеренно:
                  это разовая уборка общего диска, а не рабочий экран. Вкладка последняя в полосе и
                  видна только администратору (ApplyRoleVisibility) — ровно как раньше пункт меню. -->
@@ -1962,6 +1969,70 @@
                 <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshConnections_Click"/>
                 <Button Content="Забыть машину" Style="{StaticResource SecondaryButton}" Click="ForgetConnection_Click"
                         ToolTip="Убрать строку из списка. Машина появится снова при ближайшей своей синхронизации — это уборка списка, а не запрет."/>
+            </StackPanel>
+        </Grid>
+
+        <!-- ═══════════════════════ СЕАНСЫ РАБОТЫ ═══════════════════════ -->
+        <!-- Просьба Ильи: «сделай вкладку где можно сессию смотреть и доступ супер админа, чтобы я
+             мог управлять сессиями всеми через него, а обычный пользователь только свои сессии
+             залогиненые видит (так можно будет убивать старые версии или те кто мусор
+             записывают)». Отличие от «Подключений»: там строка на УСТАНОВКУ («какая версия»),
+             здесь — на каждый ЗАПУСК, и завершать надо именно запуск. -->
+        <Grid x:Name="SessionsTab" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" x:Name="SessionsHintText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+            <!-- Фильтры по версии и машине — то, ради чего список и нужен администратору: найти
+                 всех, кто сидит на старой версии, или всё, что идёт с одной машины. -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                <TextBlock Text="Версия:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="SessionVersionFilterCombo" Width="140" Height="34" Margin="0,0,12,0"
+                          SelectionChanged="SessionFilter_Changed"/>
+                <TextBlock Text="Компьютер:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="SessionMachineFilterCombo" Width="180" Height="34" Margin="0,0,12,0"
+                          SelectionChanged="SessionFilter_Changed"/>
+                <CheckBox x:Name="SessionOnlyLiveCheck" Content="Только работающие" VerticalAlignment="Center"
+                          IsChecked="True" Checked="SessionFilter_Changed" Unchecked="SessionFilter_Changed"
+                          ToolTip="Снимите, чтобы увидеть историю: закрытые и не ответившие сеансы."/>
+            </StackPanel>
+
+            <DataGrid Grid.Row="2" x:Name="SessionsGrid" AutoGenerateColumns="False" IsReadOnly="True" MinHeight="120" Margin="0,0,0,10"
+                      Style="{StaticResource RoomyDataGrid}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Человек" Binding="{Binding UserLogin}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Компьютер" Binding="{Binding MachineName}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellText}"/>
+                    <DataGridTextColumn Header="Версия" Binding="{Binding AppVersion}" Width="Auto" MinWidth="90" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Канал" Binding="{Binding Channel}" Width="Auto" MinWidth="80" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Начат" Binding="{Binding Started}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Активность" Binding="{Binding Heartbeat}" Width="Auto" MinWidth="130" ElementStyle="{StaticResource DataGridCellTextCentered}"/>
+                    <DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="*" MinWidth="170" ElementStyle="{StaticResource DataGridCellText}"/>
+                </DataGrid.Columns>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                        <Style.Triggers>
+                            <!-- Свой сеанс выделен жирным: в общем списке его надо узнавать сразу,
+                                 хотя бы затем, чтобы не искать «почему эту строку не завершить». -->
+                            <DataTrigger Binding="{Binding IsOwn}" Value="True">
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Outdated}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+            </DataGrid>
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal">
+                <Button Content="Обновить" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="RefreshSessions_Click"/>
+                <Button x:Name="EndSessionBtn" Content="Завершить сеанс" Style="{StaticResource SecondaryButton}" Click="EndSession_Click"
+                        ToolTip="Программа на той машине увидит это ближайшим тиком и выйдет сама. Если там идёт заливка в ПЛК или другая долгая операция — дождётся её окончания, обрывать такое нельзя."/>
             </StackPanel>
         </Grid>
 
