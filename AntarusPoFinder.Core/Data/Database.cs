@@ -669,6 +669,29 @@ public partial class Database : IDisposable
                  blocked      INTEGER NOT NULL DEFAULT 0
              );
 
+             -- СЕАНСЫ РАБОТЫ ПРОГРАММЫ (см. Database.AppSessions.cs, Core/Domain/AppSession.cs).
+             -- Соседка таблицы выше и отвечает на другой вопрос: там строка на УСТАНОВКУ, здесь —
+             -- на каждый ЗАПУСК. Нужна затем, что отключать надо не машину вообще, а конкретный
+             -- работающий экземпляр: «так можно будет убивать старые версии или те кто мусор
+             -- записывают».
+             --
+             -- ⚠️ ended_at — ПОЛЕ, А НЕ УДАЛЕНИЕ СТРОКИ. Синхронизация конфига удаления не
+             -- переносит (см. CLAUDE.md), поэтому «завершить сеанс» оформлено как дописанное
+             -- значение: так просьба доезжает до чужой машины обычным обменом.
+             CREATE TABLE IF NOT EXISTS app_sessions (
+                 session_id   TEXT PRIMARY KEY,
+                 origin_id    TEXT NOT NULL DEFAULT '',
+                 machine_name TEXT NOT NULL DEFAULT '',
+                 user_login   TEXT NOT NULL DEFAULT '',
+                 app_version  TEXT NOT NULL DEFAULT '',
+                 channel      TEXT NOT NULL DEFAULT '',
+                 started_at   TEXT NOT NULL DEFAULT '',
+                 heartbeat_at TEXT NOT NULL DEFAULT '',
+                 ended_at     TEXT NOT NULL DEFAULT '',
+                 ended_by     TEXT NOT NULL DEFAULT '',
+                 closed_at    TEXT NOT NULL DEFAULT ''
+             );
+
              CREATE TABLE IF NOT EXISTS fw_usage_shared (
                  origin             TEXT    NOT NULL,
                  query_key          TEXT    NOT NULL,
