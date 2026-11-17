@@ -68,6 +68,24 @@ public partial class MainWindow : Window
                 services.CurrentUserName,
                 AppUpdateService.CurrentVersionText,
                 Core.Domain.AppIdentity.IsBeta ? "бета" : "рабочая");
+
+            // И СЕАНС РАБОТЫ — отдельной строкой (см. Core/Domain/AppSession.cs). Строка выше
+            // говорит, какая версия у этой УСТАНОВКИ; эта — что прямо сейчас запущен вот такой
+            // экземпляр, и его можно завершить. Под одной установкой за день работают двое, и
+            // отключать надо того, кто мешает сейчас.
+            services.Db.StartSession(new Core.Domain.AppSession
+            {
+                SessionId = services.SessionId,
+                OriginId = services.Db.UsageOriginId(),
+                MachineName = Environment.MachineName,
+                UserLogin = services.CurrentUserName,
+                AppVersion = AppUpdateService.CurrentVersionText,
+                Channel = Core.Domain.AppIdentity.IsBeta ? "бета" : "рабочая",
+            });
+
+            // Уборка давно закрытых сеансов — здесь же, на старте: один запрос по дате, а делать
+            // её по таймеру значило бы заводить таймер ради того, что успевает устареть за сутки.
+            services.Db.PruneOldSessions(DateTime.Now);
         }
         catch
         {
@@ -344,6 +362,13 @@ public partial class MainWindow : Window
             _trayIcon.Dispose();
             _trayIcon = null;
         }
+
+        // Сеанс закончился. Отметка ставится здесь, а не только когда сеанс завершил администратор:
+        // обычный выход — это тоже конец сеанса, и без этой строки он висел бы «работает» ещё
+        // полчаса, до протухания отметки (AppSessions.StaleAfter). Протухание — страховка на случай
+        // «выключили по питанию», а не обычный путь.
+        try { _services.Db.CloseSession(_services.SessionId); }
+        catch { /* программа всё равно закрывается — падать на этом нечего */ }
     }
 
     /// <summary>Optional but natural extension of "сворачивать в трей": the taskbar's own minimize

@@ -1,3 +1,4 @@
+using System;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Services;
 
@@ -24,6 +25,14 @@ public class AppServices
     /// only ever picked a role through the plain shared-password dialog, in which case CurrentUserName
     /// keeps falling back to the Windows/machine account exactly as before this existed.</summary>
     public string? CurrentAdLogin { get; set; }
+
+    /// <summary>Идентификатор ЭТОГО запуска программы — см. Core/Domain/AppSession.cs. Новый GUID
+    /// на каждый старт, и живёт он только в памяти: сеанс — это «программа запущена сейчас», и
+    /// запомненный на диске он пережил бы собственное окончание.
+    ///
+    /// Здесь, а не в MainWindow, по той же причине, что и CurrentUserName рядом: «кто и в каком
+    /// сеансе сейчас действует» спрашивают страницы, а не окно.</summary>
+    public string SessionId { get; } = Guid.NewGuid().ToString("N");
 
     /// <summary>"Кто сейчас действует" for every CreatedBy/exported_by/"кем зарезервирован" field —
     /// the AD login if this session authenticated via AD, otherwise the shared Windows/machine

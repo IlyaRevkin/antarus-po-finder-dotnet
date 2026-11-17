@@ -35,6 +35,7 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
     /// малом интервале, потому что сама проверка дешёвая (см. ConfigSyncService.ReadShared — читает
     /// только Конфиг\revision.json, пока ревизия не выросла).</summary>
     private DispatcherTimer? _revisionPollTimer;
+    private DispatcherTimer? _sessionTimer;
     /// <summary>Best-effort триггер по изменению файла (Задача 3) — ДОПОЛНЕНИЕ к опросу выше, не
     /// замена: по SMB FileSystemWatcher ненадёжен (событие может не долететь/задвоиться/опоздать).
     /// См. SetupConfigWatcher.</summary>
@@ -1062,6 +1063,22 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         _revisionPollTimer.Tick += async (_, _) => await CheckForConfigUpdateAsync();
         _revisionPollTimer.Start();
 
+        // СЕАНС РАБОТЫ: отметиться живым и посмотреть, не завершил ли его администратор (см.
+        // Core/Services/AppSessions.cs и вкладку «Сеансы» в Настройках).
+        //
+        // Свой таймер, а не довесок к тику синхронизации выше, по одной причине: периодический
+        // приём конфига выключается настройкой (sync_interval_min = 0), и на такой машине сеанс
+        // перестал бы отмечаться вовсе — то есть в списке у администратора вечно висел бы «не
+        // отвечает» ровно у тех, кого он и собирался отключить. Интервал при этом того же порядка
+        // (минуты): чаще бессмысленно — отметка всё равно доедет до чужой машины не раньше
+        // ближайшего обмена конфигом.
+        //
+        // Запись идёт в SQLite на потоке интерфейса, как и соседние тики: это один UPDATE по
+        // первичному ключу, уходить ради него в фон не за чем.
+        _sessionTimer = new DispatcherTimer { Interval = Core.Services.AppSessions.HeartbeatInterval };
+        _sessionTimer.Tick += (_, _) => SessionTick();
+        _sessionTimer.Start();
+
         // FileSystemWatcher на Конфиг\revision.json — best-effort триггер «по изменению» (Задача 3),
         // ДОПОЛНЕНИЕ к опросу выше, а не замена: по SMB он ненадёжен (событие может не долететь,
         // задвоиться или прийти с задержкой) — если событие не пришло, следующий тик
@@ -1069,6 +1086,64 @@ public partial class MainWindowViewModel : ObservableObject, IAppHost
         SetupConfigWatcher();
 
         RefreshPendingChangesBanner();
+    }
+
+    /// <summary>Уже сказали человеку, что его сеанс завершён, но выход отложен долгой операцией.
+    /// Один раз: тик приходит каждые несколько минут, а заливка идёт десятки — повторять одно и то
+    /// же значило бы отвлекать наладчика от контроллера именно тогда, когда нельзя.</summary>
+    private bool _sessionEndDeferredAnnounced;
+
+    /// <summary>ОТМЕТИТЬСЯ ЖИВЫМ И ПРОВЕРИТЬ, НЕ ЗАВЕРШЁН ЛИ СЕАНС. Зовётся по таймеру (см.
+    /// StartTimers).
+    ///
+    /// ⚠️ ВЫХОД ОТКЛАДЫВАЕТСЯ, ПОКА ИДЁТ ДОЛГАЯ ОПЕРАЦИЯ. Это ровно те грабли, на которых уже
+    /// обожглись с автообновлением: «автоматический перезапуск Finder для обновления происходит при
+    /// заливке прошивки в контроллер, что может привести к окирпичиванию контроллера». Завершение
+    /// сеанса — такой же принудительный выход, и правило у него то же самое и физически ТО ЖЕ
+    /// (AppSessions.ShutdownDelayReason зовёт LongOperationRules.RestartBlockReason, а не свою
+    /// копию списка). Сеанс при этом уже помечен завершающимся, и администратор видит в списке
+    /// «завершается» — то есть его команда принята, просто исполняется не мгновенно.</summary>
+    private void SessionTick()
+    {
+        try
+        {
+            _services.Db.HeartbeatSession(_services.SessionId, _services.CurrentUserName);
+
+            var mine = _services.Db.FindSession(_services.SessionId);
+            if (mine is null || string.IsNullOrEmpty(mine.EndedAt) || !string.IsNullOrEmpty(mine.ClosedAt))
+                return;
+
+            if (Core.Services.AppSessions.ShutdownDelayReason(_services.Operations.Active) is { } wait)
+            {
+                if (_sessionEndDeferredAnnounced) return;
+                _sessionEndDeferredAnnounced = true;
+                ShowStatus(Core.Services.AppSessions.TerminationDeferredNotice(mine, wait),
+                    ms: 15000, category: NotificationCategory.General);
+                return;
+            }
+
+            // Отметка о закрытии ставится ДО самого закрытия: окно закрытия (MainWindow_Closing)
+            // поставит её же повторно, и это не помешает — CloseSession не перебивает уже
+            // записанный момент. А вот наоборот — положиться только на обработчик закрытия —
+            // значило бы потерять факт выхода, если программу в этот момент снимут жёстко.
+            _services.Db.CloseSession(_services.SessionId);
+
+            AppLog.Info(AppLog.AreaSync,
+                $"сеанс завершён администратором ({mine.EndedBy}) — выходим");
+            AppMessageBox.Show(Core.Services.AppSessions.TerminationNotice(mine),
+                "Сеанс завершён", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            // Честный выход, а не сворачивание в трей: сеанс завершили, и программа, оставшаяся
+            // висеть значком, продолжала бы писать в общие данные ровно так же.
+            MainWindow.ForceRealExit = true;
+            System.Windows.Application.Current?.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            // Сеансы — надстройка над работой, а не условие её: не записалось/не прочиталось —
+            // программа работает дальше, следующий тик попробует снова.
+            AppLog.Error(AppLog.AreaSync, $"тик сеанса не прошёл: {ex.Message}");
+        }
     }
 
     /// <summary>Пересоздаёт наблюдатель за Конфиг\revision.json на текущем root_path. Best-effort:
