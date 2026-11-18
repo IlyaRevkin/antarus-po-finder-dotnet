@@ -177,9 +177,15 @@ public partial class Database
     /// версию отдельной строкой (тикет «чекбокс отображения всего имеющегося в поиске»: модератору
     /// надо видеть, что есть и что надо подгрузить). По умолчанию выключено — схлопывание придумано
     /// ради наладчика, которому нужна одна актуальная прошивка, а не вся история.
+    /// <param name="ignoreOnDemandWords">Не применять правило «слова по запросу» — то, что делает
+    /// подсказка «скрыто N версий по слову „Рх“ — показать» (см. SearchView). От
+    /// <paramref name="showAllVersions"/> отличается тем, что НЕ отменяет схлопывание: человек
+    /// просил показать спрятанное словом, а не всю историю версий заодно. Спрятанные строки при
+    /// этом всё равно отмечаются в трассе (<see cref="LastSearchTrace"/>) — иначе подсказка,
+    /// однажды нажатая, исчезала бы вместе с объяснением, почему она была нужна.</param>
     public List<ScoredFwVersion> SearchFwVersions(IReadOnlyList<string> tokens, bool exactWord = false,
         FirmwareSearchFilters? filters = null, string usageQueryKey = "", string phrase = "", int usageThreshold = 1,
-        double usageMultiplier = 1, bool showAllVersions = false)
+        double usageMultiplier = 1, bool showAllVersions = false, bool ignoreOnDemandWords = false)
     {
         filters ??= FirmwareSearchFilters.None;
 
@@ -203,11 +209,40 @@ public partial class Database
         // ввёл и только указываю фильтры».
         var textAsked = !string.IsNullOrWhiteSpace(askedText);
         var onDemandWords = showAllVersions || !textAsked ? new List<string>() : GetOnDemandWords();
-        var rows = SearchIndex()
-            .Where(r => PassesFilters(r, filters))
-            .Where(r => !FwOnDemandTerms.ShouldHide(onDemandWords, SearchableTextOf(r), askedText))
-            .ToList();
-        if (rows.Count == 0) return new();
+
+        // Трасса заводится ДО первого отсева и доживает до возврата: по ней потом и видно, на каком
+        // шаге строка выпала (см. SearchTrace). Пишется всегда — она стоит нескольких счётчиков, —
+        // а вот уезжает наружу далеко не всякая (см. SearchTraceDrop.Interesting).
+        var trace = new SearchTrace
+        {
+            Mode = !textAsked ? "пустой запрос" : exactWord ? "точный" : "обычный",
+            QueryWords = tokens.Count(t => !string.IsNullOrWhiteSpace(t)),
+            Filtered = !filters.IsEmpty,
+            ShowAllVersions = showAllVersions,
+            OnDemandWords = onDemandWords.Count,
+        };
+        LastSearchTrace = trace;
+
+        var index = SearchIndex();
+        trace.IndexRows = index.Count;
+
+        var rows = new List<FwVersionRecord>();
+        foreach (var r in index)
+        {
+            if (!PassesFilters(r, filters)) continue;
+            trace.PassedFilters++;
+
+            if (onDemandWords.Count > 0 &&
+                FwOnDemandTerms.Explain(onDemandWords, SearchablePartsOf(r), askedText) is { } hidden)
+            {
+                trace.NoteHiddenByWord(TraceRowOf(r, SearchDropReasons.OnDemandWord, hidden.Word, hidden.Field));
+                if (!ignoreOnDemandWords) continue;
+            }
+
+            rows.Add(r);
+        }
+        trace.PassedWords = rows.Count;
+        if (rows.Count == 0) return Shown(trace, new());
 
         var usage = string.IsNullOrEmpty(usageQueryKey)
             ? new Dictionary<int, (int Uses, int Weight)>()
@@ -227,9 +262,11 @@ public partial class Database
         // справочник тому, кто просто открыл страницу, незачем.
         if (qTokens.Length == 0)
         {
-            if (filters.IsEmpty && !showAllVersions) return new();
-            return Deduplicate(rows.Select(r => new ScoredFwVersion(r, 0, UsesOf(r, usage), WeightOf(r, usage))),
-                usageThreshold, usageMultiplier, showAllVersions);
+            if (filters.IsEmpty && !showAllVersions) return Shown(trace, new());
+            trace.MatchedQuery = rows.Count;
+            return Shown(trace, Deduplicate(
+                rows.Select(r => new ScoredFwVersion(r, 0, UsesOf(r, usage), WeightOf(r, usage))),
+                usageThreshold, usageMultiplier, showAllVersions, trace));
         }
 
         // Два принципиально разных режима, а не одно матчирование с флажком:
@@ -243,9 +280,36 @@ public partial class Database
         var scored = exactWord
             ? SearchOrdered(rows, tokens, phrase, usage)
             : SearchByKeywords(rows, RepairMixedLayout(qTokens, rows), phrase, usage);
+        trace.MatchedQuery = scored.Count;
 
-        return Deduplicate(scored, usageThreshold, usageMultiplier, showAllVersions);
+        return Shown(trace, Deduplicate(scored, usageThreshold, usageMultiplier, showAllVersions, trace));
     }
+
+    /// <summary>РАЗБОР ПОСЛЕДНЕГО ПОИСКА — на каком шаге и почему строка выпала из выдачи
+    /// (см. <see cref="SearchTrace"/>). Свойство, а не возвращаемое значение, по двум причинам:
+    /// поиск зовут из полутора десятка мест, и менять им всем сигнатуру ради диагностики — цена
+    /// выше пользы; а при поиске с починкой раскладки (SearchService.SearchWithLayoutFallback)
+    /// поиск выполняется дважды, и интересен разбор именно ПОСЛЕДНЕГО — того, чью выдачу человек и
+    /// увидел. Живёт до следующего поиска; читать её имеет смысл сразу после вызова.</summary>
+    public SearchTrace? LastSearchTrace { get; private set; }
+
+    /// <summary>Забыть прошлый разбор. Зовётся там, где поиск до базы не доехал вовсе (пустой
+    /// запрос без фильтров, см. SearchService.SearchCore): иначе выдача показывала бы подсказку
+    /// «скрыто N версий» от ПРЕДЫДУЩЕГО запроса — а это ровно то враньё, от которого подсказка и
+    /// заводилась.</summary>
+    public void ResetSearchTrace() => LastSearchTrace = null;
+
+    private static List<ScoredFwVersion> Shown(SearchTrace trace, List<ScoredFwVersion> result)
+    {
+        trace.Shown = result.Count;
+        return result;
+    }
+
+    /// <summary>Строка трассы по записи прошивки. Берётся ТОЛЬКО опознавательное: номер версии,
+    /// подтип, контроллер. Ни пути, ни имени файла, ни номера заявки, ни серийника шкафа —
+    /// см. «чего здесь нет» в <see cref="SearchTrace"/>.</summary>
+    private static SearchTraceRow TraceRowOf(FwVersionRecord r, string reason, string? word = null, string? field = null) =>
+        new(r.VersionRaw ?? "", r.SubtypeName ?? "", r.CtrlName ?? "", reason, word, field);
 
     /// <summary>Обычный (не «в кавычках») поиск — модель «как в Гугле»: находит широко по отдельным
     /// словам, а порядок выдачи определяют два принципа, которые и просил наладчик — «чем больше слов
@@ -602,8 +666,10 @@ public partial class Database
     /// базы. Порядок сортировки один на оба режима (SortByRank) — разойдись он, включённая галочка
     /// выдавала бы другие версии на первых местах, и сравнить «что показано без неё и с ней» стало бы
     /// невозможно.</param>
+    /// <param name="trace">Куда записать, кто при схлопывании выбыл и почему (см.
+    /// <see cref="SearchTrace"/>). null — не записывать.</param>
     private static List<ScoredFwVersion> Deduplicate(IEnumerable<ScoredFwVersion> scored, int usageThreshold,
-        double usageMultiplier, bool showAllVersions = false)
+        double usageMultiplier, bool showAllVersions = false, SearchTrace? trace = null)
     {
         if (showAllVersions) return SortByRank(scored, usageThreshold, usageMultiplier);
 
@@ -643,11 +709,19 @@ public partial class Database
         {
             ScoredFwVersion? best = null;
             var bestRank = 0;
+            // Кого из группы вообще рассматривали. Остальные выбыли «заменена более свежей» — и
+            // это надо знать трассе: шаг невидимый, а именно на нём версия и исчезает целиком.
+            // Сравнение по ССЫЛКЕ: ScoredFwVersion — record, и две разные строки выдачи с
+            // одинаковыми числами считались бы одной.
+            var considered = trace is null
+                ? null
+                : new HashSet<ScoredFwVersion>(ReferenceEqualityComparer.Instance);
 
             // Из шкафа выбираем ТОЛЬКО среди ещё актуальных версий (StillCurrent). Ранг решает уже
             // внутри них: между конфигурациями одной версии и между линейками разного железа.
             foreach (var entry in StillCurrent(group))
             {
+                considered?.Add(entry);
                 var rank = Rank(entry, usageThreshold, usageMultiplier);
                 if (best is null || rank > bestRank ||
                     (rank == bestRank && entry.Row.ConfigName.Length == 0 && best.Row.ConfigName.Length > 0))
@@ -658,9 +732,45 @@ public partial class Database
             }
 
             if (best is not null) picked.Add(best);
+            if (trace is not null && best is not null) NoteCollapsed(trace, group, best, considered!);
         }
 
         return SortByRank(picked, usageThreshold, usageMultiplier);
+    }
+
+    /// <summary>Кто из шкафа не доехал до выдачи и почему. Три разные причины, которые со стороны
+    /// выглядят одинаково («версии нет»), а значат совершенно разное:
+    ///
+    /// <list type="bullet">
+    /// <item><b>заменена более свежей</b> — строку даже не рассматривали (см. <see cref="StillCurrent"/>);</item>
+    /// <item><b>дубль конфигурации</b> — это та же самая версия, только с другим набором тегов;
+    ///   пропажей не является вовсе, но в числах её видно, и без причины она пугала бы;</item>
+    /// <item><b>проиграла по рангу</b> — строка была актуальна и всё равно уступила. Вот это и есть
+    ///   случай, ради которого всё затевалось.</item>
+    /// </list>
+    ///
+    /// <see cref="SearchTrace.FresherLost"/> ставится, когда выбывшая версия собрана ПОЗЖЕ
+    /// показанной. Обычное схлопывание (свежая вытеснила прежние) случается на каждом втором
+    /// поиске и записи не заслуживает; «показана старая, свежая выброшена» — ровно жалоба.</summary>
+    private static void NoteCollapsed(SearchTrace trace, List<ScoredFwVersion> group, ScoredFwVersion best,
+        HashSet<ScoredFwVersion> considered)
+    {
+        foreach (var entry in group)
+        {
+            if (ReferenceEquals(entry, best)) continue;
+
+            string reason;
+            if (!considered.Contains(entry)) reason = SearchDropReasons.Superseded;
+            else if (entry.Row.SwVersion == best.Row.SwVersion &&
+                     string.Equals(entry.Row.DtStr, best.Row.DtStr, StringComparison.Ordinal))
+                reason = SearchDropReasons.DuplicateConfig;
+            else reason = SearchDropReasons.LostByRank;
+
+            trace.NoteCollapsed(TraceRowOf(entry.Row, reason));
+
+            if (string.CompareOrdinal(entry.Row.DtStr ?? "", best.Row.DtStr ?? "") > 0)
+                trace.FresherLost = true;
+        }
     }
 
     /// <summary>Версии шкафа, которые ещё актуальны, — то же правило «эту версию уже сменила более
@@ -728,9 +838,25 @@ public partial class Database
     /// слова-исключения. Путь на диске сюда НЕ входит намеренно: в нём встречаются служебные куски,
     /// которых человек не видит, и совпадение по ним пряло бы строки без видимой причины.</summary>
     private static string SearchableTextOf(FwVersionRecord r) =>
-        string.Join(" ", new[] { r.GroupName, r.SubtypeName, r.SubtypeFolder, r.CtrlName, r.Tags, r.Execution,
-                                 r.RequestNum, r.CabinetSn }
-            .Where(x => !string.IsNullOrEmpty(x)));
+        string.Join(" ", SearchablePartsOf(r).Select(p => p.Text).Where(x => !string.IsNullOrEmpty(x)));
+
+    /// <summary>То же самое, но ПОИМЕНОВАННО: правило слов-исключений должно уметь сказать не
+    /// только «спрятано», но и «нашлось в теге» (см. FwOnDemandTerms.Explain). Поля склеиваются
+    /// пробелом — он граница слова, — поэтому по частям и по склейке вердикт один и тот же.
+    ///
+    /// Имена полей человеческие: они попадают в подсказку в выдаче и в запись диагностики, а
+    /// «CabinetSn» не объясняет наладчику ничего.</summary>
+    private static (string Field, string? Text)[] SearchablePartsOf(FwVersionRecord r) => new (string, string?)[]
+    {
+        ("тип оборудования", r.GroupName),
+        ("подтип", r.SubtypeName),
+        ("папка подтипа", r.SubtypeFolder),
+        ("контроллер", r.CtrlName),
+        ("теги", r.Tags),
+        ("исполнение", r.Execution),
+        ("номер заявки", r.RequestNum),
+        ("серийный номер шкафа", r.CabinetSn),
+    };
 
     private static bool PassesFilters(FwVersionRecord row, FirmwareSearchFilters f)
     {
