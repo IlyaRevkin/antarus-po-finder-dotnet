@@ -230,6 +230,9 @@ public static class AppLog
     public const string AreaLog = "log";
     public const string AreaBackup = "backup";
 
+    /// <summary>Поиск и его разбор (см. SearchTraceDrop).</summary>
+    public const string AreaSearch = "search";
+
     private static readonly object Gate = new();
     private static string? _folder;
 

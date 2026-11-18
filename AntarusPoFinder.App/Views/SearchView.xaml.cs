@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -709,16 +710,32 @@ public partial class SearchView : UserControl
     {
         var exact = ExactWordCheck.IsChecked == true;
         var filters = ActiveFilters();
+        // Просьба «покажи и спрятанное словом» действует на ОДИН поиск — тот, который она же и
+        // запустила. Иначе человек, однажды нажавший подсказку, до конца дня искал бы с
+        // выключенным правилом и не понимал, почему выдача шире обычной.
+        var reveal = _revealOnDemandWords;
+        _revealOnDemandWords = false;
         var results = SearchService.Search(_services.Db, query, exact,
             LayoutFallbackAllowed(query), out var usedFallback, out var convertedQuery, filters,
             _services.Cfg.FwUsageThreshold(), _services.Cfg.FwUsageMultiplier(), _services.Cfg.RootPath(),
-            ShowAllVersionsCheck.IsChecked == true);
+            ShowAllVersionsCheck.IsChecked == true, reveal);
+
+        // Разбор только что выполненного поиска: на каком шаге и почему строки выпали
+        // (см. Core/Domain/SearchTrace.cs). Нужен обеим половинам видимости — честной подсказке в
+        // выдаче и тихой записи в диагностику.
+        var trace = _services.Db.LastSearchTrace;
+        ReportSearchTrace(trace);
 
         if (results.Count == 0)
         {
             ShowNoResults(query, filters.IsEmpty ? NoResultsHint : NoResultsFilteredHint);
+            // Пустая выдача — САМЫЙ нужный случай для подсказки: именно здесь человек и решает,
+            // что прошивки на диске нет. Добавляется после ShowNoResults — та чистит панель.
+            AddOnDemandHiddenHint(trace, reveal);
             return;
         }
+
+        AddOnDemandHiddenHint(trace, reveal);
 
         // Что именно искали — нужно, чтобы записать выбор оператора по этому запросу
         // (см. RecordUsage): выбор осмыслен только в паре с запросом, который его показал.
@@ -1941,6 +1958,103 @@ public partial class SearchView : UserControl
         _lastLayoutFallbackResolvedYes = reply == MessageBoxResult.Yes;
         return _lastLayoutFallbackResolvedYes;
     }
+
+    /// <summary>Человек попросил показать то, что спрятало правило «слова по запросу». Живёт один
+    /// поиск — см. PerformFirmwareSearch.</summary>
+    private bool _revealOnDemandWords;
+
+    /// <summary>ЧТОБЫ ЧЕЛОВЕК УВИДЕЛ ЭТО САМ, не дожидаясь разбора.
+    ///
+    /// Правило «слова по запросу» прячет прошивку молча, и со стороны это неотличимо от «её нет на
+    /// диске». Отсюда и тянется беда, на которую жалуются месяцами: залили версию — не находится,
+    /// помогает только залить дубликатом. Поэтому если поиск что-то спрятал — он обязан это
+    /// сказать и дать показать: «Скрыто 2 версии по слову „Рх“ — показать».
+    ///
+    /// Нажатие НЕ правит запрос и НЕ трогает список слов: оно повторяет ровно тот же поиск с
+    /// выключенным правилом. Подменять набранное или молча удалять слово из общего списка —
+    /// значит сделать за человека то, о чём он не просил, да ещё и на всех машинах сразу.</summary>
+    private void AddOnDemandHiddenHint(SearchTrace? trace, bool revealed)
+    {
+        if (trace is null || trace.HiddenByWordCount == 0) return;
+
+        var count = trace.HiddenByWordCount;
+        var words = string.Join("», «", trace.HidingWords);
+        if (words.Length == 0) return;
+
+        if (revealed)
+        {
+            // Спрятанное уже показано — подсказка остаётся, но объясняет, ПОЧЕМУ выдача шире
+            // обычной. Без неё человек увидел бы лишние строки и не понял, откуда они.
+            ResultsPanel.Children.Insert(0, new TextBlock
+            {
+                Text = $"Показано {count} {VersionsPlural(count)}, обычно скрытых по слову «{words}» " +
+                       "(Настройки → Поиск → слова по запросу)",
+                Style = (Style)FindResource("MutedText"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            return;
+        }
+
+        var button = new Button
+        {
+            Content = $"Скрыто {count} {VersionsPlural(count)} по слову «{words}» — показать",
+            Style = (Style)FindResource("SecondaryButton"),
+            Margin = new Thickness(0, 0, 0, 8),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        button.Click += (_, _) =>
+        {
+            _revealOnDemandWords = true;
+            PerformSearch();
+        };
+        ResultsPanel.Children.Insert(0, button);
+    }
+
+    /// <summary>1 версия, 2 версии, 5 версий.</summary>
+    private static string VersionsPlural(int n)
+    {
+        var tens = n % 100;
+        if (tens is >= 11 and <= 14) return "версий";
+        return (n % 10) switch { 1 => "версия", 2 or 3 or 4 => "версии", _ => "версий" };
+    }
+
+    /// <summary>Разбор поиска — в тихий канал диагностики (см. Core/Services/SearchTraceDrop.cs).
+    /// Здесь только «можно ли и стоит ли»; что именно считается интересным и как часто это
+    /// разрешено — решает сам SearchTraceDrop, потому что это правило, а не свойство экрана.
+    ///
+    /// Отправка — фоновой задачей и без ожидания: человек ждёт выдачу, а не сеть. Любой срыв
+    /// гасится здесь же — диагностика не имеет права уронить поиск.</summary>
+    private void ReportSearchTrace(SearchTrace? trace)
+    {
+        try
+        {
+            if (!SearchTraceDrop.Interesting(trace)) return;
+            if (!_services.Cfg.AutoDiagnosticsEnabled()) return;
+            if (!TraceLedger.Allow(trace, DateTime.UtcNow)) return;
+
+            var url = _services.Cfg.DiagnosticsDropUrl();
+            var code = _services.Cfg.DiagnosticsDropCode();
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(code)) return;
+
+            var machine = Environment.MachineName;
+            var takenAt = DateTime.UtcNow;
+            var json = trace!.ToJson(machine, AppUpdateService.CurrentVersionText, takenAt);
+            _ = Task.Run(async () =>
+            {
+                var result = await SearchTraceDrop.SendAsync(json, machine, takenAt, url, code);
+                if (!result.Ok) AppLog.Warn(AppLog.AreaSearch, $"разбор поиска не отправлен: {result.Error}");
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error(AppLog.AreaSearch, "разбор поиска не отправлен", ex);
+        }
+    }
+
+    /// <summary>Память «что уже присылали» — одна на всю программу, а не на экран: страница поиска
+    /// пересоздаётся при переключении вкладок, и вместе с ней обнулялся бы и счёт за сутки.</summary>
+    private static readonly SearchTraceLedger TraceLedger = new();
 
     private void ShowNoResults(string query, string hint)
     {

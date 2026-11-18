@@ -28,21 +28,51 @@ public static class FwOnDemandTerms
     ///
     /// Сравнение без учёта регистра делается на стороне .NET: в SQLite COLLATE NOCASE кириллицу не
     /// сворачивает, и правило «днём работает, ночью нет» появилось бы ровно здесь.</summary>
-    public static bool ShouldHide(IReadOnlyList<string> words, string? haystack, string? query)
+    public static bool ShouldHide(IReadOnlyList<string> words, string? haystack, string? query) =>
+        Explain(words, new[] { ("", haystack) }, query) is not null;
+
+    /// <summary>КТО ИМЕННО спрятал строку: само слово и ПОЛЕ, в котором оно нашлось.
+    ///
+    /// Зачем отдельно от <see cref="ShouldHide"/>. Жалоба «залил новую версию — она не находится»
+    /// повторяется месяцами, и выключение прежних версий её не лечит: значит новая не проигрывает
+    /// при схлопывании, а вообще не доезжает до выдачи. Одно из двух мест, где строка исчезает
+    /// молча, — здесь. «Молча» и есть беда: человек видит пустую выдачу и решает, что прошивки на
+    /// диске нет. Поэтому ответ «спрятало слово „Рх“, нашлось в тегах» обязан быть доступен и
+    /// подсказке в выдаче, и записи диагностики (см. SearchTrace).
+    ///
+    /// Поля передаются ПОИМЕНОВАННО, а не одной склеенной строкой, ровно ради второй половины
+    /// ответа. Правило при этом не меняется ни на букву: части склеиваются пробелом, пробел —
+    /// граница слова, поэтому проверка по частям и по склейке дают один и тот же вердикт. Чтобы
+    /// они не разъехались через год, <see cref="ShouldHide"/> теперь зовёт этот же код.
+    ///
+    /// Порядок обхода — СЛОВА снаружи, поля внутри: виноватым называется первое слово списка,
+    /// которое спрятало строку, как и было в прежнем ShouldHide.</summary>
+    public static HideReason? Explain(IReadOnlyList<string> words,
+        IReadOnlyList<(string Field, string? Text)> parts, string? query)
     {
-        if (words.Count == 0 || string.IsNullOrEmpty(haystack)) return false;
+        if (words.Count == 0 || parts.Count == 0) return null;
 
         foreach (var word in words)
         {
             if (string.IsNullOrWhiteSpace(word)) continue;
             var w = word.Trim();
-            if (!ContainsWord(haystack, w)) continue;
-            // Слово есть у прошивки. Показываем, только если человек его и спросил.
-            if (!ContainsWord(query, w)) return true;
+            foreach (var part in parts)
+            {
+                if (!ContainsWord(part.Text, w)) continue;
+                // Слово есть у прошивки. Показываем, только если человек его и спросил — и тогда
+                // оно не прячет строку вообще нигде, остальные поля смотреть незачем.
+                if (ContainsWord(query, w)) break;
+                return new HideReason(w, part.Field);
+            }
         }
 
-        return false;
+        return null;
     }
+
+    /// <summary>Почему строка не показана. <paramref name="Field"/> — ИМЯ поля («теги»,
+    /// «исполнение»), не его содержимое: запись диагностики уезжает наружу, и значению полей вроде
+    /// номера заявки там не место.</summary>
+    public readonly record struct HideReason(string Word, string Field);
 
     /// <summary>Слово встречается КАК СЛОВО, а не куском другого слова.
     ///

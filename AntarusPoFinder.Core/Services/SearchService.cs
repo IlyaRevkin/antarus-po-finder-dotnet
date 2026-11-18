@@ -171,17 +171,23 @@ public static class SearchService
     /// порога; реальный вызывающий код передаёт ConfigService.FwUsageThreshold()).</summary>
     /// <param name="showAllVersions">Галочка «показывать всё» — см. Database.SearchFwVersions:
     /// выдача не схлопывается к одной строке на шкаф. По умолчанию выключено.</param>
+    /// <param name="ignoreOnDemandWords">Не применять правило «слова по запросу» — см.
+    /// Database.SearchFwVersions. Включает подсказка «скрыто N версий по слову „Рх“ — показать»
+    /// (SearchView): человек узнал, что от него что-то спрятали, и попросил показать.</param>
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord = false,
         FirmwareSearchFilters? filters = null, int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "",
-        bool showAllVersions = false) =>
+        bool showAllVersions = false, bool ignoreOnDemandWords = false) =>
         SearchWithLayoutFallback(query, exactWord,
-            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions));
+            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions,
+                ignoreOnDemandWords));
 
     public static List<HierarchyResult> Search(Database db, string query, bool exactWord,
         bool allowFallback, out bool usedFallback, out string convertedQuery, FirmwareSearchFilters? filters = null,
-        int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "", bool showAllVersions = false) =>
+        int usageThreshold = 1, double usageMultiplier = 1, string localRoot = "", bool showAllVersions = false,
+        bool ignoreOnDemandWords = false) =>
         SearchWithLayoutFallback(query, exactWord,
-            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions),
+            (q, ex) => SearchCore(db, q, ex, filters, usageThreshold, usageMultiplier, localRoot, showAllVersions,
+                ignoreOnDemandWords),
             allowFallback, out usedFallback, out convertedQuery);
 
     /// <summary>Ключ статистики выбора: тот же нормализованный запрос, что идёт в поиск, — чтобы
@@ -190,7 +196,7 @@ public static class SearchService
 
     private static List<HierarchyResult> SearchCore(Database db, string query, bool exactWord,
         FirmwareSearchFilters? filters, int usageThreshold, double usageMultiplier, string localRoot = "",
-        bool showAllVersions = false)
+        bool showAllVersions = false, bool ignoreOnDemandWords = false)
     {
         var normalized = Normalize(query);
         var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -200,10 +206,15 @@ public static class SearchService
         // Исключение — галка «Показывать все версии»: с ней пустой запрос означает ровно то, что на
         // ней написано, «показать всё, что есть». Без этой оговорки отбор обрывался ЗДЕСЬ, до базы,
         // и галка при пустом поле молчала — то есть не работала в самом нужном случае.
-        if (tokens.Length == 0 && (filters is null || filters.IsEmpty) && !showAllVersions) return new();
+        if (tokens.Length == 0 && (filters is null || filters.IsEmpty) && !showAllVersions)
+        {
+            // Поиска не было вовсе — и разбор прошлого поиска должен умереть вместе с выдачей.
+            db.ResetSearchTrace();
+            return new();
+        }
 
         var rows = db.SearchFwVersions(tokens, exactWord, filters, UsageKey(query), query, usageThreshold,
-            usageMultiplier, showAllVersions);
+            usageMultiplier, showAllVersions, ignoreOnDemandWords);
 
         return rows.Select((row, idx) => ToHierarchyResult(row.Row, rows.Count - idx, row.UsageCount, localRoot, row.MatchedTokens)).ToList();
     }
