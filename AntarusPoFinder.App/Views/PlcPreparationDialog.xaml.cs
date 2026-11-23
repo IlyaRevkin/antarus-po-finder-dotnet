@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using AntarusPoFinder.Core.Loader;
 
 namespace AntarusPoFinder.App.Views;
@@ -13,7 +13,8 @@ public partial class PlcPreparationDialog : Window
 {
     public PlcPreparationAnswer Answer { get; private set; } = PlcPreparationAnswer.Cancel;
 
-    private PlcPreparationDialog(string versionName, bool rememberedFormat, string? controllerName)
+    private PlcPreparationDialog(string versionName, bool rememberedFormat, string? controllerName,
+        LoaderConnectionState connection)
     {
         InitializeComponent();
         QuestionText.Text = PlcPreparation.QuestionFor(versionName);
@@ -29,7 +30,11 @@ public partial class PlcPreparationDialog : Window
         var warning = PlcPreparation.WarningFor(controllerName);
         if (warning.Length > 0) notes.Add(warning);
 
-        var obstacle = PlcPreparation.ConnectionObstacle(LoaderConnectionSettings.ReadMode());
+        // Состояние подключения ПРИХОДИТ СНАРУЖИ и посчитано уже ПОСЛЕ переноса выбора в настройки
+        // Loader (см. LoaderDialog.Start). Читать его здесь самостоятельно нельзя: именно так и
+        // получалось, что в карточке выбран USB, а это окно пишет «Loader настроен на Ethernet» —
+        // перенос к тому моменту ещё не случился.
+        var obstacle = PlcPreparation.ConnectionObstacle(connection);
         if (obstacle.Length > 0) notes.Add(obstacle);
 
         if (notes.Count > 0)
@@ -46,7 +51,7 @@ public partial class PlcPreparationDialog : Window
         // Loader точно не на USB — подготовка не сработает, поэтому по умолчанию предлагаем залить
         // как есть (а у SMH5, где «как есть» ломает ПЛК, выбора не остаётся вовсе: там сперва надо
         // починить подключение, и об этом прямо написано выше).
-        var blocked = PlcPreparation.ConnectionBlocks(LoaderConnectionSettings.ReadMode());
+        var blocked = PlcPreparation.ConnectionBlocks(connection);
         var wasFormat = !blocked
                         && PlcPreparation.DefaultAnswer(rememberedFormat, controllerName) == PlcPreparationAnswer.Format;
         RememberedText.Text = warning.Length > 0
@@ -75,9 +80,10 @@ public partial class PlcPreparationDialog : Window
 
     /// <summary>Спросить. Возвращает ответ; отмена — <see cref="PlcPreparationAnswer.Cancel"/>.</summary>
     public static PlcPreparationAnswer Ask(Window? owner, string versionName, bool rememberedFormat,
-        string? controllerName = null)
+        string? controllerName = null, LoaderConnectionState? connection = null)
     {
-        var dialog = new PlcPreparationDialog(versionName, rememberedFormat, controllerName) { Owner = owner };
+        var dialog = new PlcPreparationDialog(versionName, rememberedFormat, controllerName,
+            connection ?? LoaderConnectionSettings.StateFor(PlcConnectionMode.Unspecified)) { Owner = owner };
         dialog.ShowDialog();
         return dialog.Answer;
     }

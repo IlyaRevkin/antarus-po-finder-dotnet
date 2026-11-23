@@ -106,10 +106,23 @@ public static class PlcPreparation
     /// <item>неизвестно — настройки Loader прочитать не удалось (другой формат файла, его ещё нет).
     /// Запрещать нельзя: запрет по догадке остановил бы работу там, где всё исправно. Предупреждаем
     /// и оставляем решение человеку.</item>
-    /// </list></summary>
-    public static string ConnectionObstacle(PlcConnectionMode loaderMode) => loaderMode switch
+    /// </list>
+    ///
+    /// <b>Спрашивать надо состояние целиком, а не один прочитанный режим.</b> Раньше сюда
+    /// передавался только <c>ReadMode()</c> — что стоит в чужом файле настроек. Выбор наладчика при
+    /// этом в расчёт не шёл вовсе, и окно подготовки честно писало «Loader настроен на Ethernet» в
+    /// ту самую минуту, когда в карточке стоял USB. Человек видел два разных ответа на один вопрос
+    /// и делал единственно возможный вывод — что переключатель ничего не меняет (тикет от
+    /// 19.11.2026). Теперь текст один и в нём сказано ОБА факта сразу.</summary>
+    public static string ConnectionObstacle(LoaderConnectionState state) => state.Effective switch
     {
-        PlcConnectionMode.Usb => "",
+        PlcConnectionMode.Usb when state.Agreement != LoaderConnectionAgreement.Unknown => "",
+        PlcConnectionMode.Usb =>
+            "Подключение выбрано USB, но прочитать настройки самого Loader не удалось. Обновление "
+            + "ядра работает только по USB: если в Loader стоит Ethernet, подготовка прервётся с ошибкой.",
+        PlcConnectionMode.Ethernet when state.Agreement == LoaderConnectionAgreement.Conflict =>
+            state.Conflict + " Обновление ядра Loader делает только по USB, поэтому подготовка "
+            + "сейчас прервётся с ошибкой.",
         PlcConnectionMode.Ethernet =>
             "Loader сейчас настроен на Ethernet, а обновление ядра он делает только по USB — "
             + "подготовка прервётся с ошибкой. Переключите подключение на USB.",
@@ -119,8 +132,10 @@ public static class PlcPreparation
     };
 
     /// <summary>Точно ли подготовка сейчас НЕ сработает. Только Ethernet: «неизвестно» — повод
-    /// предупредить, а не запретить.</summary>
-    public static bool ConnectionBlocks(PlcConnectionMode loaderMode) => loaderMode == PlcConnectionMode.Ethernet;
+    /// предупредить, а не запретить. Считается по ДЕЙСТВУЮЩЕМУ режиму (что стоит у самого Loader),
+    /// а не по выбранному у нас: заливку выполняет он и читает свои настройки.</summary>
+    public static bool ConnectionBlocks(LoaderConnectionState state) =>
+        state.Effective == PlcConnectionMode.Ethernet;
 
     /// <summary>Строка в журнале операции: что именно наладчик выбрал. Пишется всегда, включая
     /// «без форматирования», — по журналу должно быть видно, что вопрос задавали и что ответили.</summary>

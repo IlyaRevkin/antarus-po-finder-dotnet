@@ -1474,6 +1474,7 @@ public partial class SettingsView : UserControl
 
         _loaderTabLoaded = true;
         RefreshLoaderStatus();
+        RefreshLoaderConnectionHint();
         RefreshAdapterHint();
     }
 
@@ -1486,6 +1487,18 @@ public partial class SettingsView : UserControl
         LoaderStatusText.Text = backend.IsAvailable
             ? $"Loader найден: {backend.Name}{(string.IsNullOrEmpty(backend.DisplayVersion) ? "" : $", версия {backend.DisplayVersion}")}"
             : $"Loader не найден: {backend.UnavailableReason}";
+    }
+
+    /// <summary>Строка под списком «Способ подключения»: что стоит у нас и что — у самого Loader.
+    /// Состояние приходит готовым, когда его только что посчитали после переноса, и читается с
+    /// диска при открытии вкладки.</summary>
+    private void RefreshLoaderConnectionHint(LoaderConnectionState? state = null)
+    {
+        var current = state ?? LoaderConnectionSettings.StateFor(
+            LoaderConnectionSettings.ParseMode(_services.Cfg.LoaderConnectionMode()));
+        LoaderModeHint.Text = current.Summary;
+        LoaderModeHint.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty,
+            current.Agreement == LoaderConnectionAgreement.Agreed ? "TextMutedBrush" : "WarningBrush");
     }
 
     private void RefreshAdapterHint()
@@ -1506,7 +1519,13 @@ public partial class SettingsView : UserControl
     {
         if (_loaderTabFilling || LoaderModeCombo.SelectedItem is not ModeOption option) return;
         _services.Cfg.SetLoaderConnectionMode(LoaderConnectionSettings.ModeToConfig(option.Mode));
-        _host.ShowStatus($"Подключение к ПЛК: {LoaderConnectionSettings.ModeCaption(option.Mode)}");
+        // Переносим выбор в настройки самого Loader СРАЗУ и показываем, что из этого вышло. Раньше
+        // здесь писалось просто «Подключение к ПЛК: USB» — и это было обещание, а не факт: до
+        // настоящего переноса дело доходило только при заливке, а если знакомого поля в чужом
+        // settings.json не находилось, не доходило никогда (тикет от 19.11.2026).
+        var state = LoaderDialog.ApplyConnectionChoice(_services.Cfg);
+        _host.ShowStatus(state.Summary);
+        RefreshLoaderConnectionHint(state);
     }
 
     private void LoaderAdapter_Changed(object sender, SelectionChangedEventArgs e)

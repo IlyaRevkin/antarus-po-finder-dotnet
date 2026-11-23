@@ -272,13 +272,22 @@ public partial class LoaderDialog : Window
             return false;
         }
 
+        // ПЕРЕНОС ВЫБОРА ПОДКЛЮЧЕНИЯ — ДО вопроса про форматирование, а не внутри заливки.
+        //
+        // Раньше он делался в PrepareConnectionAsync, то есть уже после того, как окно подготовки
+        // успело прочитать настройки Loader и написать по ним своё предупреждение. Получалось
+        // ровно то, на что жаловался наладчик 19.11.2026: в карточке USB, а окно в ту же секунду
+        // пишет «Loader настроен на Ethernet». Теперь выбор доезжает первым, и вопрос задаётся уже
+        // по действительному состоянию — а если перенести не удалось, об этом прямо сказано.
+        var connection = ApplyConnectionChoice(cfg);
+
         // Вопрос про форматирование — ДО открытия окна операции: окно стартует загрузку само, и
         // спрашивать внутри него было бы уже поздно (см. PlcPreparation).
         PlcPreparationAnswer? preparation = null;
         if (PlcPreparation.ShouldAsk(job.Operation))
         {
             var answer = PlcPreparationDialog.Ask(owner, job.VersionName, cfg.LoaderFormatAndUpdateDefault(),
-                job.ControllerName);
+                job.ControllerName, connection);
             if (PlcPreparation.IsCancelled(answer))
             {
                 lease?.Dispose();
@@ -298,6 +307,19 @@ public partial class LoaderDialog : Window
         };
         dialog.Show();
         return true;
+    }
+
+    /// <summary>Перенести выбранное в программе подключение в настройки самого Segnetics Loader и
+    /// вернуть то, что из этого вышло, — состояние, посчитанное перечитыванием файла.
+    ///
+    /// Публичный и статический, потому что звать его обязаны ВСЕ, кто показывает человеку способ
+    /// подключения: окно загрузки, страница настроек и карточка версии. Иначе переключатель снова
+    /// начнёт жить отдельно от того, чем грузят на самом деле.</summary>
+    public static LoaderConnectionState ApplyConnectionChoice(ConfigService cfg)
+    {
+        var mode = LoaderConnectionSettings.ParseMode(cfg.LoaderConnectionMode());
+        var (_, state) = LoaderConnectionSettings.ApplyAndDescribe(mode, cfg.LoaderPlcIp(), cfg.LoaderNetworkAdapter());
+        return state;
     }
 
     /// <summary>Главное окно приложения, если оно есть и это не оно само нас открыло. Отдельный
@@ -612,16 +634,26 @@ public partial class LoaderDialog : Window
         var ip = _cfg.LoaderPlcIp();
         var adapter = _cfg.LoaderNetworkAdapter();
 
-        var applied = LoaderConnectionSettings.Apply(mode, ip, adapter);
+        var (applied, state) = LoaderConnectionSettings.ApplyAndDescribe(mode, ip, adapter);
         if (applied.Applied)
-            AppendLog($"Подключение: {LoaderConnectionSettings.ModeCaption(mode)} — перенесено в настройки Loader " +
-                      $"({string.Join(", ", applied.ChangedKeys)}).");
+            AppendLog($"Выбор подключения перенесён в настройки Loader ({string.Join(", ", applied.ChangedKeys)}).");
         else if (!string.IsNullOrEmpty(applied.Message))
             AppendLog(applied.Message, LoaderLogLevel.Warning);
 
-        // Проверять нечего, пока не выбран Ethernet с адресом: у USB адреса нет, а «как в Loader»
-        // означает, что подключение нам вообще неизвестно.
-        if (mode != PlcConnectionMode.Ethernet || !_cfg.LoaderCheckLink() || string.IsNullOrWhiteSpace(ip))
+        // ОДНА строка состояния, и она же — та самая, что видит человек в настройках и в окне
+        // подготовки. Раньше журнал писал «Подключение: USB», даже когда в Loader осталось
+        // прежнее: строка про выбор и строка про причину отказа противоречили друг другу
+        // (тикет от 19.11.2026).
+        AppendLog(state.Summary, state.Agreement switch
+        {
+            LoaderConnectionAgreement.Conflict => LoaderLogLevel.Warning,
+            LoaderConnectionAgreement.Unknown when mode != PlcConnectionMode.Unspecified => LoaderLogLevel.Warning,
+            _ => LoaderLogLevel.Info,
+        });
+
+        // Проверяем связь по ДЕЙСТВУЮЩЕМУ режиму, а не по выбранному: если выбор до Loader не
+        // доехал, заливка всё равно пойдёт по его настройкам, и проверять надо именно их.
+        if (state.Effective != PlcConnectionMode.Ethernet || !_cfg.LoaderCheckLink() || string.IsNullOrWhiteSpace(ip))
             return true;
 
         StageLabel.Text = "Проверяем связь с ПЛК…";

@@ -2717,8 +2717,13 @@ public partial class SearchView : UserControl
         // Настройка одна на машину — показываем её сразу на ВСЕХ карточках выдачи, иначе соседние
         // списки продолжали бы показывать прежний способ до перестроения выдачи.
         foreach (var card in ResultsPanel.Children.OfType<FirmwareCard>()) card.ShowConnectionMode(mode);
-        var caption = LoaderConnectionSettings.ModeCaption(LoaderConnectionSettings.ParseMode(mode));
-        _host.ShowStatus($"Подключение к ПЛК: {caption}");
+
+        // ВЫБОР ПРИМЕНЯЕТСЯ ПРЯМО СЕЙЧАС, а не «когда-нибудь при заливке». Пока перенос в настройки
+        // Segnetics Loader делался только внутри заливки, человек не мог узнать, доехал его выбор
+        // или нет, — отсюда и тикет «переключатель выполняет декоративную функцию» (19.11.2026).
+        // Теперь ответ приходит сразу и той же строкой, что потом увидят журнал и окно подготовки.
+        var state = LoaderDialog.ApplyConnectionChoice(_services.Cfg);
+        _host.ShowStatus(state.Summary);
     }
 
     /// <summary>Строка для подсказки списка на карточке: адрес и адаптер видны, не заходя в Настройки —
@@ -2730,9 +2735,15 @@ public partial class SearchView : UserControl
         if (ip.Length > 0) parts.Add($"адрес ПЛК: {ip}");
         var adapter = _services.Cfg.LoaderNetworkAdapter();
         if (adapter.Length > 0) parts.Add($"адаптер: {adapter}");
-        return parts.Count == 0
+        // Что стоит в самом Loader — первой строкой подсказки: подпись «Ethernet» на кнопке
+        // означает только наш выбор, а грузит ПЛК всё равно Loader по своим настройкам. Пока эти
+        // два ответа не стояли рядом, расхождение замечали уже посреди неудачной заливки.
+        var state = LoaderConnectionSettings.StateFor(
+            LoaderConnectionSettings.ParseMode(_services.Cfg.LoaderConnectionMode()));
+        var tail = parts.Count == 0
             ? "Адрес ПЛК и сетевой адаптер — в Настройки → Лоадер."
             : string.Join(", ", parts) + " (меняются в Настройки → Лоадер)";
+        return state.Summary + Environment.NewLine + tail;
     }
 
     /// <summary>Открывает интерактивную загрузку через Automation API. Готовый LFS имеет приоритет;

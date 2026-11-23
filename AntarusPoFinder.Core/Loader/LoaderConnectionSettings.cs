@@ -17,6 +17,81 @@ public enum PlcConnectionMode
     Ethernet,
 }
 
+/// <summary>Сходятся ли выбор в программе и настройки самого Segnetics Loader.</summary>
+public enum LoaderConnectionAgreement
+{
+    /// <summary>Loader настроен ровно так, как выбрано у нас.</summary>
+    Agreed,
+
+    /// <summary>Loader настроен ИНАЧЕ: выбор до него не доехал, и заливка пойдёт по настройкам Loader.</summary>
+    Conflict,
+
+    /// <summary>Настройки Loader прочитать не удалось — сказать, сходятся они или нет, нельзя.</summary>
+    Unknown,
+}
+
+/// <summary>ОДИН ОТВЕТ НА ВОПРОС «ЧЕРЕЗ ЧТО МЫ СЕЙЧАС ГРУЗИМ».
+///
+/// <b>Откуда взялось.</b> Тикет наладчика от 19.11.2026: «Статуст подключение противоречит тексту
+/// причины, что делает некоторые догадки о том, что переключатель "через что загружаем" выполняет
+/// декоративную функцию». И он был прав дважды:
+/// <list type="bullet">
+/// <item>в карточке стоял USB, а окно подготовки ПЛК в ту же секунду писало «Loader сейчас настроен
+///       на Ethernet» — потому что выбор переносился в настройки Loader ПОЗЖЕ, уже внутри заливки,
+///       а вопрос про подготовку задавался раньше и читал ещё старый файл;</item>
+/// <item>если в settings.json Loader'а не нашлось знакомого поля, выбор не переносился вообще
+///       никогда, и переключатель действительно оставался украшением — молча.</item>
+/// </list>
+///
+/// Поэтому ответ считается ОДНИМ местом и из ДВУХ источников сразу: что выбрал человек
+/// (<paramref name="Chosen"/>, настройка loader_connection_mode) и что реально стоит в настройках
+/// Loader (<paramref name="InLoader"/>, <see cref="LoaderConnectionSettings.ReadMode"/>). Любой
+/// текст на экране берётся отсюда, а не собирается на месте — два места дали бы два ответа, с чего
+/// всё и началось.
+///
+/// <b>Решающий голос у Loader.</b> Заливку выполняет он и читает свои собственные настройки
+/// (docs/loader/LOADER_AUTOMATION_API.md), поэтому <see cref="Effective"/> — это то, что стоит у
+/// НЕГО; наш выбор становится действительностью только после успешного переноса.</summary>
+public sealed record LoaderConnectionState(
+    PlcConnectionMode Chosen,
+    PlcConnectionMode InLoader,
+    LoaderConnectionAgreement Agreement)
+{
+    /// <summary>Как ПЛК будет заливаться на самом деле. Если настройки Loader прочитаны — по ним;
+    /// иначе остаётся наш выбор, но тогда <see cref="Agreement"/> честно говорит «неизвестно».</summary>
+    public PlcConnectionMode Effective =>
+        InLoader != PlcConnectionMode.Unspecified ? InLoader : Chosen;
+
+    /// <summary>Выбор человека подтверждённо действует. «Как в Loader» — тоже да: там выбора и не
+    /// делали, спорить не с чем.</summary>
+    public bool Honored => Agreement == LoaderConnectionAgreement.Agreed;
+
+    /// <summary>Противоречие словами — или null, если его нет. Это же текст предупреждения.</summary>
+    public string? Conflict => Agreement != LoaderConnectionAgreement.Conflict
+        ? null
+        : $"В программе выбрано подключение {LoaderConnectionSettings.ModeCaption(Chosen)}, а сам "
+          + $"Segnetics Loader настроен на {LoaderConnectionSettings.ModeCaption(InLoader)} — заливка "
+          + $"пойдёт по {LoaderConnectionSettings.ModeCaption(InLoader)}. Перенести выбор в его "
+          + "настройки не удалось: выберите режим один раз в самом Loader.";
+
+    /// <summary>Строка состояния — ровно одна и непротиворечивая. Её и показываем всюду, где
+    /// раньше писали «Подключение: USB», не сверяясь с действительностью.</summary>
+    public string Summary => Agreement switch
+    {
+        LoaderConnectionAgreement.Conflict => Conflict!,
+        LoaderConnectionAgreement.Agreed when Chosen == PlcConnectionMode.Unspecified =>
+            $"Подключение: как настроено в самом Loader — сейчас {LoaderConnectionSettings.ModeCaption(InLoader)}.",
+        LoaderConnectionAgreement.Agreed =>
+            $"Подключение: {LoaderConnectionSettings.ModeCaption(Chosen)} — так же настроен и сам Loader.",
+        _ when Chosen == PlcConnectionMode.Unspecified =>
+            "Подключение: как настроено в самом Loader. Прочитать его настройки не удалось, поэтому "
+            + "какое именно — программа не знает.",
+        _ =>
+            $"Подключение: выбрано {LoaderConnectionSettings.ModeCaption(Chosen)}. Прочитать настройки "
+            + "самого Loader не удалось — если в нём стоит другое, заливка пойдёт по нему.",
+    };
+}
+
 /// <summary>Что получилось из попытки перенести выбор в настройки Loader.</summary>
 /// <param name="Applied">Хоть что-то реально записано.</param>
 /// <param name="ChangedKeys">Какие именно поля настроек Loader изменены — для лога окна загрузки.</param>
@@ -79,6 +154,39 @@ public static class LoaderConnectionSettings
         PlcConnectionMode.Ethernet => "Ethernet",
         _ => "Как в Loader",
     };
+
+    /// <summary>Свести выбор человека и настройки Loader в одно состояние. Чистая функция — чтобы
+    /// проверялась тестами без чужого файла на диске; читающая обёртка рядом
+    /// (<see cref="StateFor"/>).</summary>
+    public static LoaderConnectionState Describe(PlcConnectionMode chosen, PlcConnectionMode inLoader)
+    {
+        var agreement = inLoader == PlcConnectionMode.Unspecified
+            // Настройки Loader не прочитались. Для «как в Loader» это тоже «неизвестно», а не
+            // «согласны»: сказать, через что пойдёт заливка, мы по-прежнему не можем.
+            ? LoaderConnectionAgreement.Unknown
+            : chosen == PlcConnectionMode.Unspecified || chosen == inLoader
+                ? LoaderConnectionAgreement.Agreed
+                : LoaderConnectionAgreement.Conflict;
+        return new LoaderConnectionState(chosen, inLoader, agreement);
+    }
+
+    /// <summary>То же, но настройки Loader читаются с диска прямо сейчас. Звать ПОСЛЕ
+    /// <see cref="Apply"/>: до переноса файл отвечает за прошлую заливку, и именно на этом
+    /// расхождении выросла жалоба про «декоративный переключатель».</summary>
+    public static LoaderConnectionState StateFor(PlcConnectionMode chosen, string? settingsPath = null) =>
+        Describe(chosen, ReadMode(settingsPath));
+
+    /// <summary>Перенести выбор в настройки Loader и сразу сказать, что из этого вышло: состояние
+    /// считается ПО ФАКТУ, перечитыванием файла, а не по тому, что мы собирались записать.
+    ///
+    /// Одна точка входа на всех: окно загрузки, страница настроек и карточка версии обязаны
+    /// говорить одно и то же, иначе переключатель снова начнёт жить своей жизнью.</summary>
+    public static (LoaderConnectionApplyResult Apply, LoaderConnectionState State) ApplyAndDescribe(
+        PlcConnectionMode mode, string? ip, string? adapter, string? settingsPath = null)
+    {
+        var applied = Apply(mode, ip, adapter, settingsPath);
+        return (applied, StateFor(mode, settingsPath));
+    }
 
     /// <summary>Записывает выбор в настройки Loader. Ничего не бросает: любая неудача — это
     /// Applied=false с объяснением, потому что из-за настроек подключения нельзя рушить заливку.</summary>

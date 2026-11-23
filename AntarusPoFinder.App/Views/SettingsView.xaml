@@ -1311,6 +1311,11 @@
                                           SelectionChanged="LoaderAdapter_Changed"
                                           ToolTip="Через какую сетевую карту идти к шкафу — обычно это переходник USB-Ethernet, а не рабочая сеть."/>
                             </Grid>
+                            <!-- Что стоит у НАС и что — в самом Segnetics Loader, одной строкой.
+                                 Без неё выбор в списке выглядел обещанием: перенос в чужой
+                                 settings.json удаётся не всегда, и узнать об этом раньше было
+                                 негде (тикет от 19.11.2026 про «декоративный переключатель»). -->
+                            <TextBlock x:Name="LoaderModeHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                             <TextBlock x:Name="LoaderAdapterHint" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
                             <CheckBox x:Name="LoaderCheckLinkCheck" Content="Проверять связь с ПЛК перед заливкой" Margin="0,0,0,8"
