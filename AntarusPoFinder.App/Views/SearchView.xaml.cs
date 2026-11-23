@@ -2927,17 +2927,20 @@ public partial class SearchView : UserControl
             files.Select(f => (f, FirmwarePathLocalizer.Localize(f.DiskPath, root))));
     }
 
+    /// <summary>Параметры ПЧ/УПП этого шкафа — и старые файлы, и таблицы.
+    ///
+    /// Пустой случай больше НЕ ТУПИК. Раньше здесь показывалось «Параметры не найдены, загрузите в
+    /// разделе Параметры» — совет, который вёл к кнопке, которой там давно нет: карточка загрузки
+    /// скрыта с переходом на таблицы. Отсюда и тикет от 18.11.2026 «непонятно как добавлять новые
+    /// параметры для ПЧ к текущим прошивкам». Теперь окно открывается всегда, и завести параметры
+    /// можно прямо в нём — кнопкой «Добавить из файла TXT…».</summary>
     private void OpenParams(HierarchyResult result)
     {
-        var files = _services.Db.GetParamFiles(subtypeId: result.SubtypeId);
-        if (files.Count == 0)
+        var subtypeLabel = _subtypesById.TryGetValue(result.SubtypeId, out var sub) ? sub.Name : "";
+        new CardParamsDialog(_services, _host, result.SubtypeId, subtypeLabel)
         {
-            AppMessageBox.Show("Параметры для этого типа шкафа не найдены.\nЗагрузите параметры в разделе «Параметры».",
-                "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        var dlg = new CardParamsDialog(files, _services.Cfg) { Owner = Window.GetWindow(this) };
-        dlg.ShowDialog();
+            Owner = Window.GetWindow(this),
+        }.ShowDialog();
     }
 
     private void OpenInstructions(HierarchyResult result)

@@ -149,6 +149,18 @@ public partial class ParamsView : UserControl
         ReloadTables();
     }
 
+    /// <summary>Завести таблицу сразу из текстового файла. Окно таблиц спрашивает файл само, не
+    /// дожидаясь, пока человек найдёт в нём кнопку «Из файла…»: именно её ненаходимость и была
+    /// жалобой (тикет от 18.11.2026).</summary>
+    private void NewTableFromText_Click(object sender, RoutedEventArgs e)
+    {
+        new ParamTableWindow(_services, _host, "", "", "", startImport: true)
+        {
+            Owner = Window.GetWindow(this),
+        }.ShowDialog();
+        ReloadTables();
+    }
+
     private void OpenTable_Click(object sender, RoutedEventArgs e) => OpenSelectedTable();
 
     private void TablesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) => OpenSelectedTable();

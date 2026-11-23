@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Threading;
 using AntarusPoFinder.Core.Data;
 using AntarusPoFinder.Core.Domain;
 using AntarusPoFinder.Core.Services;
@@ -39,6 +40,10 @@ public partial class ParamTableWindow : Window
     /// Поэтому и признак здесь вычисляется, а не передаётся: два источника правды о том, при файле
     /// документ или нет, разъехались бы на первой же правке.</summary>
     private readonly bool _standalone;
+
+    /// <summary>Шкаф, от которого открыли окно (карточка прошивки). Новые свободные таблицы
+    /// привязываются к нему сами — см. параметр forSubtypeId у конструктора.</summary>
+    private readonly int? _forSubtypeId;
 
     private List<ParamTableRevision> _revisions = new();
     private List<ParamTableRow> _rows = new();
@@ -123,8 +128,15 @@ public partial class ParamTableWindow : Window
     /// <param name="focusCode">Код настройки, из-за которого документ нашёлся. Таблица подматывается
     /// к этой строке и выделяет её: иначе человек, искавший «P0-10», получает полсотни строк и ищет
     /// нужную глазами заново.</param>
+    /// <param name="forSubtypeId">Подтип шкафа, ОТ КОТОРОГО открыли окно, — когда сюда пришли с
+    /// карточки прошивки. Каждая заведённая здесь свободная таблица сразу привязывается к нему:
+    /// шкаф в этот момент известен, и спрашивать его отдельным окном значит заставить человека
+    /// повторить то, что он только что сделал кнопкой (тикет от 18.11.2026 про параметры ПЧ).</param>
+    /// <param name="startImport">Сразу открыть выбор текстового файла. С карточки прошивки нажимают
+    /// «Добавить параметры из файла…» — показывать после этого пустой список и ещё одну кнопку с тем
+    /// же названием незачем.</param>
     public ParamTableWindow(AppServices services, IAppHost host, string diskPath, string filename, string fileLabel,
-        int? selectTableId = null, string? focusCode = null)
+        int? selectTableId = null, string? focusCode = null, int? forSubtypeId = null, bool startImport = false)
     {
         InitializeComponent();
         _services = services;
@@ -132,6 +144,7 @@ public partial class ParamTableWindow : Window
         _diskPath = diskPath;
         _filename = filename;
         _standalone = diskPath.Trim().Length == 0 && filename.Trim().Length == 0;
+        _forSubtypeId = forSubtypeId;
         MakeEditPencil();
 
         FileLabel.Text = _standalone
@@ -179,6 +192,12 @@ public partial class ParamTableWindow : Window
         _focusCode = (focusCode ?? "").Trim();
         LoadDocuments(selectTableId);
         ShowBinding();
+
+        // Пришли с карточки прошивки по кнопке «из файла» — сразу и спрашиваем файл. Loaded, а не
+        // прямо здесь: модальный выбор файла из конструктора окна открылся бы раньше самого окна.
+        if (startImport)
+            Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() => Import_Click(this, new RoutedEventArgs())));
     }
 
     private ParamTable? Current => DocumentCombo.SelectedItem as ParamTable;
@@ -692,7 +711,13 @@ public partial class ParamTableWindow : Window
     private void AskPropsOnCreate(int tableId)
     {
         if (!_standalone) return;
-        EditProps(_services.Db.GetParamTable(tableId));
+        var table = _services.Db.GetParamTable(tableId);
+        // Шкаф, с карточки которого пришли, проставляется САМ и до вопроса про шапку: он уже
+        // известен, а незаполненная привязка — это ровно то, из-за чего таблицу потом не находят
+        // там, где ищут. Остальное (производитель, прочие шкафы) по-прежнему спрашиваем.
+        if (SubtypeParams.BindTo(_services.Db, table, _forSubtypeId))
+            Announce("Таблица привязана к шкафу, с прошивки которого её завели");
+        EditProps(table);
     }
 
     /// <summary>«Править…» показывается карандашом, а не подписью.

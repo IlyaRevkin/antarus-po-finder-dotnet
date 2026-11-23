@@ -141,6 +141,13 @@
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="NewTableBtn" Content="Новая таблица…" Click="NewTable_Click"
                                 ToolTip="Завести пустую таблицу параметров и набить её строками вручную"/>
+                        <!-- ИЗ ФАЙЛА TXT — на виду, а не одним уровнем глубже. Разбор текстового
+                             файла в таблицу умели и раньше, но кнопка жила ВНУТРИ окна таблиц, то
+                             есть находил её только тот, кто и так знал, что она там есть. Тикет от
+                             18.11.2026 просит ровно это: «добавить понятную клавишу добавления
+                             файла TXT». -->
+                        <Button x:Name="NewTableFromTextBtn" Content="Из файла TXT…" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="NewTableFromText_Click"
+                                ToolTip="Разобрать накопленный текстовый файл параметров ПЧ в таблицу — с предпросмотром и правкой до сохранения"/>
                         <Button x:Name="OpenTableBtn" Content="Открыть" Style="{StaticResource CompactSecondaryButton}" Margin="8,0,0,0" Click="OpenTable_Click"
                                 ToolTip="Открыть выбранную таблицу — то же, что двойной клик по строке"/>
                         <!-- ОТВЯЗАТЬ ОТ ФАЙЛА: всё, что накоплено до беты, заведено «при .par-файле»,

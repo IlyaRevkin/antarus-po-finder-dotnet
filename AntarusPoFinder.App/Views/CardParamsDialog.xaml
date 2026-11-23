@@ -1,26 +1,46 @@
-<Window x:Class="AntarusPoFinder.App.Views.CardParamsDialog"
+﻿<Window x:Class="AntarusPoFinder.App.Views.CardParamsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="/Assets/icon.ico"
-        Title="Параметры" Width="480" Height="400" MinWidth="360" MinHeight="280"
+        Title="Параметры" Width="560" Height="440" MinWidth="420" MinHeight="300"
         Background="{DynamicResource BgBrush}"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="HintLabel" Style="{StaticResource MutedText}"
+                   TextWrapping="Wrap" Margin="0,0,0,10"/>
 
         <!-- Двойной клик по строке = кнопка «Открыть» ниже: в списке из одного-двух файлов путь
              «выделить → дотянуться до кнопки» лишний, а двойной клик здесь ожидаем так же, как в
              проводнике и в таблице тикетов. -->
-        <ListBox Grid.Row="0" x:Name="FilesList" DisplayMemberPath="Display"
+        <ListBox Grid.Row="1" x:Name="FilesList" DisplayMemberPath="Display"
+                 SelectionChanged="FilesList_SelectionChanged"
                  MouseDoubleClick="FilesList_MouseDoubleClick"/>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Content="Открыть" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Open_Click"/>
-            <Button Content="Папка" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenFolder_Click"/>
-            <Button Content="В протокол" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ToProtocol_Click"/>
+        <!-- ДОБАВИТЬ ПАРАМЕТРЫ — отдельной строкой и слева, а не в ряду с «Закрыть».
+             Тикет от 18.11.2026: «Непонятно как добавлять новые параметры для ПЧ к текущим
+             прошивкам, в редакторе нет подходящего пункта… добавить понятную клавишу добавления
+             файла TXT». Кнопка стоит ровно там, где человек ищет параметры этой прошивки, и
+             заведённая ею таблица сразу привязывается к этому шкафу. -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="AddFromTextBtn" Content="Добавить из файла TXT…"
+                    Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="AddFromText_Click"
+                    ToolTip="Разобрать текстовый файл параметров ПЧ в таблицу — с предпросмотром и правкой до сохранения"/>
+            <Button x:Name="AddEmptyBtn" Content="Новая таблица…"
+                    Style="{StaticResource SecondaryButton}" Click="AddEmpty_Click"
+                    ToolTip="Завести пустую таблицу параметров для этого шкафа и набить её вручную"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="OpenBtn" Content="Открыть" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="Open_Click"/>
+            <Button x:Name="FolderBtn" Content="Папка" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="OpenFolder_Click"/>
+            <Button x:Name="ProtocolBtn" Content="В протокол" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ToProtocol_Click"/>
             <Button Content="Закрыть" IsCancel="True" Click="Close_Click"/>
         </StackPanel>
     </Grid>
