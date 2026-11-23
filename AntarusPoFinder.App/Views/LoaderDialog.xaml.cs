@@ -73,6 +73,11 @@ public partial class LoaderDialog : Window
     private ILongOperationLease? _lease;
     private IBusyScope? _busy;
 
+    /// <summary>Как подключение выглядело на старте ЭТОЙ заливки: что выбрано у нас и что стояло
+    /// у Loader. Уезжает в журнал заливки отдельным полем — по нему видно расхождение, которое из
+    /// текста ошибки не вычитывается.</summary>
+    private LoaderConnectionState? _connectionState;
+
     /// <summary>Текущий запуск форматирует проект и обновляет ядро ПЛК — от этого зависит, безопасно
     /// ли его обрывать (см. LongOperationRules.SafeToCancel).</summary>
     private bool _formatsController;
@@ -528,6 +533,10 @@ public partial class LoaderDialog : Window
                 Artifact = _job.SourcePath,
                 ArtifactType = System.IO.Path.GetExtension(_job.SourcePath ?? "").TrimStart('.').ToLowerInvariant(),
                 Preparation = _preparation is { } chosen ? chosen.ToString() : "",
+                Connection = _connectionState is { } conn
+                    ? $"{LoaderConnectionSettings.ModeToConfig(conn.Chosen)}/" +
+                      $"{LoaderConnectionSettings.ModeToConfig(conn.InLoader)} {conn.Agreement}"
+                    : "",
                 Ok = outcome == LoaderOutcome.Succeeded,
                 Outcome = outcome + (string.IsNullOrWhiteSpace(message) ? "" : ": " + message),
                 Seconds = (int)_operationStopwatch.Elapsed.TotalSeconds,
@@ -635,6 +644,7 @@ public partial class LoaderDialog : Window
         var adapter = _cfg.LoaderNetworkAdapter();
 
         var (applied, state) = LoaderConnectionSettings.ApplyAndDescribe(mode, ip, adapter);
+        _connectionState = state;
         if (applied.Applied)
             AppendLog($"Выбор подключения перенесён в настройки Loader ({string.Join(", ", applied.ChangedKeys)}).");
         else if (!string.IsNullOrEmpty(applied.Message))

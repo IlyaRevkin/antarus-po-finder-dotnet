@@ -69,6 +69,13 @@ public static class LoaderDiagnostics
         [JsonPropertyName("artifact")] public string Artifact { get; init; } = "";
         [JsonPropertyName("artifactType")] public string ArtifactType { get; init; } = "";
         [JsonPropertyName("preparation")] public string Preparation { get; init; } = "";
+
+        /// <summary>ЧЕРЕЗ ЧТО ГРУЗИЛИ — и выбор в программе, и то, что на самом деле стояло в
+        /// настройках Segnetics Loader: «usb/ethernet Conflict». Два значения, а не одно, потому
+        /// что именно их расхождение и оказалось настоящей причиной части отказов: человек видел
+        /// в карточке USB, а Loader работал по Ethernet (тикет от 19.11.2026). По одному
+        /// выбранному режиму в журналах этого было не отличить от «просто не подключился».</summary>
+        [JsonPropertyName("connection")] public string Connection { get; init; } = "";
         [JsonPropertyName("ok")] public bool Ok { get; init; }
         [JsonPropertyName("outcome")] public string Outcome { get; init; } = "";
         [JsonPropertyName("seconds")] public int Seconds { get; init; }
