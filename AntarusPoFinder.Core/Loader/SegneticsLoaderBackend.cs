@@ -78,6 +78,23 @@ public static class SegneticsLoaderResolver
 
     public static string? Resolve(string? configuredPath) => FirstExisting(Candidates(configuredPath));
 
+    /// <summary>ОКНО самого Loader рядом с найденным Automation — или null, если его там нет.
+    ///
+    /// Нужно ровно в одном месте: когда выбор подключения перенести в settings.json не удалось,
+    /// единственный работающий совет — «выберите режим в самом Loader», и отправлять за этим
+    /// искать ярлык по меню «Пуск» было бы той же самой декоративной помощью (тикет 24.11.2026).</summary>
+    public static string? ResolveGui(string? configuredPath)
+    {
+        var automation = Resolve(configuredPath);
+        if (string.IsNullOrEmpty(automation)) return null;
+        try
+        {
+            var gui = Path.Combine(Path.GetDirectoryName(automation) ?? "", GuiExeName);
+            return File.Exists(gui) ? gui : null;
+        }
+        catch (Exception) { return null; }
+    }
+
     /// <summary>Первый существующий файл из списка. Недоступная сетевая шара в настройке — не повод
     /// падать: просто идём дальше по списку.</summary>
     public static string? FirstExisting(IEnumerable<string> candidates)

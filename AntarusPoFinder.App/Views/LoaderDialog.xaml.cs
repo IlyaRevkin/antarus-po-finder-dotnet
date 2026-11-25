@@ -535,7 +535,10 @@ public partial class LoaderDialog : Window
                 Preparation = _preparation is { } chosen ? chosen.ToString() : "",
                 Connection = _connectionState is { } conn
                     ? $"{LoaderConnectionSettings.ModeToConfig(conn.Chosen)}/" +
-                      $"{LoaderConnectionSettings.ModeToConfig(conn.InLoader)} {conn.Agreement}"
+                      $"{LoaderConnectionSettings.ModeToConfig(conn.InLoader)} {conn.Agreement}" +
+                      // «Не перенесено» — отдельная пометка: по «ethernet/ Unknown» в журнале от
+                      // 24.11.2026 было не понять, прочитать не смогли или записать.
+                      (conn.TransferProblem is { Length: > 0 } ? " NotTransferred" : "")
                     : "",
                 Ok = outcome == LoaderOutcome.Succeeded,
                 Outcome = outcome + (string.IsNullOrWhiteSpace(message) ? "" : ": " + message),
@@ -645,21 +648,20 @@ public partial class LoaderDialog : Window
 
         var (applied, state) = LoaderConnectionSettings.ApplyAndDescribe(mode, ip, adapter);
         _connectionState = state;
-        if (applied.Applied)
+        if (applied.Applied && applied.ChangedKeys.Count > 0)
             AppendLog($"Выбор подключения перенесён в настройки Loader ({string.Join(", ", applied.ChangedKeys)}).");
-        else if (!string.IsNullOrEmpty(applied.Message))
+        else if (!applied.Applied && !string.IsNullOrEmpty(applied.Message) && state.TransferProblem is null)
             AppendLog(applied.Message, LoaderLogLevel.Warning);
 
         // ОДНА строка состояния, и она же — та самая, что видит человек в настройках и в окне
         // подготовки. Раньше журнал писал «Подключение: USB», даже когда в Loader осталось
         // прежнее: строка про выбор и строка про причину отказа противоречили друг другу
         // (тикет от 19.11.2026).
-        AppendLog(state.Summary, state.Agreement switch
+        AppendLog(state.Summary, state.Trouble is not null || state.Agreement switch
         {
-            LoaderConnectionAgreement.Conflict => LoaderLogLevel.Warning,
-            LoaderConnectionAgreement.Unknown when mode != PlcConnectionMode.Unspecified => LoaderLogLevel.Warning,
-            _ => LoaderLogLevel.Info,
-        });
+            LoaderConnectionAgreement.Unknown when mode != PlcConnectionMode.Unspecified => true,
+            _ => false,
+        } ? LoaderLogLevel.Warning : LoaderLogLevel.Info);
 
         // Проверяем связь по ДЕЙСТВУЮЩЕМУ режиму, а не по выбранному: если выбор до Loader не
         // доехал, заливка всё равно пойдёт по его настройкам, и проверять надо именно их.
@@ -894,8 +896,14 @@ public partial class LoaderDialog : Window
         RetryBtn.Visibility = _backend.IsAvailable ? Visibility.Visible : Visibility.Collapsed;
         if (_isBuild) return;
 
+        // Состояние берём ТО, С КОТОРЫМ ШЛИ НА ЗАЛИВКУ (_connectionState посчитано в
+        // PrepareConnectionAsync), а не один выбранный режим: подсказке надо знать не только что
+        // выбрано, но и доехал ли выбор до Loader. Пока она этого не знала, при выбранном Ethernet
+        // и заливке по USB окно писало «Loader настроен на USB» и предлагало переключить на уже
+        // выбранный Ethernet — тикет от 24.11.2026.
         var mode = LoaderConnectionSettings.ParseMode(_cfg.LoaderConnectionMode());
-        var advice = LoaderFailureHint.For(_lastFailure, mode, _sameFailureInARow);
+        var state = _connectionState ?? LoaderConnectionSettings.Describe(mode, mode);
+        var advice = LoaderFailureHint.For(_lastFailure, state, _sameFailureInARow);
 
         FailureHintLabel.Text = advice.Text;
         _switchTo = advice.Remedy;
@@ -909,12 +917,50 @@ public partial class LoaderDialog : Window
     /// путь, которым не ходят.</summary>
     private void SwitchConnection_Click(object sender, RoutedEventArgs e)
     {
+        // ВЫБОР УЖЕ СТОИТ ПРАВИЛЬНЫЙ, а Loader грузил по-своему: переключать у себя нечего, и
+        // «повторить» даст ту же ошибку (так и вышло у наладчика 24.11.2026 — те же две попытки с
+        // разницей в минуту). Открываем сам Loader, где режим и надо выбрать.
+        if (LoaderFailureHint.OpensLoader(_switchTo))
+        {
+            OpenLoaderGui();
+            return;
+        }
+
         var target = LoaderFailureHint.TargetMode(_switchTo);
         _cfg.SetLoaderConnectionMode(LoaderConnectionSettings.ModeToConfig(target));
         AppendLog($"Подключение переключено на {LoaderConnectionSettings.ModeCaption(target)} — пробуем снова.");
 
         HideRetry();
         Restart_Click(sender, e);
+    }
+
+    /// <summary>Открыть окно самого Segnetics Loader — там, где перенести выбор подключения в его
+    /// настройки не получилось. Не нашли окно (стоит только Automation из нашей поставки) — честно
+    /// говорим это и называем файл настроек, а не отправляем человека «посмотреть где-нибудь».</summary>
+    private void OpenLoaderGui()
+    {
+        var gui = SegneticsLoaderResolver.ResolveGui(_cfg.LoaderExePath());
+        if (gui is null)
+        {
+            AppMessageBox.Show(
+                "Окно Segnetics Loader на этой машине не найдено — программа пользуется только его "
+                + "Automation. Режим подключения хранится в файле:\n\n"
+                + LoaderConnectionSettings.DefaultSettingsPath
+                + "\n\nОткройте Loader, которым обычно грузите ПЛК, и выберите режим в нём.",
+                "Настройки Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(gui) { UseShellExecute = true });
+            AppendLog($"Открыт Segnetics Loader: {gui}. Выберите в нём режим подключения и повторите загрузку.");
+        }
+        catch (Exception ex)
+        {
+            AppMessageBox.Show($"Не удалось открыть Segnetics Loader:\n{ex.Message}",
+                "Настройки Segnetics Loader", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void HideRetry()

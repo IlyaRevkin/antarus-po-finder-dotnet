@@ -31,6 +31,10 @@ public static class LoaderFailureHint
 
         /// <summary>Loader настроен на Ethernet, ПЛК не отвечает: предложить USB.</summary>
         SwitchToUsb,
+
+        /// <summary>Режим в программе уже выбран правильно, но Loader грузил ДРУГИМ способом: выбор
+        /// до него не доехал. Переключать у себя нечего — чинить надо в самом Loader.</summary>
+        FixInLoader,
     }
 
     public sealed record Advice(string Text, Remedy Remedy)
@@ -52,7 +56,23 @@ public static class LoaderFailureHint
     /// <paramref name="repeatCount"/> — сколько раз подряд пришла ОДНА И ТА ЖЕ ошибка. С третьего
     /// раза текст прямо говорит, что повтор сам по себе ничего не изменит: по журналам именно так
     /// и теряют по две минуты, нажимая кнопку.</summary>
-    public static Advice For(string? failure, PlcConnectionMode mode, int repeatCount = 1)
+    public static Advice For(string? failure, PlcConnectionMode mode, int repeatCount = 1) =>
+        For(failure, LoaderConnectionSettings.Describe(mode, mode), repeatCount);
+
+    /// <summary>ТО ЖЕ, НО СО ЗНАНИЕМ, ЧТО ВЫБРАНО У НАС.
+    ///
+    /// <b>Повторная жалоба того же наладчика, 24.11.2026.</b> В карточке выбран Ethernet; Loader
+    /// пошёл по USB (выбор в его settings.json перенести не удалось) и вернул «Активный USB/RNDIS
+    /// Ethernet адаптер ПЛК не найден». Подсказка разбирала ОДИН текст отказа и не смотрела на
+    /// выбор вовсе — параметр <c>mode</c> сюда передавался и не использовался ни разу. Поэтому
+    /// окно писало «Loader настроен на USB» рядом с выбранным Ethernet (то самое противоречие, из-за
+    /// которого переключатель и назвали декоративным) и предлагало кнопку «Переключить на Ethernet»,
+    /// которая ставила уже стоящее и запускала ту же заливку заново. По журналу видно, как он нажал
+    /// её и получил ровно ту же ошибку через минуту.
+    ///
+    /// Теперь, если Loader грузил НЕ ТЕМ способом, который выбран, подсказка так и говорит и ведёт
+    /// в настройки самого Loader: переключать у себя нечего.</summary>
+    public static Advice For(string? failure, LoaderConnectionState state, int repeatCount = 1)
     {
         var text = (failure ?? "").ToLowerInvariant();
 
@@ -63,24 +83,45 @@ public static class LoaderFailureHint
         // USB-режим и нет RNDIS-адаптера: ПЛК не подключён шнуром, не запитан, либо драйвер не
         // поднялся. Самый частый отказ в журналах.
         if (text.Contains("usb") && (text.Contains("rndis") || text.Contains("адаптер")))
-            return new Advice(
-                insist +
-                "Loader настроен на USB, но сетевой адаптер ПЛК в системе не появился. Проверьте, что " +
-                "шнур загрузки подключён напрямую к контроллеру и на контроллер подано питание: " +
-                "адаптер появляется через несколько секунд после включения. Если ПЛК в щите и до " +
-                "него дотянута сеть — переключитесь на Ethernet.",
-                Remedy.SwitchToEthernet);
+            return state.Chosen == PlcConnectionMode.Ethernet
+                ? Ignored(insist, PlcConnectionMode.Usb, state)
+                : new Advice(
+                    insist +
+                    "Loader настроен на USB, но сетевой адаптер ПЛК в системе не появился. Проверьте, что " +
+                    "шнур загрузки подключён напрямую к контроллеру и на контроллер подано питание: " +
+                    "адаптер появляется через несколько секунд после включения. Если ПЛК в щите и до " +
+                    "него дотянута сеть — переключитесь на Ethernet.",
+                    Remedy.SwitchToEthernet);
 
         // Ethernet-режим и ПЛК не отвечает (DHCP или стабильный адрес).
         if (text.Contains("dhcp") || text.Contains("ethernet") || text.Contains("не отвеча"))
-            return new Advice(
-                insist +
-                "Loader настроен на Ethernet, но ПЛК не ответил. Проверьте кабель и питание, а также " +
-                "что выбран тот сетевой адаптер компьютера, в который воткнут шнур. Если контроллер " +
-                "лежит на столе и подключён шнуром загрузки — переключитесь на USB.",
-                Remedy.SwitchToUsb);
+            return state.Chosen == PlcConnectionMode.Usb
+                ? Ignored(insist, PlcConnectionMode.Ethernet, state)
+                : new Advice(
+                    insist +
+                    "Loader настроен на Ethernet, но ПЛК не ответил. Проверьте кабель и питание, а также " +
+                    "что выбран тот сетевой адаптер компьютера, в который воткнут шнур. Если контроллер " +
+                    "лежит на столе и подключён шнуром загрузки — переключитесь на USB.",
+                    Remedy.SwitchToUsb);
 
         return new Advice(insist + Generic, Remedy.None);
+    }
+
+    /// <summary>Выбор не доехал: мы выбрали одно, а Loader грузил другим. Единственное честное
+    /// предложение здесь — открыть сам Loader и выбрать режим в нём: своих настроек у нас для этого
+    /// больше нет, а предлагать «переключить» то, что и так выбрано, — это и есть декоративная
+    /// кнопка, на которую жаловались.</summary>
+    private static Advice Ignored(string insist, PlcConnectionMode usedByLoader, LoaderConnectionState state)
+    {
+        var chosen = LoaderConnectionSettings.ModeCaption(state.Chosen);
+        var used = LoaderConnectionSettings.ModeCaption(usedByLoader);
+        return new Advice(
+            insist +
+            $"В программе выбрано подключение {chosen}, но заливку Segnetics Loader повёл по {used} — "
+            + "значит, выбор до его собственных настроек не доехал и повтор отсюда ничего не изменит. "
+            + $"Откройте Segnetics Loader и выберите {chosen} прямо в нём."
+            + (state.TransferProblem is { Length: > 0 } why ? $" Почему не доехал: {why}" : ""),
+            Remedy.FixInLoader);
     }
 
     /// <summary>Подпись кнопки под предложение.</summary>
@@ -88,13 +129,20 @@ public static class LoaderFailureHint
     {
         Remedy.SwitchToEthernet => "Переключить на Ethernet и повторить",
         Remedy.SwitchToUsb => "Переключить на USB и повторить",
+        Remedy.FixInLoader => "Открыть Segnetics Loader",
         _ => "",
     };
+
+    /// <summary>Надо ли по этому предложению открывать сам Loader, а не переключать режим у себя.</summary>
+    public static bool OpensLoader(Remedy remedy) => remedy == Remedy.FixInLoader;
 
     /// <summary>Режим, на который переключаем.</summary>
     public static PlcConnectionMode TargetMode(Remedy remedy) => remedy switch
     {
         Remedy.SwitchToEthernet => PlcConnectionMode.Ethernet,
-        _ => PlcConnectionMode.Usb,
+        Remedy.SwitchToUsb => PlcConnectionMode.Usb,
+        // «Чинить в самом Loader» — переключать у себя нечего, и молча поставить USB было бы хуже
+        // всего: человек выбрал Ethernet именно потому, что ПЛК в щите.
+        _ => PlcConnectionMode.Unspecified,
     };
 }

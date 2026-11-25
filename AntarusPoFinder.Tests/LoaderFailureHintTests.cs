@@ -1,4 +1,4 @@
-using AntarusPoFinder.Core.Loader;
+﻿using AntarusPoFinder.Core.Loader;
 using Xunit;
 
 namespace AntarusPoFinder.Tests;
@@ -72,5 +72,72 @@ public class LoaderFailureHintTests
         var advice = LoaderFailureHint.For(null, PlcConnectionMode.Usb);
 
         Assert.False(string.IsNullOrWhiteSpace(advice.Text));
+    }
+
+    // ── 24.11.2026: тот же наладчик, та же жалоба ───────────────────────────────────────────
+    //
+    // В карточке выбран Ethernet. Loader пошёл по USB (перенести выбор в его settings.json не
+    // удалось) и вернул «Активный USB/RNDIS Ethernet адаптер ПЛК не найден». Подсказка разбирала
+    // только текст отказа — параметр «что выбрано» ей передавали и ни разу не использовали, — и
+    // потому писала «Loader настроен на USB» рядом с выбранным Ethernet и предлагала кнопку
+    // «Переключить на Ethernet». По журналу видно, чем это кончилось: он нажал её в 13:33:45 и
+    // через секунду получил ту же самую ошибку.
+
+    /// <summary>Выбран Ethernet, а грузил Loader по USB — подсказка обязана назвать это своим
+    /// именем и НЕ предлагать переключить то, что уже выбрано.</summary>
+    [Fact]
+    public void Выбран_Ethernet_а_Loader_пошёл_по_USB_зовёт_в_сам_Loader()
+    {
+        var state = LoaderConnectionSettings
+            .Describe(PlcConnectionMode.Ethernet, PlcConnectionMode.Unspecified)
+            with { TransferProblem = "в settings.json самого Loader нет поля режима подключения." };
+
+        var advice = LoaderFailureHint.For(
+            "Не удалось подключиться к ПЛК: Активный USB/RNDIS Ethernet адаптер ПЛК не найден.", state);
+
+        Assert.Equal(LoaderFailureHint.Remedy.FixInLoader, advice.Remedy);
+        Assert.True(LoaderFailureHint.OpensLoader(advice.Remedy));
+        Assert.DoesNotContain("Loader настроен на USB", advice.Text);
+        Assert.Contains("выбор до его собственных настроек не доехал", advice.Text);
+        Assert.Contains("поля режима подключения", advice.Text);
+        Assert.Contains("Loader", LoaderFailureHint.ButtonCaption(advice.Remedy));
+        // Переключать у себя нечего: молча поставить USB было бы прямым вредом — ПЛК в щите.
+        Assert.Equal(PlcConnectionMode.Unspecified, LoaderFailureHint.TargetMode(advice.Remedy));
+    }
+
+    /// <summary>Зеркальный случай: выбран USB, а Loader молчал по Ethernet.</summary>
+    [Fact]
+    public void Выбран_USB_а_Loader_пошёл_по_Ethernet_зовёт_в_сам_Loader()
+    {
+        var state = LoaderConnectionSettings.Describe(PlcConnectionMode.Usb, PlcConnectionMode.Ethernet);
+
+        var advice = LoaderFailureHint.For("Не удалось подключиться к ПЛК: DHCP-запрос не получил ответа.", state);
+
+        Assert.Equal(LoaderFailureHint.Remedy.FixInLoader, advice.Remedy);
+        Assert.Contains("USB", advice.Text);
+    }
+
+    /// <summary>А когда выбор действительно доехал, подсказка остаётся прежней и по-прежнему
+    /// предлагает сменить способ: это рабочий совет, и ломать его разбором выбора нельзя.</summary>
+    [Fact]
+    public void Когда_выбор_доехал_подсказка_остаётся_прежней()
+    {
+        var state = LoaderConnectionSettings.Describe(PlcConnectionMode.Ethernet, PlcConnectionMode.Ethernet);
+
+        var advice = LoaderFailureHint.For("Не удалось подключиться к ПЛК: DHCP-запрос не получил ответа.", state);
+
+        Assert.Equal(LoaderFailureHint.Remedy.SwitchToUsb, advice.Remedy);
+        Assert.Contains("Loader настроен на Ethernet", advice.Text);
+    }
+
+    /// <summary>«Как в Loader» — выбора у нас не сделано, спорить не с чем: обычная подсказка.</summary>
+    [Fact]
+    public void Без_выбора_подсказка_прежняя()
+    {
+        var state = LoaderConnectionSettings.Describe(PlcConnectionMode.Unspecified, PlcConnectionMode.Usb);
+
+        var advice = LoaderFailureHint.For("Активный USB/RNDIS Ethernet адаптер ПЛК не найден.", state);
+
+        Assert.Equal(LoaderFailureHint.Remedy.SwitchToEthernet, advice.Remedy);
     }
 }
