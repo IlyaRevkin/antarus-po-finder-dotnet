@@ -52,10 +52,17 @@ public enum LoaderConnectionAgreement
 /// <b>Решающий голос у Loader.</b> Заливку выполняет он и читает свои собственные настройки
 /// (docs/loader/LOADER_AUTOMATION_API.md), поэтому <see cref="Effective"/> — это то, что стоит у
 /// НЕГО; наш выбор становится действительностью только после успешного переноса.</summary>
+/// <param name="TransferProblem">Почему выбор НЕ удалось перенести в settings.json самого Loader —
+/// или null, если переносить было нечего либо перенос удался. Отдельно от
+/// <paramref name="Agreement"/>, потому что это разные беды: «не прочитали чужой файл» и «прочитали,
+/// но своего поля там нет, и выбор физически никуда не уехал». Второе и привело к повторной жалобе
+/// 24.11.2026: в карточке стоял Ethernet, Loader грузил по USB, а программа уверенно писала про USB
+/// так, будто это и был выбор человека.</param>
 public sealed record LoaderConnectionState(
     PlcConnectionMode Chosen,
     PlcConnectionMode InLoader,
-    LoaderConnectionAgreement Agreement)
+    LoaderConnectionAgreement Agreement,
+    string? TransferProblem = null)
 {
     /// <summary>Как ПЛК будет заливаться на самом деле. Если настройки Loader прочитаны — по ним;
     /// иначе остаётся наш выбор, но тогда <see cref="Agreement"/> честно говорит «неизвестно».</summary>
@@ -64,7 +71,7 @@ public sealed record LoaderConnectionState(
 
     /// <summary>Выбор человека подтверждённо действует. «Как в Loader» — тоже да: там выбора и не
     /// делали, спорить не с чем.</summary>
-    public bool Honored => Agreement == LoaderConnectionAgreement.Agreed;
+    public bool Honored => Agreement == LoaderConnectionAgreement.Agreed && TransferProblem is null;
 
     /// <summary>Противоречие словами — или null, если его нет. Это же текст предупреждения.</summary>
     public string? Conflict => Agreement != LoaderConnectionAgreement.Conflict
@@ -74,9 +81,23 @@ public sealed record LoaderConnectionState(
           + $"пойдёт по {LoaderConnectionSettings.ModeCaption(InLoader)}. Перенести выбор в его "
           + "настройки не удалось: выберите режим один раз в самом Loader.";
 
+    /// <summary>ЧЕСТНЫЙ ТЕКСТ ПРО «ВЫБОР НИКУДА НЕ УЕХАЛ» — или null, если уехал.
+    ///
+    /// Случай 24.11.2026, машина NALADKA1: в карточке выбран Ethernet, в settings.json Loader
+    /// знакомого поля нет, запись не состоялась, Loader пошёл по своему USB и вернул «адаптер не
+    /// найден». Программа при этом показывала два разных ответа — «выбрано Ethernet» и «Loader
+    /// настроен на USB», — и ни один не говорил главного: выбор не действует, и нажимать «повторить»
+    /// бессмысленно, пока режим не переключён в самом Loader.</summary>
+    public string? Trouble => Conflict ?? (TransferProblem is null or "" ? null
+        : $"Подключение {LoaderConnectionSettings.ModeCaption(Chosen)} выбрано в программе, но "
+          + $"перенести выбор в настройки самого Segnetics Loader не удалось: {TransferProblem} "
+          + "Заливка пойдёт по тому, что настроено в самом Loader.");
+
     /// <summary>Строка состояния — ровно одна и непротиворечивая. Её и показываем всюду, где
     /// раньше писали «Подключение: USB», не сверяясь с действительностью.</summary>
-    public string Summary => Agreement switch
+    public string Summary => TransferProblem is { Length: > 0 } && Agreement != LoaderConnectionAgreement.Conflict
+        ? Trouble!
+        : Agreement switch
     {
         LoaderConnectionAgreement.Conflict => Conflict!,
         LoaderConnectionAgreement.Agreed when Chosen == PlcConnectionMode.Unspecified =>
@@ -121,8 +142,16 @@ public sealed record LoaderConnectionApplyResult(bool Applied, IReadOnlyList<str
 public static class LoaderConnectionSettings
 {
     /// <summary>Синонимы имени поля режима подключения. Порядок важен только для сообщений.</summary>
+    /// <remarks>Список пополнен 24.11.2026: на машине наладчика (Loader 2.9.13) ни одно из прежних
+    /// имён не нашлось, и выбор не переносился вообще. Лишние имена здесь безопасны — поле всё
+    /// равно правится, только если в нём УЖЕ лежит строка, узнаваемая как режим подключения
+    /// (см. <see cref="LooksLikeMode"/>).</remarks>
     private static readonly string[] ModeKeys =
-        { "connectionMode", "connection_mode", "mode", "plcConnectionMode", "connectionType" };
+    {
+        "connectionMode", "connection_mode", "mode", "plcConnectionMode", "connectionType",
+        "connection", "connectionKind", "connectionMethod", "connect", "connectionName",
+        "linkMode", "link", "transport", "plcConnection", "plcLink", "interfaceMode",
+    };
 
     private static readonly string[] IpKeys =
         { "ipAddress", "ip", "host", "address", "plcIp", "plcAddress", "targetIp" };
@@ -134,12 +163,29 @@ public static class LoaderConnectionSettings
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SegneticsLoader", "settings.json");
 
-    public static PlcConnectionMode ParseMode(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    /// <summary>Разбор значения режима. ПО ВХОЖДЕНИЮ, а не по точному совпадению: наши собственные
+    /// настройки хранят ровно «usb»/«ethernet», а вот чужой settings.json пишет режим так, как ему
+    /// удобно — «UsbRndis», «Ethernet_DHCP», «EthernetStatic». Прежнее точное сравнение на таких
+    /// значениях отвечало «не знаю», то есть мы не понимали даже то, что успели прочитать.
+    ///
+    /// Сначала USB: «UsbRndis» — это USB, хотя RNDIS и является Ethernet-адаптером, и слово
+    /// ethernet в значении тоже может оказаться.</summary>
+    public static PlcConnectionMode ParseMode(string? raw)
     {
-        "usb" => PlcConnectionMode.Usb,
-        "ethernet" or "eth" or "lan" => PlcConnectionMode.Ethernet,
-        _ => PlcConnectionMode.Unspecified,
-    };
+        var value = raw?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(value)) return PlcConnectionMode.Unspecified;
+        if (value.Contains("usb") || value.Contains("rndis")) return PlcConnectionMode.Usb;
+        if (value.Contains("ethernet") || value.Contains("dhcp") || value is "eth" or "lan" or "tcp")
+            return PlcConnectionMode.Ethernet;
+        return PlcConnectionMode.Unspecified;
+    }
+
+    /// <summary>Похоже ли значение поля на режим подключения. Пустая строка — тоже «похоже»: поле
+    /// есть, его просто ещё не заполнили. Это единственная защита от того, что расширенный список
+    /// имён (<see cref="ModeKeys"/>) попадёт в чужое поле вроде <c>"connection": "192.168.1.10"</c>:
+    /// не узнали значение — не трогаем.</summary>
+    private static bool LooksLikeMode(string? raw) =>
+        string.IsNullOrWhiteSpace(raw) || ParseMode(raw) != PlcConnectionMode.Unspecified;
 
     public static string ModeToConfig(PlcConnectionMode mode) => mode switch
     {
@@ -185,7 +231,18 @@ public static class LoaderConnectionSettings
         PlcConnectionMode mode, string? ip, string? adapter, string? settingsPath = null)
     {
         var applied = Apply(mode, ip, adapter, settingsPath);
-        return (applied, StateFor(mode, settingsPath));
+        var state = StateFor(mode, settingsPath);
+
+        // Неудачу переноса НЕЛЬЗЯ терять по дороге: именно она и есть причина, по которой заливка
+        // сейчас пойдёт не тем способом, который человек выбрал. Раньше сообщение уходило только
+        // строкой в журнал, а состояние об этом не знало — и все экраны продолжали говорить
+        // «выбрано Ethernet», как будто выбор действует.
+        if (!applied.Applied && mode != PlcConnectionMode.Unspecified
+            && applied.Message is { Length: > 0 } problem
+            && state.Agreement != LoaderConnectionAgreement.Agreed)
+            state = state with { TransferProblem = problem };
+
+        return (applied, state);
     }
 
     /// <summary>Записывает выбор в настройки Loader. Ничего не бросает: любая неудача — это
@@ -222,17 +279,32 @@ public static class LoaderConnectionSettings
             return LoaderConnectionApplyResult.Skipped("Настройки Loader в неожиданном формате — не трогаем их.");
 
         var changed = new List<string>();
-        if (mode != PlcConnectionMode.Unspecified)
-            TrySetString(obj, ModeKeys, ModeToConfig(mode), changed);
+
+        // РЕЖИМ — ОТДЕЛЬНО ОТ ОСТАЛЬНОГО. Адрес и адаптер — уточнения, а режим это и есть «через
+        // что грузим»: не нашли его поля — перенос ПРОВАЛЕН, сколько бы ни записалось остального.
+        // Прежний код мерил успех одним счётчиком изменений, и из-за этого путал две совершенно
+        // разные вещи: «поля нет» и «там уже стоит ровно то, что нужно» (второе возвращало
+        // Applied=false с текстом «не нашлось полей» — то есть программа пугала расхождением,
+        // которого не было).
+        var modeOutcome = mode == PlcConnectionMode.Unspecified
+            ? FieldOutcome.AlreadySet
+            : SetMode(obj, mode, changed);
+
+        if (modeOutcome == FieldOutcome.NotFound)
+            return LoaderConnectionApplyResult.Skipped(
+                "в settings.json самого Loader нет поля режима подключения, которое программа умеет " +
+                "править" + FieldsTail(obj) + " — выберите режим один раз в самом Loader, программа " +
+                "его не переопределяет.");
+
         if (!string.IsNullOrWhiteSpace(ip) && mode != PlcConnectionMode.Usb)
             TrySetString(obj, IpKeys, ip!.Trim(), changed);
         if (!string.IsNullOrWhiteSpace(adapter))
             TrySetString(obj, AdapterKeys, adapter!.Trim(), changed);
 
+        // Писать нечего — всё уже стоит как надо. Это УСПЕХ: выбор действует.
         if (changed.Count == 0)
-            return LoaderConnectionApplyResult.Skipped(
-                "В настройках Segnetics Loader не нашлось полей подключения — выберите режим в самом Loader, " +
-                "программа его не переопределяет.");
+            return new LoaderConnectionApplyResult(mode != PlcConnectionMode.Unspecified,
+                Array.Empty<string>(), null);
 
         try
         {
@@ -281,7 +353,11 @@ public static class LoaderConnectionSettings
             foreach (var (parent, key) in FindStringProperties(obj))
             {
                 if (!ModeKeys.Any(n => string.Equals(n, key, StringComparison.OrdinalIgnoreCase))) continue;
-                return ParseMode(parent[key]?.GetValue<string>());
+                // Поле с подходящим именем, но непонятным значением — это НЕ ответ «не знаю»: имена
+                // мы берём широко («connection», «link»), и попасть можно во что угодно. Такое поле
+                // пропускаем и ищем дальше; раньше первое же совпадение имени обрывало поиск.
+                var found = ParseMode(parent[key]?.GetValue<string>());
+                if (found != PlcConnectionMode.Unspecified) return found;
             }
         }
         catch { /* чужой файл — любые неожиданности здесь означают «не знаем», а не ошибку */ }
@@ -293,12 +369,67 @@ public static class LoaderConnectionSettings
         foreach (var (parent, key) in FindStringProperties(obj))
         {
             if (!names.Any(n => string.Equals(n, key, StringComparison.OrdinalIgnoreCase))) continue;
-            if (string.Equals(parent[key]?.GetValue<string>(), value, StringComparison.OrdinalIgnoreCase)) return false;
+            var old = parent[key]?.GetValue<string>();
+            if (string.Equals(old, value, StringComparison.OrdinalIgnoreCase)) return false;
             parent[key] = value;
-            changed.Add(key);
+            changed.Add(Describe(key, old, value));
             return true;
         }
         return false;
+    }
+
+    /// <summary>Что стало с полем настроек Loader.</summary>
+    private enum FieldOutcome
+    {
+        /// <summary>Поля нет (или его значение не похоже на режим) — трогать нечего.</summary>
+        NotFound,
+
+        /// <summary>Поле есть, и там уже ровно то, что нужно. Писать не надо, выбор действует.</summary>
+        AlreadySet,
+
+        /// <summary>Поле переписано.</summary>
+        Changed,
+    }
+
+    /// <summary>Переписать поле режима подключения. Отдельно от <see cref="TrySetString"/>, потому
+    /// что здесь другое правило поиска: поле должно не просто называться знакомо, но и СОДЕРЖАТЬ
+    /// узнаваемый режим. Иначе расширенный список имён («connection», «link») рано или поздно
+    /// попал бы в чужое поле.</summary>
+    private static FieldOutcome SetMode(JsonObject obj, PlcConnectionMode mode, List<string> changed)
+    {
+        foreach (var (parent, key) in FindStringProperties(obj))
+        {
+            if (!ModeKeys.Any(n => string.Equals(n, key, StringComparison.OrdinalIgnoreCase))) continue;
+            var old = parent[key]?.GetValue<string>();
+            if (!LooksLikeMode(old)) continue;
+            if (ParseMode(old) == mode) return FieldOutcome.AlreadySet;
+
+            var value = ModeToConfig(mode);
+            parent[key] = value;
+            changed.Add(Describe(key, old, value));
+            return FieldOutcome.Changed;
+        }
+        return FieldOutcome.NotFound;
+    }
+
+    /// <summary>«connectionMode: usb → ethernet». Старое значение в журнале нужно: если Loader
+    /// окажется разборчив к написанию («UsbRndis» вместо «usb»), по журналу заливки это будет
+    /// видно сразу, а не ещё через один круг переписки.</summary>
+    private static string Describe(string key, string? old, string value) =>
+        string.IsNullOrWhiteSpace(old) ? $"{key}: → {value}" : $"{key}: {old} → {value}";
+
+    /// <summary>ИМЕНА полей чужого файла — для сообщения и журнала заливки. Только имена, без
+    /// значений: в settings.json лежат и SSH-учётные данные, а знать нам надо ровно одно — как
+    /// в этой версии Loader называется поле режима. Пока этого не видно, перенос выбора остаётся
+    /// угадыванием (24.11.2026: ни одно знакомое имя не подошло).</summary>
+    private static string FieldsTail(JsonObject obj)
+    {
+        var names = FindStringProperties(obj)
+            .Select(p => p.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(24)
+            .ToList();
+        return names.Count == 0 ? "" : $" (строковые поля файла: {string.Join(", ", names)})";
     }
 
     /// <summary>Все строковые свойства объекта и вложенных объектов, сверху вниз: настройки Loader

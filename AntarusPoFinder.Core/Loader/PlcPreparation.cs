@@ -123,6 +123,16 @@ public static class PlcPreparation
         PlcConnectionMode.Ethernet when state.Agreement == LoaderConnectionAgreement.Conflict =>
             state.Conflict + " Обновление ядра Loader делает только по USB, поэтому подготовка "
             + "сейчас прервётся с ошибкой.",
+        // «Выбрано Ethernet, а что стоит у Loader — неизвестно» и «Loader настроен на Ethernet» —
+        // РАЗНЫЕ вещи, и вторую нельзя говорить вместо первой. Именно так окно и соврало наладчику
+        // 24.11.2026: настройки Loader не читались вовсе, а текст уверенно заявлял, на что тот
+        // настроен. Отсюда и вывод, что программа говорит что попало.
+        PlcConnectionMode.Ethernet when state.Agreement == LoaderConnectionAgreement.Unknown =>
+            (state.TransferProblem is { Length: > 0 } why
+                ? $"В программе выбрано Ethernet, но перенести выбор в настройки самого Loader не удалось: {why} "
+                : "В программе выбрано Ethernet, а прочитать настройки самого Loader не удалось. ")
+            + "Обновление ядра Loader делает только по USB: если он сейчас грузит по Ethernet, "
+            + "подготовка прервётся с ошибкой.",
         PlcConnectionMode.Ethernet =>
             "Loader сейчас настроен на Ethernet, а обновление ядра он делает только по USB — "
             + "подготовка прервётся с ошибкой. Переключите подключение на USB.",
